@@ -86,7 +86,7 @@ public static class UnlocksPanel
 
         if (state.UnlocksUnsupported)
         {
-            Ui.Hint("UNLOCK_LIST answered Unsupported: this game has no unlock table in qwark.");
+            Ui.Hint("This game has no unlock table.");
             return;
         }
 
@@ -95,7 +95,7 @@ public static class UnlocksPanel
         {
             Ui.Hint(!state.Connected ? "Connect to read the unlock list."
                 : !enabled ? $"No unlock list: the session is {state.Session.State}, not INGAME."
-                : "UNLOCK_LIST is empty.");
+                : "The unlock list is empty.");
             return;
         }
 
@@ -232,6 +232,6 @@ public static class UnlocksPanel
             }
 
             state.Post(() => state.RefreshUnlocks());
-        }, $"UNLOCK_SET owned={value} on {ids.Length} entries");
+        }, $"{ids.Length} entries set to {(value != 0 ? "owned" : "not owned")}");
     }
 }

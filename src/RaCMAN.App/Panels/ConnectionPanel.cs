@@ -65,7 +65,7 @@ public static class ConnectionPanel
         if (state.Connected)
         {
             var session = state.Session;
-            ImGui.Text($"Telemetry port {state.Client.TelemetryPort} | {(state.Telemetry is null ? "no packet yet" : $"{state.Telemetry.Watches.Length} watch values")}");
+            Ui.DebugHint($"Telemetry port {state.Client.TelemetryPort} | {(state.Telemetry is null ? "no packet yet" : $"{state.Telemetry.Watches.Length} watch values")}");
             if (state.Client.TelemetryViaTcp)
             {
                 ImGui.TextColored(Ui.Yellow,
@@ -73,7 +73,7 @@ public static class ConnectionPanel
                     + "Everything works, but for lower-latency updates allow RaCMAN through the firewall.");
                 DrawFirewallButton(state);
             }
-            ImGui.Text($"Planet {session.CurrentPlanet} | slot {session.SelectedSlot} | position {session.PosX:0.##}, {session.PosY:0.##}, {session.PosZ:0.##}");
+            Ui.DebugHint($"Planet {session.CurrentPlanet} | slot {session.SelectedSlot} | position {session.PosX:0.##}, {session.PosY:0.##}, {session.PosZ:0.##}");
             if (session.PreviousPending) ImGui.TextColored(Ui.Yellow, "A previous session is waiting to be re-applied.");
         }
 
@@ -160,9 +160,9 @@ public static class ConnectionPanel
 
         if (ImGui.Button("Re-read everything")) state.ForceRefresh();
         ImGui.SameLine();
-        if (ImGui.Button("CONFIG_RELOAD")) state.Run(() => state.Client.ConfigReloadAsync(), "Config reloaded");
+        if (ImGui.Button("Reload console config")) state.Run(() => state.Client.ConfigReloadAsync(), "Config reloaded");
         ImGui.SameLine();
-        if (ImGui.Button("CONFIG_SAVE")) state.Run(() => state.Client.ConfigSaveAsync(), "Config saved");
+        if (ImGui.Button("Save console config")) state.Run(() => state.Client.ConfigSaveAsync(), "Config saved");
         ImGui.EndDisabled();
     }
 
@@ -196,12 +196,12 @@ public static class ConnectionPanel
         if (hello is null)
         {
             ImGui.Spacing();
-            Ui.Hint($"Client protocol version {QwarkClient.ClientProtocolVersion}; no HELLO yet.");
+            Ui.DebugHint($"Client protocol version {QwarkClient.ClientProtocolVersion}; no handshake yet.");
             return;
         }
 
         ImGui.Spacing();
-        ImGui.Text($"qwark build {hello.QwarkVersion} | protocol {hello.ProtocolVersion} (HELLO)");
+        Ui.DebugHint($"qwark build {hello.QwarkVersion} | protocol {hello.ProtocolVersion} (HELLO)");
 
         if (hello.ProtocolVersion != QwarkClient.ClientProtocolVersion)
         {

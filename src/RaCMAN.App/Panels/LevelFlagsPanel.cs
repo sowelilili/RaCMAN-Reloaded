@@ -106,7 +106,7 @@ public static class LevelFlagsPanel
                 {
                     await state.Client.LevelFlagsResetAsync(planet).ConfigureAwait(false);
                     state.Post(() => Load(state));
-                }, $"LEVELFLAGS_RESET on planet {planet}");
+                }, $"Level flags reset on planet {planet}");
             }
 
             ImGui.PopStyleColor();
@@ -149,13 +149,13 @@ public static class LevelFlagsPanel
         {
             Ui.Hint(!state.Connected ? "Connect to read level flags."
                 : !state.Ingame ? $"Level flags are read out of game memory; the session is {session.State}, not INGAME."
-                : "No flag bytes for this planet. LEVELFLAGS_GET answers Unsupported when the game has no flag region.");
+                : "This game has no level flags.");
             return;
         }
 
         Ui.Hint(_bitView
-            ? $"{_flags.Length} bytes, planet {_loadedPlanet}. One byte per row, bit 7 to bit 0; ticking a bit sends the byte with LEVELFLAGS_SET."
-            : $"{_flags.Length} bytes, planet {_loadedPlanet}. Click a cell to edit it; Enter sends LEVELFLAGS_SET.");
+            ? $"{_flags.Length} bytes, planet {_loadedPlanet}. One byte per row, bit 7 to bit 0; ticking a bit writes the byte to the console."
+            : $"{_flags.Length} bytes, planet {_loadedPlanet}. Click a cell to edit it; Enter writes the byte.");
         ImGui.Spacing();
 
         if (_bitView) DrawBits(state);

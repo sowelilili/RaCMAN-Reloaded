@@ -84,8 +84,7 @@ public static class SaveFilesPanel
         if (!hasHelper)
         {
             ImGui.TextColored(Ui.Yellow,
-                "This game has no savefile helper loaded: DESCRIBE lists no ACTION flagged SAVE_ASIDE and LOAD_ASIDE.");
-            Ui.Hint("The console answers Unsupported to those actions when the helper is not there.");
+                "This game has no savefile helper, so set-aside save and load are not available.");
         }
         else if (!state.Ingame)
         {
@@ -96,10 +95,10 @@ public static class SaveFilesPanel
 
         ImGui.Spacing();
         Ui.Hint($"Library: {state.SaveFiles.CategoryFolder(title, Category)}");
-        Ui.Hint($"Console: {SaveFileLibrary.TempSavePath(title)}");
+        Ui.DebugHint($"Console: {SaveFileLibrary.TempSavePath(title)}");
         if (hasHelper)
         {
-            Ui.Hint($"Actions: '{save!.Label}' (id {save.Id}, SAVE_ASIDE), '{load!.Label}' (id {load.Id}, LOAD_ASIDE)");
+            Ui.DebugHint($"Actions: '{save!.Label}' (id {save.Id}, SAVE_ASIDE), '{load!.Label}' (id {load.Id}, LOAD_ASIDE)");
         }
 
         ImGui.Spacing();

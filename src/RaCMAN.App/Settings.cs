@@ -12,6 +12,21 @@ public sealed class Settings
     [JsonPropertyName("autoReconnect")]
     public bool AutoReconnect { get; set; } = true;
 
+    /// <summary>UI theme, "light" (the default) or "dark". Anything unrecognised reads as light.</summary>
+    [JsonPropertyName("theme")]
+    public string Theme { get; set; } = "light";
+
+    /// <summary>
+    /// Shows the wire-level detail in the UI: versions, counters, opcode names and internal
+    /// addresses. Off by default, because none of it means anything to someone playing a game.
+    /// </summary>
+    [JsonPropertyName("debugInfo")]
+    public bool DebugInfo { get; set; }
+
+    /// <summary>True unless <see cref="Theme"/> explicitly says "dark".</summary>
+    [JsonIgnore]
+    public bool LightTheme => !string.Equals(Theme, "dark", StringComparison.OrdinalIgnoreCase);
+
     [JsonPropertyName("webManSlot")]
     public int WebManSlot { get; set; } = 5;
 

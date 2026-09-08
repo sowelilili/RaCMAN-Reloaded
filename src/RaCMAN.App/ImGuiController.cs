@@ -86,7 +86,7 @@ public sealed class ImGuiController : IDisposable
 
         InstallClipboard(window);
         CreateDeviceResources();
-        ApplyStyle();
+        ApplyStyle(Panels.Ui.Light);
 
         window.TextInput += OnTextInput;
         window.MouseWheel += OnMouseWheel;
@@ -125,7 +125,12 @@ public sealed class ImGuiController : IDisposable
         platform.Platform_SetClipboardTextFn = Marshal.GetFunctionPointerForDelegate(_setClipboard);
     }
 
-    private static void ApplyStyle()
+    /// <summary>
+    /// Spacing and rounding are the same in both themes; only the palette changes. The light
+    /// palette is the stock ImGui light one with the greys pulled towards white and the accents
+    /// towards a muted blue, because stock light is a flat mid-grey that reads as unfinished.
+    /// </summary>
+    public static void ApplyStyle(bool light)
     {
         var style = ImGui.GetStyle();
         style.WindowRounding = 4f;
@@ -136,7 +141,61 @@ public sealed class ImGuiController : IDisposable
         style.FramePadding = new Vector2(6, 4);
         style.ItemSpacing = new Vector2(8, 6);
         style.WindowBorderSize = 0f;
-        ImGui.StyleColorsDark();
+
+        if (!light)
+        {
+            ImGui.StyleColorsDark();
+            return;
+        }
+
+        ImGui.StyleColorsLight();
+        var colours = style.Colors;
+
+        colours[(int)ImGuiCol.Text] = new Vector4(0.10f, 0.10f, 0.13f, 1f);
+        colours[(int)ImGuiCol.TextDisabled] = new Vector4(0.55f, 0.55f, 0.58f, 1f);
+        colours[(int)ImGuiCol.WindowBg] = new Vector4(0.97f, 0.97f, 0.98f, 1f);
+        colours[(int)ImGuiCol.ChildBg] = new Vector4(0.96f, 0.96f, 0.97f, 1f);
+        colours[(int)ImGuiCol.PopupBg] = new Vector4(0.98f, 0.98f, 0.99f, 1f);
+        colours[(int)ImGuiCol.Border] = new Vector4(0.80f, 0.80f, 0.84f, 1f);
+        colours[(int)ImGuiCol.BorderShadow] = new Vector4(0f, 0f, 0f, 0f);
+
+        colours[(int)ImGuiCol.FrameBg] = new Vector4(0.91f, 0.91f, 0.94f, 1f);
+        colours[(int)ImGuiCol.FrameBgHovered] = new Vector4(0.86f, 0.88f, 0.95f, 1f);
+        colours[(int)ImGuiCol.FrameBgActive] = new Vector4(0.79f, 0.84f, 0.93f, 1f);
+
+        colours[(int)ImGuiCol.TitleBg] = new Vector4(0.90f, 0.90f, 0.93f, 1f);
+        colours[(int)ImGuiCol.TitleBgActive] = new Vector4(0.80f, 0.85f, 0.93f, 1f);
+        colours[(int)ImGuiCol.MenuBarBg] = new Vector4(0.93f, 0.93f, 0.95f, 1f);
+
+        colours[(int)ImGuiCol.ScrollbarBg] = new Vector4(0.94f, 0.94f, 0.96f, 1f);
+        colours[(int)ImGuiCol.ScrollbarGrab] = new Vector4(0.78f, 0.78f, 0.82f, 1f);
+        colours[(int)ImGuiCol.ScrollbarGrabHovered] = new Vector4(0.70f, 0.70f, 0.75f, 1f);
+        colours[(int)ImGuiCol.ScrollbarGrabActive] = new Vector4(0.62f, 0.62f, 0.68f, 1f);
+
+        colours[(int)ImGuiCol.CheckMark] = new Vector4(0.18f, 0.40f, 0.72f, 1f);
+        colours[(int)ImGuiCol.SliderGrab] = new Vector4(0.45f, 0.60f, 0.85f, 1f);
+        colours[(int)ImGuiCol.SliderGrabActive] = new Vector4(0.32f, 0.49f, 0.78f, 1f);
+
+        colours[(int)ImGuiCol.Button] = new Vector4(0.82f, 0.86f, 0.94f, 1f);
+        colours[(int)ImGuiCol.ButtonHovered] = new Vector4(0.71f, 0.80f, 0.92f, 1f);
+        colours[(int)ImGuiCol.ButtonActive] = new Vector4(0.58f, 0.71f, 0.88f, 1f);
+
+        colours[(int)ImGuiCol.Header] = new Vector4(0.62f, 0.73f, 0.90f, 0.60f);
+        colours[(int)ImGuiCol.HeaderHovered] = new Vector4(0.55f, 0.68f, 0.89f, 0.75f);
+        colours[(int)ImGuiCol.HeaderActive] = new Vector4(0.45f, 0.60f, 0.86f, 0.90f);
+
+        colours[(int)ImGuiCol.Separator] = new Vector4(0.80f, 0.80f, 0.84f, 1f);
+        colours[(int)ImGuiCol.SeparatorHovered] = new Vector4(0.60f, 0.70f, 0.86f, 1f);
+        colours[(int)ImGuiCol.SeparatorActive] = new Vector4(0.45f, 0.60f, 0.86f, 1f);
+
+        colours[(int)ImGuiCol.Tab] = new Vector4(0.88f, 0.90f, 0.94f, 1f);
+        colours[(int)ImGuiCol.TabHovered] = new Vector4(0.71f, 0.80f, 0.92f, 1f);
+
+        colours[(int)ImGuiCol.TableHeaderBg] = new Vector4(0.88f, 0.89f, 0.92f, 1f);
+        colours[(int)ImGuiCol.TableBorderStrong] = new Vector4(0.76f, 0.76f, 0.80f, 1f);
+        colours[(int)ImGuiCol.TableBorderLight] = new Vector4(0.86f, 0.86f, 0.90f, 1f);
+        colours[(int)ImGuiCol.TableRowBg] = new Vector4(0f, 0f, 0f, 0f);
+        colours[(int)ImGuiCol.TableRowBgAlt] = new Vector4(0f, 0f, 0f, 0.035f);
     }
 
     // ---------------------------------------------------------------- device resources

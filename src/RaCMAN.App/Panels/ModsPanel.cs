@@ -26,7 +26,7 @@ public static class ModsPanel
         if (ImGui.SmallButton("Rescan library")) state.RescanLocalMods();
         ImGui.SameLine();
         ImGui.BeginDisabled(!state.Connected);
-        if (ImGui.SmallButton("MOD_RESCAN"))
+        if (ImGui.SmallButton("Rescan console folder"))
         {
             state.Run(async () =>
             {
@@ -197,7 +197,7 @@ public static class ModsPanel
             ImGui.Text($"Console hash: {Crc32.ToSumText(remote.Hash)}{(remote.Hash == mod.Hash ? " (current)" : " (differs, will re-upload)")}");
         }
 
-        if (mod.NeedsLua) ImGui.TextColored(Ui.Yellow, "This mod has a Lua automation; qwark applies its patches only.");
+        if (mod.NeedsLua) ImGui.TextColored(Ui.Yellow, "This mod has a Lua automation; only its patches are applied.");
         if (!string.IsNullOrEmpty(mod.Link)) ImGui.TextColored(Ui.Grey, mod.Link);
 
         if (!string.IsNullOrEmpty(mod.Description))
@@ -208,7 +208,7 @@ public static class ModsPanel
 
         ImGui.Spacing();
         ImGui.BeginDisabled(!state.Connected);
-        if (ImGui.Button("MOD_INFO from console"))
+        if (ImGui.Button("Read description from console"))
         {
             string dir = mod.DirName;
             state.Run(() => state.Client.ModInfoAsync(dir), info => state.AddToast(string.IsNullOrWhiteSpace(info) ? "(no description)" : info));
