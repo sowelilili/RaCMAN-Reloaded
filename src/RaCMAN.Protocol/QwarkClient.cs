@@ -15,6 +15,20 @@ public sealed class QwarkClient : IDisposable
     public const int DefaultPort = 9673;
     public const byte ClientProtocolVersion = 1;
 
+    /// <summary>
+    /// The qwark build this client was released beside. Unlike the protocol version it is not a
+    /// wire contract: qwark bumps it whenever its feature tables change, so a console still running
+    /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
+    /// should. Comparing it against HELLO is the only way to catch that.
+    /// </summary>
+    public const byte ExpectedQwarkBuild = 2;
+
+    /// <summary>
+    /// True when the console's module is older than the one shipped with this client. A newer
+    /// build than expected is fine: the client is the side that is behind, and nothing breaks.
+    /// </summary>
+    public static bool IsStaleBuild(byte reported) => reported < ExpectedQwarkBuild;
+
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(2);
 
     private readonly ConcurrentDictionary<ushort, TaskCompletionSource<Frame>> _pending = new();

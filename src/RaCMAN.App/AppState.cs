@@ -50,6 +50,13 @@ public sealed class AppState : IDisposable
         {
             Hello = info;
             AddToast($"Connected: {(string.IsNullOrEmpty(info.TitleId) ? "no game" : info.TitleId)}", ToastKind.Success);
+
+            // The panels would silently show the old module's feature tables, so say it up front.
+            if (QwarkClient.IsStaleBuild(info.QwarkVersion))
+            {
+                AddToast("qwark.sprx on the console is older than this client; see the Connection panel");
+            }
+
             ForceRefresh();
         });
 
@@ -89,6 +96,13 @@ public sealed class AppState : IDisposable
     public bool Connected => Client.IsConnected;
 
     public bool Ingame => Connected && Session.State == SessionState.Ingame;
+
+    /// <summary>
+    /// True while the connected console runs a qwark build older than the one this client shipped
+    /// with. Nothing refuses to work, but its feature tables are the previous build's, so every
+    /// panel is a warning away from lying and the header says so.
+    /// </summary>
+    public bool QwarkStale => Connected && Hello is not null && QwarkClient.IsStaleBuild(Hello.QwarkVersion);
 
     public DescribeResult Describe { get; private set; } = DescribeResult.Empty;
 

@@ -15,7 +15,7 @@ public static class PositionsPanel
 
         var session = state.Session;
         bool enabled = state.Ingame;
-        if (!enabled) ImGui.TextColored(Ui.Yellow, $"Position and planet commands need INGAME (state is {session.State}).");
+        if (!enabled) Ui.Warning($"Position and planet commands need INGAME (state is {session.State}).");
 
         ImGui.Text($"Current planet: {PlanetName(state, session.CurrentPlanet)} ({session.CurrentPlanet})");
         ImGui.Text($"Position: {session.PosX:0.###}, {session.PosY:0.###}, {session.PosZ:0.###}");

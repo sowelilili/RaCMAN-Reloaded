@@ -68,15 +68,15 @@ public static class ConnectionPanel
             Ui.DebugHint($"Telemetry port {state.Client.TelemetryPort} | {(state.Telemetry is null ? "no packet yet" : $"{state.Telemetry.Watches.Length} watch values")}");
             if (state.Client.TelemetryViaTcp)
             {
-                ImGui.TextColored(Ui.Yellow,
-                    "Live state is coming over TCP: the console's UDP telemetry isn't reaching this PC. "
-                    + "Everything works, but for lower-latency updates allow RaCMAN through the firewall.");
+                Ui.Warning("Live state is coming over TCP: the console's UDP telemetry isn't reaching this PC. "
+                           + "Everything works, but for lower-latency updates allow RaCMAN through the firewall.");
                 DrawFirewallButton(state);
             }
             Ui.DebugHint($"Planet {session.CurrentPlanet} | slot {session.SelectedSlot} | position {session.PosX:0.##}, {session.PosY:0.##}, {session.PosZ:0.##}");
-            if (session.PreviousPending) ImGui.TextColored(Ui.Yellow, "A previous session is waiting to be re-applied.");
+            if (session.PreviousPending) Ui.Warning("A previous session is waiting to be re-applied.");
         }
 
+        DrawStaleBuild(state);
         DrawVersions(state);
 
         ImGui.Spacing();
@@ -88,10 +88,11 @@ public static class ConnectionPanel
         ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
 
         // The default is qwark.sprx beside the executable, which is where the release layout puts it.
+        // The resolved path is absolute and long, so both spellings of this line wrap.
         string sprx = ResolveSprx(_sprxPath);
         bool sprxExists = File.Exists(sprx);
-        ImGui.TextColored(sprxExists ? Ui.Grey : Ui.Yellow,
-            sprxExists ? sprx : $"{sprx} (not found; build ../qwark or point this at the SPRX)");
+        if (sprxExists) Ui.Hint(sprx);
+        else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
 
         ImGui.SetNextItemWidth(120);
         if (ImGui.InputInt("VSH slot", ref _slot))
@@ -173,10 +174,6 @@ public static class ConnectionPanel
         return Path.IsPathRooted(trimmed) ? trimmed : Path.Combine(AppContext.BaseDirectory, trimmed);
     }
 
-    /// <summary>
-    /// What HELLO said about the module. The protocol version is the one number that has to
-    /// match: a client and a module that disagree about it disagree about every payload below.
-    /// </summary>
     private static void DrawFirewallButton(AppState state)
     {
         if (!FirewallHelper.IsSupported) return;   // Windows-only; the rule is a no-op elsewhere
@@ -190,6 +187,25 @@ public static class ConnectionPanel
         Ui.Hint("Adds a firewall rule for this app (asks for admin). Or run \"Allow through Firewall.cmd\".");
     }
 
+    /// <summary>
+    /// The console is running an older qwark.sprx than the one this client shipped with, so its
+    /// feature tables are the previous build's. Not a debug detail: it is the difference between
+    /// a missing cheat being absent and it being broken, and re-uploading the SPRX fixes it.
+    /// </summary>
+    private static void DrawStaleBuild(AppState state)
+    {
+        if (!state.QwarkStale) return;
+
+        ImGui.Spacing();
+        Ui.Warning($"The console is running qwark build {state.Hello!.QwarkVersion}; this client shipped with build "
+                   + $"{QwarkClient.ExpectedQwarkBuild}. Re-upload qwark.sprx with the button below and the "
+                   + "console will reload it.");
+    }
+
+    /// <summary>
+    /// What HELLO said about the module. The protocol version is the one number that has to
+    /// match: a client and a module that disagree about it disagree about every payload below.
+    /// </summary>
     private static void DrawVersions(AppState state)
     {
         var hello = state.Hello;
@@ -205,9 +221,9 @@ public static class ConnectionPanel
 
         if (hello.ProtocolVersion != QwarkClient.ClientProtocolVersion)
         {
-            ImGui.TextColored(Ui.Red,
-                $"Protocol mismatch: the console speaks version {hello.ProtocolVersion}, this client speaks "
-                + $"{QwarkClient.ClientProtocolVersion}. Payload layouts differ between versions; update whichever side is older.");
+            Ui.Error($"Protocol mismatch: the console speaks version {hello.ProtocolVersion}, this client speaks "
+                     + $"{QwarkClient.ClientProtocolVersion}. Payload layouts differ between versions; update "
+                     + "whichever side is older.");
         }
     }
 }

@@ -31,20 +31,29 @@ public static class Ui
         ImGui.Spacing();
     }
 
-    public static void Hint(string text) => ImGui.TextColored(Grey, text);
+    /// <summary>
+    /// Explanatory grey text. It wraps at the panel edge: the window is small enough that a
+    /// sentence written on one line would otherwise run off the right-hand side.
+    /// </summary>
+    public static void Hint(string text) => Wrapped(Grey, text);
 
-    /// <summary>A hint long enough to need wrapping at the panel edge.</summary>
-    public static void HintWrapped(string text)
-    {
-        ImGui.PushStyleColor(ImGuiCol.Text, Grey);
-        ImGui.TextWrapped(text);
-        ImGui.PopStyleColor();
-    }
+    /// <summary>Something the user should notice but that is not an error.</summary>
+    public static void Warning(string text) => Wrapped(Yellow, text);
+
+    /// <summary>Something that is broken and needs the user to act.</summary>
+    public static void Error(string text) => Wrapped(Red, text);
 
     /// <summary>A hint that only exists when the user asked to see the wire-level detail.</summary>
     public static void DebugHint(string text)
     {
-        if (Debug) ImGui.TextColored(Grey, text);
+        if (Debug) Wrapped(Grey, text);
+    }
+
+    private static void Wrapped(Vector4 colour, string text)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, colour);
+        ImGui.TextWrapped(text);
+        ImGui.PopStyleColor();
     }
 
     public static bool TryParseAddress(string text, out uint address)

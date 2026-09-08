@@ -118,11 +118,11 @@ public static class InputDisplayPanel
             $"mask 0x{session.PadMask:X4}   rx {Get(session.Analog, 0):0.00}  ry {Get(session.Analog, 1):0.00}  " +
             $"lx {Get(session.Analog, 2):0.00}  ly {Get(session.Analog, 3):0.00}");
 
-        if (_loadError is not null) ImGui.TextColored(Ui.Red, _loadError);
+        if (_loadError is not null) Ui.Error(_loadError);
 
         if (_loaded is { } loaded && loaded.Skin.Missing.Count > 0)
         {
-            ImGui.TextColored(Ui.Yellow, $"skin.txt is missing: {string.Join(", ", loaded.Skin.Missing)}");
+            Ui.Warning($"skin.txt is missing: {string.Join(", ", loaded.Skin.Missing)}");
         }
 
         ImGui.Spacing();
@@ -133,10 +133,42 @@ public static class InputDisplayPanel
         }
         else
         {
-            DrawPad(state, settings.InputScale);
+            float fit = FitScale(settings.InputScale);
+            if (fit < settings.InputScale - 0.005f)
+            {
+                Ui.Hint($"Shown at {fit:0.00}x so the whole pad fits here; float it for the full size.");
+            }
+
+            DrawPad(state, fit);
         }
 
         if (!state.Connected) Ui.Hint("Not connected: the pad shows the last telemetry packet, if any.");
+    }
+
+    /// <summary>
+    /// The largest scale the pad can be drawn at and still fit the panel. A skin is around 800 by
+    /// 730 pixels, wider than the panel at the default window size, and the pad is drawn straight
+    /// onto the window's draw list: anything past the right-hand edge is simply not reachable.
+    /// The slider still owns the scale; this only caps it, and only for the embedded pad, because
+    /// the floating window sizes itself to whatever it is given.
+    /// </summary>
+    private static float FitScale(float scale)
+    {
+        var loaded = _loaded;
+        float width = loaded?.Skin.Base.Width ?? FallbackWidth;
+        float height = loaded?.Skin.Base.Height ?? FallbackHeight;
+        if (width <= 0 || height <= 0) return scale;
+
+        // Reserve the scrollbar and the spacing below the pad in both directions. Sized to exactly
+        // what is left, the pad would overflow by that spacing, raise a scrollbar, lose the width
+        // the scrollbar takes, shrink, drop the scrollbar, and flicker between the two every frame.
+        var style = ImGui.GetStyle();
+        var available = ImGui.GetContentRegionAvail();
+        float usableX = available.X - style.ScrollbarSize;
+        float usableY = available.Y - style.ItemSpacing.Y * 2;
+        if (usableX <= 0 || usableY <= 0) return scale;
+
+        return Math.Min(scale, Math.Min(usableX / width, usableY / height));
     }
 
     /// <summary>
@@ -295,11 +327,14 @@ public static class InputDisplayPanel
         draw.AddImage(loaded.Texture, min, max, uv0, uv1);
     }
 
+    private const float FallbackWidth = 460f;
+    private const float FallbackHeight = 260f;
+
     /// <summary>The vector pad from milestone 1, used while no skin could be loaded.</summary>
     private static void DrawFallbackPad(AppState state)
     {
-        const float width = 460f;
-        const float height = 260f;
+        const float width = FallbackWidth;
+        const float height = FallbackHeight;
 
         var session = state.Session;
         uint mask = session.PadMask;
