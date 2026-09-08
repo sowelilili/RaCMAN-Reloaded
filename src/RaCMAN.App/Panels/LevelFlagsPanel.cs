@@ -171,7 +171,16 @@ public static class LevelFlagsPanel
         var flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit
                     | ImGuiTableFlags.ScrollY;
 
-        if (!ImGui.BeginTable("flag-bits", columns, flags, new Vector2(-1, -1))) return;
+        // A scrolling table needs an explicit height, but sized to the panel it draws its column
+        // borders down through the empty space below a short region. Size it to the rows instead,
+        // and only let it fill (and scroll, with the header frozen) when the rows outgrow the panel.
+        var style = ImGui.GetStyle();
+        float headerHeight = ImGui.GetTextLineHeight() + style.CellPadding.Y * 2;
+        float rowHeight = ImGui.GetFrameHeight() + style.CellPadding.Y * 2;
+        float needed = headerHeight + _flags.Length * rowHeight + style.ScrollbarSize / 2;
+        float height = Math.Min(needed, ImGui.GetContentRegionAvail().Y);
+
+        if (!ImGui.BeginTable("flag-bits", columns, flags, new Vector2(-1, height))) return;
 
         ImGui.TableSetupScrollFreeze(0, 1);   // keep the bit numbers visible while scrolling
         ImGui.TableSetupColumn("Offset");

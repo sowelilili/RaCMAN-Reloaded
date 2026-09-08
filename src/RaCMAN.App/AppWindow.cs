@@ -122,9 +122,30 @@ public sealed class AppWindow : GameWindow
                 {
                     if (!PanelVisible(i)) continue;
 
-                    if (ImGui.Selectable(PanelNames[i], _panel == i, ImGuiSelectableFlags.None, new Vector2(0, 26)))
+                    bool isGame = i == 1;
+                    bool selected = _panel == i && (!isGame || GamePanel.SubPage is null);
+                    if (ImGui.Selectable(PanelNames[i], selected, ImGuiSelectableFlags.None, new Vector2(0, 26)))
                     {
                         _panel = i;
+                        if (isGame) GamePanel.SubPage = null;
+                    }
+
+                    if (!isGame) continue;
+
+                    // The Game page's sub-pages: the sections the layout marks as "side", indented
+                    // under Game, and only those the running game has something for.
+                    foreach (var section in GamePanel.SideSectionsWithContent(_state))
+                    {
+                        bool onSub = _panel == 1 && GamePanel.SubPage == section;
+                        ImGui.PushID("game-sub");
+                        ImGui.Indent(18);
+                        if (ImGui.Selectable(section, onSub, ImGuiSelectableFlags.None, new Vector2(0, 24)))
+                        {
+                            _panel = 1;
+                            GamePanel.SubPage = section;
+                        }
+                        ImGui.Unindent(18);
+                        ImGui.PopID();
                     }
                 }
 

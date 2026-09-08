@@ -14,7 +14,7 @@ If the connection drops, the client reconnects on its own; there is nothing to r
 
 ## Panels
 
-- **Game**: the console's feature list for the running game, grouped: toggles, actions, values, enums and colours, each with an "auto on boot" flag.
+- **Game**: the everyday controls for the running game: the player values as an editable table on top, then Cheats, Player, Savefile and Progress stacked below it, each toggle with an "on boot" (auto-apply) box. The less-used sections (Collectables, Cosmetics, Debug) are sub-pages, listed under Game in the side nav.
 - **Positions and planets**: eight position slots per planet, planet loading with reset flags, die.
 - **Unlocks** and **Level flags**: per-game tables and a hex view of the flag region.
 - **Memory**: viewer, watches (live in telemetry), freezes, raw instruction patches, and the moby table.
@@ -25,9 +25,9 @@ If the connection drops, the client reconnects on its own; there is nothing to r
 
 When the game reboots, the console keeps read-only watches and asks, through this client, whether to re-apply anything that writes memory (toggles, freezes, patches, mods). Nothing that writes is re-applied silently unless its auto flag is set.
 
-## Customising the Game panel tabs
+## Customising the Game page
 
-The Game panel's tab layout is owned by the client, not the console. qwark's DESCRIBE groups are the default; `data/gamelayout.json` (shipped, and yours to edit) overrides where a feature goes, keyed by title id. A `moves` entry sends a feature (by its exact label) to a named tab, creating the tab if needed; `tabOrder` sets the order. VALUE features default to the editable table at the top, but a move can pull one into a tab (that's how QE ends up under Debug). Changing the layout never needs a qwark rebuild; the app reads the file on start.
+The Game page's layout is owned by the client, not the console. qwark's DESCRIBE groups are the default; `data/gamelayout.json` (shipped, and yours to edit) overrides it. `sideSections` names the sections that become sub-pages under Game in the side nav; everything else stacks on the Game page. Under `titles`, keyed by title id, a `moves` entry sends a feature (by its exact label) to a named section, creating it if needed, and `tabOrder` sets the order. VALUE features default to the editable table at the top, but a move can pull one into a section (that's how QE ends up under Debug). Changing the layout never needs a qwark rebuild; the app reads the file on start.
 
 ## Telemetry and the firewall (Windows)
 

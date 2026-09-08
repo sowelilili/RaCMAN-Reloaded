@@ -1,31 +1,41 @@
-// Game panel tab layout, owned by the client. Keyed by title id.
-// "moves" sends a feature (by its exact label) to a named tab. Anything not moved stays in its qwark
-// DESCRIBE group, and VALUE features default to the top value table (the "Values" section).
-// "tabOrder" sets the tab order; tabs used but not listed follow in first-seen order.
+// Game panel layout, owned by the client.
+//
+// "sideSections" lists the sections that become their own sub-page under Game in the side nav
+// (the less-used ones). Every other section stacks on the Game page, always visible.
+//
+// "titles" is keyed by title id. "moves" sends a feature (by its exact label) to a named section,
+// creating it if needed. Anything not moved stays in its qwark DESCRIBE group, and VALUE features
+// default to the editable table at the top of the Game page (the "Values" section).
+// "tabOrder" sets the section order; sections used but not listed follow in first-seen order.
+//
 // Edit freely; the app reads this on start.
 {
-  "NPEA00386": {
-    "tabOrder": ["Cheats", "Player", "Progress", "Collectables", "Cosmetics", "Debug", "Savefile"],
-    "moves": {
-      "Enable debug mode": "Debug",
-      "QE save write-offset": "Debug"
-    }
-  },
+  "sideSections": ["Collectables", "Cosmetics", "Debug"],
 
-  "NPEA00387": {
-    "tabOrder": ["Cheats", "Player", "Progress", "Cosmetics", "Debug", "Savefile"],
-    "moves": {
-      "Armour": "Cosmetics",
-      "Ship colour": "Cosmetics",
-      "QE offset": "Debug",
-      "Enable vendor QE": "Debug"
-    }
-  },
+  "titles": {
+    "NPEA00386": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Progress", "Collectables", "Cosmetics", "Debug"],
+      "moves": {
+        "Enable debug mode": "Debug",
+        "QE save write-offset": "Debug"
+      }
+    },
 
-  "NPEA00423": {
-    "tabOrder": ["Cheats", "Player", "Progress", "Cosmetics", "Savefile"],
-    "moves": {
-      "Skin": "Cosmetics"
+    "NPEA00387": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Progress", "Cosmetics", "Debug"],
+      "moves": {
+        "Armour": "Cosmetics",
+        "Ship colour": "Cosmetics",
+        "QE offset": "Debug",
+        "Enable vendor QE": "Debug"
+      }
+    },
+
+    "NPEA00423": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Progress", "Cosmetics"],
+      "moves": {
+        "Skin": "Cosmetics"
+      }
     }
   }
 }

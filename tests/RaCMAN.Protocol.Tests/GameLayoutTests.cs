@@ -91,9 +91,35 @@ public class GameLayoutTests
 
         Assert.Equal("Cosmetics", GameLayout.SectionFor("NPEA00423", skin, d));
 
-        // Deadlocked has no Cosmetics group from qwark; the move creates the tab, in configured order.
+        // Deadlocked has no Cosmetics group from qwark; the move creates the section, in configured order.
         var order = GameLayout.TabOrder("NPEA00423", new[] { "Cheats", "Player", "Cosmetics" });
-        Assert.Equal(new[] { "Cheats", "Player", "Progress", "Cosmetics", "Savefile" }, order);
+        Assert.Equal(new[] { "Cheats", "Player", "Savefile", "Progress", "Cosmetics" }, order);
+    }
+
+    [Fact]
+    public void EverydaySectionsStayOnTheGamePageAndTheRestGoToTheSide()
+    {
+        // The Game page keeps the common controls; the rest are sub-pages under Game in the nav.
+        var side = GameLayout.SideSections;
+        Assert.Equal(new[] { "Collectables", "Cosmetics", "Debug" }, side);
+        Assert.DoesNotContain("Cheats", side);
+        Assert.DoesNotContain("Player", side);
+        Assert.DoesNotContain("Savefile", side);
+    }
+
+    [Fact]
+    public void MissingFileStillHasSideSectionDefaults()
+    {
+        try
+        {
+            GameLayout.LoadFrom(Path.Combine(Path.GetTempPath(), "racman-no-such-layout.json"));
+            Assert.Empty(GameLayout.Problems);
+            Assert.Contains("Debug", GameLayout.SideSections);
+        }
+        finally
+        {
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
     }
 
     [Fact]
