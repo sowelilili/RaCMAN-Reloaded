@@ -21,8 +21,8 @@ public static class ModsPanel
             return;
         }
 
-        ImGui.Text($"Library: {Path.Combine(state.Mods.RootPath, title)}");
-        ImGui.SameLine();
+        // The buttons come first and the library path below them: the path is absolute and long
+        // enough to need wrapping, which would push anything on the same line off the panel.
         if (ImGui.SmallButton("Rescan library")) state.RescanLocalMods();
         ImGui.SameLine();
         ImGui.BeginDisabled(!state.Connected);
@@ -36,6 +36,7 @@ public static class ModsPanel
         }
 
         ImGui.EndDisabled();
+        Ui.Hint($"Library: {Path.Combine(state.Mods.RootPath, title)}");
 
         ImGui.Spacing();
 
@@ -48,12 +49,15 @@ public static class ModsPanel
         }
         else if (ImGui.BeginTable("mods", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
+            // Mod is the only stretching column, so every pixel the fixed ones do not need is a
+            // pixel of mod name that survives; at the default window width they are the difference
+            // between "Incremental RNG" and "Incremental R".
             ImGui.TableSetupColumn("Mod");
-            ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 70);
-            ImGui.TableSetupColumn("Author", ImGuiTableColumnFlags.WidthFixed, 110);
-            ImGui.TableSetupColumn("Console", ImGuiTableColumnFlags.WidthFixed, 160);
-            ImGui.TableSetupColumn("Auto", ImGuiTableColumnFlags.WidthFixed, 50);
-            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 170);
+            ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 60);
+            ImGui.TableSetupColumn("Author", ImGuiTableColumnFlags.WidthFixed, 90);
+            ImGui.TableSetupColumn("Console", ImGuiTableColumnFlags.WidthFixed, 130);
+            ImGui.TableSetupColumn("Auto", ImGuiTableColumnFlags.WidthFixed, 40);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 130);
             ImGui.TableHeadersRow();
 
             foreach (var mod in locals)
@@ -197,8 +201,8 @@ public static class ModsPanel
             ImGui.Text($"Console hash: {Crc32.ToSumText(remote.Hash)}{(remote.Hash == mod.Hash ? " (current)" : " (differs, will re-upload)")}");
         }
 
-        if (mod.NeedsLua) ImGui.TextColored(Ui.Yellow, "This mod has a Lua automation; only its patches are applied.");
-        if (!string.IsNullOrEmpty(mod.Link)) ImGui.TextColored(Ui.Grey, mod.Link);
+        if (mod.NeedsLua) Ui.Warning("This mod has a Lua automation; only its patches are applied.");
+        if (!string.IsNullOrEmpty(mod.Link)) Ui.Hint(mod.Link);
 
         if (!string.IsNullOrEmpty(mod.Description))
         {

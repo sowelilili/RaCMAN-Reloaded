@@ -83,12 +83,11 @@ public static class SaveFilesPanel
 
         if (!hasHelper)
         {
-            ImGui.TextColored(Ui.Yellow,
-                "This game has no savefile helper, so set-aside save and load are not available.");
+            Ui.Warning("This game has no savefile helper, so set-aside save and load are not available.");
         }
         else if (!state.Ingame)
         {
-            ImGui.TextColored(Ui.Yellow, $"Saving and loading need INGAME (state is {session.State}).");
+            Ui.Warning($"Saving and loading need INGAME (state is {session.State}).");
         }
 
         if (!string.Equals(_title, title, StringComparison.Ordinal)) Rescan(state, title);

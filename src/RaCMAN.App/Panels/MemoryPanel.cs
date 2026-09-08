@@ -62,7 +62,7 @@ public static class MemoryPanel
         Ui.Heading("Memory");
 
         bool enabled = state.Ingame;
-        if (!enabled) ImGui.TextColored(Ui.Yellow, $"Memory commands need INGAME (state is {state.Session.State}).");
+        if (!enabled) Ui.Warning($"Memory commands need INGAME (state is {state.Session.State}).");
 
         if (ImGui.BeginTabBar("memory-tabs"))
         {
@@ -149,15 +149,15 @@ public static class MemoryPanel
 
         if (layout is null)
         {
-            ImGui.TextColored(Ui.Yellow,
-                $"No moby layout for game {(byte)state.Session.Game} ({state.Session.Game}): index, address and position only.");
+            Ui.Warning($"No moby layout for game {(byte)state.Session.Game} ({state.Session.Game}): "
+                       + "index, address and position only.");
         }
         else
         {
             Ui.Hint($"{layout.Name} layout, from {layout.Source}");
         }
 
-        foreach (var problem in MobyLayouts.Problems) ImGui.TextColored(Ui.Red, problem);
+        foreach (var problem in MobyLayouts.Problems) Ui.Error(problem);
 
         if (_mobyInfo is { } info)
         {

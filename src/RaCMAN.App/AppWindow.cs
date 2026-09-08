@@ -37,7 +37,7 @@ public sealed class AppWindow : GameWindow
             new GameWindowSettings { UpdateFrequency = 60 },
             new NativeWindowSettings
             {
-                ClientSize = new OpenTK.Mathematics.Vector2i(1180, 760),
+                ClientSize = new OpenTK.Mathematics.Vector2i(940, 580),
                 Title = "RaCMAN Reloaded",
                 APIVersion = new Version(3, 3),
                 Profile = ContextProfile.Core,
@@ -219,6 +219,13 @@ public sealed class AppWindow : GameWindow
         ImGui.TextUnformatted("|");
         ImGui.SameLine();
         ImGui.TextUnformatted(_state.StatusLine());
+
+        // Visible from every panel: the Connection panel carries the explanation and the fix.
+        if (_state.QwarkStale)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(Ui.Yellow, "| qwark.sprx is out of date");
+        }
 
         if (_state.Connected && session.PreviousPending)
         {

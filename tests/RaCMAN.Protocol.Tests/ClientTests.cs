@@ -675,4 +675,15 @@ public class ClientTests
         Assert.Equal(QwarkClient.ClientProtocolVersion, state.Hello!.ProtocolVersion);
         Assert.Equal(7, state.Hello.QwarkVersion);
     }
+
+    [Theory]
+    [InlineData(0, true)]
+    [InlineData(1, true)]     // the build before the one this client ships with
+    [InlineData(2, false)]    // exactly the expected build
+    [InlineData(7, false)]    // a console ahead of the client is not the client's problem
+    public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
+    {
+        Assert.Equal(2, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
+    }
 }

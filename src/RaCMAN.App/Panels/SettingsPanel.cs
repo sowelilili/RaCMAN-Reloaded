@@ -35,8 +35,8 @@ public static class SettingsPanel
             state.ThemeDirty = true;
         }
 
-        Ui.HintWrapped("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
-                       + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
+        Ui.Hint("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
+                + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -54,7 +54,7 @@ public static class SettingsPanel
                 GameLayout.Problems.Count == 0 ? ToastKind.Success : ToastKind.Error);
         }
 
-        foreach (var problem in GameLayout.Problems) ImGui.TextColored(Ui.Yellow, problem);
+        foreach (var problem in GameLayout.Problems) Ui.Warning(problem);
         Ui.Hint(GameLayout.DefaultPath);
 
         ImGui.Spacing();

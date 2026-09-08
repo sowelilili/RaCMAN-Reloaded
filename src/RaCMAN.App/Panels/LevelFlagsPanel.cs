@@ -1,4 +1,3 @@
-using System.Globalization;
 using System.Numerics;
 using ImGuiNET;
 using RaCMAN.Protocol;
@@ -6,28 +5,22 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// LEVELFLAGS_GET for one planet. The flags are a bitfield, so the default view is one byte per
-/// row with a checkbox per bit (7 down to 0); a Hex view keeps the compact 16-bytes-a-row grid
-/// for scanning. Either way an edit sends the whole byte with LEVELFLAGS_SET. The bytes are the
-/// game's flag regions concatenated, so an offset here means nothing to this client beyond
-/// "byte n".
+/// LEVELFLAGS_GET for one planet. The flags are a bitfield, so the view is one byte per row with a
+/// checkbox per bit (7 down to 0) and the hex value beside them; ticking a bit sends the whole byte
+/// with LEVELFLAGS_SET. The bytes are the game's flag regions concatenated, so an offset here means
+/// nothing to this client beyond "byte n". Auto-refresh is on by default: a flag flips as the game
+/// runs, and a stale table is worse than a re-read a second.
 /// </summary>
 public static class LevelFlagsPanel
 {
-    private const int BytesPerRow = 16;
     private const float AutoRefreshSeconds = 1f;
 
     private static byte[] _flags = Array.Empty<byte>();
     private static int _loadedPlanet = -1;
     private static int _planet = -1;
-    private static bool _autoRefresh;
-    private static bool _bitView = true;
+    private static bool _autoRefresh = true;
     private static float _sinceRefresh;
     private static bool _resetArmed;
-
-    private static int _editing = -1;
-    private static string _editText = string.Empty;
-    private static bool _focusEdit;
 
     /// <summary>How many flag bytes the last LEVELFLAGS_GET returned, for the smoke-run summary.</summary>
     public static int LoadedByteCount => _flags.Length;
@@ -36,7 +29,7 @@ public static class LevelFlagsPanel
     {
         ClearData();
         _planet = -1;
-        _autoRefresh = false;
+        _autoRefresh = true;
     }
 
     /// <summary>
@@ -49,7 +42,6 @@ public static class LevelFlagsPanel
         _loadedPlanet = -1;
         _sinceRefresh = 0;
         _resetArmed = false;
-        _editing = -1;
     }
 
     public static void Draw(AppState state)
@@ -71,7 +63,6 @@ public static class LevelFlagsPanel
             if (ImGui.Combo("Planet", ref index, planets, planets.Length))
             {
                 _planet = index;
-                _editing = -1;
                 Load(state);
             }
         }
@@ -81,7 +72,6 @@ public static class LevelFlagsPanel
             if (ImGui.InputInt("Planet index", ref index))
             {
                 _planet = Math.Clamp(index, 0, 255);
-                _editing = -1;
             }
         }
 
@@ -90,9 +80,6 @@ public static class LevelFlagsPanel
 
         ImGui.SameLine();
         ImGui.Checkbox("Auto-refresh (1 Hz)", ref _autoRefresh);
-
-        ImGui.SameLine();
-        if (ImGui.Checkbox("Bit view", ref _bitView)) _editing = -1;
 
         ImGui.SameLine();
         if (_resetArmed)
@@ -139,7 +126,6 @@ public static class LevelFlagsPanel
             if (ImGui.SmallButton($"Go to current ({session.CurrentPlanet})"))
             {
                 _planet = session.CurrentPlanet;
-                _editing = -1;
             }
         }
 
@@ -153,16 +139,12 @@ public static class LevelFlagsPanel
             return;
         }
 
-        Ui.Hint(_bitView
-            ? $"{_flags.Length} bytes, planet {_loadedPlanet}. One byte per row, bit 7 to bit 0; ticking a bit writes the byte to the console."
-            : $"{_flags.Length} bytes, planet {_loadedPlanet}. Click a cell to edit it; Enter writes the byte.");
+        Ui.Hint($"{_flags.Length} bytes, planet {_loadedPlanet}. One byte per row, bit 7 to bit 0; "
+                + "ticking a bit writes the byte to the console.");
         ImGui.Spacing();
 
-        if (_bitView) DrawBits(state);
-        else DrawGrid(state);
+        DrawBits(state);
     }
-
-    // ------------------------------------------------------------- bit view
 
     /// <summary>One byte per row: offset, eight bit checkboxes (7 down to 0), and the hex value.</summary>
     private static void DrawBits(AppState state)
@@ -221,92 +203,6 @@ public static class LevelFlagsPanel
 
         ImGui.EndDisabled();
         ImGui.EndTable();
-    }
-
-    // ------------------------------------------------------------- hex view
-
-    private static void DrawGrid(AppState state)
-    {
-        if (!ImGui.BeginChild("##flags", new Vector2(-1, -1), ImGuiChildFlags.Borders,
-                ImGuiWindowFlags.HorizontalScrollbar))
-        {
-            ImGui.EndChild();
-            return;
-        }
-
-        bool enabled = state.Ingame;
-        float cell = ImGui.CalcTextSize("FF").X + ImGui.GetStyle().FramePadding.X * 2 + 6;
-
-        for (int offset = 0; offset < _flags.Length; offset += BytesPerRow)
-        {
-            ImGui.TextColored(Ui.Grey, $"{offset:X4}");
-
-            for (int i = 0; i < BytesPerRow && offset + i < _flags.Length; i++)
-            {
-                int index = offset + i;
-                ImGui.SameLine(0, i == 8 ? 12 : 4);
-                ImGui.PushID(index);
-
-                if (_editing == index)
-                {
-                    ImGui.SetNextItemWidth(cell + 12);
-                    if (_focusEdit)
-                    {
-                        ImGui.SetKeyboardFocusHere();
-                        _focusEdit = false;
-                    }
-
-                    if (ImGui.InputText("##edit", ref _editText, 3,
-                            ImGuiInputTextFlags.CharsHexadecimal | ImGuiInputTextFlags.EnterReturnsTrue))
-                    {
-                        Commit(state, index);
-                    }
-                    else if (!ImGui.IsItemActive() && !ImGui.IsItemHovered())
-                    {
-                        _editing = -1;
-                    }
-                }
-                else
-                {
-                    byte value = _flags[index];
-                    if (value != 0) ImGui.PushStyleColor(ImGuiCol.Text, Ui.Green);
-                    bool clicked = ImGui.Button($"{value:X2}", new Vector2(cell, 0));
-                    if (value != 0) ImGui.PopStyleColor();
-
-                    if (ImGui.IsItemHovered())
-                    {
-                        ImGui.SetTooltip($"offset 0x{index:X4} ({index})\nvalue 0x{value:X2} = {Convert.ToString(value, 2).PadLeft(8, '0')}");
-                    }
-
-                    if (clicked && enabled)
-                    {
-                        _editing = index;
-                        _editText = value.ToString("X2");
-                        _focusEdit = true;
-                    }
-                    else if (clicked)
-                    {
-                        state.AddToast($"Level flag edits need INGAME (state is {state.Session.State})", ToastKind.Error);
-                    }
-                }
-
-                ImGui.PopID();
-            }
-        }
-
-        ImGui.EndChild();
-    }
-
-    private static void Commit(AppState state, int index)
-    {
-        _editing = -1;
-        if (!byte.TryParse(_editText, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out byte value))
-        {
-            state.AddToast($"'{_editText}' is not a hex byte", ToastKind.Error);
-            return;
-        }
-
-        SendByte(state, index, value);
     }
 
     /// <summary>Writes one byte with LEVELFLAGS_SET, optimistically updating the local copy, then re-reads.</summary>
