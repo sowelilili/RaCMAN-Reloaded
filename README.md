@@ -10,13 +10,16 @@ Runs on Windows, Linux and macOS (.NET 8, Dear ImGui through ImGui.NET, OpenTK).
 2. Enter the console's IP and connect. The status line shows the session state, the running game and the qwark version.
 3. Start a supported game. The panels fill in from the console's own description of the game.
 
+Every qwark release carries a build number, and the client knows the one it shipped with. If the console reports an older build (the SPRX beside the client was updated but the console still runs the previous one), the header says so and the Connection panel explains how to re-upload it. Until then the feature list you see is the old module's.
+
 If the connection drops, the client reconnects on its own; there is nothing to restore because the console keeps all the state.
 
 ## Panels
 
-- **Game**: the everyday controls for the running game: the player values as an editable table on top, then Cheats, Player and Savefile stacked below it, each toggle with an "on boot" (auto-apply) box. The less-used sections are sub-pages listed under Game in the side nav: Manips (category setup and manipulation helpers), Collectables, Cosmetics and Debug.
-- **Positions and planets**: eight position slots per planet, planet loading with reset flags, die.
-- **Unlocks** and **Level flags**: per-game tables and a hex view of the flag region.
+- **Game**: the everyday controls for the running game: the player values as an editable table on top, with the per-file in-game options (UYA's quick-select pause, RaC1's goodies menu) beside it, then Cheats, Player and Savefile stacked below, each toggle with an "on boot" (auto-apply) box. Player always ends with save and load position buttons for the console's selected slot. The less-used sections are sub-pages listed under Game in the side nav: Manips (category setup and manipulation helpers), Collectables, Cosmetics and Debug.
+- **Positions and planets**: eight position slots per planet, planet loading with reset flags, die. The selected slot is remembered by the console.
+- **Unlocks**: the per-game unlock table, plus the game's bulk unlock actions (UYA's weapon level buttons live here).
+- **Level flags**: the flag region of a planet as a bitfield, one byte per row with a checkbox per bit, refreshed every second. Hidden for games whose flag layout is not known yet (RaC1 for now).
 - **Memory**: viewer, watches (live in telemetry), freezes, raw instruction patches, and the moby table.
 - **Mods**: the local library in `mods/<TITLEID>/`, uploaded to the console the first time a mod is used or when it changes; auto-apply flags; ZIP install.
 - **Combos**: controller combos executed on the console.
@@ -28,7 +31,7 @@ When the game reboots, the console keeps read-only watches and asks, through thi
 
 ## Customising the Game page
 
-The Game page's layout is owned by the client, not the console. qwark's DESCRIBE groups are the default; `data/gamelayout.json` (shipped, and yours to edit) overrides it. `sideSections` names the sections that become sub-pages under Game in the side nav; everything else stacks on the Game page. The per-game entries are keyed by game (`rac1`, `rac2`, `rac3`, `rac4`), so the disc release BCES01503, which hosts three games under one title id, gets the right layout for whichever game is running; an entry keyed by a title id is honoured first if you want one. In each entry a `moves` table sends a feature (by its exact label) to a named section, creating it if needed, and `tabOrder` sets the order. VALUE features default to the editable table at the top, but a move can pull one into a section (that's how QE ends up under Debug). Changing the layout never needs a qwark rebuild; the app reads the file on start, and the Settings panel can reload it.
+The Game page's layout is owned by the client, not the console. qwark's DESCRIBE groups are the default; `data/gamelayout.json` (shipped, and yours to edit) overrides it. `sideSections` names the sections that become sub-pages under Game in the side nav; everything else stacks on the Game page. The per-game entries are keyed by game (`rac1`, `rac2`, `rac3`, `rac4`), so the disc release BCES01503, which hosts three games under one title id, gets the right layout for whichever game is running; an entry keyed by a title id is honoured first if you want one. In each entry a `moves` table sends a feature (by its exact label) to a named section, creating it if needed, and `tabOrder` sets the order. VALUE features default to the editable table at the top, but a move can pull one into a section (that's how QE ends up under Debug). Three section names are reserved: `Values` is the top table, `Options` is the column beside it, and `Unlocks` sends a feature to the Unlocks panel instead of the Game page. `Player` is an ordinary section but always ends with the position buttons. Changing the layout never needs a qwark rebuild; the app reads the file on start, and the Settings panel can reload it.
 
 ## Telemetry and the firewall (Windows)
 
