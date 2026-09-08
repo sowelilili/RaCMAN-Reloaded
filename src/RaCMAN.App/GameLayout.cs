@@ -4,7 +4,7 @@ using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
 
-/// <summary>The layout for one title: the section order, and per-feature moves out of their qwark group.</summary>
+/// <summary>The layout for one game (or one title): the section order, and per-feature moves out of their qwark group.</summary>
 public sealed class TitleLayout
 {
     /// <summary>Preferred section order. Sections a feature lands in but not listed here follow, in first-seen order.</summary>
@@ -26,15 +26,24 @@ public sealed class LayoutFile
     [JsonPropertyName("sideSections")]
     public string[]? SideSections { get; set; }
 
-    [JsonPropertyName("titles")]
-    public Dictionary<string, TitleLayout> Titles { get; set; } = new();
+    /// <summary>
+    /// Keyed by game ("rac1".."rac4"), or by a title id for a layout that should only apply to that
+    /// one disc. A title-id entry is honoured before the game key.
+    /// </summary>
+    [JsonPropertyName("games")]
+    public Dictionary<string, TitleLayout> Games { get; set; } = new();
 }
 
 /// <summary>
 /// The Game panel's layout, owned by the client rather than qwark. qwark's DESCRIBE groups are the
 /// default; <c>data/gamelayout.json</c> (shipped, and editable by the user) overrides where a feature
 /// goes and which sections become side sub-pages, so the layout can be tuned without touching the
-/// console module. Titles are keyed by title id.
+/// console module.
+/// <para>
+/// Entries are keyed by game ("rac1".."rac4") rather than by title id, because BCES01503 hosts RaC1,
+/// RaC2 and RaC3 under a single title id. An entry keyed by a title id still wins over the game key,
+/// for the odd release that needs its own layout.
+/// </para>
 /// </summary>
 public static class GameLayout
 {
@@ -42,7 +51,7 @@ public static class GameLayout
     public const string ValuesSection = "Values";
 
     /// <summary>What counts as a side sub-page when the file does not say.</summary>
-    private static readonly string[] DefaultSideSections = { "Collectables", "Cosmetics", "Debug" };
+    private static readonly string[] DefaultSideSections = { "Manips", "Collectables", "Cosmetics", "Debug" };
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -68,6 +77,9 @@ public static class GameLayout
     /// <summary>Sections that get their own sub-page under Game in the side nav.</summary>
     public static IReadOnlyList<string> SideSections => Config.SideSections ?? DefaultSideSections;
 
+    /// <summary>The key a game is looked up under: the lower-case enum name, "rac1".."rac4".</summary>
+    private static string GameKey(GameId game) => game.ToString().ToLowerInvariant();
+
     private static LayoutFile Load(string path)
     {
         try
@@ -78,7 +90,7 @@ public static class GameLayout
                 if (loaded is not null)
                 {
                     Problems = Array.Empty<string>();
-                    return loaded;
+                    return Normalise(loaded);
                 }
             }
             Problems = Array.Empty<string>();
@@ -91,13 +103,29 @@ public static class GameLayout
         return new LayoutFile();
     }
 
+    /// <summary>Keys are title ids and game names, so match them without caring about case.</summary>
+    private static LayoutFile Normalise(LayoutFile file)
+    {
+        var games = new Dictionary<string, TitleLayout>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, layout) in file.Games) games[key] = layout;
+        file.Games = games;
+        return file;
+    }
+
+    /// <summary>The layout for a title id if there is one, else the one for the game. Null when neither is configured.</summary>
+    private static TitleLayout? LayoutFor(string? titleId, GameId game)
+    {
+        if (!string.IsNullOrWhiteSpace(titleId) && Config.Games.TryGetValue(titleId, out var byTitle)) return byTitle;
+        return Config.Games.TryGetValue(GameKey(game), out var byGame) ? byGame : null;
+    }
+
     /// <summary>
     /// The section a feature belongs in: a configured move if there is one, otherwise the top value
     /// table for a VALUE, otherwise the game's own DESCRIBE group.
     /// </summary>
-    public static string SectionFor(string titleId, Feature feature, DescribeResult describe)
+    public static string SectionFor(string titleId, GameId game, Feature feature, DescribeResult describe)
     {
-        if (Config.Titles.TryGetValue(titleId ?? string.Empty, out var layout)
+        if (LayoutFor(titleId, game) is { } layout
             && layout.Moves.TryGetValue(feature.Label, out var section)
             && !string.IsNullOrWhiteSpace(section))
         {
@@ -107,12 +135,12 @@ public static class GameLayout
         return feature.Kind == FeatureKind.Value ? ValuesSection : describe.GroupName(feature.Group);
     }
 
-    /// <summary>The section order for a title: the configured order first, then any other used sections. Values is never listed.</summary>
-    public static IReadOnlyList<string> TabOrder(string titleId, IEnumerable<string> used)
+    /// <summary>The section order for a game: the configured order first, then any other used sections. Values is never listed.</summary>
+    public static IReadOnlyList<string> TabOrder(string titleId, GameId game, IEnumerable<string> used)
     {
         var order = new List<string>();
 
-        if (Config.Titles.TryGetValue(titleId ?? string.Empty, out var layout))
+        if (LayoutFor(titleId, game) is { } layout)
         {
             foreach (var tab in layout.TabOrder)
             {

@@ -3,37 +3,92 @@
 // "sideSections" lists the sections that become their own sub-page under Game in the side nav
 // (the less-used ones). Every other section stacks on the Game page, always visible.
 //
-// "titles" is keyed by title id. "moves" sends a feature (by its exact label) to a named section,
-// creating it if needed. Anything not moved stays in its qwark DESCRIBE group, and VALUE features
-// default to the editable table at the top of the Game page (the "Values" section).
+// "games" is keyed by game: "rac1", "rac2", "rac3", "rac4". An entry keyed by a title id is
+// honoured first, for a release that needs its own layout; the game key is what BCES01503 needs,
+// since that one disc hosts RaC1, RaC2 and RaC3.
+//
+// "moves" sends a feature (by its exact DESCRIBE label) to a named section, creating it if needed.
+// Anything not moved stays in its qwark DESCRIBE group, and VALUE features default to the editable
+// table at the top of the Game page (the "Values" section). A group everything is moved out of
+// simply stops appearing.
 // "tabOrder" sets the section order; sections used but not listed follow in first-seen order.
 //
 // Edit freely; the app reads this on start.
 {
-  "sideSections": ["Collectables", "Cosmetics", "Debug"],
+  "sideSections": ["Manips", "Collectables", "Cosmetics", "Debug"],
 
-  "titles": {
-    "NPEA00386": {
-      "tabOrder": ["Cheats", "Player", "Savefile", "Progress", "Collectables", "Cosmetics", "Debug"],
+  "games": {
+    "rac1": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug"],
       "moves": {
+        "Drek skip": "Manips",
+        "Drek cutscene": "Manips",
+        "Force okay load": "Manips",
+        "Any% all-missions reset": "Manips",
+
+        "Unlock all gold bolts": "Collectables",
+        "Reset all gold bolts": "Collectables",
+        "Unlock all skill points": "Collectables",
+        "Reset skill points": "Collectables",
+        "Setup shooting skill points": "Collectables",
+        "Reset shooting skill points": "Collectables",
+
+        "Jankpot bolts": "Debug",
+        "Jankpot timer (frames)": "Debug",
+        "Activate jankpot": "Debug"
+      }
+    },
+
+    "rac2": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug"],
+      "moves": {
+        "Reset any% manips": "Manips",
+        "Reset NG+ manips/menus": "Manips",
+        "NG+ setup": "Manips",
+        "NG+ No IMG setup": "Manips",
+        "NG+ All Missions setup": "Manips",
+        "Maktar slots": "Manips",
+        "Auto-reset (any%)": "Manips",
+        "Auto-reset (NG+)": "Manips",
+
         "Enable debug mode": "Debug",
         "QE save write-offset": "Debug"
       }
     },
 
-    "NPEA00387": {
-      "tabOrder": ["Cheats", "Player", "Savefile", "Progress", "Cosmetics", "Debug"],
+    "rac3": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug"],
       "moves": {
+        "Setup NG+ manips": "Manips",
+        "Make NG+ no-QE file": "Manips",
+        "CC early setup": "Manips",
+        "Untune bosses": "Manips",
+        "Reset dropship health": "Manips",
+
+        "Refresh trophy state": "Savefile",
+
+        "Unlock all skill points": "Collectables",
+        "Reset all skill points": "Collectables",
+        "Unlock all titanium bolts": "Collectables",
+        "Reset all titanium bolts": "Collectables",
+
+        "Max all weapon levels": "Player",
+        "Reset all weapon levels": "Player",
+
         "Armour": "Cosmetics",
         "Ship colour": "Cosmetics",
+
         "QE offset": "Debug",
         "Enable vendor QE": "Debug"
       }
     },
 
-    "NPEA00423": {
-      "tabOrder": ["Cheats", "Player", "Savefile", "Progress", "Cosmetics"],
+    "rac4": {
+      "tabOrder": ["Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug"],
       "moves": {
+        "Unlock all planets": "Manips",
+        "Act tune bosses": "Manips",
+
         "Skin": "Cosmetics"
       }
     }

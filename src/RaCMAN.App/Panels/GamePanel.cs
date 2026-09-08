@@ -7,8 +7,8 @@ namespace RaCMAN.App.Panels;
 /// <summary>
 /// The Game page and its sub-pages. The page itself is the everyday controls: the player-value
 /// table on top, then the remaining sections stacked and always visible. The sections the layout
-/// marks as "side" (Collectables, Cosmetics, Debug by default) each get a sub-page, reached from
-/// the indented entries under Game in the side nav.
+/// marks as "side" (Manips, Collectables, Cosmetics, Debug by default) each get a sub-page, reached
+/// from the indented entries under Game in the side nav.
 /// </summary>
 public static class GamePanel
 {
@@ -46,18 +46,19 @@ public static class GamePanel
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<string>();
 
-        var sections = Assign(state.Session.TitleId ?? string.Empty, describe, out _);
+        var sections = Assign(state.Session.TitleId ?? string.Empty, state.Session.Game, describe, out _);
         return GameLayout.SideSections.Where(s => sections.ContainsKey(s)).ToArray();
     }
 
     /// <summary>Puts every feature in its section (client layout first, qwark group as the default).</summary>
-    private static Dictionary<string, List<Feature>> Assign(string title, DescribeResult describe, out List<string> firstSeen)
+    private static Dictionary<string, List<Feature>> Assign(
+        string title, GameId game, DescribeResult describe, out List<string> firstSeen)
     {
         var sections = new Dictionary<string, List<Feature>>(StringComparer.Ordinal);
         firstSeen = new List<string>();
         foreach (var feature in describe.Features)
         {
-            string section = GameLayout.SectionFor(title, feature, describe);
+            string section = GameLayout.SectionFor(title, game, feature, describe);
             if (!sections.TryGetValue(section, out var list))
             {
                 list = new List<Feature>();
@@ -73,8 +74,9 @@ public static class GamePanel
     {
         var describe = state.Describe;
         string title = state.Session.TitleId ?? string.Empty;
+        var game = state.Session.Game;
         var order = new List<string>();
-        var sections = describe.Features.Length > 0 ? Assign(title, describe, out order) : null;
+        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, out order) : null;
 
         // A sub-page that the running game has nothing for (the game changed) falls back to the page.
         if (SubPage is not null && (sections is null || !sections.ContainsKey(SubPage))) SubPage = null;
@@ -89,7 +91,7 @@ public static class GamePanel
         if (sections is null)
         {
             Ui.Hint(state.Connected
-                ? "No descriptors. qwark returns an empty DESCRIBE until a supported game is running."
+                ? "Start a supported game to see its controls."
                 : "Connect to see the game's descriptors.");
             return;
         }
@@ -113,7 +115,7 @@ public static class GamePanel
 
             // Everything not pinned to the top and not a side page, stacked in layout order.
             var used = order.Where(s => s != GameLayout.ValuesSection);
-            foreach (var section in GameLayout.TabOrder(title, used))
+            foreach (var section in GameLayout.TabOrder(title, game, used))
             {
                 if (GameLayout.SideSections.Contains(section)) continue;
                 if (!sections.TryGetValue(section, out var features) || features.Count == 0) continue;
@@ -134,22 +136,21 @@ public static class GamePanel
     // ---------------------------------------------------------------- values
 
     /// <summary>
-    /// The top table: the value features that live here (VALUE by default), plus every readout that
-    /// no feature drives, shown read-only. A readout a moved value drives is shown by that value in
-    /// its section, not duplicated here.
+    /// The top table: only the value features that live here (VALUE by default), every one of them
+    /// editable. A value moved to a section shows itself there, and a readout no feature drives is
+    /// not shown at all. Rows follow the game's readout order, so the table reads the same each run.
     /// </summary>
     private static void DrawTopValues(AppState state, DescribeResult describe, List<Feature> here)
     {
-        var session = state.Session;
+        // The mirror bookkeeping: a VALUE placed in this section is the one editable here.
+        var editable = here.Where(f => f.Kind == FeatureKind.Value).ToArray();
+        if (editable.Length == 0) return;
 
-        // Map each readout to the feature that mirrors it, so we know which are driven and by what.
-        var mirror = new Dictionary<int, Feature>();
-        foreach (var f in describe.Features)
+        var byMirror = new Dictionary<int, Feature>();
+        foreach (var feature in editable)
         {
-            if (f.MirrorReadout is { } r) mirror[r] = f;
+            if (feature.MirrorReadout is { } r) byMirror[r] = feature;
         }
-
-        var topIds = here.Where(f => f.Kind == FeatureKind.Value).Select(f => f.Id).ToHashSet();
 
         if (!ImGui.BeginTable("player-values", 2,
             ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
@@ -158,30 +159,17 @@ public static class GamePanel
         ImGui.TableSetupColumn("Value");
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthStretch);
 
-        for (int i = 0; i < describe.Readouts.Length && i < session.Readout.Length; i++)
+        var drawn = new HashSet<byte>();
+        for (int i = 0; i < describe.Readouts.Length; i++)
         {
-            if (mirror.TryGetValue(i, out var feature))
-            {
-                // A VALUE that lives in this table is editable here; any other mirror (an ENUM/COLOR,
-                // or a value moved to a section) shows itself elsewhere, so skip the row.
-                if (feature.Kind == FeatureKind.Value && topIds.Contains(feature.Id))
-                    ValueRow(state, describe, feature);
-                continue;
-            }
-
-            // No feature drives this readout: a plain read-only reading.
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(describe.Readouts[i]);
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(session.Readout[i].ToString());
+            if (byMirror.TryGetValue(i, out var feature) && drawn.Add(feature.Id))
+                ValueRow(state, describe, feature);
         }
 
-        // Value features that mirror no readout still belong here.
-        foreach (var feature in here)
+        // Values that mirror no readout (or one the game never named) follow in feature order.
+        foreach (var feature in editable)
         {
-            if (feature.Kind == FeatureKind.Value && feature.MirrorReadout is null)
-                ValueRow(state, describe, feature);
+            if (drawn.Add(feature.Id)) ValueRow(state, describe, feature);
         }
 
         ImGui.EndTable();
@@ -200,9 +188,13 @@ public static class GamePanel
     {
         uint live = CurrentValue(state, feature);
 
+        // The field sits in a table row, so let the row show through it. Hovered and active keep the
+        // theme's own colours, which is what makes the field light up when you reach for it.
         ImGui.SetNextItemWidth(-1);
         ImGui.PushID(feature.Id);
+        ImGui.PushStyleColor(ImGuiCol.FrameBg, Vector4.Zero);
         bool sent = Ui.NumberOnEnter("##v", live, Drafts, feature.Id, out long typed);
+        ImGui.PopStyleColor();
         ImGui.PopID();
 
         if (feature.Max > feature.Min && ImGui.IsItemHovered())
@@ -249,11 +241,15 @@ public static class GamePanel
         foreach (var feature in choices) DrawChoice(state, describe, feature);
     }
 
+    /// <summary>The gap between the widest label in a column and that column's "on boot" boxes.</summary>
+    private const float AutoBoxGap = 16f;
+
     /// <summary>
-    /// Toggles two to a row, each followed by its "on boot" (auto-apply) box. The box sits right
-    /// after the label with a fixed gap, inside the cell, so it is never clipped by the column edge
-    /// and never reads as belonging to the neighbouring toggle. The grid drops to one column when
-    /// the panel is too narrow for two.
+    /// Toggles two to a row, each followed by its "on boot" (auto-apply) box. Every box in a column
+    /// sits at the same offset, the column's widest label plus a fixed gap, so the boxes line up
+    /// instead of zig-zagging; inside a cell <c>SameLine(offset)</c> is measured from the column's
+    /// own start, so one offset per column does it. The grid drops to one column when the panel is
+    /// too narrow for two.
     /// </summary>
     private static void DrawToggleGrid(AppState state, Feature[] toggles)
     {
@@ -261,22 +257,33 @@ public static class GamePanel
 
         var style = ImGui.GetStyle();
         float autoBox = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize("on boot").X;
+
+        var labelWidth = new float[toggles.Length];
         float widest = 0;
-        foreach (var feature in toggles)
+        for (int i = 0; i < toggles.Length; i++)
         {
-            float w = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize(feature.Label).X;
-            widest = Math.Max(widest, w);
+            labelWidth[i] = ImGui.GetFrameHeight() + style.ItemInnerSpacing.X + ImGui.CalcTextSize(toggles[i].Label).X;
+            widest = Math.Max(widest, labelWidth[i]);
         }
 
         // A cell needs the label, the gap and the box, plus the table's own cell padding.
-        float cellNeeded = widest + 16 + autoBox + style.CellPadding.X * 2;
+        float cellNeeded = widest + AutoBoxGap + autoBox + style.CellPadding.X * 2;
         int columns = toggles.Length > 1 && ImGui.GetContentRegionAvail().X >= cellNeeded * 2 ? 2 : 1;
+
+        // Toggles fill left to right, so toggle i lands in column i % columns.
+        var columnLabel = new float[columns];
+        for (int i = 0; i < toggles.Length; i++)
+        {
+            int column = i % columns;
+            columnLabel[column] = Math.Max(columnLabel[column], labelWidth[i]);
+        }
 
         if (!ImGui.BeginTable("toggles", columns, ImGuiTableFlags.SizingStretchSame)) return;
 
         var session = state.Session;
-        foreach (var feature in toggles)
+        for (int i = 0; i < toggles.Length; i++)
         {
+            var feature = toggles[i];
             ImGui.TableNextColumn();
             ImGui.PushID(feature.Id);
 
@@ -290,7 +297,7 @@ public static class GamePanel
             }
             if (feature.WritesCode && ImGui.IsItemHovered()) ImGui.SetTooltip("Patches game code");
 
-            ImGui.SameLine(0, 16);
+            ImGui.SameLine(columnLabel[i % columns] + AutoBoxGap);
             bool auto = (session.ToggleAuto & bit) != 0;
             ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
             bool changed = ImGui.Checkbox("on boot", ref auto);
@@ -341,7 +348,7 @@ public static class GamePanel
             var options = state.EnumOptions.TryGetValue(feature.Id, out var loaded) ? loaded : Array.Empty<string>();
             if (options.Length == 0)
             {
-                ImGui.TextColored(Ui.Grey, $"{feature.Label}: waiting for FEATURE_OPTIONS");
+                ImGui.TextColored(Ui.Grey, $"{feature.Label}: loading options...");
                 ImGui.PopID();
                 return;
             }
