@@ -43,11 +43,47 @@ public static class GamePanel
         bool enabled = state.Ingame;
         if (!enabled) ImGui.TextColored(Ui.Yellow, $"Controls are disabled outside INGAME (state is {state.Session.State}).");
 
+        // The tab layout is client-owned: qwark's group is the default, gamelayout.json overrides it.
+        string title = state.Session.TitleId ?? string.Empty;
+        var sections = new Dictionary<string, List<Feature>>(StringComparer.Ordinal);
+        var order = new List<string>();
+        foreach (var feature in describe.Features)
+        {
+            string section = GameLayout.SectionFor(title, feature, describe);
+            if (!sections.TryGetValue(section, out var list))
+            {
+                list = new List<Feature>();
+                sections[section] = list;
+                order.Add(section);
+            }
+            list.Add(feature);
+        }
+
         ImGui.BeginDisabled(!enabled);
 
-        DrawValues(state, describe);
+        var topValues = sections.GetValueOrDefault(GameLayout.ValuesSection) ?? new List<Feature>();
+        DrawTopValues(state, describe, topValues);
+
         ImGui.Spacing();
-        DrawGroupTabs(state, describe);
+
+        var used = order.Where(s => s != GameLayout.ValuesSection);
+        var tabs = GameLayout.TabOrder(title, used);
+        if (tabs.Count > 0 &&
+            ImGui.BeginTabBar("game-groups", ImGuiTabBarFlags.FittingPolicyScroll | ImGuiTabBarFlags.TabListPopupButton))
+        {
+            foreach (var tab in tabs)
+            {
+                if (!sections.TryGetValue(tab, out var features) || features.Count == 0) continue;
+                if (!ImGui.BeginTabItem(tab)) continue;
+
+                ImGui.PushID(tab);
+                DrawSectionBody(state, describe, features);
+                ImGui.PopID();
+                ImGui.EndTabItem();
+            }
+
+            ImGui.EndTabBar();
+        }
 
         ImGui.EndDisabled();
     }
@@ -55,23 +91,22 @@ public static class GamePanel
     // ---------------------------------------------------------------- values
 
     /// <summary>
-    /// The player-value table: every VALUE feature is an inline-editable row, and every readout
-    /// that no feature drives is a read-only row. Readouts mirrored by an ENUM or COLOR are shown
-    /// by that control in its group, not here, so they are not duplicated.
+    /// The top table: the value features that live here (VALUE by default), plus every readout that
+    /// no feature drives, shown read-only. A readout a moved value drives is shown by that value in
+    /// its tab, not duplicated here.
     /// </summary>
-    private static void DrawValues(AppState state, DescribeResult describe)
+    private static void DrawTopValues(AppState state, DescribeResult describe, List<Feature> here)
     {
         var session = state.Session;
 
-        // Which readouts a feature already represents, and by which kind.
-        var mirroredByValue = new Dictionary<int, Feature>();
-        var mirroredByOther = new HashSet<int>();
+        // Map each readout to the feature that mirrors it, so we know which are driven and by what.
+        var mirror = new Dictionary<int, Feature>();
         foreach (var f in describe.Features)
         {
-            if (f.MirrorReadout is not { } r) continue;
-            if (f.Kind == FeatureKind.Value) mirroredByValue[r] = f;
-            else if (f.Kind is FeatureKind.Enum or FeatureKind.Color) mirroredByOther.Add(r);
+            if (f.MirrorReadout is { } r) mirror[r] = f;
         }
+
+        var topIds = here.Where(f => f.Kind == FeatureKind.Value).Select(f => f.Id).ToHashSet();
 
         if (!ImGui.BeginTable("player-values", 2,
             ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
@@ -79,50 +114,50 @@ public static class GamePanel
 
         ImGui.TableSetupColumn("Value");
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthStretch);
-        // No header row: the panel heading already says what this is, and it reads as a stat block.
 
-        // Readouts in order: an editable VALUE where one drives it, otherwise a read-only reading.
         for (int i = 0; i < describe.Readouts.Length && i < session.Readout.Length; i++)
         {
-            if (mirroredByOther.Contains(i)) continue;   // shown by its ENUM/COLOR control below
+            if (mirror.TryGetValue(i, out var feature))
+            {
+                // A VALUE that lives in this table is editable here; any other mirror (an ENUM/COLOR,
+                // or a value moved to a tab) shows itself elsewhere, so skip the row.
+                if (feature.Kind == FeatureKind.Value && topIds.Contains(feature.Id))
+                    ValueRow(state, describe, feature);
+                continue;
+            }
 
+            // No feature drives this readout: a plain read-only reading.
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-
-            if (mirroredByValue.TryGetValue(i, out var feature))
-            {
-                ImGui.TextUnformatted(feature.Label);
-                ImGui.TableNextColumn();
-                DrawValueEditor(state, describe, feature);
-            }
-            else
-            {
-                ImGui.TextUnformatted(describe.Readouts[i]);
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(session.Readout[i].ToString());
-            }
+            ImGui.TextUnformatted(describe.Readouts[i]);
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(session.Readout[i].ToString());
         }
 
-        // VALUE features that mirror no readout still belong in the table.
-        foreach (var feature in describe.Features)
+        // Value features that mirror no readout still belong here.
+        foreach (var feature in here)
         {
-            if (feature.Kind != FeatureKind.Value || feature.MirrorReadout is not null) continue;
-
-            ImGui.TableNextRow();
-            ImGui.TableNextColumn();
-            ImGui.TextUnformatted(feature.Label);
-            ImGui.TableNextColumn();
-            DrawValueEditor(state, describe, feature);
+            if (feature.Kind == FeatureKind.Value && feature.MirrorReadout is null)
+                ValueRow(state, describe, feature);
         }
 
         ImGui.EndTable();
+    }
+
+    private static void ValueRow(AppState state, DescribeResult describe, Feature feature)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(feature.Label);
+        ImGui.TableNextColumn();
+        DrawValueEditor(state, describe, feature);
     }
 
     private static void DrawValueEditor(AppState state, DescribeResult describe, Feature feature)
     {
         uint live = CurrentValue(state, feature);
 
-        ImGui.SetNextItemWidth(-1);   // fill the stretch column
+        ImGui.SetNextItemWidth(-1);
         ImGui.PushID(feature.Id);
         bool sent = Ui.NumberOnEnter("##v", live, Drafts, feature.Id, out long typed);
         ImGui.PopID();
@@ -140,42 +175,30 @@ public static class GamePanel
         state.Run(() => state.Client.FeatureSetAsync(id, value));
     }
 
-    // ---------------------------------------------------------------- groups
+    // ---------------------------------------------------------------- a tab
 
-    private static void DrawGroupTabs(AppState state, DescribeResult describe)
+    private static void DrawSectionBody(AppState state, DescribeResult describe, List<Feature> features)
     {
-        int groupCount = Math.Max(1, describe.Groups.Length);
-
-        // A group is worth a tab only if it has something other than the VALUEs shown up top.
-        bool HasContent(byte g) =>
-            describe.Features.Any(f => f.Group == g && f.Kind != FeatureKind.Value);
-
-        if (!ImGui.BeginTabBar("game-groups", ImGuiTabBarFlags.FittingPolicyScroll | ImGuiTabBarFlags.TabListPopupButton))
-            return;
-
-        for (byte group = 0; group < groupCount; group++)
-        {
-            if (!HasContent(group)) continue;
-            if (!ImGui.BeginTabItem(describe.GroupName(group))) continue;
-
-            ImGui.PushID(group);
-            DrawGroupBody(state, describe, group);
-            ImGui.PopID();
-            ImGui.EndTabItem();
-        }
-
-        ImGui.EndTabBar();
-    }
-
-    private static void DrawGroupBody(AppState state, DescribeResult describe, byte group)
-    {
-        var features = describe.Features.Where(f => f.Group == group).ToArray();
-
+        var values = features.Where(f => f.Kind == FeatureKind.Value).ToArray();
         var toggles = features.Where(f => f.Kind == FeatureKind.Toggle).ToArray();
         var actions = features.Where(f => f.Kind == FeatureKind.Action).ToArray();
         var choices = features.Where(f => f.Kind is FeatureKind.Enum or FeatureKind.Color).ToArray();
 
         ImGui.Spacing();
+
+        if (values.Length > 0)
+        {
+            if (ImGui.BeginTable("tab-values", 2,
+                ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+            {
+                ImGui.TableSetupColumn("Value");
+                ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthStretch);
+                foreach (var feature in values) ValueRow(state, describe, feature);
+                ImGui.EndTable();
+            }
+            if (toggles.Length > 0 || actions.Length > 0 || choices.Length > 0) ImGui.Spacing();
+        }
+
         DrawToggleGrid(state, toggles);
         if (toggles.Length > 0 && (actions.Length > 0 || choices.Length > 0)) ImGui.Spacing();
         DrawActionGrid(state, actions);

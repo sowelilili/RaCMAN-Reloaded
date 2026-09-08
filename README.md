@@ -25,6 +25,10 @@ If the connection drops, the client reconnects on its own; there is nothing to r
 
 When the game reboots, the console keeps read-only watches and asks, through this client, whether to re-apply anything that writes memory (toggles, freezes, patches, mods). Nothing that writes is re-applied silently unless its auto flag is set.
 
+## Customising the Game panel tabs
+
+The Game panel's tab layout is owned by the client, not the console. qwark's DESCRIBE groups are the default; `data/gamelayout.json` (shipped, and yours to edit) overrides where a feature goes, keyed by title id. A `moves` entry sends a feature (by its exact label) to a named tab, creating the tab if needed; `tabOrder` sets the order. VALUE features default to the editable table at the top, but a move can pull one into a tab (that's how QE ends up under Debug). Changing the layout never needs a qwark rebuild; the app reads the file on start.
+
 ## Telemetry and the firewall (Windows)
 
 The console streams live state (readouts, toggle state, the pad for combos) to the PC over UDP. Windows Firewall blocks unsolicited inbound UDP for a freshly unzipped, unsigned app, often without showing a prompt. On first run the client offers to add the rule; if you decline it keeps working by falling back to slower TCP polling, and the Connection panel then shows a one-click **Allow inbound UDP through Windows Firewall** button. Either way it asks for administrator approval and only adds an inbound rule for RaCMAN. You can also double-click **Allow through Firewall.cmd**, or remove the rules later with `windows-firewall.ps1 -Remove`.

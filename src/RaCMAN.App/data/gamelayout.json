@@ -1,0 +1,31 @@
+// Game panel tab layout, owned by the client. Keyed by title id.
+// "moves" sends a feature (by its exact label) to a named tab. Anything not moved stays in its qwark
+// DESCRIBE group, and VALUE features default to the top value table (the "Values" section).
+// "tabOrder" sets the tab order; tabs used but not listed follow in first-seen order.
+// Edit freely; the app reads this on start.
+{
+  "NPEA00386": {
+    "tabOrder": ["Cheats", "Player", "Progress", "Collectables", "Cosmetics", "Debug", "Savefile"],
+    "moves": {
+      "Enable debug mode": "Debug",
+      "QE save write-offset": "Debug"
+    }
+  },
+
+  "NPEA00387": {
+    "tabOrder": ["Cheats", "Player", "Progress", "Cosmetics", "Debug", "Savefile"],
+    "moves": {
+      "Armour": "Cosmetics",
+      "Ship colour": "Cosmetics",
+      "QE offset": "Debug",
+      "Enable vendor QE": "Debug"
+    }
+  },
+
+  "NPEA00423": {
+    "tabOrder": ["Cheats", "Player", "Progress", "Cosmetics", "Savefile"],
+    "moves": {
+      "Skin": "Cosmetics"
+    }
+  }
+}
