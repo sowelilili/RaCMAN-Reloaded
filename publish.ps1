@@ -35,7 +35,7 @@ $ErrorActionPreference = 'Stop'
 
 $repo = $PSScriptRoot
 if (-not $OutputRoot) { $OutputRoot = Join-Path $repo '..\build' }
-if (-not $ModsSource) { $ModsSource = Join-Path $repo '..\racman-official\mods' }
+if (-not $ModsSource) { $ModsSource = Join-Path $repo '..\..\legacy\racman-official\mods' }
 if (-not $SprxPath)   { $SprxPath   = Join-Path $repo '..\qwark\qwark.sprx' }
 
 # The mod library the client ships with: one folder per title plus the shared Lua helpers.
