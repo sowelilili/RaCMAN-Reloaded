@@ -16,12 +16,12 @@ If the connection drops, the client reconnects on its own; there is nothing to r
 
 ## Panels
 
-- **Game**: the everyday controls for the running game: the player values as an editable table on top, with the per-file in-game options (UYA's quick-select pause, RaC1's goodies menu) beside it, then Cheats, Player and Savefile stacked below, each toggle with an "on boot" (auto-apply) box. Player always ends with save and load position buttons for the console's selected slot. The less-used sections are sub-pages listed under Game in the side nav: Manips (category setup and manipulation helpers), Collectables, Cosmetics and Debug.
+- **Game**: the everyday controls for the running game: the player values as an editable table on top, with the per-file in-game options (UYA's quick-select pause, RaC1's goodies menu) beside it, then Cheats, Player and Savefile stacked below, each toggle with an "on boot" (auto-apply) box. Toggles that are plain game-memory switches (the options, the debug bits) have no such box: the console reads their state back from the game, so the checkbox shows what the game says. Player always ends with save and load position buttons for the console's selected slot. The less-used sections are sub-pages listed under Game in the side nav: Manips (category setup and manipulation helpers), Collectables, Cosmetics and Debug.
 - **Positions and planets**: eight position slots per planet, planet loading with reset flags, die. The selected slot is remembered by the console.
-- **Unlocks**: the per-game unlock table, plus the game's bulk unlock actions (UYA's weapon level buttons live here).
+- **Unlocks**: the per-game unlock table, with the columns the console describes for that game (UYA: owned, level, XP, ammo; RaC1 adds gold), a search box, and the game's bulk unlock actions (UYA's weapon level buttons live here).
 - **Level flags**: the flag region of a planet as a bitfield, one byte per row with a checkbox per bit, refreshed every second. Hidden for games whose flag layout is not known yet (RaC1 for now).
-- **Memory**: viewer, watches (live in telemetry), freezes, raw instruction patches, and the moby table.
-- **Mods**: the local library in `mods/<TITLEID>/`, uploaded to the console the first time a mod is used or when it changes; auto-apply flags; ZIP install.
+- **Memory**: viewer, watches (live in telemetry) with named watchlists per title, freezes, raw instruction patches, and the moby table.
+- **Mods**: the local library in `mods/<TITLEID>/`, uploaded to the console the first time a mod is used or when it changes; auto-apply flags; ZIP install with a native file picker. Hashes and patch counts only show with debug information on.
 - **Combos**: controller combos executed on the console.
 - **Input display**: the 21 controller skins from RaCMAN.
 - **Save files**: a category library in `savefiles/<TITLEID>/<category>/`, moved through the game's savefile helper: the two ACTIONs the console flags SAVE_ASIDE and LOAD_ASIDE, plus the generic file ops.
