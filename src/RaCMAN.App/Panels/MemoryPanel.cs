@@ -55,6 +55,13 @@ public static class MemoryPanel
         ClearGameData();
         Local.Clear();
         _watchlistName = string.Empty;
+
+        // The saved-list combo is per title, so it is re-listed on the next frame that draws it.
+        _watchlistLabels = Array.Empty<string>();
+        _watchlistNames = Array.Empty<string?>();
+        _watchlistIndex = -1;
+        _watchlistTitle = string.Empty;
+        _deleteArmed = false;
     }
 
     public static void Draw(AppState state)
@@ -511,54 +518,204 @@ public static class MemoryPanel
         ImGui.Separator();
         Ui.Heading("Watchlist file");
 
-        ImGui.SetNextItemWidth(200);
-        Ui.InputTextWithHint("Name", "default", ref _watchlistName, 64);
-        ImGui.SameLine();
-
         string title = string.IsNullOrEmpty(state.Session.TitleId) ? "unknown" : state.Session.TitleId;
-        if (ImGui.Button("Save watchlist"))
+
+        // Only when the title changes: this walks the watchlists folder, which is not something to
+        // do once a frame.
+        if (!string.Equals(_watchlistTitle, title, StringComparison.Ordinal)) RefreshWatchlists(state, title);
+
+        DrawWatchlistPicker(state, title);
+
+        ImGui.SetNextItemWidth(200);
+        if (Ui.InputTextWithHint("Name", "default", ref _watchlistName, 64))
         {
-            try
-            {
-                var entries = state.Watches
-                    .Select(w => Local.TryGetValue(Key(w.Address, w.Size), out var saved)
-                        ? new SavedWatch { Address = w.Address, Size = w.Size, Name = saved.Name, Format = saved.Format }
-                        : new SavedWatch { Address = w.Address, Size = w.Size, Name = $"watch {w.Id}" })
-                    .ToList();
-                state.Watchlists.Save(title, entries, string.IsNullOrWhiteSpace(_watchlistName) ? null : _watchlistName);
-                state.AddToast($"Watchlist saved to {state.Watchlists.FileFor(title, string.IsNullOrWhiteSpace(_watchlistName) ? null : _watchlistName)}", ToastKind.Success);
-            }
-            catch (IOException ex)
-            {
-                state.AddToast($"Watchlist save failed: {ex.Message}", ToastKind.Error);
-            }
+            // Typing a name is how a new list is made, so the combo follows the box rather than
+            // the other way round; a name with no file behind it simply selects nothing.
+            SelectWatchlist(_watchlistName);
+            _deleteArmed = false;
         }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Save watchlist")) SaveWatchlist(state, title);
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!state.Connected);
-        if (ImGui.Button("Load watchlist"))
-        {
-            var entries = state.Watchlists.Load(title, string.IsNullOrWhiteSpace(_watchlistName) ? null : _watchlistName);
-            if (entries.Count == 0)
-            {
-                state.AddToast("No watchlist file for this title", ToastKind.Error);
-            }
-            else
-            {
-                foreach (var entry in entries) Local[Key(entry.Address, entry.Size)] = entry;
-                state.Run(async () =>
-                {
-                    foreach (var entry in entries)
-                    {
-                        await state.Client.WatchAddAsync(entry.Address, entry.Size);
-                    }
+        if (ImGui.Button("Load watchlist")) LoadWatchlist(state, title);
+        ImGui.EndDisabled();
+    }
 
-                    state.Post(state.RefreshWatches);
-                }, $"Added {entries.Count} watches");
+    // ---------------------------------------------------------------- watchlist files
+
+    /// <summary>What the combo shows, and the name behind each entry (null is the default list).</summary>
+    private static string[] _watchlistLabels = Array.Empty<string>();
+    private static string?[] _watchlistNames = Array.Empty<string?>();
+    private static int _watchlistIndex = -1;
+
+    /// <summary>The title the two arrays above were listed for, so the listing happens once.</summary>
+    private static string _watchlistTitle = string.Empty;
+
+    private static bool _deleteArmed;
+
+    private static void DrawWatchlistPicker(AppState state, string title)
+    {
+        string preview = _watchlistIndex >= 0 && _watchlistIndex < _watchlistLabels.Length
+            ? _watchlistLabels[_watchlistIndex]
+            : _watchlistLabels.Length == 0 ? "(none saved)" : "(pick one)";
+
+        ImGui.SetNextItemWidth(200);
+        ImGui.BeginDisabled(_watchlistLabels.Length == 0);
+        if (ImGui.BeginCombo("Saved lists", preview))
+        {
+            for (int i = 0; i < _watchlistLabels.Length; i++)
+            {
+                if (!ImGui.Selectable(_watchlistLabels[i], i == _watchlistIndex)) continue;
+
+                _watchlistIndex = i;
+                _deleteArmed = false;
+                _watchlistName = _watchlistNames[i] ?? string.Empty;
+                LoadWatchlist(state, title);
             }
+
+            ImGui.EndCombo();
         }
 
         ImGui.EndDisabled();
+        ImGui.SameLine();
+
+        // The same two-step the level flags use for a reset: nothing on this panel deletes a file
+        // on one click.
+        if (_deleteArmed)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
+            if (ImGui.Button("Confirm delete")) DeleteWatchlist(state, title);
+            ImGui.PopStyleColor();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel##watchlist")) _deleteArmed = false;
+        }
+        else
+        {
+            ImGui.BeginDisabled(_watchlistIndex < 0);
+            if (ImGui.Button("Delete...")) _deleteArmed = true;
+            ImGui.EndDisabled();
+        }
+    }
+
+    /// <summary>Re-lists the watchlist files for a title and keeps the Name box's entry selected.</summary>
+    private static void RefreshWatchlists(AppState state, string title)
+    {
+        _watchlistTitle = title;
+        _deleteArmed = false;
+
+        var found = new List<(string Label, string? Name)>();
+        try
+        {
+            foreach (var file in state.Watchlists.ListFor(title))
+            {
+                // The listing is a prefix match, so another title's file can turn up in it.
+                if (WatchlistStore.TryGetName(title, file, out var name))
+                {
+                    found.Add((name is null ? "(default)" : name, name));
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            state.AddToast($"Watchlists: {ex.Message}", ToastKind.Error);
+        }
+
+        // The unnamed list first, then the named ones in alphabetical order.
+        found.Sort((left, right) => left.Name is null
+            ? right.Name is null ? 0 : -1
+            : right.Name is null ? 1 : string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+
+        _watchlistLabels = found.Select(entry => entry.Label).ToArray();
+        _watchlistNames = found.Select(entry => entry.Name).ToArray();
+        SelectWatchlist(_watchlistName);
+    }
+
+    /// <summary>Points the combo at the file the Name box names, or at nothing.</summary>
+    private static void SelectWatchlist(string name)
+    {
+        string? wanted = string.IsNullOrWhiteSpace(name) ? null : name.Trim();
+        _watchlistIndex = Array.FindIndex(_watchlistNames,
+            entry => string.Equals(entry, wanted, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string? WatchlistName() => string.IsNullOrWhiteSpace(_watchlistName) ? null : _watchlistName.Trim();
+
+    private static void SaveWatchlist(AppState state, string title)
+    {
+        string? name = WatchlistName();
+        try
+        {
+            var entries = state.Watches
+                .Select(w => Local.TryGetValue(Key(w.Address, w.Size), out var saved)
+                    ? new SavedWatch { Address = w.Address, Size = w.Size, Name = saved.Name, Format = saved.Format }
+                    : new SavedWatch { Address = w.Address, Size = w.Size, Name = $"watch {w.Id}" })
+                .ToList();
+
+            state.Watchlists.Save(title, entries, name);
+            state.AddToast($"Watchlist saved to {state.Watchlists.FileFor(title, name)}", ToastKind.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            state.AddToast($"Watchlist save failed: {ex.Message}", ToastKind.Error);
+        }
+
+        RefreshWatchlists(state, title);
+    }
+
+    private static void LoadWatchlist(AppState state, string title)
+    {
+        var entries = state.Watchlists.Load(title, WatchlistName());
+        if (entries.Count == 0)
+        {
+            state.AddToast("No watchlist file for this title", ToastKind.Error);
+            return;
+        }
+
+        foreach (var entry in entries) Local[Key(entry.Address, entry.Size)] = entry;
+
+        if (!state.Connected)
+        {
+            // The names are the PC's, the watches are the console's, and the combo is usable
+            // offline: half a load is worth saying out loud rather than a refused request.
+            state.AddToast($"Loaded {entries.Count} names; connect to add the watches themselves");
+            return;
+        }
+
+        state.Run(async () =>
+        {
+            foreach (var entry in entries)
+            {
+                await state.Client.WatchAddAsync(entry.Address, entry.Size);
+            }
+
+            state.Post(state.RefreshWatches);
+        }, $"Added {entries.Count} watches");
+    }
+
+    private static void DeleteWatchlist(AppState state, string title)
+    {
+        _deleteArmed = false;
+        if (_watchlistIndex < 0 || _watchlistIndex >= _watchlistNames.Length) return;
+
+        string? name = _watchlistNames[_watchlistIndex];
+        string label = _watchlistLabels[_watchlistIndex];
+
+        try
+        {
+            if (state.Watchlists.Delete(title, name)) state.AddToast($"Watchlist {label} deleted", ToastKind.Success);
+            else state.AddToast($"Watchlist {label} was already gone", ToastKind.Error);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            state.AddToast($"Watchlist delete failed: {ex.Message}", ToastKind.Error);
+        }
+
+        _watchlistName = string.Empty;
+        RefreshWatchlists(state, title);
     }
 
     private static void DrawFreezes(AppState state, bool enabled)
