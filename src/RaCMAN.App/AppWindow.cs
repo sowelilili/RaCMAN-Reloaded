@@ -22,6 +22,7 @@ public sealed class AppWindow : GameWindow
         "Save files",
         "Combos",
         "Input display",
+        "Settings",
     };
 
     private readonly AppState _state;
@@ -47,6 +48,11 @@ public sealed class AppWindow : GameWindow
         _state = state;
         _exitAfterSeconds = exitAfterSeconds;
         _panel = Math.Clamp(startPanel, 0, PanelNames.Length - 1);
+
+        // Before OnLoad, so the controller builds its style from the saved theme and the very
+        // first frame is already the right one.
+        Ui.Light = state.Settings.LightTheme;
+        Ui.Debug = state.Settings.DebugInfo;
     }
 
     /// <summary>Set when a frame threw, so the caller can report a non-zero exit code.</summary>
@@ -56,10 +62,25 @@ public sealed class AppWindow : GameWindow
     {
         base.OnLoad();
         _controller = new ImGuiController(this);
-        GL.ClearColor(0.07f, 0.07f, 0.09f, 1f);
+        ApplyTheme();
 
         // First-run only, and only on a published Windows build with the helper beside it.
         Panels.FirewallModal.MaybeOffer(_state);
+    }
+
+    /// <summary>
+    /// Pushes the saved theme into ImGui, the status colours and the GL clear colour. Called once
+    /// on load and again whenever the Settings panel flips a switch.
+    /// </summary>
+    private void ApplyTheme()
+    {
+        bool light = _state.Settings.LightTheme;
+        Ui.Light = light;
+        Ui.Debug = _state.Settings.DebugInfo;
+        ImGuiController.ApplyStyle(light);
+        if (light) GL.ClearColor(0.94f, 0.94f, 0.95f, 1f);
+        else GL.ClearColor(0.07f, 0.07f, 0.09f, 1f);
+        _state.ThemeDirty = false;
     }
 
     protected override void OnResize(ResizeEventArgs e)
@@ -80,6 +101,8 @@ public sealed class AppWindow : GameWindow
 
         try
         {
+            if (_state.ThemeDirty) ApplyTheme();
+
             _state.Tick((float)args.Time);
             CombosPanel.Update(_state);
 
@@ -149,10 +172,13 @@ public sealed class AppWindow : GameWindow
                     }
                 }
 
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.TextColored(Ui.Grey, $"{ImGui.GetIO().Framerate:0} fps");
-                if (_state.InFlight > 0) ImGui.TextColored(Ui.Yellow, $"{_state.InFlight} in flight");
+                if (Ui.Debug)
+                {
+                    ImGui.Spacing();
+                    ImGui.Separator();
+                    ImGui.TextColored(Ui.Grey, $"{ImGui.GetIO().Framerate:0} fps");
+                    if (_state.InFlight > 0) ImGui.TextColored(Ui.Yellow, $"{_state.InFlight} in flight");
+                }
             }
 
             ImGui.EndChild();
@@ -215,6 +241,7 @@ public sealed class AppWindow : GameWindow
             case 7: SaveFilesPanel.Draw(_state); break;
             case 8: CombosPanel.Draw(_state); break;
             case 9: InputDisplayPanel.Draw(_state, controller); break;
+            case 10: SettingsPanel.Draw(_state); break;
         }
     }
 
@@ -242,7 +269,7 @@ public sealed class AppWindow : GameWindow
                 {
                     ToastKind.Error => Ui.Red,
                     ToastKind.Success => Ui.Green,
-                    _ => new Vector4(0.85f, 0.85f, 0.9f, 1f),
+                    _ => Ui.Neutral,
                 };
 
                 ImGui.TextColored(colour, toast.Text);

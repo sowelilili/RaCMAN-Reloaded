@@ -64,7 +64,7 @@ public static class CombosPanel
     public static void Draw(AppState state)
     {
         Ui.Heading("Controller combos");
-        Ui.Hint("qwark reads the pad every tick and fires a combo when the mask matches exactly, re-arming at 0.");
+        Ui.Hint("The console watches the pad and fires a combo when exactly those buttons are held, re-arming once they are released.");
 
         if (!state.Connected)
         {

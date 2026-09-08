@@ -7,10 +7,22 @@ namespace RaCMAN.App.Panels;
 /// <summary>Small shared helpers so the panels stay about the protocol, not about ImGui plumbing.</summary>
 public static class Ui
 {
-    public static readonly Vector4 Green = new(0.45f, 0.85f, 0.45f, 1f);
-    public static readonly Vector4 Red = new(0.95f, 0.45f, 0.45f, 1f);
-    public static readonly Vector4 Yellow = new(0.95f, 0.82f, 0.35f, 1f);
-    public static readonly Vector4 Grey = new(0.6f, 0.6f, 0.6f, 1f);
+    /// <summary>
+    /// True while the light theme is applied. Set by the window when the theme is applied, so the
+    /// status colours below stay readable on both backgrounds without every call site knowing.
+    /// </summary>
+    public static bool Light { get; set; } = true;
+
+    /// <summary>Mirrors the "Show debug information" setting; gates <see cref="DebugHint"/>.</summary>
+    public static bool Debug { get; set; }
+
+    public static Vector4 Green => Light ? new(0.10f, 0.55f, 0.15f, 1f) : new(0.45f, 0.85f, 0.45f, 1f);
+    public static Vector4 Red => Light ? new(0.80f, 0.15f, 0.15f, 1f) : new(0.95f, 0.45f, 0.45f, 1f);
+    public static Vector4 Yellow => Light ? new(0.70f, 0.45f, 0.00f, 1f) : new(0.95f, 0.82f, 0.35f, 1f);
+    public static Vector4 Grey => Light ? new(0.42f, 0.42f, 0.45f, 1f) : new(0.60f, 0.60f, 0.60f, 1f);
+
+    /// <summary>Plain body text, for the places that draw text on their own background.</summary>
+    public static Vector4 Neutral => Light ? new(0.12f, 0.12f, 0.16f, 1f) : new(0.85f, 0.85f, 0.90f, 1f);
 
     public static void Heading(string text)
     {
@@ -20,6 +32,12 @@ public static class Ui
     }
 
     public static void Hint(string text) => ImGui.TextColored(Grey, text);
+
+    /// <summary>A hint that only exists when the user asked to see the wire-level detail.</summary>
+    public static void DebugHint(string text)
+    {
+        if (Debug) ImGui.TextColored(Grey, text);
+    }
 
     public static bool TryParseAddress(string text, out uint address)
     {

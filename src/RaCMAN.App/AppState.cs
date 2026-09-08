@@ -122,6 +122,12 @@ public sealed class AppState : IDisposable
 
     public bool PreviousModalRequested { get; set; }
 
+    /// <summary>
+    /// Set by the Settings panel when the theme or the debug switch changes; the window picks it
+    /// up on the next frame and re-applies the ImGui style and the clear colour.
+    /// </summary>
+    public bool ThemeDirty { get; set; }
+
     public IReadOnlyList<Toast> Toasts => _toasts;
 
     public int InFlight => Volatile.Read(ref _inFlight);
@@ -155,7 +161,10 @@ public sealed class AppState : IDisposable
             }
             catch (QwarkStatusException ex)
             {
-                Post(() => AddToast($"{ex.Opcode}: {ex.Status}", ToastKind.Error));
+                // The status is always shown; which request carried it is debug-only detail.
+                Post(() => AddToast(
+                    Panels.Ui.Debug ? $"{ex.Opcode}: {ex.Status}" : $"The console refused that: {ex.Status}",
+                    ToastKind.Error));
             }
             catch (Exception ex)
             {
@@ -221,7 +230,7 @@ public sealed class AppState : IDisposable
             _lastGeneration = session.Generation;
             _lastPlanet = 0xFF;
             _lastState = session.State;
-            AddToast($"Game rebooted (generation {session.Generation})");
+            AddToast(Panels.Ui.Debug ? $"Game rebooted (generation {session.Generation})" : "Game rebooted");
 
             // Same title, new process: the descriptors still hold but everything read out of the
             // old process is now a lie, so it goes before the re-read lands.
@@ -400,7 +409,7 @@ public sealed class AppState : IDisposable
                 Post(() =>
                 {
                     Unlocks = UnlockList.Empty;
-                    if (!UnlocksUnsupported) AddToast("UNLOCK_LIST: Unsupported for this game");
+                    if (!UnlocksUnsupported) AddToast("This game has no unlock table.");
                     UnlocksUnsupported = true;
                 });
             }
@@ -484,8 +493,12 @@ public sealed class AppState : IDisposable
 
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
+        string line = $"{session.State} | {title} | {session.Game.DisplayName()}";
+        if (!Panels.Ui.Debug) return line;
+
         string tick = session.Tick > 0 ? $"tick {session.Tick}" : "tick -";
-        return $"{session.State} | {title} | {session.Game.DisplayName()} | generation {session.Generation} | {tick} | qwark v{session.QwarkVersion} protocol {session.ProtocolVersion}";
+        return line + $" | generation {session.Generation} | {tick}"
+                    + $" | qwark v{session.QwarkVersion} protocol {session.ProtocolVersion}";
     }
 
     public void Dispose()

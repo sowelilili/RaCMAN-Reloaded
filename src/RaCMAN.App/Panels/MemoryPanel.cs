@@ -161,7 +161,7 @@ public static class MemoryPanel
 
         if (_mobyInfo is { } info)
         {
-            Ui.Hint($"MOBY_TABLE: pointer 0x{info.TablePointerAddress:X8}, end pointer 0x{info.TableEndPointerAddress:X8}, stride {info.Stride} bytes");
+            Ui.DebugHint($"MOBY_TABLE: pointer 0x{info.TablePointerAddress:X8}, end pointer 0x{info.TableEndPointerAddress:X8}, stride {info.Stride} bytes");
         }
 
         if (_mobyStatus.Length > 0) ImGui.TextUnformatted(_mobyStatus);
@@ -432,7 +432,7 @@ public static class MemoryPanel
 
         if (state.Watches.Length == 0)
         {
-            Ui.Hint("No watches. qwark keeps them across a same-game reboot, so this list is the console's.");
+            Ui.Hint("No watches. The console owns this list and keeps it across a same-game reboot.");
         }
         else if (ImGui.BeginTable("watches", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -602,7 +602,7 @@ public static class MemoryPanel
 
         if (state.Freezes.Length == 0)
         {
-            Ui.Hint("No freezes. qwark writes every active freeze once per tick.");
+            Ui.Hint("No freezes. The console keeps re-writing every active freeze while the game runs.");
         }
         else if (ImGui.BeginTable("freezes", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {
@@ -697,7 +697,7 @@ public static class MemoryPanel
 
         if (state.Patches.Length == 0)
         {
-            Ui.Hint("PATCH_LIST is empty.");
+            Ui.Hint("No patches.");
         }
         else if (ImGui.BeginTable("patches", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {

@@ -33,7 +33,7 @@ public static class PositionsPanel
 
         if (state.Planets.Length == 0)
         {
-            Ui.Hint("PLANET_LIST returned nothing for this game.");
+            Ui.Hint("This game has no planet list.");
         }
         else
         {
@@ -71,8 +71,6 @@ public static class PositionsPanel
 
         ImGui.Spacing();
         if (ImGui.Button("Die")) state.Run(() => state.Client.DieAsync());
-        ImGui.SameLine();
-        Ui.Hint("DIE (0x0048)");
 
         ImGui.EndDisabled();
     }
@@ -84,7 +82,7 @@ public static class PositionsPanel
         {
             Ui.Hint(!state.Connected ? "Connect to read the position slots."
                 : !state.Ingame ? $"Position slots are read out of game memory; the session is {session.State}, not INGAME."
-                : "POS_LIST returned no slots for this planet.");
+                : "No positions saved for this planet.");
             return;
         }
 

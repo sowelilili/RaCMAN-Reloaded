@@ -40,7 +40,7 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
             Console.WriteLine("  --panel <n>            open on panel n: 0 connection, 1 game, 2 positions,");
             Console.WriteLine("                         3 unlocks, 4 level flags, 5 memory, 6 mods,");
-            Console.WriteLine("                         7 save files, 8 combos, 9 input display");
+            Console.WriteLine("                         7 save files, 8 combos, 9 input display, 10 settings");
             Console.WriteLine("  --game-section <name>  open the Game panel on that side sub-page (Debug, Cosmetics, ...)");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
             return 0;
