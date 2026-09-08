@@ -6,10 +6,11 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// LEVELFLAGS_GET for one planet as a hex grid, 16 bytes to a row with the offset in the left
-/// column. Clicking a cell opens a one-byte hex editor; Enter sends LEVELFLAGS_SET. The bytes
-/// are the game's flag regions concatenated, so the offsets here are offsets into that blob and
-/// mean nothing to this client beyond "byte n".
+/// LEVELFLAGS_GET for one planet. The flags are a bitfield, so the default view is one byte per
+/// row with a checkbox per bit (7 down to 0); a Hex view keeps the compact 16-bytes-a-row grid
+/// for scanning. Either way an edit sends the whole byte with LEVELFLAGS_SET. The bytes are the
+/// game's flag regions concatenated, so an offset here means nothing to this client beyond
+/// "byte n".
 /// </summary>
 public static class LevelFlagsPanel
 {
@@ -20,6 +21,7 @@ public static class LevelFlagsPanel
     private static int _loadedPlanet = -1;
     private static int _planet = -1;
     private static bool _autoRefresh;
+    private static bool _bitView = true;
     private static float _sinceRefresh;
     private static bool _resetArmed;
 
@@ -90,6 +92,9 @@ public static class LevelFlagsPanel
         ImGui.Checkbox("Auto-refresh (1 Hz)", ref _autoRefresh);
 
         ImGui.SameLine();
+        if (ImGui.Checkbox("Bit view", ref _bitView)) _editing = -1;
+
+        ImGui.SameLine();
         if (_resetArmed)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
@@ -148,11 +153,68 @@ public static class LevelFlagsPanel
             return;
         }
 
-        Ui.Hint($"{_flags.Length} bytes, planet {_loadedPlanet}. Click a cell to edit it; Enter sends LEVELFLAGS_SET.");
+        Ui.Hint(_bitView
+            ? $"{_flags.Length} bytes, planet {_loadedPlanet}. One byte per row, bit 7 to bit 0; ticking a bit sends the byte with LEVELFLAGS_SET."
+            : $"{_flags.Length} bytes, planet {_loadedPlanet}. Click a cell to edit it; Enter sends LEVELFLAGS_SET.");
         ImGui.Spacing();
 
-        DrawGrid(state);
+        if (_bitView) DrawBits(state);
+        else DrawGrid(state);
     }
+
+    // ------------------------------------------------------------- bit view
+
+    /// <summary>One byte per row: offset, eight bit checkboxes (7 down to 0), and the hex value.</summary>
+    private static void DrawBits(AppState state)
+    {
+        const int columns = 10;   // offset + 8 bits + hex
+        var flags = ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit
+                    | ImGuiTableFlags.ScrollY;
+
+        if (!ImGui.BeginTable("flag-bits", columns, flags, new Vector2(-1, -1))) return;
+
+        ImGui.TableSetupScrollFreeze(0, 1);   // keep the bit numbers visible while scrolling
+        ImGui.TableSetupColumn("Offset");
+        for (int bit = 7; bit >= 0; bit--) ImGui.TableSetupColumn(bit.ToString());
+        ImGui.TableSetupColumn("Hex");
+        ImGui.TableHeadersRow();
+
+        bool enabled = state.Ingame;
+        ImGui.BeginDisabled(!enabled);
+
+        for (int index = 0; index < _flags.Length; index++)
+        {
+            byte value = _flags[index];
+
+            ImGui.TableNextRow();
+            ImGui.PushID(index);
+
+            ImGui.TableNextColumn();
+            ImGui.TextColored(Ui.Grey, $"0x{index:X4}");
+
+            for (int bit = 7; bit >= 0; bit--)
+            {
+                ImGui.TableNextColumn();
+                bool set = ((value >> bit) & 1) != 0;
+                if (ImGui.Checkbox($"##b{bit}", ref set))
+                {
+                    byte updated = set ? (byte)(value | (1 << bit)) : (byte)(value & ~(1 << bit));
+                    SendByte(state, index, updated);
+                }
+            }
+
+            ImGui.TableNextColumn();
+            if (value != 0) ImGui.TextColored(Ui.Green, $"{value:X2}");
+            else ImGui.TextUnformatted($"{value:X2}");
+
+            ImGui.PopID();
+        }
+
+        ImGui.EndDisabled();
+        ImGui.EndTable();
+    }
+
+    // ------------------------------------------------------------- hex view
 
     private static void DrawGrid(AppState state)
     {
@@ -235,6 +297,12 @@ public static class LevelFlagsPanel
             return;
         }
 
+        SendByte(state, index, value);
+    }
+
+    /// <summary>Writes one byte with LEVELFLAGS_SET, optimistically updating the local copy, then re-reads.</summary>
+    private static void SendByte(AppState state, int index, byte value)
+    {
         byte planet = (byte)_loadedPlanet;
         ushort offset = (ushort)index;
         _flags[index] = value;

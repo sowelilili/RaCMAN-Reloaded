@@ -230,7 +230,13 @@ public static class GamePanel
             }
             if (feature.WritesCode && ImGui.IsItemHovered()) ImGui.SetTooltip("Patches game code");
 
+            // Right-align the auto box inside the cell so it is never clipped by the column edge,
+            // whatever the label length. Falls back to sitting right after a very long label.
             ImGui.SameLine();
+            float autoWidth = ImGui.GetFrameHeight() + ImGui.GetStyle().ItemInnerSpacing.X + ImGui.CalcTextSize("A").X;
+            float cellRight = ImGui.GetCursorPosX() + ImGui.GetContentRegionAvail().X;
+            ImGui.SameLine(Math.Max(ImGui.GetCursorPosX(), cellRight - autoWidth));
+
             bool auto = (session.ToggleAuto & bit) != 0;
             if (ImGui.Checkbox("A", ref auto))
             {

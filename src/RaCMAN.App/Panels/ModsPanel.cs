@@ -63,7 +63,10 @@ public static class ModsPanel
                 ImGui.PushID(mod.DirName);
 
                 ImGui.TableNextColumn();
-                if (ImGui.Selectable(mod.Name, _selected == mod.DirName, ImGuiSelectableFlags.SpanAllColumns))
+                // SpanAllColumns makes the whole row select, but without AllowOverlap the selectable
+                // sits on top of the Auto checkbox and the Load/Upload buttons and eats their clicks.
+                if (ImGui.Selectable(mod.Name, _selected == mod.DirName,
+                        ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
                 {
                     _selected = mod.DirName;
                 }
