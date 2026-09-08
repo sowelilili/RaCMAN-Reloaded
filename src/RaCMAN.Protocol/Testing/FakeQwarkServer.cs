@@ -64,6 +64,9 @@ public sealed class FakeQwarkServer : IDisposable
                 // Revision 1.2: the two flagged ACTIONs the savefile manager drives.
                 new Feature(6, FeatureKind.Action, 0, 0, FeatureFlags.SaveAside, 0xFF, 0, 0, "Set aside file"),
                 new Feature(7, FeatureKind.Action, 0, 0, FeatureFlags.LoadAside, 0xFF, 0, 0, "Load set-aside file"),
+
+                // Revision 1.3: a TOGGLE that is a game-memory byte qwark polls. No "on boot".
+                new Feature(8, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Goodies menu"),
             });
 
         Mods = new List<ModEntry>
@@ -73,11 +76,21 @@ public sealed class FakeQwarkServer : IDisposable
         };
 
         UnlockCategories = new[] { "Weapons", "Gadgets" };
+
+        // What the four value slots mean for this "game", as revision 1.3 has the console say.
+        UnlockFields = new[]
+        {
+            new UnlockField("Owned", UnlockFieldKind.Flag, 0),
+            new UnlockField("Level", UnlockFieldKind.Number, 8),
+            new UnlockField("XP", UnlockFieldKind.Number, 0),
+            new UnlockField("Ammo", UnlockFieldKind.Number, 0),
+        };
+
         Unlocks = new List<Unlock>
         {
-            // fields: bit0 owned, bit1 gold, bit2 level, bit3 ammo.
+            // fields: bit f set = slot f is meaningful, named by UnlockFields[f].
             new(0, 0, 0b1011, new uint[] { 1, 0, 0, 40 }, "Bomb Glove"),
-            new(1, 0, 0b1111, new uint[] { 1, 1, 3, 200 }, "Blaster"),
+            new(1, 0, 0b1111, new uint[] { 1, 3, 1200, 200 }, "Blaster"),
             new(2, 0, 0b1011, new uint[] { 0, 0, 0, 0 }, "RYNO"),
             new(3, 1, 0b0001, new uint[] { 1, 0, 0, 0 }, "Heli-Pack"),
             new(4, 1, 0b0001, new uint[] { 0, 0, 0, 0 }, "Swingshot"),
@@ -147,6 +160,9 @@ public sealed class FakeQwarkServer : IDisposable
     public uint MemoryBase { get; set; } = 0x300000;
 
     public string[] UnlockCategories { get; set; }
+
+    /// <summary>The four value-slot descriptors UNLOCK_LIST reports, one per slot.</summary>
+    public UnlockField[] UnlockFields { get; set; }
 
     public List<Unlock> Unlocks { get; }
 
@@ -394,6 +410,11 @@ public sealed class FakeQwarkServer : IDisposable
                 case Opcode.FeatureSetAuto:
                 {
                     if (payload.Length < 2) return (Status.BadArg, null);
+
+                    // A live toggle is the game's own byte: there is nothing to apply on boot.
+                    var target = Array.Find(Describe.Features, f => f.Id == payload[0]);
+                    if (target is not null && target.IsLive) return (Status.Unsupported, null);
+
                     ulong bit = 1UL << payload[0];
                     _session = payload[1] != 0
                         ? _session with { ToggleAuto = _session.ToggleAuto | bit }
@@ -567,10 +588,18 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.UnlockList:
                 {
-                    var buffer = new byte[1 + UnlockCategories.Length * 24 + 1 + Unlocks.Count * Unlock.Size];
+                    var buffer = new byte[1 + UnlockCategories.Length * 24
+                        + UnlockList.SlotCount * UnlockField.Size + 1 + Unlocks.Count * Unlock.Size];
                     var w = new SpanWriter(buffer);
                     w.WriteU8((byte)UnlockCategories.Length);
                     foreach (var category in UnlockCategories) w.WriteFixedString(category, 24);
+
+                    for (int slot = 0; slot < UnlockList.SlotCount; slot++)
+                    {
+                        var field = slot < UnlockFields.Length ? UnlockFields[slot] : UnlockField.None;
+                        w.WriteBytes(field.ToBytes());
+                    }
+
                     w.WriteU8((byte)Unlocks.Count);
                     foreach (var unlock in Unlocks)
                     {

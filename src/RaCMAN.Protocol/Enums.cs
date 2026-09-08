@@ -146,13 +146,19 @@ public enum ComboAction : byte
     LoadSetAsideFile = 4,
 }
 
-/// <summary>The four Unlock value slots, section 5.6. Which ones apply is in <c>fields</c>.</summary>
-public enum UnlockField : byte
+/// <summary>
+/// How an unlock value slot is edited, from the UNLOCK_LIST descriptors of revision 1.3. Before
+/// that the four slots were fixed as Owned/Gold/Level/Ammo, which only RaC1 laid out that way:
+/// RaC3 keeps a weapon's version in slot 1 and its XP in slot 2, so a client that assumed the old
+/// names drew a checkbox over a number.
+/// </summary>
+public enum UnlockFieldKind : byte
 {
-    Owned = 0,
-    Gold = 1,
-    Level = 2,
-    Ammo = 3,
+    /// <summary>A checkbox; only 0 and 1 are ever written.</summary>
+    Flag = 0,
+
+    /// <summary>A number box, clamped to the descriptor's max when it names one.</summary>
+    Number = 1,
 }
 
 public enum PatchKind : byte
@@ -192,6 +198,13 @@ public enum FeatureFlags : byte
 
     /// <summary>This ACTION makes the game load <c>USRDIR/tempsave</c>.</summary>
     LoadAside = 1 << 3,
+
+    /// <summary>
+    /// This TOGGLE is a plain game-memory byte that qwark polls, so its bit in
+    /// <c>toggle_state</c> follows the game rather than what the client last sent. There is
+    /// nothing to auto-apply on boot and FEATURE_SET_AUTO is refused for it (revision 1.3).
+    /// </summary>
+    Live = 1 << 4,
 }
 
 [Flags]

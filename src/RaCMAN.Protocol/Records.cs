@@ -212,6 +212,12 @@ public sealed record Feature(
     /// <summary>Triggering this ACTION makes the game load the tempsave file.</summary>
     public bool LoadsAside => Kind == FeatureKind.Action && (Flags & FeatureFlags.LoadAside) != 0;
 
+    /// <summary>
+    /// This TOGGLE mirrors a game-memory byte qwark polls: its state comes from the game, and it
+    /// has no "on boot" of its own because qwark refuses FEATURE_SET_AUTO for it.
+    /// </summary>
+    public bool IsLive => Kind == FeatureKind.Toggle && (Flags & FeatureFlags.Live) != 0;
+
     /// <summary>The ENUM option count. Zero for every other kind since revision 1.1.</summary>
     public byte OptionCount => Kind == FeatureKind.Enum ? Aux : (byte)0;
 
@@ -427,9 +433,63 @@ public sealed record Unlock(byte Id, byte Category, byte Fields, uint[] Values, 
     }
 }
 
-public sealed record UnlockList(string[] Categories, Unlock[] Unlocks)
+/// <summary>
+/// What one of the four Unlock value slots means for the running game, 16 bytes (revision 1.3).
+/// The console names the slot and says how to edit it, so the client no longer has to guess that
+/// slot 1 is a "Gold" flag: in RaC3 it is the weapon's version and slot 2 its XP.
+/// A slot with an empty name is one this game does not use, and is not drawn at all.
+/// </summary>
+public readonly record struct UnlockField(string Name, UnlockFieldKind Kind, byte Max)
 {
-    public static UnlockList Empty { get; } = new(Array.Empty<string>(), Array.Empty<Unlock>());
+    public const int Size = 16;
+
+    /// <summary>The stand-in for a slot the reply did not describe: nothing is drawn for it.</summary>
+    public static UnlockField None { get; } = new(string.Empty, UnlockFieldKind.Flag, 0);
+
+    public bool IsNamed => !string.IsNullOrEmpty(Name);
+
+    /// <summary>A number slot's ceiling, or null when the descriptor names no limit.</summary>
+    public uint? Ceiling => Kind == UnlockFieldKind.Number && Max > 0 ? Max : null;
+
+    public static UnlockField Parse(ReadOnlySpan<byte> entry)
+    {
+        var r = new SpanReader(entry);
+        string name = r.ReadFixedString(12);
+        var kind = (UnlockFieldKind)r.ReadU8();
+        byte max = r.ReadU8();
+        r.Skip(2);
+        return new UnlockField(name, kind, max);
+    }
+
+    public byte[] ToBytes()
+    {
+        var buffer = new byte[Size];
+        var w = new SpanWriter(buffer);
+        w.WriteFixedString(Name, 12);
+        w.WriteU8((byte)Kind);
+        w.WriteU8(Max);
+        w.WriteZeros(2);
+        return buffer;
+    }
+}
+
+public sealed record UnlockList(string[] Categories, UnlockField[] Fields, Unlock[] Unlocks)
+{
+    /// <summary>Every entry carries four value slots, described or not.</summary>
+    public const int SlotCount = 4;
+
+    /// <summary>
+    /// Slot 0, every game's "do I have this" flag and the one the bulk buttons drive. The other
+    /// three mean whatever the descriptors say, so only this one is named here.
+    /// </summary>
+    public const byte PrimarySlot = 0;
+
+    public static UnlockList Empty { get; } =
+        new(Array.Empty<string>(), Array.Empty<UnlockField>(), Array.Empty<Unlock>());
+
+    /// <summary>The descriptor for one slot, or <see cref="UnlockField.None"/> when there is none.</summary>
+    public UnlockField FieldAt(int slot) =>
+        slot >= 0 && slot < Fields.Length ? Fields[slot] : UnlockField.None;
 
     public static UnlockList Parse(ReadOnlySpan<byte> payload)
     {
@@ -438,10 +498,13 @@ public sealed record UnlockList(string[] Categories, Unlock[] Unlocks)
         var categories = new string[ncat];
         for (int i = 0; i < ncat; i++) categories[i] = r.ReadFixedString(24);
 
+        var fields = new UnlockField[SlotCount];
+        for (int i = 0; i < SlotCount; i++) fields[i] = UnlockField.Parse(r.ReadSpan(UnlockField.Size));
+
         int n = r.ReadU8();
         var unlocks = new Unlock[n];
         for (int i = 0; i < n; i++) unlocks[i] = Unlock.Parse(r.ReadSpan(Unlock.Size));
-        return new UnlockList(categories, unlocks);
+        return new UnlockList(categories, fields, unlocks);
     }
 }
 

@@ -5,8 +5,10 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// UNLOCK_LIST rendered as one tab per category, with a column for each field the entry's
-/// bitmask says is meaningful. Every edit is one UNLOCK_SET; the list is then re-read.
+/// UNLOCK_LIST rendered as one tab per category, with a column for each value slot the running
+/// game describes and at least one entry in the tab declares. The console names the slots and says
+/// whether each is a flag or a number (revision 1.3), so the panel no longer assumes RaC1's
+/// Owned/Gold/Level/Ammo for every game. Every edit is one UNLOCK_SET; the list is then re-read.
 ///
 /// Above the tabs sit the features the layout moved to <see cref="GameLayout.UnlocksSection"/>:
 /// console-side actions that rewrite the whole table (UYA's weapon-level pair), which belong with
@@ -20,19 +22,30 @@ public static class UnlocksPanel
 {
     private const float AutoRefreshSeconds = 1f;
 
+    /// <summary>How wide the search box is, and how wide a flag and a number column are.</summary>
+    private const float SearchWidth = 200f;
+    private const float FlagColumnWidth = 70f;
+    private const float NumberColumnWidth = 110f;
+
     private static bool _opened;
     private static bool _autoRefresh = true;
     private static float _sinceRefresh;
 
-    /// <summary>Half-typed level and ammo edits, kept only while the box has focus.</summary>
+    /// <summary>Half-typed number edits, kept only while the box has focus.</summary>
     private static readonly Dictionary<(byte Id, int Field), string> Drafts = new();
 
-    private static readonly string[] FieldLabels = { "Owned", "Gold", "Level", "Ammo" };
+    /// <summary>
+    /// The name filter, shared by every category tab: the tables are long enough that hunting for
+    /// one weapon by eye is the slow part, and a per-tab filter would just be forgotten in a tab
+    /// the user is not looking at. Dropped when the game changes.
+    /// </summary>
+    private static string _filter = string.Empty;
 
     public static void Reset()
     {
         _opened = false;
         _sinceRefresh = 0;
+        _filter = string.Empty;
         Drafts.Clear();
     }
 
@@ -120,7 +133,7 @@ public static class UnlocksPanel
             if (!ImGui.BeginTabItem($"{name}###category{category}")) continue;
 
             ImGui.PushID(category);
-            DrawCategory(state, rows, enabled);
+            DrawCategory(state, list, rows, enabled);
             ImGui.PopID();
             ImGui.EndTabItem();
         }
@@ -131,7 +144,7 @@ public static class UnlocksPanel
     /// <summary>
     /// The features the layout sent to the "Unlocks" section, drawn the way the Game page draws
     /// actions: equal-width buttons, two to a row. Each is one FEATURE_TRIGGER followed by a
-    /// re-read, the same shape as the bulk owned buttons inside a category. Only actions are
+    /// re-read, the same shape as the bulk unlock buttons inside a category. Only actions are
     /// expected here, so anything else the layout moved in is left alone.
     /// </summary>
     private static void DrawSectionActions(AppState state)
@@ -171,24 +184,41 @@ public static class UnlocksPanel
         ImGui.Spacing();
     }
 
-    private static void DrawCategory(AppState state, Unlock[] rows, bool enabled)
+    private static void DrawCategory(AppState state, UnlockList list, Unlock[] rows, bool enabled)
     {
+        // The filter is what the bulk buttons act on, so it is applied before they are drawn.
+        string needle = _filter.Trim();
+        bool filtering = needle.Length > 0;
+        var visible = filtering
+            ? rows.Where(r => r.Name.Contains(needle, StringComparison.OrdinalIgnoreCase)).ToArray()
+            : rows;
+
         ImGui.BeginDisabled(!enabled);
 
         // The bulk buttons loop UNLOCK_SET over the rows: a client-side loop over a generic op.
         // Anything that needs game knowledge, a max ammo value for instance, is an ACTION
         // feature on the console and does not belong in this panel.
-        if (ImGui.Button("Own all")) SetOwnedForAll(state, rows, 1);
+        if (ImGui.Button("Unlock all")) SetPrimaryForAll(state, visible, 1, filtering);
         ImGui.SameLine();
-        if (ImGui.Button("Own none")) SetOwnedForAll(state, rows, 0);
+        if (ImGui.Button("Unlock none")) SetPrimaryForAll(state, visible, 0, filtering);
         ImGui.EndDisabled();
 
+        // Searching is a view, not an edit, so it stays live outside INGAME.
         ImGui.SameLine();
-        Ui.Hint($"{rows.Length} entries");
+        ImGui.SetNextItemWidth(SearchWidth);
+        Ui.InputTextWithHint("##search", "Search", ref _filter);
+
+        ImGui.SameLine();
+        ImGui.TextColored(Ui.Grey, filtering ? $"{visible.Length} of {rows.Length}" : $"{rows.Length} entries");
         ImGui.Spacing();
 
-        // Only the columns some row in this category actually carries are shown.
-        var present = Enumerable.Range(0, 4).Where(f => rows.Any(r => r.HasField(f))).ToArray();
+        // A column needs both halves: the game has to have named the slot, and some entry in this
+        // category has to declare it. Filtered-out rows still count, so the columns do not shift
+        // about while the user types.
+        var present = Enumerable.Range(0, UnlockList.SlotCount)
+            .Where(slot => list.FieldAt(slot).IsNamed && rows.Any(r => r.HasField(slot)))
+            .ToArray();
+
         int columns = 2 + present.Length;
 
         if (!ImGui.BeginTable("unlocks", columns,
@@ -199,14 +229,16 @@ public static class UnlocksPanel
 
         ImGui.TableSetupColumn("Id", ImGuiTableColumnFlags.WidthFixed, 36);
         ImGui.TableSetupColumn("Name");
-        foreach (int field in present)
+        foreach (int slot in present)
         {
-            ImGui.TableSetupColumn(FieldLabels[field], ImGuiTableColumnFlags.WidthFixed, field < 2 ? 70 : 110);
+            var field = list.FieldAt(slot);
+            float width = field.Kind == UnlockFieldKind.Flag ? FlagColumnWidth : NumberColumnWidth;
+            ImGui.TableSetupColumn(field.Name, ImGuiTableColumnFlags.WidthFixed, width);
         }
 
         ImGui.TableHeadersRow();
 
-        foreach (var unlock in rows)
+        foreach (var unlock in visible)
         {
             ImGui.TableNextRow();
             ImGui.PushID(unlock.Id);
@@ -217,18 +249,19 @@ public static class UnlocksPanel
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(unlock.Name);
 
-            foreach (int field in present)
+            foreach (int slot in present)
             {
                 ImGui.TableNextColumn();
-                if (!unlock.HasField(field))
+                if (!unlock.HasField(slot))
                 {
                     ImGui.TextColored(Ui.Grey, "-");
                     continue;
                 }
 
+                var field = list.FieldAt(slot);
                 ImGui.BeginDisabled(!enabled);
-                if (field <= 1) DrawFlagCell(state, unlock, field);
-                else DrawNumberCell(state, unlock, field);
+                if (field.Kind == UnlockFieldKind.Flag) DrawFlagCell(state, unlock, slot);
+                else DrawNumberCell(state, unlock, slot, field);
                 ImGui.EndDisabled();
             }
 
@@ -247,13 +280,16 @@ public static class UnlocksPanel
         }
     }
 
-    private static void DrawNumberCell(AppState state, Unlock unlock, int field)
+    private static void DrawNumberCell(AppState state, Unlock unlock, int field, UnlockField descriptor)
     {
         ImGui.SetNextItemWidth(-1);
-        if (Ui.NumberOnEnter($"##field{field}", unlock.Values[field], Drafts, (unlock.Id, field), out long typed))
+        if (!Ui.NumberOnEnter($"##field{field}", unlock.Values[field], Drafts, (unlock.Id, field), out long typed))
         {
-            Send(state, unlock.Id, field, (uint)Math.Clamp(typed, 0, uint.MaxValue));
+            return;
         }
+
+        long ceiling = descriptor.Ceiling ?? uint.MaxValue;
+        Send(state, unlock.Id, field, (uint)Math.Clamp(typed, 0, ceiling));
     }
 
     private static void Send(AppState state, byte id, int field, uint value)
@@ -265,23 +301,32 @@ public static class UnlocksPanel
         });
     }
 
-    private static void SetOwnedForAll(AppState state, Unlock[] rows, uint value)
+    /// <summary>
+    /// The bulk buttons, over slot 0: the "do I have this" flag every game keeps there. With a
+    /// filter in the box they act on the rows the user can actually see, and the toast says so.
+    /// </summary>
+    private static void SetPrimaryForAll(AppState state, Unlock[] rows, uint value, bool filtering)
     {
-        var ids = rows.Where(r => r.HasField((int)UnlockField.Owned)).Select(r => r.Id).ToArray();
+        var ids = rows.Where(r => r.HasField(UnlockList.PrimarySlot)).Select(r => r.Id).ToArray();
         if (ids.Length == 0)
         {
-            state.AddToast("No entry in this category has an owned field", ToastKind.Error);
+            state.AddToast(filtering
+                ? "No entry matching the search can be unlocked"
+                : "No entry in this category can be unlocked", ToastKind.Error);
             return;
         }
+
+        string what = value != 0 ? "unlocked" : "not unlocked";
+        string scope = filtering ? "shown entries" : "entries";
 
         state.Run(async () =>
         {
             foreach (byte id in ids)
             {
-                await state.Client.UnlockSetAsync(id, (byte)UnlockField.Owned, value).ConfigureAwait(false);
+                await state.Client.UnlockSetAsync(id, UnlockList.PrimarySlot, value).ConfigureAwait(false);
             }
 
             state.Post(() => state.RefreshUnlocks());
-        }, $"{ids.Length} entries set to {(value != 0 ? "owned" : "not owned")}");
+        }, $"{ids.Length} {scope} set to {what}");
     }
 }

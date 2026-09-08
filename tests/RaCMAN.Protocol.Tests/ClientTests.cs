@@ -85,13 +85,21 @@ public class ClientTests
             var describe = await client.DescribeAsync();
             Assert.Equal(GameId.Rac1, describe.Game);
             Assert.Equal(new[] { "Cheats", "Movement" }, describe.Groups);
-            Assert.Equal(8, describe.Features.Length);
+            Assert.Equal(9, describe.Features.Length);
             Assert.Equal("Infinite ammo", describe.Features[0].Label);
             Assert.Equal(FeatureKind.Color, describe.Features[5].Kind);
 
             // Revision 1.2: the two flagged savefile ACTIONs at the end of the table.
             Assert.True(describe.Features[6].SavesAside);
             Assert.True(describe.Features[7].LoadsAside);
+
+            // Revision 1.3: the live toggle, whose state the console reads out of the game.
+            Assert.True(describe.Features[8].IsLive);
+
+            // qwark has nothing to apply on boot for it, so the auto op is refused.
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.FeatureSetAutoAsync(describe.Features[8].Id, true));
+            Assert.Equal(Status.Unsupported, refused.Status);
         }
     }
 
@@ -228,25 +236,36 @@ public class ClientTests
         using (server)
         using (client)
         {
+            const byte owned = UnlockList.PrimarySlot;
+            const byte xp = 2;
+            const byte ammo = 3;
+
             var list = await client.UnlockListAsync();
             Assert.Equal(new[] { "Weapons", "Gadgets" }, list.Categories);
             Assert.Equal(5, list.Unlocks.Length);
 
-            var ryno = list.Unlocks.Single(u => u.Name == "RYNO");
-            Assert.Equal(0u, ryno.Values[(int)UnlockField.Owned]);
-            Assert.True(ryno.HasField((int)UnlockField.Ammo));
-            Assert.False(ryno.HasField((int)UnlockField.Level));
+            // The console says what its four value slots mean; the panel draws them from this.
+            Assert.Equal(4, list.Fields.Length);
+            Assert.Equal(new UnlockField("Owned", UnlockFieldKind.Flag, 0), list.FieldAt(owned));
+            Assert.Equal(new UnlockField("Level", UnlockFieldKind.Number, 8), list.FieldAt(1));
+            Assert.Equal("XP", list.FieldAt(xp).Name);
+            Assert.Equal(UnlockFieldKind.Number, list.FieldAt(ammo).Kind);
 
-            await client.UnlockSetAsync(ryno.Id, (byte)UnlockField.Owned, 1);
-            await client.UnlockSetAsync(ryno.Id, (byte)UnlockField.Ammo, 50);
+            var ryno = list.Unlocks.Single(u => u.Name == "RYNO");
+            Assert.Equal(0u, ryno.Values[owned]);
+            Assert.True(ryno.HasField(ammo));
+            Assert.False(ryno.HasField(xp));
+
+            await client.UnlockSetAsync(ryno.Id, owned, 1);
+            await client.UnlockSetAsync(ryno.Id, ammo, 50);
 
             var again = (await client.UnlockListAsync()).Unlocks.Single(u => u.Id == ryno.Id);
-            Assert.Equal(1u, again.Values[(int)UnlockField.Owned]);
-            Assert.Equal(50u, again.Values[(int)UnlockField.Ammo]);
+            Assert.Equal(1u, again.Values[owned]);
+            Assert.Equal(50u, again.Values[ammo]);
 
             // A field the entry does not carry is refused rather than silently written.
             var refused = await Assert.ThrowsAsync<QwarkStatusException>(
-                () => client.UnlockSetAsync(ryno.Id, (byte)UnlockField.Level, 3));
+                () => client.UnlockSetAsync(ryno.Id, xp, 3));
             Assert.Equal(Status.BadArg, refused.Status);
         }
     }
@@ -678,12 +697,12 @@ public class ClientTests
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(1, true)]     // the build before the one this client ships with
-    [InlineData(2, false)]    // exactly the expected build
+    [InlineData(2, true)]     // the build before the one this client ships with
+    [InlineData(3, false)]    // exactly the expected build
     [InlineData(7, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(2, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(3, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 }

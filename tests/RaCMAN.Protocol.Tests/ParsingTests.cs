@@ -190,6 +190,36 @@ public class ParsingTests
         Assert.Null(unmirrored.MirrorReadout);
     }
 
+    /// <summary>
+    /// Revision 1.3: flag bit 4 marks a TOGGLE whose state qwark reads back out of the game, which
+    /// is what tells the client not to offer an "on boot" box for it.
+    /// </summary>
+    [Fact]
+    public void LiveFlagRoundTripsOnAToggle()
+    {
+        var entry = new byte[Feature.Size];
+        entry[0] = 5;
+        entry[1] = (byte)FeatureKind.Toggle;
+        entry[4] = 0x10;                                     // flags: LIVE
+        entry[5] = SessionInfo.NoReadout;
+        Encoding.ASCII.GetBytes("Goodies menu").CopyTo(entry, 16);
+
+        var feature = Feature.Parse(entry);
+
+        Assert.Equal(FeatureFlags.Live, feature.Flags);
+        Assert.True(feature.IsLive);
+        Assert.False(feature.Auto);
+        Assert.False(feature.WritesCode);
+        Assert.Equal(entry, feature.ToBytes());
+
+        // Only a TOGGLE is ever live; the same bit on another kind means nothing to the client.
+        var action = new Feature(6, FeatureKind.Action, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Die");
+        Assert.False(action.IsLive);
+
+        var plain = new Feature(7, FeatureKind.Toggle, 0, 0, FeatureFlags.Auto, 0xFF, 0, 0, "Fast loads");
+        Assert.False(plain.IsLive);
+    }
+
     [Fact]
     public void DescribeParsesGroupsReadoutsAndFeatures()
     {
@@ -297,30 +327,79 @@ public class ParsingTests
         Assert.False(list.Slots[1].Filled);
     }
 
-    [Fact]
-    public void UnlockListParsesAt44Bytes()
+    /// <summary>Writes one 16-byte UnlockFieldDesc at <paramref name="at"/>.</summary>
+    private static void WriteFieldDesc(byte[] payload, int at, string name, UnlockFieldKind kind, byte max)
     {
-        var payload = new byte[1 + 24 + 1 + Unlock.Size];
+        Encoding.ASCII.GetBytes(name).CopyTo(payload, at);
+        payload[at + 12] = (byte)kind;
+        payload[at + 13] = max;
+    }
+
+    /// <summary>
+    /// Revision 1.3 puts four 16-byte slot descriptors between the categories and the entries, so
+    /// the client draws the names and widget kinds the running game asks for instead of RaC1's.
+    /// </summary>
+    [Fact]
+    public void UnlockListParsesDescriptorsThenEntries()
+    {
+        const int descriptorsAt = 1 + 24;
+        const int countAt = descriptorsAt + 4 * UnlockField.Size;
+        const int entryAt = countAt + 1;
+
+        var payload = new byte[entryAt + Unlock.Size];
         payload[0] = 1;
         Encoding.ASCII.GetBytes("Weapons").CopyTo(payload, 1);
-        payload[25] = 1;
-        payload[26] = 3;   // id
-        payload[27] = 0;   // category
-        payload[28] = 0b1011;
-        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(30), 1);
-        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(34), 0);
-        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(38), 5);
-        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(42), 99);
-        Encoding.ASCII.GetBytes("Blaster").CopyTo(payload, 46);
+
+        WriteFieldDesc(payload, descriptorsAt, "Owned", UnlockFieldKind.Flag, 0);
+        WriteFieldDesc(payload, descriptorsAt + UnlockField.Size, "Level", UnlockFieldKind.Number, 10);
+        WriteFieldDesc(payload, descriptorsAt + 2 * UnlockField.Size, "XP", UnlockFieldKind.Number, 0);
+        WriteFieldDesc(payload, descriptorsAt + 3 * UnlockField.Size, string.Empty, UnlockFieldKind.Flag, 0);
+
+        payload[countAt] = 1;
+        payload[entryAt] = 3;         // id
+        payload[entryAt + 1] = 0;     // category
+        payload[entryAt + 2] = 0b1011;
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(entryAt + 4), 1);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(entryAt + 8), 0);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(entryAt + 12), 5);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(entryAt + 16), 99);
+        Encoding.ASCII.GetBytes("Blaster").CopyTo(payload, entryAt + 20);
 
         var list = UnlockList.Parse(payload);
         Assert.Equal(new[] { "Weapons" }, list.Categories);
+
+        Assert.Equal(4, list.Fields.Length);
+        Assert.Equal(new UnlockField("Owned", UnlockFieldKind.Flag, 0), list.FieldAt(0));
+        Assert.Equal(new UnlockField("Level", UnlockFieldKind.Number, 10), list.FieldAt(1));
+        Assert.Equal((uint?)10, list.FieldAt(1).Ceiling);
+        Assert.Null(list.FieldAt(2).Ceiling);      // a number slot with no ceiling
+        Assert.Null(list.FieldAt(0).Ceiling);      // a flag never has one
+
+        // The fourth slot is nameless: this game does not use it and nothing is drawn for it.
+        Assert.False(list.FieldAt(3).IsNamed);
+        Assert.True(list.FieldAt(0).IsNamed);
+        Assert.Equal(UnlockField.None, list.FieldAt(9));
+
         var unlock = Assert.Single(list.Unlocks);
         Assert.Equal(3, unlock.Id);
         Assert.Equal("Blaster", unlock.Name);
         Assert.True(unlock.HasField(0));
         Assert.False(unlock.HasField(2));
         Assert.Equal(new uint[] { 1, 0, 5, 99 }, unlock.Values);
+    }
+
+    [Fact]
+    public void UnlockFieldDescriptorIs16BytesAndRoundTrips()
+    {
+        Assert.Equal(16, UnlockField.Size);
+
+        var descriptor = new UnlockField("Ammo", UnlockFieldKind.Number, 200);
+        var bytes = descriptor.ToBytes();
+        Assert.Equal(16, bytes.Length);
+        Assert.Equal(descriptor, UnlockField.Parse(bytes));
+
+        // A reply that stops short of four descriptors is a protocol error, not a silent default.
+        Assert.Throws<ProtocolException>(() => UnlockList.Parse(new byte[1 + 3 * UnlockField.Size]));
     }
 
     [Fact]

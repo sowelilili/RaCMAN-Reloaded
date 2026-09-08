@@ -427,8 +427,9 @@ public static class GamePanel
     /// Toggles two to a row, each followed by its "on boot" (auto-apply) box. Every box in a column
     /// sits at the same offset, the column's widest label plus a fixed gap, so the boxes line up
     /// instead of zig-zagging; inside a cell <c>SameLine(offset)</c> is measured from the column's
-    /// own start, so one offset per column does it. The grid drops to one column when the panel is
-    /// too narrow for two, or when <paramref name="maxColumns"/> says so.
+    /// own start, so one offset per column does it. A toggle the console marks LIVE gets no box at
+    /// all. The grid drops to one column when the panel is too narrow for two, or when
+    /// <paramref name="maxColumns"/> says so.
     /// </summary>
     private static void DrawToggleGrid(AppState state, Feature[] toggles, int maxColumns = 2)
     {
@@ -476,20 +477,30 @@ public static class GamePanel
                 uint value = on ? 1u : 0u;
                 state.Run(() => state.Client.FeatureSetAsync(id, value));
             }
-            if (feature.WritesCode && ImGui.IsItemHovered()) ImGui.SetTooltip("Patches game code");
-
-            ImGui.SameLine(columnLabel[i % columns] + AutoBoxGap);
-            bool auto = (session.ToggleAuto & bit) != 0;
-            ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
-            bool changed = ImGui.Checkbox("on boot", ref auto);
-            ImGui.PopStyleColor();
-            if (changed)
+            if (ImGui.IsItemHovered())
             {
-                byte id = feature.Id;
-                bool wanted = auto;
-                state.Run(() => state.Client.FeatureSetAutoAsync(id, wanted));
+                if (feature.IsLive) ImGui.SetTooltip("Read from the game's memory");
+                else if (feature.WritesCode) ImGui.SetTooltip("Patches game code");
             }
-            if (ImGui.IsItemHovered()) ImGui.SetTooltip("Auto-apply this toggle when the game boots");
+
+            // A live toggle is a game-memory byte qwark polls: there is nothing to apply on boot
+            // and FEATURE_SET_AUTO is refused for it, so the box is left out. The column offsets
+            // are computed from the labels alone, so the boxes on the other rows still line up.
+            if (!feature.IsLive)
+            {
+                ImGui.SameLine(columnLabel[i % columns] + AutoBoxGap);
+                bool auto = (session.ToggleAuto & bit) != 0;
+                ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
+                bool changed = ImGui.Checkbox("on boot", ref auto);
+                ImGui.PopStyleColor();
+                if (changed)
+                {
+                    byte id = feature.Id;
+                    bool wanted = auto;
+                    state.Run(() => state.Client.FeatureSetAutoAsync(id, wanted));
+                }
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Auto-apply this toggle when the game boots");
+            }
 
             ImGui.PopID();
         }
