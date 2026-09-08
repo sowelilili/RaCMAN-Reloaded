@@ -1,0 +1,12 @@
+{
+  "game": 4,
+  "name": "Deadlocked (RAC4)",
+  "source": "racman-official RaCTrainer/Games/RAC4/rac4.cs, struct rac4.Moby, [StructLayout(Sequential, Pack = 1)]",
+  "stride": 256,
+  "fields": {
+    "position": { "offset": 16,  "type": "vec3f", "from": "Vec4 pos (x, y, z of the Vec4 at 0x10)" },
+    "state":    { "offset": 32,  "type": "i8",    "from": "sbyte state" },
+    "oClass":   { "offset": 188, "type": "i16",   "from": "short oClass" },
+    "uid":      { "offset": 178, "type": "i16",   "from": "short UID" }
+  }
+}

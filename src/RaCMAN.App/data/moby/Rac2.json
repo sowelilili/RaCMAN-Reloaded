@@ -1,0 +1,12 @@
+{
+  "game": 2,
+  "name": "Going Commando (RAC2)",
+  "source": "racman-official RaCTrainer/Games/RAC2/rac2.cs, struct rac2.Moby, [StructLayout(Sequential, Pack = 1)]",
+  "stride": 256,
+  "fields": {
+    "position": { "offset": 16,  "type": "vec3f", "from": "Vec4 position (x, y, z of the Vec4 at 0x10)" },
+    "state":    { "offset": 32,  "type": "i8",    "from": "sbyte state" },
+    "oClass":   { "offset": 170, "type": "u16",   "from": "ushort oClass" },
+    "uid":      { "offset": 178, "type": "i16",   "from": "short UID" }
+  }
+}

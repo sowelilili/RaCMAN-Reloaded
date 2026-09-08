@@ -1,0 +1,611 @@
+using System.Text;
+
+namespace RaCMAN.Protocol;
+
+/// <summary>The 164-byte session info block, section 3 of PROTOCOL.md (revision 1.1).</summary>
+public sealed record SessionInfo(
+    byte ProtocolVersion,
+    byte QwarkVersion,
+    SessionState State,
+    GameId Game,
+    uint Generation,
+    uint Tick,
+    string TitleId,
+    SessionFlags Flags,
+    byte SelectedSlot,
+    byte SelectedPlanet,
+    PlanetFlags PlanetFlags,
+    byte CurrentPlanet,
+    float PosX,
+    float PosY,
+    float PosZ,
+    uint PadMask,
+    float[] Analog,
+    uint[] Readout,
+    ulong ToggleState,
+    ulong ToggleAuto,
+    ulong FreezeActive,
+    uint ModLoaded,
+    uint ModAuto,
+    uint ModPrevious)
+{
+    public const int Size = 164;
+
+    /// <summary>Length of <c>readout[]</c>, section 3. Sixteen since revision 1.1.</summary>
+    public const int ReadoutCount = 16;
+
+    /// <summary>A <c>Feature.Readout</c> of this value means the feature mirrors no readout.</summary>
+    public const byte NoReadout = 0xFF;
+
+    public bool PreviousPending => (Flags & SessionFlags.PreviousPending) != 0;
+
+    public bool IsIngame => State == SessionState.Ingame;
+
+    /// <summary>The readout at <paramref name="index"/>, or null when the index names none.</summary>
+    public uint? ReadoutAt(int index) =>
+        index >= 0 && index < Readout.Length ? Readout[index] : null;
+
+    public static SessionInfo Empty { get; } = new(
+        1, 0, SessionState.Xmb, GameId.None, 0, 0, string.Empty, SessionFlags.None, 0, 0,
+        Protocol.PlanetFlags.None, 0, 0, 0, 0, 0, new float[4], new uint[ReadoutCount], 0, 0, 0, 0, 0, 0);
+
+    public static SessionInfo Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < Size)
+        {
+            throw new ProtocolException($"SessionInfo needs {Size} bytes, got {payload.Length}");
+        }
+
+        var r = new SpanReader(payload[..Size]);
+        byte protocolVersion = r.ReadU8();
+        byte qwarkVersion = r.ReadU8();
+        var state = (SessionState)r.ReadU8();
+        var game = (GameId)r.ReadU8();
+        uint generation = r.ReadU32();
+        uint tick = r.ReadU32();
+        string titleId = r.ReadFixedString(12);
+        var flags = (SessionFlags)r.ReadU8();
+        byte selectedSlot = r.ReadU8();
+        byte selectedPlanet = r.ReadU8();
+        var planetFlags = (PlanetFlags)r.ReadU8();
+        byte currentPlanet = r.ReadU8();
+        r.Skip(3);
+        float x = r.ReadF32();
+        float y = r.ReadF32();
+        float z = r.ReadF32();
+        uint padMask = r.ReadU32();
+        var analog = new float[4];
+        for (int i = 0; i < 4; i++) analog[i] = r.ReadF32();
+        var readout = new uint[ReadoutCount];
+        for (int i = 0; i < ReadoutCount; i++) readout[i] = r.ReadU32();
+        ulong toggleState = r.ReadU64();
+        ulong toggleAuto = r.ReadU64();
+        ulong freezeActive = r.ReadU64();
+        uint modLoaded = r.ReadU32();
+        uint modAuto = r.ReadU32();
+        uint modPrevious = r.ReadU32();
+
+        return new SessionInfo(protocolVersion, qwarkVersion, state, game, generation, tick, titleId, flags,
+            selectedSlot, selectedPlanet, planetFlags, currentPlanet, x, y, z, padMask, analog, readout,
+            toggleState, toggleAuto, freezeActive, modLoaded, modAuto, modPrevious);
+    }
+
+    public byte[] ToBytes()
+    {
+        var buffer = new byte[Size];
+        Write(buffer);
+        return buffer;
+    }
+
+    public void Write(Span<byte> destination)
+    {
+        var w = new SpanWriter(destination);
+        w.WriteU8(ProtocolVersion);
+        w.WriteU8(QwarkVersion);
+        w.WriteU8((byte)State);
+        w.WriteU8((byte)Game);
+        w.WriteU32(Generation);
+        w.WriteU32(Tick);
+        w.WriteFixedString(TitleId, 12);
+        w.WriteU8((byte)Flags);
+        w.WriteU8(SelectedSlot);
+        w.WriteU8(SelectedPlanet);
+        w.WriteU8((byte)PlanetFlags);
+        w.WriteU8(CurrentPlanet);
+        w.WriteZeros(3);
+        w.WriteF32(PosX);
+        w.WriteF32(PosY);
+        w.WriteF32(PosZ);
+        w.WriteU32(PadMask);
+        for (int i = 0; i < 4; i++) w.WriteF32(i < Analog.Length ? Analog[i] : 0f);
+        for (int i = 0; i < ReadoutCount; i++) w.WriteU32(i < Readout.Length ? Readout[i] : 0u);
+        w.WriteU64(ToggleState);
+        w.WriteU64(ToggleAuto);
+        w.WriteU64(FreezeActive);
+        w.WriteU32(ModLoaded);
+        w.WriteU32(ModAuto);
+        w.WriteU32(ModPrevious);
+    }
+}
+
+/// <summary>One live watch value out of a telemetry packet.</summary>
+public readonly record struct WatchValue(byte Id, byte Size, bool Valid, ulong Value);
+
+/// <summary>The UDP telemetry packet, section 4 of PROTOCOL.md. GET_STATE returns these bytes too.</summary>
+public sealed record TelemetryPacket(SessionInfo Session, WatchValue[] Watches)
+{
+    public static ReadOnlySpan<byte> Magic => "QWRK"u8;
+
+    public const int MaxWatches = 64;
+
+    public static TelemetryPacket Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 4 + SessionInfo.Size + 1)
+        {
+            throw new ProtocolException($"telemetry packet too short: {payload.Length} bytes");
+        }
+
+        if (!payload[..4].SequenceEqual(Magic))
+        {
+            throw new ProtocolException("telemetry packet is missing the QWRK magic");
+        }
+
+        var session = SessionInfo.Parse(payload.Slice(4, SessionInfo.Size));
+        var r = new SpanReader(payload[(4 + SessionInfo.Size)..]);
+        int count = r.ReadU8();
+        var watches = new WatchValue[count];
+        for (int i = 0; i < count; i++)
+        {
+            byte id = r.ReadU8();
+            byte size = r.ReadU8();
+            bool valid = r.ReadU8() != 0;
+            r.Skip(1);
+            ulong value = r.ReadU64();
+            watches[i] = new WatchValue(id, size, valid, value);
+        }
+
+        return new TelemetryPacket(session, watches);
+    }
+
+    public byte[] ToBytes()
+    {
+        var buffer = new byte[4 + SessionInfo.Size + 1 + Watches.Length * 12];
+        var w = new SpanWriter(buffer);
+        w.WriteBytes(Magic);
+        Session.Write(buffer.AsSpan(4, SessionInfo.Size));
+        var tail = new SpanWriter(buffer.AsSpan(4 + SessionInfo.Size));
+        tail.WriteU8((byte)Watches.Length);
+        foreach (var watch in Watches)
+        {
+            tail.WriteU8(watch.Id);
+            tail.WriteU8(watch.Size);
+            tail.WriteU8(watch.Valid ? (byte)1 : (byte)0);
+            tail.WriteU8(0);
+            tail.WriteU64(watch.Value);
+        }
+
+        return buffer;
+    }
+}
+
+/// <summary>One entry of a DESCRIBE feature table, 48 bytes since revision 1.1.</summary>
+public sealed record Feature(
+    byte Id,
+    FeatureKind Kind,
+    byte Group,
+    byte Aux,
+    FeatureFlags Flags,
+    byte Readout,
+    uint Min,
+    uint Max,
+    string Label)
+{
+    public const int Size = 48;
+
+    public bool Auto => (Flags & FeatureFlags.Auto) != 0;
+
+    public bool WritesCode => (Flags & FeatureFlags.WritesCode) != 0;
+
+    /// <summary>Triggering this ACTION makes the game write its save to the tempsave path.</summary>
+    public bool SavesAside => Kind == FeatureKind.Action && (Flags & FeatureFlags.SaveAside) != 0;
+
+    /// <summary>Triggering this ACTION makes the game load the tempsave file.</summary>
+    public bool LoadsAside => Kind == FeatureKind.Action && (Flags & FeatureFlags.LoadAside) != 0;
+
+    /// <summary>The ENUM option count. Zero for every other kind since revision 1.1.</summary>
+    public byte OptionCount => Kind == FeatureKind.Enum ? Aux : (byte)0;
+
+    /// <summary>
+    /// The index into <c>SessionInfo.readout[]</c> that mirrors this feature's current value,
+    /// or null when the feature names none. Only VALUE, ENUM and COLOR ever do.
+    /// </summary>
+    public byte? MirrorReadout =>
+        Kind is FeatureKind.Value or FeatureKind.Enum or FeatureKind.Color
+        && Readout != SessionInfo.NoReadout
+        && Readout < SessionInfo.ReadoutCount
+            ? Readout
+            : null;
+
+    public static Feature Parse(ReadOnlySpan<byte> entry)
+    {
+        if (entry.Length < Size)
+        {
+            throw new ProtocolException($"Feature needs {Size} bytes, got {entry.Length}");
+        }
+
+        var r = new SpanReader(entry[..Size]);
+        byte id = r.ReadU8();
+        var kind = (FeatureKind)r.ReadU8();
+        byte group = r.ReadU8();
+        byte aux = r.ReadU8();
+        var flags = (FeatureFlags)r.ReadU8();
+        byte readout = r.ReadU8();
+        r.Skip(2);
+        uint min = r.ReadU32();
+        uint max = r.ReadU32();
+        string label = r.ReadFixedString(32);
+        return new Feature(id, kind, group, aux, flags, readout, min, max, label);
+    }
+
+    public byte[] ToBytes()
+    {
+        var buffer = new byte[Size];
+        var w = new SpanWriter(buffer);
+        w.WriteU8(Id);
+        w.WriteU8((byte)Kind);
+        w.WriteU8(Group);
+        w.WriteU8(Aux);
+        w.WriteU8((byte)Flags);
+        w.WriteU8(Readout);
+        w.WriteZeros(2);
+        w.WriteU32(Min);
+        w.WriteU32(Max);
+        w.WriteFixedString(Label, 32);
+        return buffer;
+    }
+}
+
+/// <summary>The DESCRIBE reply: groups, readout names and the feature table.</summary>
+public sealed record DescribeResult(GameId Game, string[] Groups, string[] Readouts, Feature[] Features)
+{
+    public static DescribeResult Empty { get; } =
+        new(GameId.None, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<Feature>());
+
+    public static DescribeResult Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        var game = (GameId)r.ReadU8();
+
+        int ngroups = r.ReadU8();
+        var groups = new string[ngroups];
+        for (int i = 0; i < ngroups; i++) groups[i] = r.ReadFixedString(24);
+
+        int nreadouts = r.ReadU8();
+        var readouts = new string[nreadouts];
+        for (int i = 0; i < nreadouts; i++) readouts[i] = r.ReadFixedString(24);
+
+        int nfeatures = r.ReadU8();
+        var features = new Feature[nfeatures];
+        if (nfeatures > 0)
+        {
+            if (r.Remaining < nfeatures * Feature.Size)
+            {
+                throw new ProtocolException(
+                    $"DESCRIBE has {r.Remaining} bytes for {nfeatures} features, needs {nfeatures * Feature.Size}");
+            }
+
+            for (int i = 0; i < nfeatures; i++) features[i] = Feature.Parse(r.ReadSpan(Feature.Size));
+        }
+
+        return new DescribeResult(game, groups, readouts, features);
+    }
+
+    /// <summary>The ACTION flagged SAVE_ASIDE, or null when this game has no savefile helper.</summary>
+    public Feature? SaveAsideAction => Array.Find(Features, f => f.SavesAside);
+
+    /// <summary>The ACTION flagged LOAD_ASIDE, or null when this game has no savefile helper.</summary>
+    public Feature? LoadAsideAction => Array.Find(Features, f => f.LoadsAside);
+
+    /// <summary>True when the game declares both halves of the savefile helper.</summary>
+    public bool HasSaveFileHelper => SaveAsideAction is not null && LoadAsideAction is not null;
+
+    public string GroupName(byte index) => index < Groups.Length ? Groups[index] : $"Group {index}";
+
+    public string ReadoutName(int index) => index >= 0 && index < Readouts.Length ? Readouts[index] : $"readout[{index}]";
+}
+
+/// <summary>WATCH_LIST entry.</summary>
+public readonly record struct WatchEntry(byte Id, byte Size, uint Address)
+{
+    public static WatchEntry[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int n = r.ReadU8();
+        var result = new WatchEntry[n];
+        for (int i = 0; i < n; i++)
+        {
+            byte id = r.ReadU8();
+            byte size = r.ReadU8();
+            r.Skip(2);
+            uint addr = r.ReadU32();
+            result[i] = new WatchEntry(id, size, addr);
+        }
+
+        return result;
+    }
+}
+
+/// <summary>FREEZE_LIST entry.</summary>
+public readonly record struct FreezeEntry(byte Id, byte Size, uint Address, ulong Value)
+{
+    public static FreezeEntry[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int n = r.ReadU8();
+        var result = new FreezeEntry[n];
+        for (int i = 0; i < n; i++)
+        {
+            byte id = r.ReadU8();
+            byte size = r.ReadU8();
+            r.Skip(2);
+            uint addr = r.ReadU32();
+            ulong value = r.ReadU64();
+            result[i] = new FreezeEntry(id, size, addr, value);
+        }
+
+        return result;
+    }
+}
+
+/// <summary>PATCH_LIST entry.</summary>
+public sealed record PatchEntry(uint FirstAddress, ushort WordCount, PatchKind Kind, string Name)
+{
+    public static PatchEntry[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int n = r.ReadU8();
+        var result = new PatchEntry[n];
+        for (int i = 0; i < n; i++)
+        {
+            uint addr = r.ReadU32();
+            ushort words = r.ReadU16();
+            var kind = (PatchKind)r.ReadU8();
+            r.Skip(1);
+            string name = r.ReadFixedString(32);
+            result[i] = new PatchEntry(addr, words, kind, name);
+        }
+
+        return result;
+    }
+}
+
+/// <summary>One position slot of POS_LIST.</summary>
+public readonly record struct PositionSlot(byte Slot, bool Filled, float X, float Y, float Z);
+
+public sealed record PositionList(byte Planet, PositionSlot[] Slots)
+{
+    public static PositionList Empty { get; } = new(0, Array.Empty<PositionSlot>());
+
+    public static PositionList Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        byte planet = r.ReadU8();
+        int n = r.ReadU8();
+        var slots = new PositionSlot[n];
+        for (int i = 0; i < n; i++)
+        {
+            bool filled = r.ReadU8() != 0;
+            r.Skip(3);
+            float x = r.ReadF32();
+            float y = r.ReadF32();
+            float z = r.ReadF32();
+            slots[i] = new PositionSlot((byte)i, filled, x, y, z);
+        }
+
+        return new PositionList(planet, slots);
+    }
+}
+
+/// <summary>UNLOCK_LIST entry, 44 bytes.</summary>
+public sealed record Unlock(byte Id, byte Category, byte Fields, uint[] Values, string Name)
+{
+    public const int Size = 44;
+
+    public bool HasField(int field) => (Fields & (1 << field)) != 0;
+
+    public static Unlock Parse(ReadOnlySpan<byte> entry)
+    {
+        var r = new SpanReader(entry);
+        byte id = r.ReadU8();
+        byte category = r.ReadU8();
+        byte fields = r.ReadU8();
+        r.Skip(1);
+        var values = new uint[4];
+        for (int i = 0; i < 4; i++) values[i] = r.ReadU32();
+        string name = r.ReadFixedString(24);
+        return new Unlock(id, category, fields, values, name);
+    }
+}
+
+public sealed record UnlockList(string[] Categories, Unlock[] Unlocks)
+{
+    public static UnlockList Empty { get; } = new(Array.Empty<string>(), Array.Empty<Unlock>());
+
+    public static UnlockList Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int ncat = r.ReadU8();
+        var categories = new string[ncat];
+        for (int i = 0; i < ncat; i++) categories[i] = r.ReadFixedString(24);
+
+        int n = r.ReadU8();
+        var unlocks = new Unlock[n];
+        for (int i = 0; i < n; i++) unlocks[i] = Unlock.Parse(r.ReadSpan(Unlock.Size));
+        return new UnlockList(categories, unlocks);
+    }
+}
+
+/// <summary>MOD_LIST entry, 120 bytes.</summary>
+public sealed record ModEntry(
+    byte Index,
+    ModFlags Flags,
+    uint Hash,
+    string DirName,
+    string Name,
+    string Version,
+    string Author)
+{
+    public const int Size = 120;
+
+    public bool Loaded => (Flags & ModFlags.Loaded) != 0;
+
+    public bool Auto => (Flags & ModFlags.Auto) != 0;
+
+    public bool NeedsLua => (Flags & ModFlags.NeedsLua) != 0;
+
+    public bool Previous => (Flags & ModFlags.Previous) != 0;
+
+    public bool ParseError => (Flags & ModFlags.ParseError) != 0;
+
+    public static ModEntry Parse(ReadOnlySpan<byte> entry)
+    {
+        var r = new SpanReader(entry);
+        byte index = r.ReadU8();
+        var flags = (ModFlags)r.ReadU8();
+        r.Skip(2);
+        uint hash = r.ReadU32();
+        string dirName = r.ReadFixedString(32);
+        string name = r.ReadFixedString(32);
+        string version = r.ReadFixedString(16);
+        string author = r.ReadFixedString(32);
+        return new ModEntry(index, flags, hash, dirName, name, version, author);
+    }
+
+    public byte[] ToBytes()
+    {
+        var buffer = new byte[Size];
+        var w = new SpanWriter(buffer);
+        w.WriteU8(Index);
+        w.WriteU8((byte)Flags);
+        w.WriteZeros(2);
+        w.WriteU32(Hash);
+        w.WriteFixedString(DirName, 32);
+        w.WriteFixedString(Name, 32);
+        w.WriteFixedString(Version, 16);
+        w.WriteFixedString(Author, 32);
+        return buffer;
+    }
+
+    public static ModEntry[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int n = r.ReadU8();
+        var result = new ModEntry[n];
+        for (int i = 0; i < n; i++) result[i] = Parse(r.ReadSpan(Size));
+        return result;
+    }
+}
+
+/// <summary>DIR_LIST entry.</summary>
+public sealed record DirEntry(bool IsDirectory, uint Size, string Name)
+{
+    public static DirEntry[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int n = r.ReadU16();
+        var result = new DirEntry[n];
+        for (int i = 0; i < n; i++)
+        {
+            bool isDir = r.ReadU8() != 0;
+            int namelen = r.ReadU8();
+            uint size = r.ReadU32();
+            string name = Encoding.UTF8.GetString(r.ReadSpan(namelen));
+            result[i] = new DirEntry(isDir, size, name);
+        }
+
+        return result;
+    }
+}
+
+/// <summary>COMBO_LIST entry.</summary>
+public readonly record struct ComboEntry(ComboAction Action, uint Mask)
+{
+    public static ComboEntry[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int n = r.ReadU8();
+        var result = new ComboEntry[n];
+        for (int i = 0; i < n; i++)
+        {
+            var action = (ComboAction)r.ReadU8();
+            r.Skip(3);
+            uint mask = r.ReadU32();
+            result[i] = new ComboEntry(action, mask);
+        }
+
+        return result;
+    }
+}
+
+public readonly record struct PreviousFreeze(byte Size, uint Address, ulong Value);
+
+public readonly record struct PreviousPatch(uint FirstAddress, ushort WordCount);
+
+/// <summary>PREVIOUS_LIST: what the last same-game session left behind.</summary>
+public sealed record PreviousSession(
+    ulong Toggles,
+    uint Mods,
+    PreviousFreeze[] Freezes,
+    PreviousPatch[] Patches)
+{
+    public static PreviousSession Empty { get; } =
+        new(0, 0, Array.Empty<PreviousFreeze>(), Array.Empty<PreviousPatch>());
+
+    public bool IsEmpty => Toggles == 0 && Mods == 0 && Freezes.Length == 0 && Patches.Length == 0;
+
+    public static PreviousSession Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        ulong toggles = r.ReadU64();
+        uint mods = r.ReadU32();
+
+        int nfreeze = r.ReadU8();
+        var freezes = new PreviousFreeze[nfreeze];
+        for (int i = 0; i < nfreeze; i++)
+        {
+            byte size = r.ReadU8();
+            r.Skip(3);
+            uint addr = r.ReadU32();
+            ulong value = r.ReadU64();
+            freezes[i] = new PreviousFreeze(size, addr, value);
+        }
+
+        int npatch = r.ReadU8();
+        var patches = new PreviousPatch[npatch];
+        for (int i = 0; i < npatch; i++)
+        {
+            uint addr = r.ReadU32();
+            ushort words = r.ReadU16();
+            r.Skip(2);
+            patches[i] = new PreviousPatch(addr, words);
+        }
+
+        return new PreviousSession(toggles, mods, freezes, patches);
+    }
+}
+
+/// <summary>MOBY_TABLE reply: where the client should point MEM_READ.</summary>
+public readonly record struct MobyTableInfo(uint TablePointerAddress, uint TableEndPointerAddress, ushort Stride)
+{
+    public static MobyTableInfo Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        uint tablePtr = r.ReadU32();
+        uint endPtr = r.ReadU32();
+        ushort stride = r.ReadU16();
+        return new MobyTableInfo(tablePtr, endPtr, stride);
+    }
+}
+
+/// <summary>One word of a client patch.</summary>
+public readonly record struct PatchWord(uint Address, uint Word);

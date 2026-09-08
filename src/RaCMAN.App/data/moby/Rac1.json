@@ -1,0 +1,12 @@
+{
+  "game": 1,
+  "name": "Ratchet & Clank (RAC1)",
+  "source": "racman-official RaCTrainer/Games/RAC1/rac1.cs, struct rac1.Moby, [StructLayout(Sequential, Pack = 1)]",
+  "stride": 256,
+  "fields": {
+    "position": { "offset": 16,  "type": "vec3f", "from": "Vec4 position (x, y, z of the Vec4 at 0x10)" },
+    "state":    { "offset": 32,  "type": "i8",    "from": "sbyte state" },
+    "oClass":   { "offset": 166, "type": "i16",   "from": "short oClass" },
+    "uid":      { "offset": 178, "type": "u16",   "from": "ushort UID" }
+  }
+}

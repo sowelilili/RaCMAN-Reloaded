@@ -1,0 +1,12 @@
+{
+  "game": 3,
+  "name": "Up Your Arsenal (RAC3)",
+  "source": "racman-official RaCTrainer/Games/RAC3/ActiveMobysForm.cs reads oClass at 0xAA and UID at 0xB2; RaCTrainer/MemoryForm.cs uses the rac2.Moby struct for every game that is not RAC1 or RAC4, so the RAC2 layout applies",
+  "stride": 256,
+  "fields": {
+    "position": { "offset": 16,  "type": "vec3f", "from": "rac2.Moby Vec4 position (x, y, z of the Vec4 at 0x10)" },
+    "state":    { "offset": 32,  "type": "i8",    "from": "rac2.Moby sbyte state" },
+    "oClass":   { "offset": 170, "type": "u16",   "from": "rac2.Moby ushort oClass, confirmed by ActiveMobysForm's 0xAA" },
+    "uid":      { "offset": 178, "type": "i16",   "from": "rac2.Moby short UID, confirmed by ActiveMobysForm's 0xB2" }
+  }
+}

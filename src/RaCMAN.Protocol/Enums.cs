@@ -1,0 +1,270 @@
+namespace RaCMAN.Protocol;
+
+/// <summary>Request opcodes, section 5 of PROTOCOL.md.</summary>
+public enum Opcode : ushort
+{
+    // 5.1 Session
+    Hello = 0x0001,
+    Heartbeat = 0x0002,
+    Notify = 0x0003,
+    PreviousList = 0x0004,
+    PreviousReapply = 0x0005,
+    PreviousDismiss = 0x0006,
+
+    // 5.2 Telemetry
+    Subscribe = 0x0010,
+    Unsubscribe = 0x0011,
+    GetState = 0x0012,
+
+    // 5.3 Features
+    Describe = 0x0020,
+    FeatureSet = 0x0021,
+    FeatureTrigger = 0x0022,
+    FeatureSetAuto = 0x0023,
+    FeatureOptions = 0x0024,
+
+    // 5.4 Memory
+    MemRead = 0x0030,
+    MemWrite = 0x0031,
+    WatchAdd = 0x0032,
+    WatchRemove = 0x0033,
+    WatchList = 0x0034,
+    FreezeAdd = 0x0035,
+    FreezeRemove = 0x0036,
+    FreezeList = 0x0037,
+    PatchApply = 0x0038,
+    PatchRevert = 0x0039,
+    PatchList = 0x003A,
+    ClearClient = 0x003B,
+
+    // 5.5 Positions and planets
+    PosSelect = 0x0040,
+    PosSave = 0x0041,
+    PosLoad = 0x0042,
+    PosList = 0x0043,
+    PosClear = 0x0044,
+    PlanetList = 0x0045,
+    PlanetSelect = 0x0046,
+    PlanetLoad = 0x0047,
+    Die = 0x0048,
+    MobyTable = 0x0049,
+
+    // 5.6 Unlocks and level flags
+    UnlockList = 0x0050,
+    UnlockSet = 0x0051,
+    LevelFlagsGet = 0x0053,
+    LevelFlagsReset = 0x0054,
+    LevelFlagsSet = 0x0055,
+
+    // 5.7 Mods
+    ModList = 0x0060,
+    ModLoad = 0x0061,
+    ModUnload = 0x0062,
+    ModSetAuto = 0x0063,
+    ModRescan = 0x0064,
+    ModInfo = 0x0065,
+
+    // 5.8 Files
+    FileOpen = 0x0070,
+    FileWrite = 0x0071,
+    FileRead = 0x0072,
+    FileClose = 0x0073,
+    FileDelete = 0x0074,
+    DirList = 0x0075,
+    DirCreate = 0x0076,
+    DirDelete = 0x0077,
+    UserId = 0x0078,
+
+    // 5.9 Combos
+    ComboSet = 0x0080,
+    ComboList = 0x0081,
+
+    // 5.10 Config
+    ConfigReload = 0x0090,
+    ConfigSave = 0x0091,
+}
+
+/// <summary>Reply status codes, section 2 of PROTOCOL.md.</summary>
+public enum Status : ushort
+{
+    Ok = 0,
+    NotIngame = 1,
+    Unsupported = 2,
+    BadArg = 3,
+    IoError = 4,
+    Full = 5,
+    UnknownOp = 6,
+    NotFound = 7,
+    Busy = 8,
+}
+
+public enum SessionState : byte
+{
+    Xmb = 0,
+    Booting = 1,
+    Ingame = 2,
+    Quitting = 3,
+}
+
+public enum GameId : byte
+{
+    None = 0,
+    Rac1 = 1,
+    Rac2 = 2,
+    Rac3 = 3,
+    Rac4 = 4,
+}
+
+public enum FeatureKind : byte
+{
+    Toggle = 0,
+    Action = 1,
+    Value = 2,
+    Enum = 3,
+    Color = 4,
+}
+
+public enum ComboAction : byte
+{
+    SavePosition = 0,
+    LoadPosition = 1,
+    Die = 2,
+    LoadPlanet = 3,
+    LoadSetAsideFile = 4,
+}
+
+/// <summary>The four Unlock value slots, section 5.6. Which ones apply is in <c>fields</c>.</summary>
+public enum UnlockField : byte
+{
+    Owned = 0,
+    Gold = 1,
+    Level = 2,
+    Ammo = 3,
+}
+
+public enum PatchKind : byte
+{
+    Client = 0,
+    Feature = 1,
+    Mod = 2,
+}
+
+public enum FileMode : byte
+{
+    Read = 0,
+    WriteTruncate = 1,
+}
+
+[Flags]
+public enum SessionFlags : byte
+{
+    None = 0,
+    PreviousPending = 1 << 0,
+}
+
+/// <summary>
+/// Feature.flags, section 5.3 of PROTOCOL.md. SAVE_ASIDE and LOAD_ASIDE arrived with revision
+/// 1.2: they mark the two ACTIONs that drive the savefile helper, so the client can find them
+/// without matching labels.
+/// </summary>
+[Flags]
+public enum FeatureFlags : byte
+{
+    None = 0,
+    Auto = 1 << 0,
+    WritesCode = 1 << 1,
+
+    /// <summary>This ACTION makes the game write its save to <c>USRDIR/tempsave</c>.</summary>
+    SaveAside = 1 << 2,
+
+    /// <summary>This ACTION makes the game load <c>USRDIR/tempsave</c>.</summary>
+    LoadAside = 1 << 3,
+}
+
+[Flags]
+public enum ModFlags : byte
+{
+    None = 0,
+    Loaded = 1 << 0,
+    Auto = 1 << 1,
+    NeedsLua = 1 << 2,
+    Previous = 1 << 3,
+    ParseError = 1 << 4,
+}
+
+[Flags]
+public enum PlanetFlags : byte
+{
+    None = 0,
+    ResetLevelFlags = 1 << 0,
+    ResetSpecialBolts = 1 << 1,
+}
+
+[Flags]
+public enum PreviousCategories : byte
+{
+    None = 0,
+    Toggles = 1 << 0,
+    Mods = 1 << 1,
+    Freezes = 1 << 2,
+    Patches = 1 << 3,
+    All = Toggles | Mods | Freezes | Patches,
+}
+
+/// <summary>The OG pad-mask layout, section 6 of PROTOCOL.md. Shared by all four games.</summary>
+[Flags]
+public enum PadButton : uint
+{
+    None = 0,
+    L2 = 0x1,
+    R2 = 0x2,
+    L1 = 0x4,
+    R1 = 0x8,
+    Triangle = 0x10,
+    Circle = 0x20,
+    Cross = 0x40,
+    Square = 0x80,
+    Select = 0x100,
+    L3 = 0x200,
+    R3 = 0x400,
+    Start = 0x800,
+    Up = 0x1000,
+    Right = 0x2000,
+    Down = 0x4000,
+    Left = 0x8000,
+}
+
+public static class PadButtons
+{
+    /// <summary>Buttons in mask order, with the display names the old client used.</summary>
+    public static readonly (PadButton Button, string Name)[] All =
+    {
+        (PadButton.L2, "L2"),
+        (PadButton.R2, "R2"),
+        (PadButton.L1, "L1"),
+        (PadButton.R1, "R1"),
+        (PadButton.Triangle, "Triangle"),
+        (PadButton.Circle, "Circle"),
+        (PadButton.Cross, "Cross"),
+        (PadButton.Square, "Square"),
+        (PadButton.Select, "Select"),
+        (PadButton.L3, "L3"),
+        (PadButton.R3, "R3"),
+        (PadButton.Start, "Start"),
+        (PadButton.Up, "Up"),
+        (PadButton.Right, "Right"),
+        (PadButton.Down, "Down"),
+        (PadButton.Left, "Left"),
+    };
+
+    public static IEnumerable<string> DecodeNames(uint mask)
+    {
+        foreach (var (button, name) in All)
+        {
+            if ((mask & (uint)button) != 0) yield return name;
+        }
+    }
+
+    public static string Describe(uint mask) =>
+        mask == 0 ? "None" : string.Join(" + ", DecodeNames(mask));
+}
