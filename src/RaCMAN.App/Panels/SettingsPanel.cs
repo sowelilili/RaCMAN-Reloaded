@@ -35,8 +35,8 @@ public static class SettingsPanel
             state.ThemeDirty = true;
         }
 
-        Ui.Hint("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
-                + "counters, request names in error messages, frame rate and internal addresses.");
+        Ui.HintWrapped("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
+                       + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
 
         ImGui.Spacing();
         ImGui.Separator();

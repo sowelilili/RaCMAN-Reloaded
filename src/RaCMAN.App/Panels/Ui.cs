@@ -33,6 +33,14 @@ public static class Ui
 
     public static void Hint(string text) => ImGui.TextColored(Grey, text);
 
+    /// <summary>A hint long enough to need wrapping at the panel edge.</summary>
+    public static void HintWrapped(string text)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, Grey);
+        ImGui.TextWrapped(text);
+        ImGui.PopStyleColor();
+    }
+
     /// <summary>A hint that only exists when the user asked to see the wire-level detail.</summary>
     public static void DebugHint(string text)
     {
