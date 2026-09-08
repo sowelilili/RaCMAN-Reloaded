@@ -9,6 +9,7 @@ int startPanel = 0;
 string? connectTo = null;
 string? fakeScript = null;
 bool fakeServer = false;
+bool padWindow = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -29,6 +30,9 @@ for (int i = 0; i < args.Length; i++)
         case "--fake-server":
             fakeServer = true;
             break;
+        case "--pad-window":
+            padWindow = true;
+            break;
         case "--fake-script" when i + 1 < args.Length:
             fakeScript = args[++i];
             break;
@@ -42,12 +46,18 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("                         3 unlocks, 4 level flags, 5 memory, 6 mods,");
             Console.WriteLine("                         7 save files, 8 combos, 9 input display, 10 settings");
             Console.WriteLine("  --game-section <name>  open the Game panel on that side sub-page (Debug, Cosmetics, ...)");
+            Console.WriteLine("  --pad-window           show the input display in its own OS window");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
             return 0;
     }
 }
 
 var settings = Settings.Load();
+
+// --pad-window forces the mode on for a smoke run without leaving it on in the settings file.
+var padWindowWas = padWindow ? settings.InputMode : (InputDisplayMode?)null;
+if (padWindow) settings.InputMode = InputDisplayMode.Window;
+
 using var state = new AppState(settings);
 
 FakeQwarkServer? fake = null;
@@ -98,8 +108,11 @@ if (exitAfter > 0)
                       $"mobyrows={MemoryPanel.MobyRowCount} skins={SkinLibrary.List().Length} " +
                       $"mobylayouts={MobyLayouts.All.Count} skin='{InputDisplayPanel.Status}' " +
                       $"savehelper={state.Describe.HasSaveFileHelper} savefiles={SaveFilesPanel.Summary} " +
-                      $"readout0={readout0} padmask=0x{padMask:X} tcpfallback={state.Client.TelemetryViaTcp}");
+                      $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
+                      $"tcpfallback={state.Client.TelemetryViaTcp}");
 }
+
+if (padWindowWas is { } previousMode) settings.InputMode = previousMode;
 
 fake?.Dispose();
 settings.Save();

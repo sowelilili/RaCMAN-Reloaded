@@ -7,8 +7,9 @@ namespace RaCMAN.App.Panels;
 
 /// <summary>
 /// The pad drawn from pad_mask and analog[] with the old client's controller skins: one sprite
-/// sheet per skin, the base blitted first and then every pressed button's sprite on top. The
-/// panel can also float in its own plain window so it can sit over a stream layout.
+/// sheet per skin, the base blitted first and then every pressed button's sprite on top. It can
+/// be drawn in the panel, in a plain window floating over the panels, or in its own OS window so
+/// a capture tool can take it as a source of its own.
 /// </summary>
 public static class InputDisplayPanel
 {
@@ -47,9 +48,16 @@ public static class InputDisplayPanel
 
     private static string[] _available = Array.Empty<string>();
     private static bool _scanned;
-    private static LoadedSkin? _loaded;
     private static string? _loadError;
-    private static string _wanted = string.Empty;
+
+    /// <summary>
+    /// The sheet, once per controller: a texture belongs to the GL context that uploaded it, and
+    /// the pad window has a context of its own. Both entries hold the same skin, and both are
+    /// reloaded when the picker changes.
+    /// </summary>
+    private static readonly Dictionary<ImGuiController, LoadedSkin> Skins = new();
+
+    private static readonly Dictionary<ImGuiController, string> Wanted = new();
 
     /// <summary>
     /// What the input display ended up drawing. Kept as a string rather than read off the
@@ -68,7 +76,7 @@ public static class InputDisplayPanel
         Ui.Heading("Input display");
 
         Scan();
-        EnsureSkin(state, controller);
+        var loaded = EnsureSkin(state, controller);
 
         var settings = state.Settings;
         var session = state.Session;
@@ -92,8 +100,13 @@ public static class InputDisplayPanel
         if (ImGui.SmallButton("Rescan"))
         {
             _scanned = false;
-            _wanted = string.Empty;
+
+            // Both controllers reload on the next frame they draw, the pad window's included.
+            Wanted.Clear();
         }
+
+        // The pad's own window sizes the skin to itself, so the slider has nothing to say there.
+        ImGui.BeginDisabled(settings.InputMode == InputDisplayMode.Window);
 
         float scale = settings.InputScale;
         ImGui.SetNextItemWidth(260);
@@ -104,15 +117,9 @@ public static class InputDisplayPanel
 
         if (ImGui.IsItemDeactivatedAfterEdit()) settings.Save();
 
-        bool floating = settings.InputFloating;
-        if (ImGui.Checkbox("Float in its own window", ref floating))
-        {
-            settings.InputFloating = floating;
-            settings.Save();
-        }
+        ImGui.EndDisabled();
 
-        ImGui.SameLine();
-        Ui.Hint("A floating pad stays inside this window but can be dragged over any panel.");
+        DrawModeChoice(settings);
 
         ImGui.TextColored(Ui.Grey,
             $"mask 0x{session.PadMask:X4}   rx {Get(session.Analog, 0):0.00}  ry {Get(session.Analog, 1):0.00}  " +
@@ -120,29 +127,73 @@ public static class InputDisplayPanel
 
         if (_loadError is not null) Ui.Error(_loadError);
 
-        if (_loaded is { } loaded && loaded.Skin.Missing.Count > 0)
+        if (loaded is not null && loaded.Skin.Missing.Count > 0)
         {
             Ui.Warning($"skin.txt is missing: {string.Join(", ", loaded.Skin.Missing)}");
         }
 
         ImGui.Spacing();
 
-        if (settings.InputFloating)
+        switch (settings.InputMode)
         {
-            Ui.Hint("The pad is in its own window; untick the box to bring it back here.");
-        }
-        else
-        {
-            float fit = FitScale(settings.InputScale);
-            if (fit < settings.InputScale - 0.005f)
-            {
-                Ui.Hint($"Shown at {fit:0.00}x so the whole pad fits here; float it for the full size.");
-            }
+            case InputDisplayMode.Window:
+                Ui.Hint($"The pad is in its own window: capture \"{PadWindow.WindowTitle}\" as a window source, "
+                        + "or close that window to bring the pad back here.");
+                break;
 
-            DrawPad(state, fit);
+            case InputDisplayMode.Floating:
+                Ui.Hint("The pad is in a floating window; pick \"In this panel\" to bring it back here.");
+                break;
+
+            default:
+                float fit = FitScale(loaded, settings.InputScale);
+                if (fit < settings.InputScale - 0.005f)
+                {
+                    Ui.Hint($"Shown at {fit:0.00}x so the whole pad fits here; float it for the full size.");
+                }
+
+                DrawPad(state, loaded, fit);
+                break;
         }
 
         if (!state.Connected) Ui.Hint("Not connected: the pad shows the last telemetry packet, if any.");
+    }
+
+    /// <summary>
+    /// The three places the pad can live, plus the one thing only the OS window can do. Switching
+    /// is what opens and closes that window: the frame loop follows the setting.
+    /// </summary>
+    private static void DrawModeChoice(Settings settings)
+    {
+        var mode = settings.InputMode;
+        var chosen = mode;
+
+        if (ImGui.RadioButton("In this panel", mode == InputDisplayMode.Panel)) chosen = InputDisplayMode.Panel;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Floating inside RaCMAN", mode == InputDisplayMode.Floating)) chosen = InputDisplayMode.Floating;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Own window", mode == InputDisplayMode.Window)) chosen = InputDisplayMode.Window;
+
+        if (chosen != mode)
+        {
+            settings.InputMode = chosen;
+            settings.Save();
+        }
+
+        ImGui.BeginDisabled(chosen != InputDisplayMode.Window);
+        bool onTop = settings.InputWindowOnTop;
+        if (ImGui.Checkbox("Always on top", ref onTop))
+        {
+            settings.InputWindowOnTop = onTop;
+            settings.Save();
+        }
+
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        Ui.Hint(chosen == InputDisplayMode.Window
+            ? "Its own OS window survives minimising RaCMAN and can sit over the game feed."
+            : "A floating pad stays inside this window but can be dragged over any panel.");
     }
 
     /// <summary>
@@ -152,9 +203,8 @@ public static class InputDisplayPanel
     /// The slider still owns the scale; this only caps it, and only for the embedded pad, because
     /// the floating window sizes itself to whatever it is given.
     /// </summary>
-    private static float FitScale(float scale)
+    private static float FitScale(LoadedSkin? loaded, float scale)
     {
-        var loaded = _loaded;
         float width = loaded?.Skin.Base.Width ?? FallbackWidth;
         float height = loaded?.Skin.Base.Height ?? FallbackHeight;
         if (width <= 0 || height <= 0) return scale;
@@ -177,10 +227,10 @@ public static class InputDisplayPanel
     /// </summary>
     public static void DrawFloating(AppState state, ImGuiController controller)
     {
-        if (!state.Settings.InputFloating) return;
+        if (state.Settings.InputMode != InputDisplayMode.Floating) return;
 
         Scan();
-        EnsureSkin(state, controller);
+        var loaded = EnsureSkin(state, controller);
 
         const ImGuiWindowFlags flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoDocking
                                        | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoNav
@@ -192,22 +242,93 @@ public static class InputDisplayPanel
         bool open = true;
         if (ImGui.Begin("Input display##floating", ref open, flags))
         {
-            DrawPad(state, state.Settings.InputScale);
+            DrawPad(state, loaded, state.Settings.InputScale);
         }
 
         ImGui.End();
 
         if (!open)
         {
-            state.Settings.InputFloating = false;
+            state.Settings.InputMode = InputDisplayMode.Panel;
             state.Settings.Save();
         }
     }
 
+    /// <summary>
+    /// The whole content of the pad's own OS window: one borderless ImGui window filling the
+    /// client area, with the skin scaled to fit and centred. The scale slider does not apply
+    /// here - the window's own size is the scale.
+    /// </summary>
+    public static void DrawOwnWindow(AppState state, ImGuiController controller, Vector2 clientSize)
+    {
+        Scan();
+        var loaded = EnsureSkin(state, controller);
+
+        const ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
+                                       | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.NoCollapse
+                                       | ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse
+                                       | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoNavFocus
+                                       | ImGuiWindowFlags.NoBackground | ImGuiWindowFlags.NoSavedSettings;
+
+        ImGui.SetNextWindowPos(Vector2.Zero);
+        ImGui.SetNextWindowSize(clientSize);
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+
+        if (ImGui.Begin("##padwindow", flags))
+        {
+            float width = loaded?.Skin.Base.Width ?? FallbackWidth;
+            float height = loaded?.Skin.Base.Height ?? FallbackHeight;
+
+            // The vector fallback pad has its coordinates baked in and always draws at 1x, so
+            // only a real skin is scaled to the window.
+            float scale = loaded is not null && width > 0 && height > 0
+                ? Math.Min(clientSize.X / width, clientSize.Y / height)
+                : 1f;
+
+            ImGui.SetCursorPos(new Vector2(
+                Math.Max(0f, (clientSize.X - width * scale) / 2f),
+                Math.Max(0f, (clientSize.Y - height * scale) / 2f)));
+
+            DrawPad(state, loaded, scale);
+        }
+
+        ImGui.End();
+        ImGui.PopStyleVar();
+    }
+
+    /// <summary>
+    /// The skin's own pixel size, read without uploading anything, so the pad window can open at
+    /// the size the skin was drawn at. Falls back to the vector pad's size when no skin loads.
+    /// </summary>
+    public static (int Width, int Height) NativeSize(Settings settings)
+    {
+        try
+        {
+            var skin = SkinLibrary.Load(settings.InputSkin);
+            var sprite = skin.Base;
+            if (sprite.Width > 0 && sprite.Height > 0) return (sprite.Width, sprite.Height);
+        }
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
+                                       or ArgumentException or DirectoryNotFoundException)
+        {
+            // The panel reports the load error; the window just needs a size.
+        }
+
+        return ((int)FallbackWidth, (int)FallbackHeight);
+    }
+
+    /// <summary>Drops one controller's copy of the sheet, before that controller is disposed.</summary>
+    public static void Release(ImGuiController controller)
+    {
+        if (Skins.Remove(controller, out var loaded)) loaded.Dispose();
+        Wanted.Remove(controller);
+    }
+
     public static void Dispose()
     {
-        _loaded?.Dispose();
-        _loaded = null;
+        foreach (var loaded in Skins.Values) loaded.Dispose();
+        Skins.Clear();
+        Wanted.Clear();
     }
 
     // ---------------------------------------------------------------- skin plumbing
@@ -219,7 +340,7 @@ public static class InputDisplayPanel
         _available = SkinLibrary.List();
     }
 
-    private static void EnsureSkin(AppState state, ImGuiController controller)
+    private static LoadedSkin? EnsureSkin(AppState state, ImGuiController controller)
     {
         string wanted = state.Settings.InputSkin;
         if (_available.Length > 0 && !_available.Contains(wanted, StringComparer.Ordinal))
@@ -228,13 +349,15 @@ public static class InputDisplayPanel
             state.Settings.InputSkin = wanted;
         }
 
-        if (wanted.Length == 0 || string.Equals(wanted, _wanted, StringComparison.Ordinal)) return;
+        Skins.TryGetValue(controller, out var current);
 
-        _wanted = wanted;
+        bool upToDate = Wanted.TryGetValue(controller, out var already)
+                        && string.Equals(wanted, already, StringComparison.Ordinal);
+        if (wanted.Length == 0 || upToDate) return current;
+
+        Release(controller);
+        Wanted[controller] = wanted;
         _loadError = null;
-
-        _loaded?.Dispose();
-        _loaded = null;
 
         try
         {
@@ -246,31 +369,32 @@ public static class InputDisplayPanel
                 throw new InvalidDataException($"{skin.ImageFileName} decoded to nothing");
             }
 
-            int texture = controller.CreateTexture(image.Width, image.Height, image.Data);
-            _loaded = new LoadedSkin
+            var loaded = new LoadedSkin
             {
                 Skin = skin,
-                Texture = texture,
+                Texture = controller.CreateTexture(image.Width, image.Height, image.Data),
                 Width = image.Width,
                 Height = image.Height,
                 Owner = controller,
             };
 
+            Skins[controller] = loaded;
             Status = $"{skin.Name} {image.Width}x{image.Height} pitch {skin.AnalogPitch}";
+            return loaded;
         }
         catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
                                        or ArgumentException or DirectoryNotFoundException)
         {
             _loadError = $"skin '{wanted}': {ex.Message}";
             Status = _loadError;
+            return null;
         }
     }
 
     // ---------------------------------------------------------------- drawing
 
-    private static void DrawPad(AppState state, float scale)
+    private static void DrawPad(AppState state, LoadedSkin? loaded, float scale)
     {
-        var loaded = _loaded;
         if (loaded is null)
         {
             DrawFallbackPad(state);

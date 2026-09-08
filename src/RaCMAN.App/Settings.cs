@@ -3,6 +3,19 @@ using System.Text.Json.Serialization;
 
 namespace RaCMAN.App;
 
+/// <summary>Where the input display draws.</summary>
+public enum InputDisplayMode
+{
+    /// <summary>Inside the Input display panel, with the other controls.</summary>
+    Panel,
+
+    /// <summary>A plain ImGui window that can be dragged anywhere inside the main window.</summary>
+    Floating,
+
+    /// <summary>Its own OS window, which a capture tool can pick up on its own.</summary>
+    Window,
+}
+
 /// <summary>Client preferences. Nothing about the game lives here: qwark owns all of that.</summary>
 public sealed class Settings
 {
@@ -50,8 +63,50 @@ public sealed class Settings
     [JsonPropertyName("inputScale")]
     public float InputScale { get; set; } = 1f;
 
+    /// <summary>The pad floats in a plain ImGui window inside the main window. Predates <see cref="InputWindowed"/>.</summary>
     [JsonPropertyName("inputFloating")]
     public bool InputFloating { get; set; }
+
+    /// <summary>The pad has its own OS window, so a capture tool can take it as a source of its own.</summary>
+    [JsonPropertyName("inputWindowed")]
+    public bool InputWindowed { get; set; }
+
+    /// <summary>Keeps the pad window above other windows. Only meaningful with <see cref="InputWindowed"/>.</summary>
+    [JsonPropertyName("inputWindowOnTop")]
+    public bool InputWindowOnTop { get; set; }
+
+    /// <summary>
+    /// Where the pad window was last left, in screen coordinates, and how big it was. Null until
+    /// the window has been opened once, which is what centres it on the main window the first time.
+    /// </summary>
+    [JsonPropertyName("inputWindowX")]
+    public int? InputWindowX { get; set; }
+
+    [JsonPropertyName("inputWindowY")]
+    public int? InputWindowY { get; set; }
+
+    [JsonPropertyName("inputWindowW")]
+    public int? InputWindowW { get; set; }
+
+    [JsonPropertyName("inputWindowH")]
+    public int? InputWindowH { get; set; }
+
+    /// <summary>
+    /// The three ways the pad can be shown, over the two flags an older settings file may hold:
+    /// a file that only knows "inputFloating" still opens on the floating pad.
+    /// </summary>
+    [JsonIgnore]
+    public InputDisplayMode InputMode
+    {
+        get => InputWindowed ? InputDisplayMode.Window
+            : InputFloating ? InputDisplayMode.Floating
+            : InputDisplayMode.Panel;
+        set
+        {
+            InputWindowed = value == InputDisplayMode.Window;
+            InputFloating = value == InputDisplayMode.Floating;
+        }
+    }
 
     /// <summary>Set once the first-run "allow through the firewall" offer has been shown, so it never nags again.</summary>
     [JsonPropertyName("firewallOffered")]

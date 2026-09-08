@@ -96,6 +96,89 @@ public class SettingsTests
         }
     }
 
+    [Fact]
+    public void TheInputDisplayStartsInThePanelAndTheModeMapsOntoTheTwoFlags()
+    {
+        var settings = new Settings();
+
+        Assert.Equal(InputDisplayMode.Panel, settings.InputMode);
+        Assert.False(settings.InputFloating);
+        Assert.False(settings.InputWindowed);
+        Assert.False(settings.InputWindowOnTop);
+        Assert.Null(settings.InputWindowX);
+        Assert.Null(settings.InputWindowY);
+        Assert.Null(settings.InputWindowW);
+        Assert.Null(settings.InputWindowH);
+
+        settings.InputMode = InputDisplayMode.Window;
+        Assert.True(settings.InputWindowed);
+        Assert.False(settings.InputFloating);
+
+        settings.InputMode = InputDisplayMode.Floating;
+        Assert.False(settings.InputWindowed);
+        Assert.True(settings.InputFloating);
+
+        settings.InputMode = InputDisplayMode.Panel;
+        Assert.False(settings.InputWindowed);
+        Assert.False(settings.InputFloating);
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripThePadWindowMode_OnTopFlagAndGeometry()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.InputMode = InputDisplayMode.Window;
+            saved.InputWindowOnTop = true;
+            saved.InputWindowX = -1720;
+            saved.InputWindowY = 240;
+            saved.InputWindowW = 800;
+            saved.InputWindowH = 558;
+            saved.Save();
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal(InputDisplayMode.Window, loaded.InputMode);
+            Assert.True(loaded.InputWindowed);
+            Assert.False(loaded.InputFloating);
+            Assert.True(loaded.InputWindowOnTop);
+            Assert.Equal(-1720, loaded.InputWindowX);
+            Assert.Equal(240, loaded.InputWindowY);
+            Assert.Equal(800, loaded.InputWindowW);
+            Assert.Equal(558, loaded.InputWindowH);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AFileThatOnlyKnowsInputFloatingStillOpensOnTheFloatingPad()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "old.settings.json");
+            File.WriteAllText(path, """{ "inputSkin": "DS3 Black", "inputFloating": true }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal(InputDisplayMode.Floating, loaded.InputMode);
+            Assert.False(loaded.InputWindowed);
+            Assert.False(loaded.InputWindowOnTop);
+            Assert.Null(loaded.InputWindowX);
+            Assert.Null(loaded.InputWindowW);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     private static string TempFolder()
     {
         var folder = Path.Combine(Path.GetTempPath(), "racman-settings-" + Guid.NewGuid().ToString("N"));

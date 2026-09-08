@@ -29,6 +29,7 @@ public sealed class AppWindow : GameWindow
     private readonly double _exitAfterSeconds;
 
     private ImGuiController? _controller;
+    private PadWindow? _pad;
     private int _panel;
     private double _elapsed;
 
@@ -77,6 +78,10 @@ public sealed class AppWindow : GameWindow
         bool light = _state.Settings.LightTheme;
         Ui.Light = light;
         Ui.Debug = _state.Settings.DebugInfo;
+
+        // ApplyStyle works on whatever ImGui context is current, and the pad window's was the last
+        // one set if it drew a frame.
+        _controller?.MakeCurrent();
         ImGuiController.ApplyStyle(light);
         if (light) GL.ClearColor(0.94f, 0.94f, 0.95f, 1f);
         else GL.ClearColor(0.07f, 0.07f, 0.09f, 1f);
@@ -112,6 +117,8 @@ public sealed class AppWindow : GameWindow
             GL.Clear(ClearBufferMask.ColorBufferBit);
             controller.Render();
             SwapBuffers();
+
+            SyncPadWindow((float)args.Time);
         }
         catch (Exception ex)
         {
@@ -119,6 +126,56 @@ public sealed class AppWindow : GameWindow
             Console.Error.WriteLine(ex);
             Close();
         }
+    }
+
+    /// <summary>
+    /// Opens, draws and closes the pad's own OS window, after the main window's frame and on the
+    /// same thread. The setting is the only switch: the panel ticks it, and the window's own close
+    /// button unticks it. Whatever happens, the main window's GL context is current on the way out.
+    /// </summary>
+    private void SyncPadWindow(float deltaSeconds)
+    {
+        var settings = _state.Settings;
+        bool wanted = settings.InputMode == InputDisplayMode.Window;
+        if (!wanted && _pad is null) return;
+
+        try
+        {
+            if (!wanted)
+            {
+                ClosePadWindow();
+                return;
+            }
+
+            _pad ??= PadWindow.Create(settings, this);
+            _pad.Render(_state, deltaSeconds);
+
+            if (!_pad.Closed) return;
+
+            settings.InputMode = InputDisplayMode.Panel;
+            settings.Save();
+            ClosePadWindow();
+        }
+        catch (Exception ex) when (ex is GLFWException or PlatformNotSupportedException
+                                       or InvalidOperationException)
+        {
+            // A second window is a nicety: the client keeps working with the pad back inside it,
+            // and the message says what went wrong rather than the window silently not appearing.
+            ClosePadWindow();
+            settings.InputMode = InputDisplayMode.Floating;
+            settings.Save();
+            _state.AddToast($"Pad window: {ex.Message}", ToastKind.Error);
+        }
+        finally
+        {
+            MakeCurrent();
+        }
+    }
+
+    private void ClosePadWindow()
+    {
+        _pad?.Dispose();
+        _pad = null;
     }
 
     private void DrawUi(ImGuiController controller)
@@ -288,6 +345,11 @@ public sealed class AppWindow : GameWindow
 
     protected override void OnUnload()
     {
+        // The pad window owns GL objects in its own context, so it goes first and puts this
+        // window's context back before the main controller deletes anything.
+        ClosePadWindow();
+        MakeCurrent();
+
         InputDisplayPanel.Dispose();
         _controller?.Dispose();
         _controller = null;

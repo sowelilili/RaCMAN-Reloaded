@@ -11,6 +11,11 @@ namespace RaCMAN.App;
 /// <summary>
 /// The in-repo Dear ImGui backend: font atlas upload, an OpenGL 3.3 core shader, streamed
 /// VAO/VBO/EBO, scissor, keyboard/mouse/text/scroll input, clipboard and DPI-aware scaling.
+///
+/// One controller owns one ImGui context and one set of GL objects, and takes any OpenTK window
+/// rather than the main <see cref="GameWindow"/>, so the input display can have a second one on
+/// its own OS window. Every entry point sets its own context current first: two controllers take
+/// turns within a frame, and cimgui's "current context" is a single global.
 /// </summary>
 public sealed class ImGuiController : IDisposable
 {
@@ -48,9 +53,9 @@ public sealed class ImGuiController : IDisposable
     private static GetClipboardDelegate? _getClipboard;
     private static SetClipboardDelegate? _setClipboard;
     private static IntPtr _clipboardBuffer;
-    private static GameWindow? _clipboardWindow;
+    private static NativeWindow? _clipboardWindow;
 
-    private readonly GameWindow _window;
+    private readonly NativeWindow _window;
 
     private int _vertexArray;
     private int _vertexBuffer;
@@ -65,7 +70,15 @@ public sealed class ImGuiController : IDisposable
     private float _scrollY;
     private bool _disposed;
 
-    public ImGuiController(GameWindow window)
+    /// <param name="window">
+    /// The window this controller draws into. Its GL context must be current: every GL object
+    /// below belongs to it.
+    /// </param>
+    /// <param name="withClipboard">
+    /// False for a controller that shows no text boxes. The clipboard hooks are process-wide in
+    /// cimgui's platform IO, so only the main window installs them.
+    /// </param>
+    public ImGuiController(NativeWindow window, bool withClipboard = true)
     {
         _window = window;
 
@@ -84,7 +97,7 @@ public sealed class ImGuiController : IDisposable
         io.BackendFlags |= ImGuiBackendFlags.RendererHasVtxOffset;
         io.ConfigFlags |= ImGuiConfigFlags.NavEnableKeyboard;
 
-        InstallClipboard(window);
+        if (withClipboard) InstallClipboard(window);
         CreateDeviceResources();
         ApplyStyle(Panels.Ui.Light);
 
@@ -94,8 +107,25 @@ public sealed class ImGuiController : IDisposable
 
     public IntPtr Context { get; }
 
-    private void OnTextInput(OpenTK.Windowing.Common.TextInputEventArgs args) =>
+    /// <summary>
+    /// Makes this controller's ImGui context the current one. Anything that calls into ImGui
+    /// outside <see cref="Update"/> and <see cref="Render"/> - applying the style, drawing a
+    /// panel - has to do this first once a second controller exists.
+    /// </summary>
+    public void MakeCurrent() => ImGui.SetCurrentContext(Context);
+
+    /// <summary>
+    /// Typed characters go to this controller's context, not to whichever one happens to be
+    /// current: GLFW dispatches the callback from inside a poll, which can land in either
+    /// window's slice of the frame.
+    /// </summary>
+    private void OnTextInput(OpenTK.Windowing.Common.TextInputEventArgs args)
+    {
+        var previous = ImGui.GetCurrentContext();
+        ImGui.SetCurrentContext(Context);
         ImGui.GetIO().AddInputCharacter((uint)args.Unicode);
+        ImGui.SetCurrentContext(previous);
+    }
 
     private void OnMouseWheel(OpenTK.Windowing.Common.MouseWheelEventArgs args)
     {
@@ -103,7 +133,7 @@ public sealed class ImGuiController : IDisposable
         _scrollY += args.OffsetY;
     }
 
-    private static void InstallClipboard(GameWindow window)
+    private static void InstallClipboard(NativeWindow window)
     {
         _clipboardWindow = window;
         _getClipboard = _ =>
@@ -327,6 +357,7 @@ public sealed class ImGuiController : IDisposable
 
     public void Update(float deltaSeconds)
     {
+        ImGui.SetCurrentContext(Context);
         var io = ImGui.GetIO();
 
         var client = _window.ClientSize;
@@ -370,6 +401,7 @@ public sealed class ImGuiController : IDisposable
 
     public void Render()
     {
+        ImGui.SetCurrentContext(Context);
         ImGui.Render();
         RenderDrawData(ImGui.GetDrawData());
     }
