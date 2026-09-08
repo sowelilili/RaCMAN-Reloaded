@@ -128,9 +128,47 @@ public static class GamePanel
                 }
                 ImGui.PopID();
             }
+
+            if (Ui.Debug) DrawRawReadouts(state, describe);
         }
 
         ImGui.EndDisabled();
+    }
+
+    /// <summary>
+    /// Every readout the game reports, as the console sends it, for the "show debug information"
+    /// switch. The everyday page shows only the editable values; the read-only readings (the
+    /// savefile helper byte, update flags, frame counters) are wire detail nobody needs while playing.
+    /// </summary>
+    private static void DrawRawReadouts(AppState state, DescribeResult describe)
+    {
+        var session = state.Session;
+        if (describe.Readouts.Length == 0) return;
+
+        if (!ImGui.CollapsingHeader("Readouts (debug)")) return;
+
+        if (!ImGui.BeginTable("raw-readouts", 3,
+            ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingFixedFit))
+            return;
+
+        ImGui.TableSetupColumn("#");
+        ImGui.TableSetupColumn("Readout");
+        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableHeadersRow();
+
+        for (int i = 0; i < describe.Readouts.Length; i++)
+        {
+            ImGui.TableNextRow();
+            ImGui.TableNextColumn();
+            ImGui.TextColored(Ui.Grey, i.ToString());
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(describe.Readouts[i]);
+            ImGui.TableNextColumn();
+            uint value = i < session.Readout.Length ? session.Readout[i] : 0u;
+            ImGui.TextUnformatted($"{value}  (0x{value:X8})");
+        }
+
+        ImGui.EndTable();
     }
 
     // ---------------------------------------------------------------- values
