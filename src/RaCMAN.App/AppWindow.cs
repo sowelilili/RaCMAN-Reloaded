@@ -115,8 +115,13 @@ public sealed class AppWindow : GameWindow
 
             if (ImGui.BeginChild("##nav", new Vector2(190, -1), ImGuiChildFlags.Borders))
             {
+                // If the current panel is one the running game doesn't support, fall back to Game.
+                if (!PanelVisible(_panel)) _panel = 1;
+
                 for (int i = 0; i < PanelNames.Length; i++)
                 {
+                    if (!PanelVisible(i)) continue;
+
                     if (ImGui.Selectable(PanelNames[i], _panel == i, ImGuiSelectableFlags.None, new Vector2(0, 26)))
                     {
                         _panel = i;
@@ -148,6 +153,14 @@ public sealed class AppWindow : GameWindow
         FirewallModal.Draw(_state);
         DrawToasts();
     }
+
+    /// <summary>Hide panels the running game has no data for: Unlocks (index 3) and Level flags (index 4).</summary>
+    private bool PanelVisible(int panel) => panel switch
+    {
+        3 => !_state.UnlocksUnsupported,
+        4 => !_state.LevelFlagsUnsupported,
+        _ => true,
+    };
 
     private void DrawHeader()
     {

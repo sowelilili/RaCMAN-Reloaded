@@ -111,6 +111,9 @@ public sealed class AppState : IDisposable
     /// <summary>Set once when UNLOCK_LIST answers UNSUPPORTED, so the toast is not repeated.</summary>
     public bool UnlocksUnsupported { get; private set; }
 
+    /// <summary>Set when LEVELFLAGS_GET answers UNSUPPORTED (e.g. Deadlocked), so the nav can hide it.</summary>
+    public bool LevelFlagsUnsupported { get; private set; }
+
     public IReadOnlyList<LocalMod> LocalMods { get; private set; } = Array.Empty<LocalMod>();
 
     public Dictionary<byte, string[]> EnumOptions { get; } = new();
@@ -239,12 +242,11 @@ public sealed class AppState : IDisposable
             }
             else if (session.State == SessionState.Ingame)
             {
-                // Back in game: the lists are readable again, so fetch them once. Positions are
-                // left to the planet check below, which fires because _lastPlanet is 0xFF.
-                RefreshUnlocks(quiet: true);
-                RefreshWatches();
-                RefreshFreezes();
-                RefreshPatches();
+                // Back in game: re-read everything. DESCRIBE especially, because the fetch on the
+                // game-change tick happened during BOOTING, when qwark still held the previous
+                // game's feature table; only at INGAME is the table the running game's. Without
+                // this a game switch leaves the old game's cheats on screen.
+                RefreshAll();
             }
         }
 
@@ -299,6 +301,7 @@ public sealed class AppState : IDisposable
         Positions = PositionList.Empty;
         Unlocks = UnlockList.Empty;
         UnlocksUnsupported = false;
+        LevelFlagsUnsupported = false;
         Panels.PanelState.ClearGameData();
     }
 
@@ -340,6 +343,32 @@ public sealed class AppState : IDisposable
         RefreshPatches();
         RefreshMods();
         RefreshCombos();
+        RefreshLevelFlagsSupport();
+    }
+
+    /// <summary>
+    /// Probes LEVELFLAGS_GET once so the nav can hide the Level flags panel for a game that has no
+    /// flag table (Deadlocked). UNSUPPORTED means hide; anything else (bytes, or BAD_ARG for a
+    /// placeholder planet) means the game has them.
+    /// </summary>
+    public void RefreshLevelFlagsSupport()
+    {
+        if (!Connected) return;
+
+        byte planet = Session.CurrentPlanet;
+        Run(async () =>
+        {
+            try
+            {
+                await Client.LevelFlagsGetAsync(planet).ConfigureAwait(false);
+                Post(() => LevelFlagsUnsupported = false);
+            }
+            catch (QwarkStatusException ex)
+            {
+                bool unsupported = ex.Status == Status.Unsupported;
+                Post(() => LevelFlagsUnsupported = unsupported);
+            }
+        });
     }
 
     public void RefreshPositions()
@@ -456,7 +485,7 @@ public sealed class AppState : IDisposable
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
         string tick = session.Tick > 0 ? $"tick {session.Tick}" : "tick -";
-        return $"{session.State} | {title} | {session.Game} | generation {session.Generation} | {tick} | qwark v{session.QwarkVersion} protocol {session.ProtocolVersion}";
+        return $"{session.State} | {title} | {session.Game.DisplayName()} | generation {session.Generation} | {tick} | qwark v{session.QwarkVersion} protocol {session.ProtocolVersion}";
     }
 
     public void Dispose()

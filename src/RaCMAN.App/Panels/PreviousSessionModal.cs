@@ -91,10 +91,8 @@ public static class PreviousSessionModal
                          | (_freezes ? PreviousCategories.Freezes : 0)
                          | (_patches ? PreviousCategories.Patches : 0);
 
-        ImGui.BeginDisabled(categories == PreviousCategories.None);
-        if (ImGui.Button("Reapply selected"))
+        void Reapply(PreviousCategories wanted)
         {
-            var wanted = categories;
             state.Run(async () =>
             {
                 await state.Client.PreviousReapplyAsync(wanted);
@@ -109,9 +107,16 @@ public static class PreviousSessionModal
             ImGui.CloseCurrentPopup();
         }
 
+        ImGui.BeginDisabled(categories == PreviousCategories.None);
+        if (ImGui.Button("Reapply selected")) Reapply(categories);
         ImGui.EndDisabled();
-        ImGui.SameLine();
 
+        ImGui.SameLine();
+        const PreviousCategories all = PreviousCategories.Toggles | PreviousCategories.Mods
+                                       | PreviousCategories.Freezes | PreviousCategories.Patches;
+        if (ImGui.Button("Reapply all")) Reapply(all);
+
+        ImGui.SameLine();
         if (ImGui.Button("Dismiss"))
         {
             state.Run(() => state.Client.PreviousDismissAsync(), "Previous session dismissed");

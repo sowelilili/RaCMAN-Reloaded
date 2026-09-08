@@ -115,6 +115,19 @@ public enum GameId : byte
     Rac4 = 4,
 }
 
+public static class GameIdExtensions
+{
+    /// <summary>The name to show a human: "RaC1", "Deadlocked", etc., not the C# "Rac1".</summary>
+    public static string DisplayName(this GameId game) => game switch
+    {
+        GameId.Rac1 => "RaC1",
+        GameId.Rac2 => "RaC2",
+        GameId.Rac3 => "RaC3",
+        GameId.Rac4 => "Deadlocked",
+        _ => "no game",
+    };
+}
+
 public enum FeatureKind : byte
 {
     Toggle = 0,

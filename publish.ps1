@@ -133,6 +133,24 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
         $from = Copy-ModFolder $name $modsDir
         if ($from) { Write-Host "  mods\$name  ($from)" }
     }
+
+    Remove-LuaMods $modsDir
+}
+
+<#
+    Drops any mod whose patch.txt has an "automation:" line. Those mods drive a Lua script, and
+    Lua is not in this release, so they would not work: better to ship without them than to ship
+    a checkbox that does nothing.
+#>
+function Remove-LuaMods([string]$modsDir) {
+    Get-ChildItem -Path $modsDir -Recurse -Filter 'patch.txt' -File -ErrorAction SilentlyContinue | ForEach-Object {
+        if (Select-String -Path $_.FullName -Pattern '^\s*automation\s*:' -Quiet) {
+            $modDir = $_.Directory.FullName
+            $label = (Split-Path -Leaf (Split-Path -Parent $modDir)) + '\' + (Split-Path -Leaf $modDir)
+            Remove-Item -Recurse -Force $modDir
+            Write-Host "  mods: excluded $label (needs Lua, which this release does not run)" -ForegroundColor Yellow
+        }
+    }
 }
 
 function New-Zip([string]$stageDir, [string]$zipPath) {

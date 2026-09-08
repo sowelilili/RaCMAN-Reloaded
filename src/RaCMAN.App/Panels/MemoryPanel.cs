@@ -66,15 +66,16 @@ public static class MemoryPanel
 
         if (ImGui.BeginTabBar("memory-tabs"))
         {
-            if (ImGui.BeginTabItem("Viewer"))
-            {
-                DrawViewer(state, enabled);
-                ImGui.EndTabItem();
-            }
-
+            // Watches is the tab people live in, so it is first and opens selected by default.
             if (ImGui.BeginTabItem("Watches"))
             {
                 DrawWatches(state, enabled);
+                ImGui.EndTabItem();
+            }
+
+            if (ImGui.BeginTabItem("Viewer"))
+            {
+                DrawViewer(state, enabled);
                 ImGui.EndTabItem();
             }
 
