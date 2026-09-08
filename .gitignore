@@ -6,3 +6,4 @@ imgui.ini
 
 # Local build-and-run staging (run.ps1)
 run/
+.claude/
