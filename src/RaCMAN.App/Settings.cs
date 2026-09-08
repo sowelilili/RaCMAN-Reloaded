@@ -165,4 +165,43 @@ public sealed class WatchlistStore
             yield return System.IO.Path.GetFileName(file);
         }
     }
+
+    /// <summary>
+    /// The name behind a file name from <see cref="ListFor"/>: null for the title's default list,
+    /// the text between the title and ".json" for a named one. False when the file is not this
+    /// title's at all, which <see cref="ListFor"/> can hand over because its pattern is a prefix
+    /// match: "NPEA00386X.json" is another title's file, not a list named "X".
+    /// </summary>
+    public static bool TryGetName(string titleId, string fileName, out string? name)
+    {
+        name = null;
+        if (string.IsNullOrEmpty(titleId) || string.IsNullOrEmpty(fileName)) return false;
+
+        var stem = System.IO.Path.GetFileName(fileName);
+        if (!stem.EndsWith(".json", StringComparison.OrdinalIgnoreCase)) return false;
+        stem = stem[..^".json".Length];
+
+        if (string.Equals(stem, titleId, StringComparison.OrdinalIgnoreCase)) return true;
+
+        if (stem.Length > titleId.Length + 1 && stem.StartsWith(titleId + ".", StringComparison.OrdinalIgnoreCase))
+        {
+            name = stem[(titleId.Length + 1)..];
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Removes one watchlist file. False when there was nothing to remove; an IO error is thrown
+    /// rather than swallowed, because a delete that quietly did nothing is worse than a message.
+    /// </summary>
+    public bool Delete(string titleId, string? name = null)
+    {
+        var path = FileFor(titleId, name);
+        if (!File.Exists(path)) return false;
+
+        File.Delete(path);
+        return true;
+    }
 }

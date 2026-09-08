@@ -10,6 +10,9 @@ public static class ModsPanel
     private static ZipCandidate? _pendingZip;
     private static string _selected = string.Empty;
 
+    /// <summary>True while a native file dialog is up, so Browse cannot open a second one.</summary>
+    private static bool _dialogOpen;
+
     public static void Draw(AppState state)
     {
         Ui.Heading("Mods");
@@ -194,11 +197,18 @@ public static class ModsPanel
 
         ImGui.Text($"Folder: {mod.DirName}");
         ImGui.Text($"Version: {(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version)}    Author: {(string.IsNullOrEmpty(mod.Author) ? "-" : mod.Author)}");
-        ImGui.Text($"Patch words: {mod.PatchWordCount}    Code caves: {mod.BinFiles.Count}    CRC32: {Crc32.ToSumText(mod.Hash)}");
 
-        if (console.TryGetValue(mod.DirName, out var remote))
+        // Word counts, code caves and checksums say nothing to someone who only wants the mod on;
+        // they are what you look at when a mod misbehaves, which is what the debug switch is for.
+        // The console column already says whether the console's copy is stale.
+        if (Ui.Debug)
         {
-            ImGui.Text($"Console hash: {Crc32.ToSumText(remote.Hash)}{(remote.Hash == mod.Hash ? " (current)" : " (differs, will re-upload)")}");
+            ImGui.Text($"Patch words: {mod.PatchWordCount}    Code caves: {mod.BinFiles.Count}    CRC32: {Crc32.ToSumText(mod.Hash)}");
+
+            if (console.TryGetValue(mod.DirName, out var remote))
+            {
+                ImGui.Text($"Console hash: {Crc32.ToSumText(remote.Hash)}{(remote.Hash == mod.Hash ? " (current)" : " (differs, will re-upload)")}");
+            }
         }
 
         if (mod.NeedsLua) Ui.Warning("This mod has a Lua automation; only its patches are applied.");
@@ -209,6 +219,11 @@ public static class ModsPanel
             ImGui.Spacing();
             ImGui.TextWrapped(mod.Description);
         }
+
+        // Every mod in this table is installed on this PC, so its description is the one already
+        // shown above, read out of the local patch.txt. MOD_INFO only answers what the console
+        // parsed out of its own copy: a wire check, not something to offer while playing.
+        if (!Ui.Debug) return;
 
         ImGui.Spacing();
         ImGui.BeginDisabled(!state.Connected);
@@ -221,41 +236,31 @@ public static class ModsPanel
         ImGui.EndDisabled();
     }
 
+    /// <summary>
+    /// The quotes a file manager's "copy as path" leaves around a path, and the spaces around
+    /// them, are not part of the path. An empty result means nothing was picked, which is the one
+    /// case the install must refuse: ZipFile would throw ArgumentException at it.
+    /// </summary>
+    public static string NormalizeZipPath(string? text) => (text ?? string.Empty).Trim().Trim('"').Trim();
+
     private static void DrawZipInstall(AppState state, string title)
     {
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Install from ZIP");
-        Ui.Hint("Paste a path: a portable file dialog is a dependency this client does not carry.");
 
-        ImGui.SetNextItemWidth(-160);
+        ImGui.SetNextItemWidth(-250);
         Ui.InputTextWithHint("##zip", "C:\\downloads\\some-mod.zip", ref _zipPath, 512);
-        ImGui.SameLine();
-        if (ImGui.Button("Install ZIP"))
-        {
-            state.Settings.LastZipPath = _zipPath;
-            state.Settings.Save();
-            try
-            {
-                _pendingZip?.Dispose();
-                _pendingZip = state.Mods.OpenZip(_zipPath.Trim('"'), title);
 
-                if (!_pendingZip.NeedsConfirmation)
-                {
-                    var installed = state.Mods.CommitZip(_pendingZip, title);
-                    state.AddToast($"{installed.Name} {installed.Version} installed", ToastKind.Success);
-                    _pendingZip.Dispose();
-                    _pendingZip = null;
-                    state.RescanLocalMods();
-                }
-            }
-            catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException)
-            {
-                state.AddToast($"ZIP install failed: {ex.Message}", ToastKind.Error);
-                _pendingZip?.Dispose();
-                _pendingZip = null;
-            }
-        }
+        ImGui.SameLine();
+        ImGui.BeginDisabled(!FileDialog.IsSupported || _dialogOpen);
+        if (ImGui.Button("Browse...")) Browse(state, title);
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        if (ImGui.Button("Install ZIP")) InstallZip(state, title);
+
+        if (!FileDialog.IsSupported) Ui.Hint("No file dialog available; paste the path.");
 
         if (_pendingZip is null) return;
 
@@ -299,5 +304,87 @@ public static class ModsPanel
         }
 
         ImGui.EndPopup();
+    }
+
+    /// <summary>
+    /// Extracts what the path box points at, asking first when the mod is already installed. Both
+    /// the Install button and a successful Browse land here, so picking a file installs it.
+    /// </summary>
+    private static void InstallZip(AppState state, string title)
+    {
+        string path = NormalizeZipPath(_zipPath);
+        if (path.Length == 0)
+        {
+            state.AddToast("Pick a ZIP file first", ToastKind.Error);
+            return;
+        }
+
+        state.Settings.LastZipPath = _zipPath;
+        state.Settings.Save();
+
+        try
+        {
+            _pendingZip?.Dispose();
+            _pendingZip = state.Mods.OpenZip(path, title);
+
+            if (!_pendingZip.NeedsConfirmation)
+            {
+                var installed = state.Mods.CommitZip(_pendingZip, title);
+                state.AddToast($"{installed.Name} {installed.Version} installed", ToastKind.Success);
+                _pendingZip.Dispose();
+                _pendingZip = null;
+                state.RescanLocalMods();
+            }
+        }
+        // ArgumentException and NotSupportedException are what Path and ZipFile throw at a path
+        // that is not one; they used to reach the top of the render loop and close the window.
+        catch (Exception ex) when (ex is IOException or InvalidDataException or UnauthorizedAccessException
+                                       or ArgumentException or NotSupportedException)
+        {
+            state.AddToast($"ZIP install failed: {ex.Message}", ToastKind.Error);
+            _pendingZip?.Dispose();
+            _pendingZip = null;
+        }
+    }
+
+    /// <summary>
+    /// Opens the native picker. The dialog runs off the render thread and the answer comes back
+    /// through <see cref="AppState.Post"/>, so the path box and the install only ever move on the
+    /// render thread; <see cref="_dialogOpen"/> keeps a second dialog behind the first.
+    /// </summary>
+    private static void Browse(AppState state, string title)
+    {
+        if (!FileDialog.IsSupported)
+        {
+            state.AddToast("No file dialog available; paste the path", ToastKind.Error);
+            return;
+        }
+
+        _dialogOpen = true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                string? picked = await FileDialog.OpenAsync("Install a mod from a ZIP", "ZIP files", "zip")
+                    .ConfigureAwait(false);
+
+                state.Post(() =>
+                {
+                    _dialogOpen = false;
+                    if (picked is null) return;
+
+                    _zipPath = picked;
+                    InstallZip(state, title);
+                });
+            }
+            catch (Exception ex)
+            {
+                state.Post(() =>
+                {
+                    _dialogOpen = false;
+                    state.AddToast($"File dialog failed: {ex.Message}", ToastKind.Error);
+                });
+            }
+        });
     }
 }
