@@ -10,6 +10,10 @@ namespace RaCMAN.Protocol.Tests;
 /// unlocks to Collectables, QE and debug controls to Debug, skins/armour to Cosmetics, and everything
 /// else left where qwark's DESCRIBE group put it. The file is keyed by game, not by title id, because
 /// BCES01503 hosts RaC1, RaC2 and RaC3 under one title id.
+/// <para>
+/// Three names are reserved for the panels that place them: "Values" and "Options" at the top of the
+/// Game page, "Unlocks" on the Unlocks panel. None of them may reach a side sub-page or the tab order.
+/// </para>
 /// </summary>
 public class GameLayoutTests
 {
@@ -74,6 +78,25 @@ public class GameLayoutTests
     }
 
     [Fact]
+    public void Rac1ShootingSkillPointsAreAManipAndGoodiesIsAnOption()
+    {
+        // The shooting pair sets up (or clears) an in-run strategy, so it sits with the manips; the
+        // plain unlock/reset pair stays with the other collectables.
+        var setup = Make(24, FeatureKind.Action, 2, "Setup shooting skill points");
+        var reset = Make(25, FeatureKind.Action, 2, "Reset shooting skill points");
+        var skill = Make(22, FeatureKind.Action, 2, "Unlock all skill points");
+        var goldBolts = Make(20, FeatureKind.Action, 2, "Unlock all gold bolts");
+        var goodies = Make(5, FeatureKind.Toggle, 0, "Goodies menu");
+        var d = Describe(GameId.Rac1, Rac1Groups, setup, reset, skill, goldBolts, goodies);
+
+        Assert.Equal("Manips", GameLayout.SectionFor(DiscTitle, GameId.Rac1, setup, d));
+        Assert.Equal("Manips", GameLayout.SectionFor(DiscTitle, GameId.Rac1, reset, d));
+        Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, skill, d));
+        Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, goldBolts, d));
+        Assert.Equal(GameLayout.OptionsSection, GameLayout.SectionFor(DiscTitle, GameId.Rac1, goodies, d));
+    }
+
+    [Fact]
     public void Rac2ManipsAndDebugRegroup()
     {
         var debugMode = Make(5, FeatureKind.Toggle, 0, "Enable debug mode");
@@ -114,9 +137,23 @@ public class GameLayoutTests
         Assert.Equal("Savefile", GameLayout.SectionFor("NPEA00387", GameId.Rac3, trophy, d));
         Assert.Equal("Collectables", GameLayout.SectionFor("NPEA00387", GameId.Rac3, titanium, d));
         Assert.Equal("Collectables", GameLayout.SectionFor("NPEA00387", GameId.Rac3, resetTitanium, d));
-        Assert.Equal("Player", GameLayout.SectionFor("NPEA00387", GameId.Rac3, upgrade, d));
-        Assert.Equal("Player", GameLayout.SectionFor("NPEA00387", GameId.Rac3, downgrade, d));
+
+        // The weapon-level pair rewrites the unlock table, so the Unlocks panel draws it, not the Game page.
+        Assert.Equal(GameLayout.UnlocksSection, GameLayout.SectionFor("NPEA00387", GameId.Rac3, upgrade, d));
+        Assert.Equal(GameLayout.UnlocksSection, GameLayout.SectionFor("NPEA00387", GameId.Rac3, downgrade, d));
         Assert.Equal("Manips", GameLayout.SectionFor("NPEA00387", GameId.Rac3, ngPlus, d));
+    }
+
+    [Fact]
+    public void Rac3QuickSelectPauseIsAnOption()
+    {
+        // A save-file switch rather than a run tool: it belongs beside the value table, not in Cheats.
+        var quickSelect = Make(6, FeatureKind.Toggle, 0, "Quick-select pause");
+        var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");
+        var d = Describe(GameId.Rac3, Rac3Groups, quickSelect, fastLoads);
+
+        Assert.Equal(GameLayout.OptionsSection, GameLayout.SectionFor("NPEA00387", GameId.Rac3, quickSelect, d));
+        Assert.Equal("Cheats", GameLayout.SectionFor("NPEA00387", GameId.Rac3, fastLoads, d));
     }
 
     [Fact]
@@ -135,7 +172,7 @@ public class GameLayoutTests
     }
 
     [Fact]
-    public void DeadlockedSkinMovesToCosmeticsAndPlanetsToManips()
+    public void DeadlockedSkinMovesToCosmeticsAndPlanetsToPlayer()
     {
         var skin = Make(10, FeatureKind.Enum, 1, "Skin");
         var planets = Make(11, FeatureKind.Action, 2, "Unlock all planets");
@@ -143,7 +180,9 @@ public class GameLayoutTests
         var d = Describe(GameId.Rac4, Rac4Groups, skin, planets, actTune);
 
         Assert.Equal("Cosmetics", GameLayout.SectionFor("NPEA00423", GameId.Rac4, skin, d));
-        Assert.Equal("Manips", GameLayout.SectionFor("NPEA00423", GameId.Rac4, planets, d));
+
+        // Unlocking the planets is everyday progress, not a manip; only the act tune stays there.
+        Assert.Equal(GameLayout.PlayerSection, GameLayout.SectionFor("NPEA00423", GameId.Rac4, planets, d));
         Assert.Equal("Manips", GameLayout.SectionFor("NPEA00423", GameId.Rac4, actTune, d));
 
         // Deadlocked has no Cosmetics group from qwark; the move creates the section, in configured order.
@@ -160,6 +199,59 @@ public class GameLayoutTests
         Assert.DoesNotContain("Cheats", side);
         Assert.DoesNotContain("Player", side);
         Assert.DoesNotContain("Savefile", side);
+    }
+
+    [Fact]
+    public void TheReservedSectionsAreNeverSidePagesAndNeverInTheTabOrder()
+    {
+        // A panel places each of these itself: Values and Options at the top of the Game page,
+        // Unlocks on the Unlocks panel. None may become a sub-page or a stacked header.
+        Assert.True(GameLayout.IsReserved(GameLayout.ValuesSection));
+        Assert.True(GameLayout.IsReserved(GameLayout.OptionsSection));
+        Assert.True(GameLayout.IsReserved(GameLayout.UnlocksSection));
+        Assert.False(GameLayout.IsReserved(GameLayout.PlayerSection));
+
+        foreach (var reserved in new[] { GameLayout.ValuesSection, GameLayout.OptionsSection, GameLayout.UnlocksSection })
+        {
+            Assert.DoesNotContain(reserved, GameLayout.SideSections);
+        }
+
+        foreach (var game in new[] { GameId.Rac1, GameId.Rac2, GameId.Rac3, GameId.Rac4 })
+        {
+            var order = GameLayout.TabOrder(string.Empty, game,
+                new[] { GameLayout.ValuesSection, GameLayout.OptionsSection, GameLayout.UnlocksSection, "Cheats" });
+
+            Assert.DoesNotContain(GameLayout.ValuesSection, order);
+            Assert.DoesNotContain(GameLayout.OptionsSection, order);
+            Assert.DoesNotContain(GameLayout.UnlocksSection, order);
+            Assert.Contains(GameLayout.PlayerSection, order);
+        }
+    }
+
+    [Fact]
+    public void AFileThatListsAReservedSectionAsASidePageIsIgnored()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-reserved-side.json");
+        File.WriteAllText(path, """
+        {
+          "sideSections": ["Options", "Unlocks", "Values", "Debug"],
+          "games": {
+            "rac2": { "tabOrder": ["Options", "Cheats", "Unlocks"], "moves": {} }
+          }
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+            Assert.Equal(new[] { "Debug" }, GameLayout.SideSections);
+            Assert.Equal(new[] { "Cheats" }, GameLayout.TabOrder("NPEA00386", GameId.Rac2, Array.Empty<string>()));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
     }
 
     [Fact]
@@ -220,12 +312,14 @@ public class GameLayoutTests
     }
 
     [Fact]
-    public void TabOrderStartsWithTheEverydaySectionsAndNeverIncludesValues()
+    public void TabOrderStartsWithTheEverydaySectionsAndNeverIncludesTheReservedOnes()
     {
         var order = GameLayout.TabOrder("NPEA00386", GameId.Rac2,
-            new[] { GameLayout.ValuesSection, "Extra", "Cheats" });
+            new[] { GameLayout.ValuesSection, GameLayout.OptionsSection, GameLayout.UnlocksSection, "Extra", "Cheats" });
 
         Assert.DoesNotContain(GameLayout.ValuesSection, order);
+        Assert.DoesNotContain(GameLayout.OptionsSection, order);
+        Assert.DoesNotContain(GameLayout.UnlocksSection, order);
         Assert.Equal(new[] { "Cheats", "Player", "Savefile" }, order.Take(3));
         Assert.Equal("Extra", order[^1]);            // an unlisted tab is appended, not dropped
     }

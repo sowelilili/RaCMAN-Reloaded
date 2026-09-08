@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
@@ -6,6 +7,10 @@ namespace RaCMAN.App.Panels;
 /// <summary>
 /// UNLOCK_LIST rendered as one tab per category, with a column for each field the entry's
 /// bitmask says is meaningful. Every edit is one UNLOCK_SET; the list is then re-read.
+///
+/// Above the tabs sit the features the layout moved to <see cref="GameLayout.UnlocksSection"/>:
+/// console-side actions that rewrite the whole table (UYA's weapon-level pair), which belong with
+/// the list they change rather than on the Game page.
 ///
 /// Refresh policy: the whole list is re-read once a second while the panel is open, and again
 /// straight after any UNLOCK_SET. Re-reading everything is simpler than patching one row back
@@ -45,6 +50,8 @@ public static class UnlocksPanel
     public static void Draw(AppState state)
     {
         Ui.Heading("Unlocks");
+
+        DrawSectionActions(state);
 
         // First frame on the panel: load the list.
         if (!_opened)
@@ -119,6 +126,49 @@ public static class UnlocksPanel
         }
 
         ImGui.EndTabBar();
+    }
+
+    /// <summary>
+    /// The features the layout sent to the "Unlocks" section, drawn the way the Game page draws
+    /// actions: equal-width buttons, two to a row. Each is one FEATURE_TRIGGER followed by a
+    /// re-read, the same shape as the bulk owned buttons inside a category. Only actions are
+    /// expected here, so anything else the layout moved in is left alone.
+    /// </summary>
+    private static void DrawSectionActions(AppState state)
+    {
+        var actions = GamePanel.FeaturesInSection(state, GameLayout.UnlocksSection)
+            .Where(f => f.Kind == FeatureKind.Action)
+            .ToArray();
+
+        if (actions.Length == 0) return;
+
+        ImGui.BeginDisabled(!state.Ingame);
+
+        int columns = actions.Length > 1 ? 2 : 1;
+        if (ImGui.BeginTable("unlock-actions", columns, ImGuiTableFlags.SizingStretchSame))
+        {
+            foreach (var feature in actions)
+            {
+                ImGui.TableNextColumn();
+                ImGui.PushID(feature.Id);
+                if (ImGui.Button(feature.Label, new Vector2(-1, 0)))
+                {
+                    byte id = feature.Id;
+                    state.Run(async () =>
+                    {
+                        await state.Client.FeatureTriggerAsync(id).ConfigureAwait(false);
+                        state.Post(() => state.RefreshUnlocks());
+                    });
+                }
+
+                ImGui.PopID();
+            }
+
+            ImGui.EndTable();
+        }
+
+        ImGui.EndDisabled();
+        ImGui.Spacing();
     }
 
     private static void DrawCategory(AppState state, Unlock[] rows, bool enabled)

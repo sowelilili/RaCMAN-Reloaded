@@ -50,6 +50,32 @@ public static class GameLayout
     /// <summary>The pinned section at the top of the Game page, rendered as the player-value table.</summary>
     public const string ValuesSection = "Values";
 
+    /// <summary>
+    /// The per-file switches that ride in a column to the right of the value table, since that
+    /// table never needs the whole width. Placed by the Game page itself, so it is never a side
+    /// sub-page, never a stacked header and never in the tab order.
+    /// </summary>
+    public const string OptionsSection = "Options";
+
+    /// <summary>
+    /// Features the Unlocks panel draws instead of the Game page: whole-table actions that belong
+    /// with the unlock list they rewrite. The Game page ignores this section entirely.
+    /// </summary>
+    public const string UnlocksSection = "Unlocks";
+
+    /// <summary>
+    /// The section the position save/load pair is appended to. An ordinary stacked section in every
+    /// other way; the Game page creates it when a layout leaves the game without one.
+    /// </summary>
+    public const string PlayerSection = "Player";
+
+    /// <summary>
+    /// The section names the client owns. A panel decides where each of these is drawn, so none of
+    /// them may become a side sub-page or a stacked header however the layout file is written.
+    /// </summary>
+    public static bool IsReserved(string section) =>
+        section is ValuesSection or OptionsSection or UnlocksSection;
+
     /// <summary>What counts as a side sub-page when the file does not say.</summary>
     private static readonly string[] DefaultSideSections = { "Manips", "Collectables", "Cosmetics", "Debug" };
 
@@ -109,6 +135,11 @@ public static class GameLayout
         var games = new Dictionary<string, TitleLayout>(StringComparer.OrdinalIgnoreCase);
         foreach (var (key, layout) in file.Games) games[key] = layout;
         file.Games = games;
+
+        // A reserved name listed as a side section would otherwise turn a panel-owned section into
+        // a sub-page; drop it here so every reader of SideSections sees the same clean list.
+        if (file.SideSections is { } side) file.SideSections = side.Where(s => !IsReserved(s)).ToArray();
+
         return file;
     }
 
@@ -135,7 +166,10 @@ public static class GameLayout
         return feature.Kind == FeatureKind.Value ? ValuesSection : describe.GroupName(feature.Group);
     }
 
-    /// <summary>The section order for a game: the configured order first, then any other used sections. Values is never listed.</summary>
+    /// <summary>
+    /// The section order for a game: the configured order first, then any other used sections. The
+    /// reserved sections are never listed, since a panel places each of them itself.
+    /// </summary>
     public static IReadOnlyList<string> TabOrder(string titleId, GameId game, IEnumerable<string> used)
     {
         var order = new List<string>();
@@ -144,13 +178,13 @@ public static class GameLayout
         {
             foreach (var tab in layout.TabOrder)
             {
-                if (tab != ValuesSection && !order.Contains(tab)) order.Add(tab);
+                if (!IsReserved(tab) && !order.Contains(tab)) order.Add(tab);
             }
         }
 
         foreach (var tab in used)
         {
-            if (tab != ValuesSection && !order.Contains(tab)) order.Add(tab);
+            if (!IsReserved(tab) && !order.Contains(tab)) order.Add(tab);
         }
 
         return order;
