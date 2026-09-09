@@ -1,14 +1,19 @@
 namespace RaCMAN.Protocol;
 
 /// <summary>
-/// One run event as qwark detected it, section 5.11 of PROTOCOL.md (revision 1.4). 16 bytes.
+/// One run event as qwark detected it, section 5.11 of PROTOCOL.md (revision 1.5). 16 bytes.
 /// <para>
 /// qwark emits these unconditionally: it watches game memory, says what happened and keeps no
 /// timer and no settings. Deciding what a SPLIT means, and whether it reaches LiveSplit at all,
 /// is the client's job.
 /// </para>
+/// <para>
+/// <see cref="TimeMs"/> replaced revision 1.4's tick count: milliseconds since the module started,
+/// wrapping every 49 days. It is what the client subtracts to measure a load or a pause, so the
+/// arithmetic is unsigned and a wrap comes out right on its own.
+/// </para>
 /// </summary>
-public readonly record struct AutosplitEvent(uint Seq, uint Tick, AutosplitKind Kind, byte Code, uint Arg)
+public readonly record struct AutosplitEvent(uint Seq, uint TimeMs, AutosplitKind Kind, byte Code, uint Arg)
 {
     public const int Size = 16;
 
@@ -21,6 +26,13 @@ public readonly record struct AutosplitEvent(uint Seq, uint Tick, AutosplitKind 
     /// <summary>True when this is the "planet entered" SPLIT the planet route applies to.</summary>
     public bool IsPlanetEntered => Kind == AutosplitKind.Split && Code == PlanetEnteredCode;
 
+    /// <summary>
+    /// Milliseconds from an earlier event's <see cref="TimeMs"/> to this one's. The subtraction is
+    /// unchecked and unsigned, so the module's 32-bit millisecond counter wrapping between the two
+    /// still gives the real gap.
+    /// </summary>
+    public static uint Elapsed(uint fromMs, uint toMs) => unchecked(toMs - fromMs);
+
     public static AutosplitEvent Parse(ReadOnlySpan<byte> entry)
     {
         if (entry.Length < Size)
@@ -30,19 +42,19 @@ public readonly record struct AutosplitEvent(uint Seq, uint Tick, AutosplitKind 
 
         var r = new SpanReader(entry[..Size]);
         uint seq = r.ReadU32();
-        uint tick = r.ReadU32();
+        uint timeMs = r.ReadU32();
         var kind = (AutosplitKind)r.ReadU8();
         byte code = r.ReadU8();
         r.Skip(2);
         uint arg = r.ReadU32();
-        return new AutosplitEvent(seq, tick, kind, code, arg);
+        return new AutosplitEvent(seq, timeMs, kind, code, arg);
     }
 
     public void Write(Span<byte> destination)
     {
         var w = new SpanWriter(destination);
         w.WriteU32(Seq);
-        w.WriteU32(Tick);
+        w.WriteU32(TimeMs);
         w.WriteU8((byte)Kind);
         w.WriteU8(Code);
         w.WriteU16(0);
@@ -58,19 +70,40 @@ public readonly record struct AutosplitEvent(uint Seq, uint Tick, AutosplitKind 
 }
 
 /// <summary>
-/// What one reason code of the running game means, from AUTOSPLIT_DESCRIBE. 28 bytes.
+/// What one reason code of the running game means, from AUTOSPLIT_DESCRIBE. 32 bytes as of
+/// revision 1.5, which added <paramref name="ParamUs"/> and the two timing flags.
 /// The label is the client's key for the user's per-code setting, so it is also what the settings
 /// file stores; a game that relabels a code takes its default again, which is the safe way round.
+/// <para>
+/// A row is either a split option the user ticks (<see cref="AutosplitKind.Split"/>) or a timing
+/// row that is always applied: a load pair (<see cref="AutosplitKind.LoadStart"/> with a LOAD_END
+/// of the same code) or a pause pair (<see cref="AutosplitKind.Pause"/> with a RESUME of the same
+/// code). A SPLIT row may also carry <see cref="AutosplitEventFlags.Flat"/>, in which case it is
+/// both.
+/// </para>
 /// </summary>
-public sealed record AutosplitEventDesc(byte Code, AutosplitKind Kind, AutosplitEventFlags Flags, string Label)
+public sealed record AutosplitEventDesc(
+    byte Code, AutosplitKind Kind, AutosplitEventFlags Flags, uint ParamUs, string Label)
 {
-    public const int Size = 28;
+    public const int Size = 32;
 
     /// <summary>Whether the user's checkbox starts ticked when the settings file says nothing.</summary>
     public bool EnabledByDefault => (Flags & AutosplitEventFlags.EnabledByDefault) != 0;
 
     /// <summary>True for the code the planet route applies to, which is only ever code 1.</summary>
     public bool PlanetRoute => (Flags & AutosplitEventFlags.PlanetRoute) != 0;
+
+    /// <summary><see cref="ParamUs"/> comes off game time every time this event happens.</summary>
+    public bool Flat => (Flags & AutosplitEventFlags.Flat) != 0;
+
+    /// <summary>Whatever this row's pair lasts beyond <see cref="ParamUs"/> comes off game time.</summary>
+    public bool Normalise => (Flags & AutosplitEventFlags.Normalise) != 0;
+
+    /// <summary>True for a row the panel shows as a checkbox; a timing row is never an option.</summary>
+    public bool IsSplitOption => Kind == AutosplitKind.Split;
+
+    /// <summary>True when this row corrects game time at all, by either of the two rules.</summary>
+    public bool IsTiming => Flat || Normalise;
 
     public static AutosplitEventDesc Parse(ReadOnlySpan<byte> entry)
     {
@@ -84,8 +117,9 @@ public sealed record AutosplitEventDesc(byte Code, AutosplitKind Kind, Autosplit
         var kind = (AutosplitKind)r.ReadU8();
         var flags = (AutosplitEventFlags)r.ReadU8();
         r.Skip(1);
+        uint paramUs = r.ReadU32();
         string label = r.ReadFixedString(24);
-        return new AutosplitEventDesc(code, kind, flags, label);
+        return new AutosplitEventDesc(code, kind, flags, paramUs, label);
     }
 
     public byte[] ToBytes()
@@ -96,6 +130,7 @@ public sealed record AutosplitEventDesc(byte Code, AutosplitKind Kind, Autosplit
         w.WriteU8((byte)Kind);
         w.WriteU8((byte)Flags);
         w.WriteU8(0);
+        w.WriteU32(ParamUs);
         w.WriteFixedString(Label, 24);
         return buffer;
     }

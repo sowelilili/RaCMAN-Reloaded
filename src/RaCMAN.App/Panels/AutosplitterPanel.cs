@@ -32,8 +32,9 @@ public static class AutosplitterPanel
         Ui.Heading("Autosplitter");
         Ui.Hint("The console reports what happened in the run and keeps no timer. This client decides what splits.");
 
+        // No separator of its own before the game section: its heading draws one, and the panel
+        // has to hold a game with eight subsplits inside 940x580 without scrolling.
         DrawConnection(state, autosplit);
-        ImGui.Separator();
         DrawGameSection(state, autosplit);
         ImGui.Separator();
 
@@ -127,87 +128,151 @@ public static class AutosplitterPanel
         var options = autosplit.For(game);
         var settings = state.Settings;
 
-        // Two to a row: a game can describe eight of these and the panel still has to fit.
+        // The subsplits the user picks on the left, the three "does this kind of event do
+        // anything at all" masters on the right. Timing rows are on neither: they are not a
+        // choice, and the hint under the table says so.
         if (ImGui.BeginTable("autosplit-events", 2, ImGuiTableFlags.SizingStretchSame))
         {
-            foreach (var desc in descriptors)
-            {
-                ImGui.TableNextColumn();
-                bool on = options.EventEnabled(desc.Label, desc.EnabledByDefault);
-                if (ImGui.Checkbox(desc.Label, ref on))
-                {
-                    options.SetEvent(desc.Label, on);
-                    settings.Save();
-                }
+            ImGui.TableNextRow();
 
-                if (!Ui.Debug) continue;
-                ImGui.SameLine();
-                ImGui.TextColored(Ui.Grey, $"({desc.Code})");
-            }
+            ImGui.TableNextColumn();
+            DrawSplitOptions(game, options, settings, descriptors);
+
+            ImGui.TableNextColumn();
+            DrawMasters(options, settings);
 
             ImGui.EndTable();
         }
 
-        var planetDesc = state.Autosplitter.PlanetDescriptor;
-        ImGui.BeginDisabled(planetDesc is null);
-        bool route = options.PlanetRoute;
-        if (ImGui.Checkbox("Use planet split route", ref route))
+        // One line, ASCII only: the panel has to fit and the font atlas has no em dash.
+        Ui.Hint("The old autosplitters' game-time normalisation is applied automatically.");
+
+        if (options.PlanetRoute && state.Autosplitter.PlanetDescriptor is not null
+            && !AutosplitRoutes.Knows(game, state.Session.CurrentPlanet))
         {
-            options.PlanetRoute = route;
-            settings.Save();
+            Ui.Warning($"{Path.GetFileName(AutosplitRoutes.FileFor(game))} has no names for planet "
+                       + $"{state.Session.CurrentPlanet}, so entering it will not split.");
         }
 
-        ImGui.EndDisabled();
-
-        if (planetDesc is null)
+        if (options.PlanetRoute && state.LiveSplit.IsConnected
+            && !state.LiveSplit.Answers(LiveSplitClient.GetUpcomingSplitName))
         {
-            Ui.Hint("This game reports no \"planet entered\" event, so there is no route to follow.");
+            Ui.Warning($"This LiveSplit does not answer {LiveSplitClient.GetUpcomingSplitName}, which is the "
+                       + "name the route compares, so planet events cannot split while the route is on.");
         }
-        else
-        {
-            ImGui.SameLine();
-            Ui.Hint($"(names from data/autosplit/{Path.GetFileName(AutosplitRoutes.FileFor(game))})");
+    }
 
-            ImGui.BeginDisabled(!route);
-            int names = options.NamesAreDestination ? 1 : 0;
-            ImGui.TextUnformatted("Split names are:");
-            ImGui.SameLine();
-            bool picked = ImGui.RadioButton("the planet you are on", ref names, 0);
-            ImGui.SameLine();
-            picked |= ImGui.RadioButton("the planet you are travelling to", ref names, 1);
-            if (picked)
+    /// <summary>The left column: one checkbox per SPLIT row, with the route indented under its own.</summary>
+    private static void DrawSplitOptions(
+        GameId game, AutosplitGameSettings options, Settings settings,
+        IReadOnlyList<AutosplitEventDesc> descriptors)
+    {
+        ImGui.TextUnformatted("Split on");
+
+        bool any = false;
+        foreach (var desc in descriptors)
+        {
+            if (!desc.IsSplitOption) continue;
+            any = true;
+
+            bool on = options.EventEnabled(desc.Label, desc.EnabledByDefault);
+            if (ImGui.Checkbox(desc.Label, ref on))
             {
-                options.NamesAreDestination = names == 1;
+                options.SetEvent(desc.Label, on);
+                settings.Save();
+            }
+
+            if (Ui.Debug)
+            {
+                ImGui.SameLine();
+                ImGui.TextColored(Ui.Grey, $"({desc.Code})");
+            }
+
+            if (!desc.PlanetRoute) continue;
+
+            // The route is a property of the planet split, so it lives under it and means nothing
+            // while the planet split itself is off.
+            ImGui.Indent();
+            ImGui.BeginDisabled(!on);
+            bool route = options.PlanetRoute;
+            if (ImGui.Checkbox("Use planet split route", ref route))
+            {
+                options.PlanetRoute = route;
                 settings.Save();
             }
 
             ImGui.EndDisabled();
-
-            if (route && !AutosplitRoutes.Knows(game, state.Session.CurrentPlanet))
+            if (ImGui.IsItemHovered())
             {
-                Ui.Warning($"{Path.GetFileName(AutosplitRoutes.FileFor(game))} has no names for planet "
-                           + $"{state.Session.CurrentPlanet}, so entering it will not split.");
+                ImGui.SetTooltip("Only split when the planet you have just reached is the one the "
+                                 + "next split is named after, from "
+                                 + $"data/autosplit/{Path.GetFileName(AutosplitRoutes.FileFor(game))}.");
             }
+
+            ImGui.Unindent();
         }
 
-        bool neverReset = options.NeverReset;
-        if (ImGui.Checkbox("Never reset (e.g. All Exterminator Cards)", ref neverReset))
+        if (!any) Ui.Hint("This game reports only timing events, so there is nothing to choose.");
+    }
+
+    /// <summary>The right column: what each kind of event is allowed to do to the timer.</summary>
+    private static void DrawMasters(AutosplitGameSettings options, Settings settings)
+    {
+        ImGui.TextUnformatted("Timer control");
+
+        bool start = options.Start;
+        if (Master("Start", "START events start the timer", ref start))
         {
-            options.NeverReset = neverReset;
+            options.Start = start;
+            settings.Save();
+        }
+
+        bool split = options.Split;
+        if (Master("Split", "SPLIT events split", ref split))
+        {
+            options.Split = split;
+            settings.Save();
+        }
+
+        bool reset = options.Reset;
+        if (Master("Reset", "RESET events reset the timer", ref reset))
+        {
+            options.Reset = reset;
             settings.Save();
         }
     }
 
+    /// <summary>One master and what it means, on one line so eight subsplits still fit beside it.</summary>
+    private static bool Master(string label, string meaning, ref bool value)
+    {
+        bool changed = ImGui.Checkbox(label, ref value);
+        ImGui.SameLine();
+        ImGui.TextColored(Ui.Grey, meaning);
+        return changed;
+    }
+
     private static void DrawLog(AppState state)
     {
-        var entries = state.Autosplitter.Log();
+        var splitter = state.Autosplitter;
 
+        // Short enough to clear the window's own status text in the bottom right corner, which
+        // shares this line once a game with eight subsplits has filled the panel above it.
         ImGui.TextUnformatted("Run events");
         ImGui.SameLine();
-        ImGui.TextColored(Ui.Grey, $"| {state.Autosplitter.Received} received, {state.Autosplitter.Acted} acted on");
-        ImGui.SameLine();
-        if (ImGui.SmallButton("Clear")) state.Autosplitter.ClearLog();
+        ImGui.TextColored(Ui.Grey, $"| {splitter.Received} received, {splitter.Acted} acted on, "
+                                   + $"{splitter.Adjustments} adjusted");
 
+        if (!Ui.Debug)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(Ui.Grey, "| log in Settings");
+            return;
+        }
+
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Clear")) splitter.ClearLog();
+
+        var entries = splitter.Log();
         if (entries.Length == 0)
         {
             Ui.Hint("Nothing yet. Events arrive from the console the moment it detects them.");
@@ -219,8 +284,8 @@ public static class AutosplitterPanel
             && ImGui.BeginTable("events", 4,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("Tick", ImGuiTableColumnFlags.WidthFixed, 60);
-            ImGui.TableSetupColumn("Kind", ImGuiTableColumnFlags.WidthFixed, 55);
+            ImGui.TableSetupColumn("Time", ImGuiTableColumnFlags.WidthFixed, 70);
+            ImGui.TableSetupColumn("Kind", ImGuiTableColumnFlags.WidthFixed, 70);
             ImGui.TableSetupColumn("Event", ImGuiTableColumnFlags.WidthFixed, 190);
             ImGui.TableSetupColumn("Action");
             ImGui.TableHeadersRow();
@@ -231,7 +296,7 @@ public static class AutosplitterPanel
                 ImGui.TableNextRow();
 
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(entry.Tick.ToString());
+                ImGui.TextUnformatted($"{entry.TimeMs / 1000.0:0.000}");
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(entry.Kind == AutosplitKind.None ? "-" : entry.Kind.ToString());

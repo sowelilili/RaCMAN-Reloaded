@@ -191,9 +191,18 @@ public sealed class FakeQwarkServer : IDisposable
     public List<AutosplitEventDesc> AutosplitDescriptors { get; set; } = new()
     {
         new AutosplitEventDesc(1, AutosplitKind.Split,
-            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, "Planet entered"),
-        new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, "Boss defeated"),
-        new AutosplitEventDesc(3, AutosplitKind.Split, AutosplitEventFlags.None, "Arena entered"),
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, 0, "Planet entered"),
+
+        // A split that is also a flat correction, the shape of RaC2's Protopet: seven frames of
+        // cutscene come off game time just before the split goes out.
+        new AutosplitEventDesc(2, AutosplitKind.Split,
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Flat, 116667, "Boss defeated"),
+
+        new AutosplitEventDesc(3, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Arena entered"),
+
+        // The two normalised pairs: RaC1's 7.56 s load timer and Deadlocked's 14.8 s quit.
+        new AutosplitEventDesc(8, AutosplitKind.LoadStart, AutosplitEventFlags.Normalise, 7_560_000, "Level load"),
+        new AutosplitEventDesc(9, AutosplitKind.Pause, AutosplitEventFlags.Normalise, 14_800_000, "Quit to XMB"),
     };
 
     /// <summary>The event ring AUTOSPLIT_EVENTS reads from, oldest first.</summary>
@@ -203,6 +212,9 @@ public sealed class FakeQwarkServer : IDisposable
     /// Off makes both autosplit ops answer UNKNOWN_OP, which is what a module from before
     /// revision 1.4 does and what the client has to stop asking about.
     /// </summary>
+    /// <remarks>
+    /// The rows and events themselves are revision 1.5: a 32-byte descriptor with a parameter, and
+    /// an event carrying milliseconds rather than ticks.</remarks>
     public bool AutosplitSupported { get; set; } = true;
 
     /// <summary>
@@ -218,14 +230,26 @@ public sealed class FakeQwarkServer : IDisposable
     private uint _autosplitSeq;
 
     /// <summary>
+    /// The module's millisecond clock, which revision 1.5 events carry instead of a tick count.
+    /// It runs from the moment the fake server was made, exactly as qwark's runs from module load.
+    /// </summary>
+    public uint AutosplitClockMs => (uint)_clock.ElapsedMilliseconds;
+
+    private readonly System.Diagnostics.Stopwatch _clock = System.Diagnostics.Stopwatch.StartNew();
+
+    /// <summary>
     /// Appends one event to the ring the way the console's watcher would, and queues its three
     /// datagram copies when the push is on. Returns the event, sequence number and all.
+    /// <para>
+    /// <paramref name="timeMs"/> overrides the module clock, which is how a test or a fake script
+    /// stages a load or a pause of an exact length without waiting for one.
+    /// </para>
     /// </summary>
-    public AutosplitEvent EmitAutosplitEvent(AutosplitKind kind, byte code = 0, uint arg = 0)
+    public AutosplitEvent EmitAutosplitEvent(AutosplitKind kind, byte code = 0, uint arg = 0, uint? timeMs = null)
     {
         lock (_gate)
         {
-            var ev = new AutosplitEvent(++_autosplitSeq, _session.Tick, kind, code, arg);
+            var ev = new AutosplitEvent(++_autosplitSeq, timeMs ?? AutosplitClockMs, kind, code, arg);
             AutosplitRing.Add(ev);
             if (AutosplitRing.Count > AutosplitEventsReply.MaxEvents) AutosplitRing.RemoveAt(0);
             if (AutosplitPush) _autosplitPushes.Add((ev, AutosplitPushCopies));

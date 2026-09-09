@@ -17,7 +17,8 @@ namespace RaCMAN.App;
 public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, drop, "
-                                + "start, split[:code[:arg]], reset, pause, resume";
+                                + "start, split[:code[:arg]], reset, "
+                                + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
     public static IReadOnlyList<(double At, string Step)> Parse(string script)
     {
@@ -62,18 +63,34 @@ public static class FakeScript
         ["reset"] = AutosplitKind.Reset,
         ["pause"] = AutosplitKind.Pause,
         ["resume"] = AutosplitKind.Resume,
+        ["load"] = AutosplitKind.LoadStart,
+        ["loadend"] = AutosplitKind.LoadEnd,
     };
+
+    /// <summary>
+    /// The kinds whose third field is the event's own millisecond stamp rather than an argument:
+    /// the two halves of a load and the two halves of a pause. Scripting both halves of a pair
+    /// with an explicit stamp is how a normalised load of an exactly known length is staged
+    /// without the script having to sit through it.
+    /// </summary>
+    private static bool StepCarriesTime(AutosplitKind kind) =>
+        kind is AutosplitKind.LoadStart or AutosplitKind.LoadEnd or AutosplitKind.Pause or AutosplitKind.Resume;
 
     public static void Apply(FakeQwarkServer fake, string step)
     {
-        // "split:1:3" is one step: the kind, then the reason code and its argument.
+        // "split:1:3" is one step: the kind, then the reason code and its argument. For a timing
+        // step, "load:8:9000", the third field is the module clock reading instead.
         var parts = step.Split(':');
         if (EventSteps.TryGetValue(parts[0], out var kind))
         {
             byte code = parts.Length > 1 && byte.TryParse(parts[1], out var c) ? c : (byte)0;
-            uint arg = parts.Length > 2 && uint.TryParse(parts[2], out var a) ? a : 0u;
-            var emitted = fake.EmitAutosplitEvent(kind, code, arg);
-            Console.WriteLine($"fake-script emit seq={emitted.Seq} kind={kind} code={code} arg={arg}");
+            uint third = parts.Length > 2 && uint.TryParse(parts[2], out var a) ? a : 0u;
+            bool timed = StepCarriesTime(kind);
+            uint? timeMs = timed && parts.Length > 2 ? third : null;
+
+            var emitted = fake.EmitAutosplitEvent(kind, code, timed ? 0u : third, timeMs);
+            Console.WriteLine($"fake-script emit seq={emitted.Seq} kind={kind} code={code} " +
+                              $"arg={emitted.Arg} time={emitted.TimeMs}ms");
             return;
         }
 

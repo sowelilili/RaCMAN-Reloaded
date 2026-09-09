@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading.Channels;
@@ -25,10 +26,16 @@ public enum LiveSplitPhase
 }
 
 /// <summary>
-/// The client half of LiveSplit's built-in TCP server: one connection, ASCII commands terminated
-/// with CRLF, replies one line at a time. Commands are fire and forget; the few queries are
-/// answered on the same connection, so everything is serialised through one worker and a query
-/// gives up after a second rather than holding the caller.
+/// The client half of LiveSplit's TCP server: one connection, ASCII commands terminated with CRLF,
+/// replies one line at a time. Commands are fire and forget; the few queries are answered on the
+/// same connection, so everything is serialised through one worker.
+/// <para>
+/// The one rule that matters here is that <b>only a socket error drops the connection</b>. A query
+/// that goes unanswered is not an error: LiveSplit's server silently ignores a command it does not
+/// know, and its command set differs between builds. Such a query is remembered as unanswered,
+/// never sent again on this connection, and reported as "unknown" to the caller. Treating that
+/// silence as a dead connection is what made the link drop a second after it came up.
+/// </para>
 /// <para>
 /// Nothing here blocks the render thread: <see cref="Send"/> only enqueues, and
 /// <see cref="QueryAsync"/> is awaited off the UI thread with its result posted back.
@@ -45,7 +52,7 @@ public sealed class LiveSplitClient : IDisposable
         "LiveSplit's server ships with LiveSplit but is not running until you start it: right-click "
         + "LiveSplit, Control -> Start TCP Server. It listens on port 16834.";
 
-    // Fire and forget, section "commands" of LiveSplit.Server.
+    // Fire and forget.
     public const string StartTimer = "starttimer";
     public const string StartOrSplit = "startorsplit";
     public const string Split = "split";
@@ -55,31 +62,50 @@ public sealed class LiveSplitClient : IDisposable
     public const string Pause = "pause";
     public const string Resume = "resume";
 
+    /// <summary>
+    /// Takes one time and adds it to the run's loading times, which is how game time is corrected:
+    /// game time is real time less the loading times, so a positive number takes time off the
+    /// clock. It is the only game-time command this client uses — it never pauses game time and
+    /// never sets it outright, so nothing here can disagree with LiveSplit about the elapsed run.
+    /// </summary>
+    public const string AddLoadingTimes = "addloadingtimes";
+
     // One line back.
     public const string GetCurrentSplitName = "getcurrentsplitname";
     public const string GetUpcomingSplitName = "getupcomingsplitname";
     public const string GetPreviousSplitName = "getprevioussplitname";
     public const string GetSplitIndex = "getsplitindex";
     public const string GetCurrentTimerPhase = "getcurrenttimerphase";
-    public const string GetLiveSplitVersion = "getlivesplitversion";
     public const string Ping = "ping";
 
     private static readonly HashSet<string> QueryCommands = new(StringComparer.Ordinal)
     {
         GetCurrentSplitName, GetUpcomingSplitName, GetPreviousSplitName,
-        GetSplitIndex, GetCurrentTimerPhase, GetLiveSplitVersion, Ping,
+        GetSplitIndex, GetCurrentTimerPhase, Ping,
     };
 
-    /// <summary>A query that goes unanswered for this long is treated as a dead connection.</summary>
+    /// <summary>
+    /// A query unanswered for this long is taken as one this server does not implement. It is not
+    /// a connection failure, and the connection is left exactly as it was.
+    /// </summary>
     public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(1);
 
     private readonly object _gate = new();
     private readonly List<byte> _pendingBytes = new();
     private readonly byte[] _readBuffer = new byte[512];
+    private readonly HashSet<string> _unanswered = new(StringComparer.Ordinal);
 
     private Channel<Operation> _queue = NewQueue();
     private CancellationTokenSource? _cts;
     private Task? _worker;
+
+    /// <summary>
+    /// A read started for an earlier query that timed out. It is kept rather than cancelled, so the
+    /// socket is never torn down mid-receive and a late reply is collected instead of corrupting
+    /// the next one.
+    /// </summary>
+    private Task<int>? _pendingRead;
+
     private volatile LiveSplitStatus _status = LiveSplitStatus.Disconnected;
     private bool _disposed;
 
@@ -102,11 +128,14 @@ public sealed class LiveSplitClient : IDisposable
 
     public bool IsConnected => _status == LiveSplitStatus.Connected;
 
-    /// <summary>Whatever <c>getlivesplitversion</c> answered on connect. Null until it has.</summary>
-    public string? Version { get; private set; }
-
     /// <summary>Why the last connection attempt failed, for the panel's status line.</summary>
     public string? LastError { get; private set; }
+
+    /// <summary>
+    /// The last thing worth saying that did not drop the connection — a query this server does not
+    /// answer, almost always. Cleared when a connection comes up.
+    /// </summary>
+    public string? LastNote { get; private set; }
 
     /// <summary>True while the client wants a connection: connected, or waiting to retry.</summary>
     public bool Enabled { get; private set; }
@@ -114,13 +143,25 @@ public sealed class LiveSplitClient : IDisposable
     /// <summary>Every command actually written to LiveSplit, in order. Debug aid and test hook.</summary>
     public int CommandsSent { get; private set; }
 
-    /// <summary>Raised on the worker thread once a connection is up and its version is known.</summary>
+    /// <summary>Raised on the worker thread once a connection is up and the handshake is done.</summary>
     public event Action? Established;
 
-    /// <summary>One line for the panel: the status, and the version or the reason it is not connected.</summary>
+    /// <summary>The queries this server has been asked and never answered, for the panel.</summary>
+    public string[] Unanswered
+    {
+        get { lock (_gate) return _unanswered.ToArray(); }
+    }
+
+    /// <summary>True when this server answers a command at all, i.e. it is not one it ignores.</summary>
+    public bool Answers(string command)
+    {
+        lock (_gate) return !_unanswered.Contains(command);
+    }
+
+    /// <summary>One line for the panel: the status, and the reason it is not connected.</summary>
     public string StatusLine => _status switch
     {
-        LiveSplitStatus.Connected => $"Connected to LiveSplit{(Version is null ? string.Empty : $" {Version}")} at {Host}:{Port}",
+        LiveSplitStatus.Connected => $"Connected to LiveSplit at {Host}:{Port}",
         LiveSplitStatus.Connecting => $"Connecting to {Host}:{Port}...",
         _ when !Enabled => "Not connected",
         _ => $"Not connected to {Host}:{Port}{(LastError is null ? string.Empty : $" ({LastError})")}",
@@ -186,7 +227,6 @@ public sealed class LiveSplitClient : IDisposable
 
         cts?.Dispose();
         _status = LiveSplitStatus.Disconnected;
-        Version = null;
         DrainQueue();
     }
 
@@ -201,12 +241,18 @@ public sealed class LiveSplitClient : IDisposable
     }
 
     /// <summary>
-    /// Sends one query and waits for its single line. Null when nothing is connected or the answer
-    /// did not arrive within <see cref="QueryTimeout"/>.
+    /// Sends one query and waits for its single line. Null when nothing is connected, when this
+    /// server has already shown it does not answer this command, or when the answer did not arrive
+    /// within <see cref="QueryTimeout"/>. A null is "unknown", never "the connection is gone".
     /// </summary>
     public async Task<string?> QueryAsync(string command)
     {
         if (_disposed || !IsConnected) return null;
+
+        lock (_gate)
+        {
+            if (_unanswered.Contains(command)) return null;
+        }
 
         var reply = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
         if (!_queue.Writer.TryWrite(new Operation { Command = command, Reply = reply })) return null;
@@ -229,6 +275,21 @@ public sealed class LiveSplitClient : IDisposable
 
     public static bool IsQuery(string command) => QueryCommands.Contains(command);
 
+    /// <summary>
+    /// A duration as LiveSplit's time parser reads it: seconds with six decimal places, so a
+    /// microsecond survives the trip and nothing is rounded into the run. Never negative — the
+    /// caller decides there is time to take off before it asks for the string.
+    /// </summary>
+    public static string FormatTime(long microseconds)
+    {
+        if (microseconds < 0) microseconds = 0;
+        return (microseconds / 1_000_000m).ToString("0.000000", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>The whole <c>addloadingtimes</c> line for a correction of this many microseconds.</summary>
+    public static string AddLoadingTimesCommand(long microseconds) =>
+        $"{AddLoadingTimes} {FormatTime(microseconds)}";
+
     // ---------------------------------------------------------------- worker
 
     private async Task WorkerAsync(CancellationToken token)
@@ -245,12 +306,21 @@ public sealed class LiveSplitClient : IDisposable
                 await client.ConnectAsync(Host, Port, token).ConfigureAwait(false);
 
                 var stream = client.GetStream();
-                _pendingBytes.Clear();
+                lock (_gate)
+                {
+                    _pendingBytes.Clear();
+                    _unanswered.Clear();
+                }
+
                 attempt = 0;
                 LastError = null;
+                LastNote = null;
                 _status = LiveSplitStatus.Connected;
 
-                Version = await AskAsync(stream, GetLiveSplitVersion, token).ConfigureAwait(false);
+                // The whole handshake: one query every LiveSplit server has answered for as long
+                // as it has had one. Silence is not a failure — the phase is simply unknown until
+                // something asks again — so nothing here can decide the connection is dead.
+                await AskAsync(stream, GetCurrentTimerPhase, token).ConfigureAwait(false);
                 Established?.Invoke();
 
                 await PumpAsync(stream, token).ConfigureAwait(false);
@@ -265,9 +335,9 @@ public sealed class LiveSplitClient : IDisposable
             }
             finally
             {
+                OrphanPendingRead();
                 client?.Dispose();
                 _status = LiveSplitStatus.Disconnected;
-                Version = null;
                 DrainQueue();
             }
 
@@ -295,32 +365,49 @@ public sealed class LiveSplitClient : IDisposable
     {
         await foreach (var operation in _queue.Reader.ReadAllAsync(token).ConfigureAwait(false))
         {
+            if (operation.Reply is not null)
+            {
+                bool skip;
+                lock (_gate) skip = _unanswered.Contains(operation.Command);
+                if (skip)
+                {
+                    operation.Reply.TrySetResult(null);
+                    continue;
+                }
+            }
+
             try
             {
-                await WriteAsync(stream, operation.Command, token).ConfigureAwait(false);
-                CommandsSent++;
-
-                if (operation.Reply is null) continue;
-
-                var line = await ReadLineAsync(stream, token).ConfigureAwait(false);
-                operation.Reply.TrySetResult(line);
+                var line = await AskAsync(stream, operation.Command, token, operation.Reply is not null)
+                    .ConfigureAwait(false);
+                operation.Reply?.TrySetResult(line);
             }
             catch (Exception)
             {
-                // A failed write or a query that went unanswered means this connection is done;
-                // the worker reconnects and the caller sees a null answer.
+                // A failed write or read is a real socket failure: this connection is done, the
+                // worker reconnects, and the caller sees a null answer.
                 operation.Reply?.TrySetResult(null);
                 throw;
             }
         }
     }
 
-    /// <summary>One query on a stream the pump does not own yet, used for the version handshake.</summary>
-    private async Task<string?> AskAsync(NetworkStream stream, string command, CancellationToken token)
+    /// <summary>
+    /// Writes one command and, when it is a query, reads its single line. Only a socket failure
+    /// throws; a query the server ignores comes back null.
+    /// </summary>
+    private async Task<string?> AskAsync(
+        NetworkStream stream, string command, CancellationToken token, bool expectReply = true)
     {
+        // Anything already buffered arrived with no query outstanding — a late answer to a query
+        // that timed out, or a server that volunteered a line — so it is not this query's reply.
+        lock (_gate) _pendingBytes.Clear();
+
         await WriteAsync(stream, command, token).ConfigureAwait(false);
         CommandsSent++;
-        return await ReadLineAsync(stream, token).ConfigureAwait(false);
+
+        if (!expectReply) return null;
+        return await ReadLineAsync(stream, command, token).ConfigureAwait(false);
     }
 
     private static Task WriteAsync(NetworkStream stream, string command, CancellationToken token)
@@ -330,29 +417,80 @@ public sealed class LiveSplitClient : IDisposable
     }
 
     /// <summary>
-    /// Reads one CRLF-terminated line, giving up after <see cref="QueryTimeout"/>. A timeout throws
-    /// so the worker drops the connection: LiveSplit always answers a query, so silence means the
-    /// far end is gone or wedged, and reconnecting is what gets the panel truthful again.
+    /// Reads one line, accepting either CRLF or a bare LF, and gives up after
+    /// <see cref="QueryTimeout"/> with a null rather than an exception. The outstanding read is
+    /// kept for the next call instead of being cancelled: cancelling a receive mid-flight is what
+    /// would actually break the socket, and a reply that turns up late is dropped by the buffer
+    /// clear in <see cref="AskAsync"/>.
     /// </summary>
-    private async Task<string?> ReadLineAsync(NetworkStream stream, CancellationToken token)
+    private async Task<string?> ReadLineAsync(NetworkStream stream, string command, CancellationToken token)
     {
-        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
-        timeout.CancelAfter(QueryTimeout);
+        var deadline = DateTime.UtcNow + QueryTimeout;
 
         while (true)
         {
-            int newline = _pendingBytes.IndexOf((byte)'\n');
-            if (newline >= 0)
+            string? line = TakeLine();
+            if (line is not null) return line;
+
+            _pendingRead ??= stream.ReadAsync(_readBuffer, token).AsTask();
+
+            var remaining = deadline - DateTime.UtcNow;
+            if (remaining > TimeSpan.Zero)
             {
-                var line = Encoding.ASCII.GetString(_pendingBytes.ToArray(), 0, newline).TrimEnd('\r');
-                _pendingBytes.RemoveRange(0, newline + 1);
-                return line;
+                using var delay = CancellationTokenSource.CreateLinkedTokenSource(token);
+                var finished = await Task.WhenAny(_pendingRead, Task.Delay(remaining, delay.Token))
+                    .ConfigureAwait(false);
+                delay.Cancel();
+                if (finished != _pendingRead)
+                {
+                    NoteUnanswered(command);
+                    return null;
+                }
+            }
+            else if (!_pendingRead.IsCompleted)
+            {
+                NoteUnanswered(command);
+                return null;
             }
 
-            int read = await stream.ReadAsync(_readBuffer, timeout.Token).ConfigureAwait(false);
+            int read = await _pendingRead.ConfigureAwait(false);
+            _pendingRead = null;
             if (read <= 0) throw new IOException("LiveSplit closed the connection");
-            _pendingBytes.AddRange(_readBuffer.AsSpan(0, read).ToArray());
+            lock (_gate) _pendingBytes.AddRange(_readBuffer.AsSpan(0, read).ToArray());
         }
+    }
+
+    /// <summary>The first complete line in the buffer, CR trimmed, or null when there is none yet.</summary>
+    private string? TakeLine()
+    {
+        lock (_gate)
+        {
+            int newline = _pendingBytes.IndexOf((byte)'\n');
+            if (newline < 0) return null;
+
+            var line = Encoding.ASCII.GetString(_pendingBytes.ToArray(), 0, newline).TrimEnd('\r');
+            _pendingBytes.RemoveRange(0, newline + 1);
+            return line;
+        }
+    }
+
+    /// <summary>Remembers a command this server ignores, so it is asked once and never again.</summary>
+    private void NoteUnanswered(string command)
+    {
+        bool first;
+        lock (_gate) first = _unanswered.Add(command);
+        if (first) LastNote = $"LiveSplit did not answer \"{command}\"; this build does not support it.";
+    }
+
+    /// <summary>
+    /// Lets go of a read left over from a connection that has died. It is never awaited again, so
+    /// its failure is observed here rather than left dangling on the finalizer thread.
+    /// </summary>
+    private void OrphanPendingRead()
+    {
+        var orphan = _pendingRead;
+        _pendingRead = null;
+        orphan?.ContinueWith(static t => _ = t.Exception, TaskScheduler.Default);
     }
 
     /// <summary>Fails every queued query and drops the commands: they belonged to a dead connection.</summary>

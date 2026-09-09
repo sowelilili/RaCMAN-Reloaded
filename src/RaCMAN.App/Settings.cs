@@ -138,6 +138,7 @@ public sealed class Settings
                 if (loaded is not null)
                 {
                     loaded.Path = path;
+                    loaded.Autosplit.MigrateAll();
                     return loaded;
                 }
             }
@@ -181,17 +182,49 @@ public sealed class AutosplitGameSettings
     [JsonPropertyName("planetRoute")]
     public bool PlanetRoute { get; set; }
 
+    /// <summary>START events start the timer.</summary>
+    [JsonPropertyName("start")]
+    public bool Start { get; set; } = true;
+
+    /// <summary>SPLIT events split, whatever their per-event checkboxes say.</summary>
+    [JsonPropertyName("split")]
+    public bool Split { get; set; } = true;
+
     /// <summary>
-    /// False (the default): split names are the planet you are on, so the planet entered is
-    /// compared against the upcoming split, exactly as the old LiveSplit scripts did. True: the
-    /// names are the planet you are travelling to, so the current split is compared instead.
+    /// RESET events reset the timer. Off is the All Exterminator Cards case, where a death is not
+    /// the end of the run; it is what the old scripts' AEC setting did.
+    /// </summary>
+    [JsonPropertyName("reset")]
+    public bool Reset { get; set; } = true;
+
+    /// <summary>
+    /// Read from files this client wrote before the three masters existed, then dropped: "never
+    /// reset" is the Reset master turned off. Never written back.
+    /// </summary>
+    [JsonPropertyName("neverReset")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NeverReset { get; set; }
+
+    /// <summary>
+    /// Read from older files and dropped. The split names are the planets of the run and the
+    /// upcoming one is where you are going: there was never a second way round, and offering one
+    /// only ever produced a route that silently never matched.
     /// </summary>
     [JsonPropertyName("namesAreDestination")]
-    public bool NamesAreDestination { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? NamesAreDestination { get; set; }
 
-    /// <summary>Never send LiveSplit a reset, for a category (All Exterminator Cards) where a death is not a reset.</summary>
-    [JsonPropertyName("neverReset")]
-    public bool NeverReset { get; set; }
+    /// <summary>
+    /// Folds whatever an older file said into the settings this build has. Idempotent, and called
+    /// on the way out of <see cref="AutosplitSettings.For"/>, so every path into a game's entry —
+    /// a loaded file, a hand-written one, a deserialized fragment — is migrated exactly once.
+    /// </summary>
+    public void Migrate()
+    {
+        if (NeverReset is true) Reset = false;
+        NeverReset = null;
+        NamesAreDestination = null;
+    }
 
     /// <summary>Whether this event is on, falling back to the console's own default for the label.</summary>
     public bool EventEnabled(string label, bool byDefault)
@@ -249,12 +282,21 @@ public sealed class AutosplitSettings
         string key = KeyFor(game);
         foreach (var (existing, settings) in Games)
         {
-            if (string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)) return settings;
+            if (!string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)) continue;
+
+            settings.Migrate();
+            return settings;
         }
 
         var created = new AutosplitGameSettings();
         Games[key] = created;
         return created;
+    }
+
+    /// <summary>Migrates every game's entry, so a file is brought forward even if nothing reads it.</summary>
+    public void MigrateAll()
+    {
+        foreach (var settings in Games.Values) settings.Migrate();
     }
 }
 

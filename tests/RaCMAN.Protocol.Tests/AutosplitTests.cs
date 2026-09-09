@@ -7,7 +7,7 @@ using RaCMAN.Protocol.Testing;
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// The autosplit wire contract of revision 1.4: the 16-byte event, the 28-byte descriptor, the
+/// The autosplit wire contract of revision 1.5: the 16-byte event, the 32-byte descriptor, the
 /// AUTOSPLIT_EVENTS reply, and the receiver that has to tell the 20-byte push datagram from a
 /// telemetry packet on the same socket, drop the two duplicate copies of it, and fill a gap over
 /// TCP before delivering the event that exposed it.
@@ -68,16 +68,24 @@ public class AutosplitTests
 
         Assert.Equal(ev, AutosplitEvent.Parse(bytes));
         Assert.True(ev.IsPlanetEntered);
+        Assert.Equal(0x0A0B0C0Du, ev.TimeMs);
+
+        // The module's millisecond clock wraps every 49 days, and a gap across the wrap is still
+        // the real gap: unsigned subtraction is the whole of it.
+        Assert.Equal(9_000u, AutosplitEvent.Elapsed(1_000, 10_000));
+        Assert.Equal(9_000u, AutosplitEvent.Elapsed(uint.MaxValue - 3_999, 5_000));
+        Assert.Equal(0u, AutosplitEvent.Elapsed(1_234, 1_234));
     }
 
     [Fact]
-    public void EventDescIsTwentyEightBytesAndRoundTripsItsLabelAndFlags()
+    public void EventDescIsThirtyTwoBytesAndRoundTripsItsLabelFlagsAndParameter()
     {
         var desc = new AutosplitEventDesc(1, AutosplitKind.Split,
-            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, "Planet entered");
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, 0, "Planet entered");
         var bytes = desc.ToBytes();
 
         Assert.Equal(AutosplitEventDesc.Size, bytes.Length);
+        Assert.Equal(32, bytes.Length);
         Assert.Equal(0, bytes[3]);
         Assert.Equal(0, bytes[^1]);   // the label is NUL-padded to its 24 bytes
 
@@ -85,11 +93,40 @@ public class AutosplitTests
         Assert.Equal(desc, parsed);
         Assert.True(parsed.EnabledByDefault);
         Assert.True(parsed.PlanetRoute);
+        Assert.False(parsed.IsTiming);
+        Assert.True(parsed.IsSplitOption);
 
         var plain = AutosplitEventDesc.Parse(
-            new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.None, "Boss defeated").ToBytes());
+            new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Boss defeated").ToBytes());
         Assert.False(plain.EnabledByDefault);
         Assert.False(plain.PlanetRoute);
+    }
+
+    [Fact]
+    public void ATimingRowCarriesItsParameterBigEndianAfterTheFlags()
+    {
+        // RaC1's load allowance: 7.56 s in microseconds, at bytes 4..7.
+        var load = new AutosplitEventDesc(4, AutosplitKind.LoadStart, AutosplitEventFlags.Normalise,
+            7_560_000, "Level load");
+        var bytes = load.ToBytes();
+
+        Assert.Equal((byte)AutosplitKind.LoadStart, bytes[1]);
+        Assert.Equal(0b1000, bytes[2]);
+        Assert.Equal(new byte[] { 0x00, 0x73, 0x5B, 0x40 }, bytes[4..8]);
+
+        var parsed = AutosplitEventDesc.Parse(bytes);
+        Assert.Equal(7_560_000u, parsed.ParamUs);
+        Assert.True(parsed.Normalise);
+        Assert.False(parsed.Flat);
+        Assert.True(parsed.IsTiming);
+        Assert.False(parsed.IsSplitOption);   // a timing row is never a checkbox
+
+        var flat = new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.Flat, 116_667, "Protopet");
+        var back = AutosplitEventDesc.Parse(flat.ToBytes());
+        Assert.True(back.Flat);
+        Assert.True(back.IsTiming);
+        Assert.True(back.IsSplitOption);      // a flat split row is both
+        Assert.Equal(116_667u, back.ParamUs);
     }
 
     [Fact]
@@ -98,8 +135,8 @@ public class AutosplitTests
         var descriptors = new[]
         {
             new AutosplitEventDesc(1, AutosplitKind.Split,
-                AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, "Planet entered"),
-            new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, "Protopet defeated"),
+                AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, 0, "Planet entered"),
+            new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Protopet defeated"),
         };
 
         var payload = AutosplitEventDesc.EncodeList(descriptors);
@@ -169,11 +206,16 @@ public class AutosplitTests
         using (client)
         {
             var rows = await client.AutosplitDescribeAsync();
-            Assert.Equal(3, rows.Length);
+            Assert.Equal(5, rows.Length);
             Assert.Equal("Planet entered", rows[0].Label);
             Assert.True(rows[0].PlanetRoute);
             Assert.True(rows[0].EnabledByDefault);
             Assert.False(rows[2].EnabledByDefault);
+
+            // Three split options and the two timing rows, which are never options.
+            Assert.Equal(3, rows.Count(r => r.IsSplitOption));
+            Assert.Equal(7_560_000u, rows.Single(r => r.Kind == AutosplitKind.LoadStart).ParamUs);
+            Assert.Equal(14_800_000u, rows.Single(r => r.Kind == AutosplitKind.Pause).ParamUs);
 
             server.AutosplitDescriptors.Clear();
             var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => client.AutosplitDescribeAsync());

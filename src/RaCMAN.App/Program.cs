@@ -112,7 +112,17 @@ if (exitAfter > 0)
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"tcpfallback={state.Client.TelemetryViaTcp} " +
                       $"autosplitevents={state.AutosplitEvents.Length} " +
-                      $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}");
+                      $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}" +
+                      $"+{state.Autosplitter.Adjustments}adj " +
+                      $"livesplit={state.LiveSplit.Status} sent={state.LiveSplit.CommandsSent} " +
+                      $"unanswered=[{string.Join(" ", state.LiveSplit.Unanswered)}]");
+
+    // The run-event log, so a headless run says what it decided and not only how much of it.
+    foreach (var entry in state.Autosplitter.Log())
+    {
+        Console.WriteLine($"autosplit-log t={entry.TimeMs / 1000.0:0.000}s {entry.Kind} "
+                          + $"\"{entry.Event}\" -> {entry.Action}");
+    }
 }
 
 if (padWindowWas is { } previousMode) settings.InputMode = previousMode;

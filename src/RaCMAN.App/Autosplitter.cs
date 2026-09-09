@@ -3,22 +3,35 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App;
 
 /// <summary>What LiveSplit last told us about itself. Replaced whole, so it is always self-consistent.</summary>
-public sealed record LiveSplitView(LiveSplitPhase Phase, string? CurrentSplit, string? UpcomingSplit)
+/// <param name="UpcomingSupported">
+/// False once this LiveSplit build has shown it does not answer <c>getupcomingsplitname</c>, which
+/// is the only name the planet route compares. The panel says so rather than letting the route
+/// look broken.
+/// </param>
+public sealed record LiveSplitView(
+    LiveSplitPhase Phase, string? CurrentSplit, string? UpcomingSplit, bool UpcomingSupported = true)
 {
     public static LiveSplitView Empty { get; } = new(LiveSplitPhase.Unknown, null, null);
 }
 
 /// <summary>One line of the panel's rolling log: what arrived, and what was done about it.</summary>
-public sealed record AutosplitLogEntry(uint Seq, uint Tick, AutosplitKind Kind, string Event, string Action, bool Acted);
+public sealed record AutosplitLogEntry(uint Seq, uint TimeMs, AutosplitKind Kind, string Event, string Action, bool Acted);
 
 /// <summary>
 /// The decision half of "qwark detects, the client decides": it takes the run events the console
 /// emits unconditionally, applies the user's settings and turns what survives into LiveSplit
 /// commands. It keeps no timer of its own and never sets game time — LiveSplit owns the clock.
 /// <para>
+/// Two things are not the user's decision. The game-time corrections the old LiveSplit scripts
+/// applied in their <c>update</c> and <c>isLoading</c> blocks are what make a run's final time the
+/// run's final time, so they are applied whenever the autosplitter is on and LiveSplit is
+/// connected, whatever any checkbox says. They only ever go out as <c>addloadingtimes</c>: game
+/// time is never paused and never set outright.
+/// </para>
+/// <para>
 /// The timer phase and the two split names are read back from LiveSplit on connect, after every
 /// command sent and once a second, so a manual reset or undo in LiveSplit is followed rather than
-/// fought, and the names needed for the planet route are already in hand when a planet event lands.
+/// fought, and the name the planet route needs is already in hand when a planet event lands.
 /// </para>
 /// </summary>
 public sealed class Autosplitter
@@ -32,12 +45,18 @@ public sealed class Autosplitter
     private readonly LiveSplitClient _liveSplit;
     private readonly Action<Action> _post;
     private readonly List<AutosplitLogEntry> _log = new();
+
+    /// <summary>The open half of every normalised pair: the reason code against its start time.</summary>
+    private readonly Dictionary<byte, uint> _openPairs = new();
+
     private readonly object _gate = new();
 
     private volatile LiveSplitView _view = LiveSplitView.Empty;
+    private GameId _game = GameId.None;
     private int _refreshing;
     private int _received;
     private int _acted;
+    private int _adjustments;
     private double _sincePoll;
 
     /// <param name="post">
@@ -55,7 +74,18 @@ public sealed class Autosplitter
     }
 
     /// <summary>The running game, from telemetry. Chooses the settings entry and the planet route.</summary>
-    public GameId Game { get; set; } = GameId.None;
+    public GameId Game
+    {
+        get => _game;
+        set
+        {
+            if (_game == value) return;
+            _game = value;
+
+            // A half-finished load belongs to the game that started it.
+            lock (_gate) _openPairs.Clear();
+        }
+    }
 
     /// <summary>The AUTOSPLIT_DESCRIBE rows for the running game; empty when it has no watcher.</summary>
     public IReadOnlyList<AutosplitEventDesc> Descriptors { get; set; } = Array.Empty<AutosplitEventDesc>();
@@ -68,8 +98,11 @@ public sealed class Autosplitter
     /// <summary>Events received from the console, whatever was done with them.</summary>
     public int Received => Volatile.Read(ref _received);
 
-    /// <summary>Events that became a LiveSplit command.</summary>
+    /// <summary>Events that became at least one LiveSplit command.</summary>
     public int Acted => Volatile.Read(ref _acted);
+
+    /// <summary>How many game-time corrections have gone out, of either kind.</summary>
+    public int Adjustments => Volatile.Read(ref _adjustments);
 
     public AutosplitSettings Options => _settings.Autosplit;
 
@@ -106,8 +139,8 @@ public sealed class Autosplitter
     // ---------------------------------------------------------------- decisions
 
     /// <summary>
-    /// One event from the console. Called on a network thread: it decides, sends at most one
-    /// command and logs, and never touches the UI.
+    /// One event from the console. Called on a network thread: it decides, sends what it decided
+    /// and logs, and never touches the UI.
     /// </summary>
     public void Handle(AutosplitEvent ev)
     {
@@ -129,40 +162,139 @@ public sealed class Autosplitter
         }
 
         var game = GameOptions;
-        if (desc is not null && !game.EventEnabled(desc.Label, desc.EnabledByDefault))
-        {
-            Record(ev, what, $"ignored: \"{desc.Label}\" is switched off", false);
-            return;
-        }
+
+        // The game-time correction goes first: for a FLAT split row the old script took its
+        // frames off before it split, and LiveSplit has to see the two in that order.
+        bool acted = ApplyTiming(ev, desc, what, out bool logged);
 
         switch (ev.Kind)
         {
             case AutosplitKind.Start:
-                HandleStart(ev, what);
+                if (!game.Start) Record(ev, what, "ignored: starting the timer is switched off", false);
+                else acted |= HandleStart(ev, what);
                 break;
 
             case AutosplitKind.Split:
-                HandleSplit(ev, desc, what, game);
+                acted |= HandleSplit(ev, desc, what, game);
                 break;
 
             case AutosplitKind.Reset:
-                if (game.NeverReset) Record(ev, what, "ignored: never reset is on", false);
-                else Act(ev, what, LiveSplitClient.Reset);
+                if (!game.Reset) Record(ev, what, "ignored: resetting the timer is switched off", false);
+                else acted |= Act(ev, what, LiveSplitClient.Reset);
                 break;
 
             case AutosplitKind.Pause:
-                Act(ev, what, LiveSplitClient.Pause);
+            case AutosplitKind.Resume:
+                acted |= HandlePauseResume(ev, desc, what, logged);
                 break;
 
-            case AutosplitKind.Resume:
-                Act(ev, what, LiveSplitClient.Resume);
+            case AutosplitKind.LoadStart:
+            case AutosplitKind.LoadEnd:
+                if (!logged) Record(ev, what, NoTimingReason(desc), false);
                 break;
 
             default:
                 Record(ev, what, $"ignored: unknown event kind {(byte)ev.Kind}", false);
                 break;
         }
+
+        if (acted) Interlocked.Increment(ref _acted);
     }
+
+    // ---------------------------------------------------------------- game time
+
+    /// <summary>
+    /// The two corrections of revision 1.5, which no setting gates:
+    /// <list type="bullet">
+    /// <item>FLAT: the row's parameter comes off game time every time the event happens.</item>
+    /// <item>
+    /// NORMALISE: the start of the pair is remembered, and at its end everything the pair lasted
+    /// beyond the parameter comes off. A pair shorter than its parameter is left alone — the old
+    /// scripts never gave a run time back, and neither does this.
+    /// </item>
+    /// </list>
+    /// </summary>
+    /// <param name="logged">True when this wrote a line of its own, so the caller does not repeat it.</param>
+    /// <returns>True when a command went out.</returns>
+    private bool ApplyTiming(AutosplitEvent ev, AutosplitEventDesc? desc, string what, out bool logged)
+    {
+        logged = false;
+        if (desc is null || !desc.IsTiming) return false;
+
+        switch (ev.Kind)
+        {
+            case AutosplitKind.Split:
+                if (!desc.Flat) return false;
+                logged = true;
+                return SendAdjustment(ev, what, desc.ParamUs, $"a fixed {Seconds(desc.ParamUs)} off {desc.Label}");
+
+            case AutosplitKind.LoadStart:
+            case AutosplitKind.Pause:
+                if (desc.Flat)
+                {
+                    logged = true;
+                    return SendAdjustment(ev, what, desc.ParamUs, $"a fixed {Seconds(desc.ParamUs)} off {desc.Label}");
+                }
+
+                // The other half of the pair carries the same code, and the gap between the two
+                // stamps is the load. Only the newest start is kept: a start with no end is a load
+                // the console never finished reporting, and replacing it is what an ASL would do.
+                lock (_gate) _openPairs[ev.Code] = ev.TimeMs;
+                logged = true;
+                Record(ev, what, $"timing: started, {Seconds(desc.ParamUs)} of it is free", false);
+                return false;
+
+            case AutosplitKind.LoadEnd:
+            case AutosplitKind.Resume:
+            {
+                uint start;
+                bool open;
+                lock (_gate) open = _openPairs.Remove(ev.Code, out start);
+                if (!open || !desc.Normalise) return false;
+
+                logged = true;
+                long durationUs = (long)AutosplitEvent.Elapsed(start, ev.TimeMs) * 1000;
+                long excess = durationUs - desc.ParamUs;
+                if (excess > 0)
+                {
+                    return SendAdjustment(ev, what, excess,
+                        $"{desc.Label} took {Seconds(durationUs)}, {Seconds(excess)} over its {Seconds(desc.ParamUs)}");
+                }
+
+                Record(ev, what, $"no adjustment: {Seconds(durationUs)} is within its {Seconds(desc.ParamUs)}", false);
+                return false;
+            }
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>
+    /// Takes time off the run's game time. Nothing else in this client touches the clock, and the
+    /// amount is never negative, so a correction can only ever shorten a run — the same direction
+    /// every one of the old scripts moved it.
+    /// </summary>
+    private bool SendAdjustment(AutosplitEvent ev, string what, long microseconds, string because)
+    {
+        if (microseconds <= 0) return false;
+
+        string command = LiveSplitClient.AddLoadingTimesCommand(microseconds);
+        _liveSplit.Send(command);
+        Interlocked.Increment(ref _adjustments);
+        Record(ev, what, $"{command} ({because})", true);
+        return true;
+    }
+
+    /// <summary>Why a load or pause event did nothing, which is only ever one of two things.</summary>
+    private static string NoTimingReason(AutosplitEventDesc? desc) => desc is null
+        ? "ignored: this game describes no timing for that code"
+        : "ignored: nothing of that code had started";
+
+    private static string Seconds(long microseconds) =>
+        $"{microseconds / 1_000_000.0:0.###} s";
+
+    // ---------------------------------------------------------------- splits
 
     /// <summary>
     /// A run started. The timer only starts when LiveSplit says it is not running, so a start
@@ -170,49 +302,86 @@ public sealed class Autosplitter
     /// is treated as "not running": the phase query failed, and refusing to start a run because of
     /// that would be worse than a start LiveSplit ignores.
     /// </summary>
-    private void HandleStart(AutosplitEvent ev, string what)
+    private bool HandleStart(AutosplitEvent ev, string what)
     {
         var phase = _view.Phase;
         if (phase is LiveSplitPhase.NotRunning or LiveSplitPhase.Unknown)
         {
-            Act(ev, what, LiveSplitClient.StartTimer,
+            return Act(ev, what, LiveSplitClient.StartTimer,
                 phase == LiveSplitPhase.Unknown ? "the timer phase is not known yet" : null);
-            return;
         }
 
         Record(ev, what, $"ignored: the timer is {phase}", false);
+        return false;
     }
 
-    private void HandleSplit(AutosplitEvent ev, AutosplitEventDesc? desc, string what, AutosplitGameSettings game)
+    /// <summary>
+    /// A split candidate. The master switch, then the row's own checkbox, then — for the planet
+    /// code alone — the route: the split names are the planets of the run, so the planet just
+    /// entered has to be the one the <em>upcoming</em> split names, exactly as every old script
+    /// compared <c>timer.Run[timer.CurrentSplitIndex + 1].Name</c>.
+    /// </summary>
+    private bool HandleSplit(AutosplitEvent ev, AutosplitEventDesc? desc, string what, AutosplitGameSettings game)
     {
-        bool routed = game.PlanetRoute
-                      && (desc?.PlanetRoute ?? ev.Code == AutosplitEvent.PlanetEnteredCode)
-                      && ev.Code == AutosplitEvent.PlanetEnteredCode;
-
-        if (!routed)
+        if (!game.Split)
         {
-            Act(ev, what, LiveSplitClient.Split);
-            return;
+            Record(ev, what, "ignored: splitting is switched off", false);
+            return false;
         }
 
+        if (desc is not null && !game.EventEnabled(desc.Label, desc.EnabledByDefault))
+        {
+            Record(ev, what, $"ignored: \"{desc.Label}\" is switched off", false);
+            return false;
+        }
+
+        bool routed = game.PlanetRoute
+                      && ev.Code == AutosplitEvent.PlanetEnteredCode
+                      && (desc?.PlanetRoute ?? true);
+
+        if (!routed) return Act(ev, what, LiveSplitClient.Split);
+
         var view = _view;
-        string? name = game.NamesAreDestination ? view.CurrentSplit : view.UpcomingSplit;
-        string which = game.NamesAreDestination ? "current split" : "next split";
+        string? name = view.UpcomingSplit;
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            Record(ev, what, view.UpcomingSupported
+                ? "no split: there is no upcoming split, so this is the last segment"
+                : $"no split: this LiveSplit does not answer {LiveSplitClient.GetUpcomingSplitName}", false);
+            return false;
+        }
 
         if (AutosplitRoutes.Matches(Game, (int)ev.Arg, name))
         {
-            Act(ev, what, LiveSplitClient.Split, $"{which} \"{name}\" is this planet");
-            return;
+            return Act(ev, what, LiveSplitClient.Split, $"the next split \"{name}\" is this planet");
         }
 
-        string shown = string.IsNullOrWhiteSpace(name) ? "(none)" : name!;
-        Record(ev, what, $"no split: {which} \"{shown}\" is not on this planet's route", false);
+        Record(ev, what, $"no split: the next split \"{name}\" is not on this planet's route", false);
+        return false;
     }
 
-    private void Act(AutosplitEvent ev, string what, string command, string? because = null)
+    /// <summary>
+    /// A pause that is not a normalised pair is still worth passing on, so a game that reports one
+    /// without a parameter stops the timer the way it always did. A normalised pause never does:
+    /// the run keeps counting and the excess comes off at the resume, which is what keeps the
+    /// final game time identical to the old script's.
+    /// </summary>
+    private bool HandlePauseResume(AutosplitEvent ev, AutosplitEventDesc? desc, string what, bool logged)
+    {
+        if (logged) return false;
+
+        if (desc is { Normalise: true })
+        {
+            Record(ev, what, NoTimingReason(desc), false);
+            return false;
+        }
+
+        return Act(ev, what, ev.Kind == AutosplitKind.Pause ? LiveSplitClient.Pause : LiveSplitClient.Resume);
+    }
+
+    private bool Act(AutosplitEvent ev, string what, string command, string? because = null)
     {
         _liveSplit.Send(command);
-        Interlocked.Increment(ref _acted);
         Record(ev, what, because is null ? command : $"{command} ({because})", true);
 
         // What we just sent moved the timer. The read-back below is asynchronous, and the console
@@ -229,11 +398,12 @@ public sealed class Autosplitter
         _view = _view with { Phase = assumed };
 
         _ = RefreshAsync();
+        return true;
     }
 
     private void Record(AutosplitEvent ev, string what, string action, bool acted)
     {
-        var entry = new AutosplitLogEntry(ev.Seq, ev.Tick, ev.Kind, what, action, acted);
+        var entry = new AutosplitLogEntry(ev.Seq, ev.TimeMs, ev.Kind, what, action, acted);
         lock (_gate)
         {
             _log.Add(entry);
@@ -241,12 +411,23 @@ public sealed class Autosplitter
         }
     }
 
-    /// <summary>The row that names this event's reason code, or null when the game described none.</summary>
+    /// <summary>
+    /// The row that names this event's reason code, or null when the game described none. The end
+    /// of a pair is described by its start: a LOAD_END carries its LOAD_START row's code, and a
+    /// RESUME its PAUSE row's, so both find the row that holds the parameter.
+    /// </summary>
     public AutosplitEventDesc? DescriptorFor(AutosplitEvent ev)
     {
+        var kind = ev.Kind switch
+        {
+            AutosplitKind.LoadEnd => AutosplitKind.LoadStart,
+            AutosplitKind.Resume => AutosplitKind.Pause,
+            _ => ev.Kind,
+        };
+
         foreach (var desc in Descriptors)
         {
-            if (desc.Kind == ev.Kind && desc.Code == ev.Code) return desc;
+            if (desc.Kind == kind && desc.Code == ev.Code) return desc;
         }
 
         // A code named without its kind still names the split; code 0 is not a code at all.
@@ -266,6 +447,7 @@ public sealed class Autosplitter
     {
         string label = desc?.Label ?? (ev.Kind == AutosplitKind.Split ? $"code {ev.Code}" : ev.Kind.ToString());
 
+        if (ev.Kind is AutosplitKind.LoadEnd or AutosplitKind.Resume) label = $"{label} (end)";
         if (ev.Kind != AutosplitKind.Split) return label;
         if (ev.Code != AutosplitEvent.PlanetEnteredCode) return ev.Arg == 0 ? label : $"{label} ({ev.Arg})";
 
@@ -296,7 +478,8 @@ public sealed class Autosplitter
 
     /// <summary>
     /// Reads the timer phase and the two split names back. One refresh runs at a time: a burst of
-    /// events would otherwise queue three queries each behind the same connection.
+    /// events would otherwise queue three queries each behind the same connection. A query this
+    /// LiveSplit does not answer costs one timeout on the first refresh and nothing afterwards.
     /// </summary>
     public async Task RefreshAsync()
     {
@@ -310,8 +493,9 @@ public sealed class Autosplitter
                 .ConfigureAwait(false));
             string? current = await _liveSplit.QueryAsync(LiveSplitClient.GetCurrentSplitName).ConfigureAwait(false);
             string? upcoming = await _liveSplit.QueryAsync(LiveSplitClient.GetUpcomingSplitName).ConfigureAwait(false);
+            bool upcomingSupported = _liveSplit.Answers(LiveSplitClient.GetUpcomingSplitName);
 
-            var view = new LiveSplitView(phase, Clean(current), Clean(upcoming));
+            var view = new LiveSplitView(phase, Clean(current), Clean(upcoming), upcomingSupported);
             _post(() => _view = view);
         }
         finally
@@ -324,7 +508,7 @@ public sealed class Autosplitter
     private static string? Clean(string? reply)
     {
         var trimmed = reply?.Trim();
-        return string.IsNullOrEmpty(trimmed) ? null : trimmed;
+        return string.IsNullOrEmpty(trimmed) || trimmed == "-" ? null : trimmed;
     }
 
     /// <summary>The panel's test buttons: one command, no decisions, logged as a manual action.</summary>

@@ -83,7 +83,7 @@ public enum Opcode : ushort
     ConfigReload = 0x0090,
     ConfigSave = 0x0091,
 
-    // 5.11 Autosplitting (revision 1.4)
+    // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
 }
@@ -91,6 +91,10 @@ public enum Opcode : ushort
 /// <summary>
 /// What an <see cref="AutosplitEvent"/> says happened, section 5.11 of PROTOCOL.md. qwark reports
 /// the event; which of them become LiveSplit commands is entirely the client's decision.
+/// <para>
+/// Revision 1.5 added the two load kinds. A load and a pause are the same shape — something began
+/// and later ended — and both are timing, never a split.
+/// </para>
 /// </summary>
 public enum AutosplitKind : byte
 {
@@ -100,11 +104,15 @@ public enum AutosplitKind : byte
     Reset = 3,
     Pause = 4,
     Resume = 5,
+    LoadStart = 6,
+    LoadEnd = 7,
 }
 
 /// <summary>
 /// AutosplitEventDesc.flags. Bit0 is the state the client's checkbox takes when the settings file
-/// has nothing to say about the label; bit1 marks the one code the planet route applies to.
+/// has nothing to say about the label; bit1 marks the one code the planet route applies to; bits 2
+/// and 3 mark the two game-time corrections of revision 1.5, which the client applies whether or
+/// not any checkbox is ticked.
 /// </summary>
 [Flags]
 public enum AutosplitEventFlags : byte
@@ -119,6 +127,20 @@ public enum AutosplitEventFlags : byte
     /// applies to it. Only ever set on code 1.
     /// </summary>
     PlanetRoute = 1 << 1,
+
+    /// <summary>
+    /// A fixed correction: the row's <c>param_us</c> comes off game time every time the event
+    /// happens. The old scripts' constant subtractions — RaC2's three loading screens and its
+    /// seven frames before the Protopet cutscene, RaC3's one second of long load.
+    /// </summary>
+    Flat = 1 << 2,
+
+    /// <summary>
+    /// A normalised pair: the row is a LOAD_START (or PAUSE), its LOAD_END (or RESUME) carries the
+    /// same code, and everything the pair lasted beyond <c>param_us</c> comes off game time. The
+    /// old scripts' <c>isLoading</c> blocks — RaC1's 7.56 s load timer, Deadlocked's 14.8 s quit.
+    /// </summary>
+    Normalise = 1 << 3,
 }
 
 /// <summary>Reply status codes, section 2 of PROTOCOL.md.</summary>

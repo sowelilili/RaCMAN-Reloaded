@@ -37,7 +37,12 @@ internal sealed class FakeLiveSplitServer : IDisposable
 
     public string Phase { get; set; } = "NotRunning";
 
-    public string Version { get; set; } = "1.8.29";
+    /// <summary>
+    /// Commands this server ignores, the way the real one silently ignores everything outside its
+    /// own list. Nothing is written back at all, which is exactly the case the client must not
+    /// mistake for a dead connection.
+    /// </summary>
+    public HashSet<string> Ignored { get; } = new(StringComparer.Ordinal);
 
     /// <summary>Everything received, queries included, in order.</summary>
     public string[] Commands
@@ -51,9 +56,30 @@ internal sealed class FakeLiveSplitServer : IDisposable
         get { lock (_gate) return _commands.Where(c => !LiveSplitClient.IsQuery(c)).ToArray(); }
     }
 
+    /// <summary>Every <c>addloadingtimes</c> line, argument included, in the order it arrived.</summary>
+    public List<string> LoadingTimes { get; } = new();
+
+    /// <summary>The seconds each <c>addloadingtimes</c> asked for, as LiveSplit's parser reads them.</summary>
+    public double[] LoadingTimeSeconds
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return LoadingTimes
+                    .Select(c => double.Parse(c.Split(' ')[1], System.Globalization.CultureInfo.InvariantCulture))
+                    .ToArray();
+            }
+        }
+    }
+
     public void ClearCommands()
     {
-        lock (_gate) _commands.Clear();
+        lock (_gate)
+        {
+            _commands.Clear();
+            LoadingTimes.Clear();
+        }
     }
 
     private async Task AcceptAsync()
@@ -107,7 +133,10 @@ internal sealed class FakeLiveSplitServer : IDisposable
     {
         lock (_gate)
         {
-            switch (command)
+            if (Ignored.Contains(command)) return null;
+
+            // "addloadingtimes 1.440000" and friends: the verb decides, the argument rides along.
+            switch (command.Split(' ')[0])
             {
                 case LiveSplitClient.StartTimer:
                     Phase = "Running";
@@ -144,8 +173,9 @@ internal sealed class FakeLiveSplitServer : IDisposable
                 case LiveSplitClient.GetCurrentTimerPhase:
                     return Phase;
 
-                case LiveSplitClient.GetLiveSplitVersion:
-                    return Version;
+                case LiveSplitClient.AddLoadingTimes:
+                    LoadingTimes.Add(command);
+                    return null;
 
                 case LiveSplitClient.GetSplitIndex:
                     return SplitIndex.ToString();
@@ -187,13 +217,30 @@ public class AutosplitterTests
 {
     private static readonly AutosplitEventDesc PlanetEntered = new(
         1, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute,
-        "Planet entered");
+        0, "Planet entered");
 
     private static readonly AutosplitEventDesc BossDefeated = new(
-        2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, "Protopet defeated");
+        2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Protopet defeated");
 
     private static readonly AutosplitEventDesc ArenaEntered = new(
-        3, AutosplitKind.Split, AutosplitEventFlags.None, "Maktar arena");
+        3, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Maktar arena");
+
+    /// <summary>RaC2's Protopet: the split is also a fixed seven frames off game time.</summary>
+    private static readonly AutosplitEventDesc FlatBoss = new(
+        2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Flat,
+        116_667, "Protopet defeated");
+
+    /// <summary>RaC1's load timer: everything past 7.56 s of a load comes off game time.</summary>
+    private static readonly AutosplitEventDesc NormalisedLoad = new(
+        4, AutosplitKind.LoadStart, AutosplitEventFlags.Normalise, 7_560_000, "Level load");
+
+    /// <summary>Deadlocked's quit to the XMB, which the old script gave back 14.8 s of.</summary>
+    private static readonly AutosplitEventDesc NormalisedPause = new(
+        5, AutosplitKind.Pause, AutosplitEventFlags.Normalise, 14_800_000, "Quit to XMB");
+
+    /// <summary>RaC3's long load: a flat second, applied the moment the load starts.</summary>
+    private static readonly AutosplitEventDesc FlatLoad = new(
+        6, AutosplitKind.LoadStart, AutosplitEventFlags.Flat, 1_000_000, "Long load");
 
     private static async Task<bool> WaitFor(Func<bool> condition, int timeoutMs = 5000)
     {
@@ -240,8 +287,21 @@ public class AutosplitterTests
         public async Task ReadyAsync()
         {
             Assert.True(await WaitFor(() => LiveSplit.IsConnected), "the fake LiveSplit never accepted the client");
-            await Engine.RefreshAsync();
+
+            // Connecting starts a refresh of its own, and the engine runs one at a time, so wait
+            // for that one to land rather than racing it with a second that would be dropped.
+            Assert.True(await WaitFor(() => Engine.View.Phase != LiveSplitPhase.Unknown),
+                "LiveSplit never answered the first phase query");
+            await RefreshAsync();
             Server.ClearCommands();
+        }
+
+        /// <summary>A refresh that has certainly happened, even if one was already in flight.</summary>
+        public async Task RefreshAsync()
+        {
+            await Engine.RefreshAsync();
+            await Task.Delay(30);
+            await Engine.RefreshAsync();
         }
 
         /// <summary>Waits for the engine's fire-and-forget send to reach the server.</summary>
@@ -324,13 +384,17 @@ public class AutosplitterTests
     }
 
     [Fact]
-    public async Task TheRouteComparesTheNextSplitWhenNamesAreThePlanetYouAreOn()
+    public async Task TheRouteComparesTheUpcomingSplitAndNothingElse()
     {
         using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar" }, PlanetEntered);
         await h.ReadyAsync();
         h.Options.PlanetRoute = true;
 
-        // Split 0 is running, so the next split is "Oozla": entering Maktar is off route.
+        // Split 0 is running, so the split you are on is "Aranos" and the upcoming one is "Oozla".
+        // Entering Maktar is off route even though Maktar is a split further down the run.
+        Assert.Equal("Aranos", h.Engine.View.CurrentSplit);
+        Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
+
         h.Engine.Handle(Split(PlanetEntered.Code, 2));
         await Task.Delay(200);
         Assert.Empty(h.Server.Actions);
@@ -343,25 +407,25 @@ public class AutosplitterTests
     }
 
     [Fact]
-    public async Task TheRouteComparesTheCurrentSplitWhenNamesAreWhereYouAreGoing()
+    public async Task OnTheLastSegmentAPlanetEventNeverSplits()
     {
-        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar" }, PlanetEntered);
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
         await h.ReadyAsync();
         h.Options.PlanetRoute = true;
-        h.Options.NamesAreDestination = true;
 
+        // The run is on its last segment, so there is no upcoming name to compare against.
         h.Server.SplitIndex = 1;
-        await h.Engine.RefreshAsync();
-        Assert.Equal("Oozla", h.Engine.View.CurrentSplit);
+        await h.RefreshAsync();
+        Assert.Null(h.Engine.View.UpcomingSplit);
 
-        // Endako (planet 3) is not what the current split names.
-        h.Engine.Handle(Split(PlanetEntered.Code, 3));
+        h.Engine.Handle(Split(PlanetEntered.Code, 1));
         await Task.Delay(200);
         Assert.Empty(h.Server.Actions);
+        Assert.Contains("last segment", h.Engine.Log()[^1].Action);
 
-        h.Engine.Handle(Split(PlanetEntered.Code, 1, seq: 2));
+        // Every other reason still splits: the route only ever gates the planet code.
+        h.Engine.Handle(Split(BossDefeated.Code, seq: 2));
         Assert.True(await h.Sent(LiveSplitClient.Split));
-        Assert.Contains("current split", h.Engine.Log()[^1].Action);
     }
 
     [Fact]
@@ -422,21 +486,37 @@ public class AutosplitterTests
     }
 
     [Fact]
-    public async Task ResetGoesThroughUnlessNeverResetIsOn()
+    public async Task EachMasterSwitchStopsItsOwnKindOfEvent()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered);
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, BossDefeated);
         await h.ReadyAsync();
 
         h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Reset, 0, 0));
         Assert.True(await h.Sent(LiveSplitClient.Reset));
 
+        // Reset off is the All Exterminator Cards case the old script called AEC.
         h.Server.ClearCommands();
-        h.Options.NeverReset = true;
+        h.Options.Reset = false;
         h.Engine.Handle(new AutosplitEvent(2, 20, AutosplitKind.Reset, 0, 0));
         await Task.Delay(200);
-
         Assert.Empty(h.Server.Actions);
-        Assert.Contains("never reset", h.Engine.Log()[^1].Action);
+        Assert.Contains("resetting the timer is switched off", h.Engine.Log()[^1].Action);
+
+        h.Options.Start = false;
+        h.Engine.Handle(new AutosplitEvent(3, 30, AutosplitKind.Start, 0, 0));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("starting the timer is switched off", h.Engine.Log()[^1].Action);
+
+        h.Options.Split = false;
+        h.Engine.Handle(Split(BossDefeated.Code, seq: 4));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("splitting is switched off", h.Engine.Log()[^1].Action);
+
+        // Four events in, and only the first reset ever reached LiveSplit.
+        Assert.Equal(4, h.Engine.Received);
+        Assert.Equal(1, h.Engine.Acted);
     }
 
     [Fact]
@@ -451,6 +531,149 @@ public class AutosplitterTests
         h.Engine.Handle(new AutosplitEvent(2, 20, AutosplitKind.Resume, 0, 0));
         Assert.True(await h.Sent(LiveSplitClient.Resume));
         Assert.Equal(2, h.Engine.Acted);
+    }
+
+    // ---------------------------------------------------------------- game time
+
+    [Fact]
+    public async Task AFlatSplitRowTakesItsTimeOffBeforeItSplits()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, FlatBoss);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(Split(FlatBoss.Code));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+
+        // The order is the whole point: the old script subtracted its seven frames and only then
+        // returned true, so LiveSplit's split time already has the correction in it.
+        var actions = h.Server.Actions;
+        int adjusted = Array.FindIndex(actions, a => a.StartsWith(LiveSplitClient.AddLoadingTimes, StringComparison.Ordinal));
+        int split = Array.IndexOf(actions, LiveSplitClient.Split);
+        Assert.True(adjusted >= 0, "no addloadingtimes was sent");
+        Assert.True(adjusted < split, $"the correction has to come first, got {string.Join(", ", actions)}");
+
+        Assert.Equal(new[] { 0.116667 }, h.Server.LoadingTimeSeconds);
+        Assert.Equal(1, h.Engine.Adjustments);
+        Assert.Equal(1, h.Engine.Acted);
+    }
+
+    [Fact]
+    public async Task AFlatLoadRowTakesItsTimeOffWhenTheLoadStarts()
+    {
+        using var h = new Harness(GameId.Rac3, new[] { "Veldin", "Florana" }, PlanetEntered, FlatLoad);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 4_000, AutosplitKind.LoadStart, FlatLoad.Code, 0));
+
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 1.0 }, h.Server.LoadingTimeSeconds);
+        Assert.DoesNotContain(LiveSplitClient.Split, h.Server.Actions);
+    }
+
+    [Fact]
+    public async Task ANormalisedLoadGivesBackOnlyWhatItRanOver()
+    {
+        using var h = new Harness(GameId.Rac1, new[] { "Veldin", "Novalis" }, PlanetEntered, NormalisedLoad);
+        await h.ReadyAsync();
+
+        // Nine seconds of load against RaC1's 7.56 s allowance: 1.44 s comes off game time.
+        h.Engine.Handle(new AutosplitEvent(1, 10_000, AutosplitKind.LoadStart, NormalisedLoad.Code, 0));
+        h.Engine.Handle(new AutosplitEvent(2, 19_000, AutosplitKind.LoadEnd, NormalisedLoad.Code, 0));
+
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 1.44 }, h.Server.LoadingTimeSeconds);
+        Assert.Contains("1.44", h.Engine.Log()[^1].Action);
+        Assert.Equal(1, h.Engine.Adjustments);
+    }
+
+    [Fact]
+    public async Task ALoadInsideItsAllowanceCostsTheRunNothing()
+    {
+        using var h = new Harness(GameId.Rac1, new[] { "Veldin", "Novalis" }, PlanetEntered, NormalisedLoad);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 1_000, AutosplitKind.LoadStart, NormalisedLoad.Code, 0));
+        h.Engine.Handle(new AutosplitEvent(2, 5_000, AutosplitKind.LoadEnd, NormalisedLoad.Code, 0));
+        await Task.Delay(200);
+
+        Assert.Empty(h.Server.LoadingTimes);
+        Assert.Equal(0, h.Engine.Adjustments);
+        Assert.Contains("within its", h.Engine.Log()[^1].Action);
+    }
+
+    [Fact]
+    public async Task DeadlockedsQuitIsNormalisedTheSameWayAndNeverPausesTheTimer()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
+        await h.ReadyAsync();
+
+        // Twenty seconds in the XMB against the old script's 14.8 s: 5.2 s comes off.
+        h.Engine.Handle(new AutosplitEvent(1, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        h.Engine.Handle(new AutosplitEvent(2, 21_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 5.2 }, h.Server.LoadingTimeSeconds);
+
+        // Never the timer: game time is corrected, the clock is not stopped and not set.
+        Assert.DoesNotContain(LiveSplitClient.Pause, h.Server.Actions);
+        Assert.DoesNotContain(LiveSplitClient.Resume, h.Server.Actions);
+        Assert.DoesNotContain(h.Server.Actions, a => a.StartsWith("setgametime", StringComparison.Ordinal));
+        Assert.DoesNotContain(h.Server.Actions, a => a.StartsWith("pausegametime", StringComparison.Ordinal));
+
+        // A short quit gives nothing back, the same way a short load does not.
+        h.Server.ClearCommands();
+        h.Engine.Handle(new AutosplitEvent(3, 30_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        h.Engine.Handle(new AutosplitEvent(4, 32_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.LoadingTimes);
+    }
+
+    [Fact]
+    public async Task TheCorrectionsHappenWhateverTheCheckboxesSay()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, FlatBoss);
+        await h.ReadyAsync();
+
+        // Splitting off entirely, and the row's own checkbox off with it.
+        h.Options.Split = false;
+        h.Options.SetEvent(FlatBoss.Label, false);
+
+        h.Engine.Handle(Split(FlatBoss.Code));
+
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 0.116667 }, h.Server.LoadingTimeSeconds);
+        Assert.DoesNotContain(LiveSplitClient.Split, h.Server.Actions);
+
+        // It still counts as having acted: a command went out for that event.
+        Assert.Equal(1, h.Engine.Acted);
+    }
+
+    [Fact]
+    public async Task AModuleClockThatWrapsStillMeasuresTheLoad()
+    {
+        using var h = new Harness(GameId.Rac1, new[] { "Veldin", "Novalis" }, PlanetEntered, NormalisedLoad);
+        await h.ReadyAsync();
+
+        // 49 days in, the millisecond counter rolls over in the middle of a nine-second load.
+        h.Engine.Handle(new AutosplitEvent(1, uint.MaxValue - 3_999, AutosplitKind.LoadStart, NormalisedLoad.Code, 0));
+        h.Engine.Handle(new AutosplitEvent(2, 5_000, AutosplitKind.LoadEnd, NormalisedLoad.Code, 0));
+
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 1.44 }, h.Server.LoadingTimeSeconds);
+    }
+
+    [Fact]
+    public void TheTimeStringIsWhatLiveSplitParses()
+    {
+        // Confirmed against LiveSplit's own server: a bare number is read as seconds, and six
+        // decimals carry a microsecond without rounding.
+        Assert.Equal("0.116667", LiveSplitClient.FormatTime(116_667));
+        Assert.Equal("1.440000", LiveSplitClient.FormatTime(1_440_000));
+        Assert.Equal("7.560000", LiveSplitClient.FormatTime(7_560_000));
+        Assert.Equal("addloadingtimes 1.440000", LiveSplitClient.AddLoadingTimesCommand(1_440_000));
+
+        // Never negative: a correction only ever takes time off a run.
+        Assert.Equal("0.000000", LiveSplitClient.FormatTime(-500_000));
     }
 
     // ---------------------------------------------------------------- when nothing should happen
@@ -518,17 +741,75 @@ public class AutosplitterTests
     }
 
     [Fact]
-    public async Task TheVersionAndPhaseComeBackFromLiveSplitOnConnect()
+    public async Task ThePhaseAndBothSplitNamesComeBackFromLiveSplitOnConnect()
     {
         using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" });
-        await h.ReadyAsync();
+        Assert.True(await WaitFor(() => h.LiveSplit.IsConnected));
 
-        Assert.True(await WaitFor(() => h.LiveSplit.Version == "1.8.29"));
+        // The handshake is one getcurrenttimerphase and nothing else: the real server answers no
+        // version query at all, and asking for one is what used to drop the connection.
+        Assert.True(await WaitFor(() => h.Server.Commands.Length > 0));
+        Assert.Equal(LiveSplitClient.GetCurrentTimerPhase, h.Server.Commands[0]);
+        Assert.DoesNotContain(h.Server.Commands, c => c.Contains("version", StringComparison.OrdinalIgnoreCase));
+
+        await h.RefreshAsync();
         Assert.Equal(LiveSplitStatus.Connected, h.LiveSplit.Status);
-        Assert.Contains("1.8.29", h.LiveSplit.StatusLine);
+        Assert.Contains("Connected to LiveSplit", h.LiveSplit.StatusLine);
         Assert.Equal(LiveSplitPhase.NotRunning, h.Engine.View.Phase);
         Assert.Equal("Aranos", h.Engine.View.CurrentSplit);
         Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
+    }
+
+    // ---------------------------------------------------------------- the connection itself
+
+    [Fact]
+    public async Task AQueryTheServerIgnoresIsUnknownRatherThanADroppedConnection()
+    {
+        // LiveSplit's real server answers nothing at all to a command outside its list, which is
+        // most of them: getupcomingsplitname and getlivesplitversion included. Waiting a second
+        // and then tearing the socket down is what made the link drop seconds after it came up.
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
+        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
+        await h.ReadyAsync();
+
+        // The first refresh spends the timeout finding out; after that the client knows.
+        Assert.True(await WaitFor(() => !h.LiveSplit.Answers(LiveSplitClient.GetUpcomingSplitName)),
+            "the unanswered query was never noticed");
+        await h.RefreshAsync();
+
+        Assert.True(h.LiveSplit.IsConnected);
+        Assert.False(h.Engine.View.UpcomingSupported);
+        Assert.Equal(LiveSplitPhase.NotRunning, h.Engine.View.Phase);
+        Assert.Equal("Aranos", h.Engine.View.CurrentSplit);
+
+        // Asked once, then never again: a query that costs a second is not worth repeating.
+        int asked = h.Server.Commands.Count(c => c == LiveSplitClient.GetUpcomingSplitName);
+        await h.RefreshAsync();
+        await Task.Delay(100);
+        Assert.Equal(asked, h.Server.Commands.Count(c => c == LiveSplitClient.GetUpcomingSplitName));
+
+        // And the connection is still good for everything else.
+        h.Engine.Handle(Split(BossDefeated.Code));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.True(h.LiveSplit.IsConnected);
+    }
+
+    [Fact]
+    public async Task ASurvivingConnectionKeepsWorkingForLongerThanAQueryTimeout()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
+        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
+        await h.ReadyAsync();
+
+        // Three seconds of the 1 Hz poll, which is where the drop always showed itself.
+        for (int i = 0; i < 3; i++)
+        {
+            h.Engine.Tick(1.5);
+            await Task.Delay(400);
+            Assert.True(h.LiveSplit.IsConnected, $"the connection dropped on poll {i + 1}");
+        }
+
+        Assert.Equal(LiveSplitStatus.Connected, h.LiveSplit.Status);
     }
 
     // ---------------------------------------------------------------- the route files
@@ -598,12 +879,16 @@ public class AutosplitterTests
 
             var rac2 = saved.Autosplit.For(GameId.Rac2);
             rac2.PlanetRoute = true;
-            rac2.NamesAreDestination = true;
             rac2.SetEvent("Planet entered", false);
             rac2.SetEvent("Protopet defeated", true);
 
-            saved.Autosplit.For(GameId.Rac4).NeverReset = true;
+            saved.Autosplit.For(GameId.Rac4).Reset = false;
             saved.Save();
+
+            // The two settings this build replaced are not written back out.
+            string json = File.ReadAllText(path);
+            Assert.DoesNotContain("neverReset", json);
+            Assert.DoesNotContain("namesAreDestination", json);
 
             var loaded = Settings.Load(path);
             Assert.True(loaded.Autosplit.Enabled);
@@ -612,10 +897,14 @@ public class AutosplitterTests
 
             var back = loaded.Autosplit.For(GameId.Rac2);
             Assert.True(back.PlanetRoute);
-            Assert.True(back.NamesAreDestination);
             Assert.False(back.EventEnabled("Planet entered", byDefault: true));
             Assert.True(back.EventEnabled("Protopet defeated", byDefault: false));
-            Assert.True(loaded.Autosplit.For(GameId.Rac4).NeverReset);
+
+            // The three masters default on, and only the one that was changed is off.
+            Assert.True(back.Start);
+            Assert.True(back.Split);
+            Assert.True(back.Reset);
+            Assert.False(loaded.Autosplit.For(GameId.Rac4).Reset);
 
             // A label the file never mentioned takes the console's default, either way round.
             Assert.True(back.EventEnabled("Maktar arena", byDefault: true));
@@ -645,6 +934,54 @@ public class AutosplitterTests
             Assert.Equal(LiveSplitClient.DefaultHost, loaded.Autosplit.Host);
             Assert.Equal(LiveSplitClient.DefaultPort, loaded.Autosplit.Port);
             Assert.Empty(loaded.Autosplit.Games);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ASettingsFileFromTheBuildBeforeTheMastersIsMigratedSilently()
+    {
+        const string older = """
+        {
+          "autosplit": {
+            "enabled": true,
+            "games": {
+              "rac4": { "events": { "Planet entered": true }, "planetRoute": true,
+                        "namesAreDestination": true, "neverReset": true },
+              "rac2": { "events": {}, "planetRoute": false, "neverReset": false }
+            }
+          }
+        }
+        """;
+
+        var folder = Path.Combine(Path.GetTempPath(), "racman-autosplit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            File.WriteAllText(path, older);
+
+            var loaded = Settings.Load(path);
+
+            // "never reset" was the Reset master turned off, and nothing else moved.
+            var rac4 = loaded.Autosplit.For(GameId.Rac4);
+            Assert.False(rac4.Reset);
+            Assert.True(rac4.Start);
+            Assert.True(rac4.Split);
+            Assert.True(rac4.PlanetRoute);
+            Assert.True(rac4.EventEnabled("Planet entered", byDefault: false));
+
+            var rac2 = loaded.Autosplit.For(GameId.Rac2);
+            Assert.True(rac2.Reset);
+
+            // Neither retired setting survives the next save.
+            loaded.Save();
+            string json = File.ReadAllText(path);
+            Assert.DoesNotContain("neverReset", json);
+            Assert.DoesNotContain("namesAreDestination", json);
         }
         finally
         {
