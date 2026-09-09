@@ -9,7 +9,7 @@ namespace RaCMAN.Protocol.Testing;
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
 /// memory primitives, POS_LIST, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
-/// MOD_LIST, the file ops, COMBO_SET/LIST and the two AUTOSPLIT ops with their UDP push.
+/// MOD_LIST, the file ops, COMBO_SET/LIST/SUSPEND and the two AUTOSPLIT ops with their UDP push.
 /// Everything else answers UNKNOWN_OP.
 /// </summary>
 public sealed class FakeQwarkServer : IDisposable
@@ -32,7 +32,7 @@ public sealed class FakeQwarkServer : IDisposable
         _session = SessionInfo.Empty with
         {
             ProtocolVersion = 1,
-            QwarkVersion = 7,
+            QwarkVersion = 8,
             State = SessionState.Ingame,
             Game = GameId.Rac1,
             Generation = 1,
@@ -271,6 +271,13 @@ public sealed class FakeQwarkServer : IDisposable
     public List<FreezeEntry> Freezes { get; } = new();
 
     public Dictionary<ComboAction, uint> Combos { get; } = new();
+
+    /// <summary>
+    /// The last COMBO_SUSPEND the client sent: true while it is holding the combos off, which is
+    /// what the Combos panel does for the length of a capture. Null until one arrives, so a test
+    /// can tell "never asked" from "asked and resumed".
+    /// </summary>
+    public bool? CombosSuspended { get; private set; }
 
     /// <summary>The console's filesystem, as far as the file ops are concerned.</summary>
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
@@ -857,6 +864,15 @@ public sealed class FakeQwarkServer : IDisposable
                     }
 
                     return (Status.Ok, buffer);
+                }
+
+                case Opcode.ComboSuspend:
+                {
+                    // `u8 suspend` and nothing else, so a client that pads the request out or
+                    // sends an empty one is caught here rather than passing quietly.
+                    if (payload.Length != 1) return (Status.BadArg, null);
+                    CombosSuspended = payload[0] != 0;
+                    return (Status.Ok, null);
                 }
 
                 case Opcode.DirCreate:

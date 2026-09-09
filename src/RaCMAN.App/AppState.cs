@@ -360,7 +360,7 @@ public sealed class AppState : IDisposable
         Previous = null;
         PreviousModalRequested = false;
         ClearGameViews();
-        Panels.PanelState.ResetAll();
+        Panels.PanelState.ResetAll(this);
     }
 
     /// <summary>

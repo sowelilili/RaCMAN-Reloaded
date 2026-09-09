@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 7;
+    public const byte ExpectedQwarkBuild = 8;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -980,6 +980,21 @@ public sealed class QwarkClient : IDisposable
 
     public async Task<ComboEntry[]> ComboListAsync(CancellationToken cancellationToken = default) =>
         ComboEntry.ParseList(await RequestAsync(Opcode.ComboList, null, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// COMBO_SUSPEND, revision 1.8: holds every combo the console has off, or hands them back.
+    /// Capture reads the pad out of telemetry, and the console is watching that same pad, so
+    /// without the hold the buttons being recorded also fire whatever is already stored there.
+    /// <para>
+    /// The console expires a hold on its own two minutes after it was set, so a client that dies
+    /// mid-capture cannot leave the combos off; the panel still sends the 0 when it is done.
+    /// </para>
+    /// </summary>
+    public Task ComboSuspendAsync(bool suspend, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.ComboSuspend, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)(suspend ? 1 : 0));
+        }), cancellationToken);
 
     // ---------------------------------------------------------------- 5.10 config
 

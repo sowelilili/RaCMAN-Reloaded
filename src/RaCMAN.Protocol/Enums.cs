@@ -78,6 +78,7 @@ public enum Opcode : ushort
     // 5.9 Combos
     ComboSet = 0x0080,
     ComboList = 0x0081,
+    ComboSuspend = 0x0082,   // revision 1.8
 
     // 5.10 Config
     ConfigReload = 0x0090,
