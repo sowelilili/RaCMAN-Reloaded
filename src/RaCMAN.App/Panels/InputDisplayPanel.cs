@@ -8,8 +8,8 @@ namespace RaCMAN.App.Panels;
 /// <summary>
 /// The pad drawn from pad_mask and analog[] with the old client's controller skins: one sprite
 /// sheet per skin, the base blitted first and then every pressed button's sprite on top. It can
-/// be drawn in the panel, in a plain window floating over the panels, or in its own OS window so
-/// a capture tool can take it as a source of its own.
+/// be drawn in the panel or in its own OS window, so a capture tool can take it as a source of
+/// its own.
 /// </summary>
 public static class InputDisplayPanel
 {
@@ -134,33 +134,27 @@ public static class InputDisplayPanel
 
         ImGui.Spacing();
 
-        switch (settings.InputMode)
+        if (settings.InputMode == InputDisplayMode.Window)
         {
-            case InputDisplayMode.Window:
-                Ui.Hint($"The pad is in its own window: capture \"{PadWindow.WindowTitle}\" as a window source, "
-                        + "or close that window to bring the pad back here.");
-                break;
+            Ui.Hint($"The pad is in its own window: capture \"{PadWindow.WindowTitle}\" as a window source, "
+                    + "or close that window to bring the pad back here.");
+        }
+        else
+        {
+            float fit = FitScale(loaded, settings.InputScale);
+            if (fit < settings.InputScale - 0.005f)
+            {
+                Ui.Hint($"Shown at {fit:0.00}x so the whole pad fits here; give it its own window for the full size.");
+            }
 
-            case InputDisplayMode.Floating:
-                Ui.Hint("The pad is in a floating window; pick \"In this panel\" to bring it back here.");
-                break;
-
-            default:
-                float fit = FitScale(loaded, settings.InputScale);
-                if (fit < settings.InputScale - 0.005f)
-                {
-                    Ui.Hint($"Shown at {fit:0.00}x so the whole pad fits here; float it for the full size.");
-                }
-
-                DrawPad(state, loaded, fit);
-                break;
+            DrawPad(state, loaded, fit);
         }
 
         if (!state.Connected) Ui.Hint("Not connected: the pad shows the last telemetry packet, if any.");
     }
 
     /// <summary>
-    /// The three places the pad can live, plus the one thing only the OS window can do. Switching
+    /// The two places the pad can live, plus the one thing only the OS window can do. Switching
     /// is what opens and closes that window: the frame loop follows the setting.
     /// </summary>
     private static void DrawModeChoice(Settings settings)
@@ -168,9 +162,7 @@ public static class InputDisplayPanel
         var mode = settings.InputMode;
         var chosen = mode;
 
-        if (ImGui.RadioButton("In this panel", mode == InputDisplayMode.Panel)) chosen = InputDisplayMode.Panel;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Floating inside RaCMAN", mode == InputDisplayMode.Floating)) chosen = InputDisplayMode.Floating;
+        if (ImGui.RadioButton("In the panel", mode == InputDisplayMode.Panel)) chosen = InputDisplayMode.Panel;
         ImGui.SameLine();
         if (ImGui.RadioButton("Own window", mode == InputDisplayMode.Window)) chosen = InputDisplayMode.Window;
 
@@ -193,7 +185,7 @@ public static class InputDisplayPanel
         ImGui.SameLine();
         Ui.Hint(chosen == InputDisplayMode.Window
             ? "Its own OS window survives minimising RaCMAN and can sit over the game feed."
-            : "A floating pad stays inside this window but can be dragged over any panel.");
+            : "Give the pad its own window and a capture tool can take it as a source of its own.");
     }
 
     /// <summary>
@@ -201,7 +193,7 @@ public static class InputDisplayPanel
     /// 730 pixels, wider than the panel at the default window size, and the pad is drawn straight
     /// onto the window's draw list: anything past the right-hand edge is simply not reachable.
     /// The slider still owns the scale; this only caps it, and only for the embedded pad, because
-    /// the floating window sizes itself to whatever it is given.
+    /// the pad's own window sizes the skin to itself.
     /// </summary>
     private static float FitScale(LoadedSkin? loaded, float scale)
     {
@@ -219,39 +211,6 @@ public static class InputDisplayPanel
         if (usableX <= 0 || usableY <= 0) return scale;
 
         return Math.Min(scale, Math.Min(usableX / width, usableY / height));
-    }
-
-    /// <summary>
-    /// The floating pad. Drawn from the frame loop rather than the panel so it stays up while
-    /// another panel is on screen. It is a plain ImGui window inside the one OS window.
-    /// </summary>
-    public static void DrawFloating(AppState state, ImGuiController controller)
-    {
-        if (state.Settings.InputMode != InputDisplayMode.Floating) return;
-
-        Scan();
-        var loaded = EnsureSkin(state, controller);
-
-        const ImGuiWindowFlags flags = ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoDocking
-                                       | ImGuiWindowFlags.NoCollapse | ImGuiWindowFlags.NoNav
-                                       | ImGuiWindowFlags.NoFocusOnAppearing;
-
-        ImGui.SetNextWindowBgAlpha(0.85f);
-        ImGui.SetNextWindowSize(Vector2.Zero, ImGuiCond.Always);
-
-        bool open = true;
-        if (ImGui.Begin("Input display##floating", ref open, flags))
-        {
-            DrawPad(state, loaded, state.Settings.InputScale);
-        }
-
-        ImGui.End();
-
-        if (!open)
-        {
-            state.Settings.InputMode = InputDisplayMode.Panel;
-            state.Settings.Save();
-        }
     }
 
     /// <summary>

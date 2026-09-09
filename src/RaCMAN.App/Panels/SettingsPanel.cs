@@ -18,6 +18,11 @@ public static class SettingsPanel
     private static bool _dialogOpen;
     private static bool _importing;
 
+    /// <summary>The LiveSplit endpoint while it is being typed; committed when the boxes are left.</summary>
+    private static string _liveSplitHost = string.Empty;
+    private static int _liveSplitPort;
+    private static bool _portsRead;
+
     public static void Draw(AppState state)
     {
         var settings = state.Settings;
@@ -32,6 +37,24 @@ public static class SettingsPanel
         if (ImGui.RadioButton("Light", light) && !light) SetTheme(state, "light");
         ImGui.SameLine();
         if (ImGui.RadioButton("Dark", !light) && light) SetTheme(state, "dark");
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        Ui.Heading("Tables");
+
+        // The panels read this every frame, so a change here is live in the table you can see.
+        float seconds = settings.TableRefreshSeconds;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.InputFloat("Refresh tables every N seconds", ref seconds, 0.5f, 1f, "%.1f"))
+        {
+            // The property clamps to 0..10, so a typed 99 or a typed -1 is still a period the
+            // panels can use.
+            settings.TableRefreshSeconds = seconds;
+            settings.Save();
+        }
+
+        Ui.Hint("How often the Unlocks and Level flags tables re-read themselves from the console. "
+                + "0 means only when you press Refresh.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -69,6 +92,11 @@ public static class SettingsPanel
 
         ImGui.Spacing();
         ImGui.Separator();
+        Ui.Heading("Ports");
+        DrawPorts(state);
+
+        ImGui.Spacing();
+        ImGui.Separator();
         Ui.Heading("Import from RaCMAN");
         DrawImport(state);
 
@@ -79,6 +107,78 @@ public static class SettingsPanel
         Path("Settings file", string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path);
         Path("Mods folder", state.Mods.RootPath);
         Path("Save files folder", state.SaveFiles.RootPath);
+    }
+
+    // ---------------------------------------------------------------- ports
+
+    /// <summary>
+    /// The two ports nobody should have to think about: RPCS3's IPC server, which the helper is
+    /// pointed at, and LiveSplit's TCP server. Both are typed once, if ever, so they live here and
+    /// the panels that use them only name the value they are using.
+    /// </summary>
+    private static void DrawPorts(AppState state)
+    {
+        var settings = state.Settings;
+        var autosplit = settings.Autosplit;
+
+        int pine = settings.Rpcs3PinePort;
+        ImGui.SetNextItemWidth(140);
+        if (ImGui.InputInt("RPCS3 IPC port", ref pine))
+        {
+            settings.Rpcs3PinePort = Math.Clamp(pine, 1, 65535);
+            settings.Save();
+        }
+
+        Ui.Hint("Where qwark-rpcs3.exe looks for the emulator. RPCS3's own default is "
+                + $"{Rpcs3Host.DefaultPinePort} (Settings, I/O, Enable IPC server).");
+
+        ImGui.Spacing();
+
+        if (!_portsRead)
+        {
+            _liveSplitHost = autosplit.Host;
+            _liveSplitPort = autosplit.Port;
+            _portsRead = true;
+        }
+
+        ImGui.SetNextItemWidth(180);
+        ImGui.InputText("LiveSplit host", ref _liveSplitHost, 64);
+        bool editing = ImGui.IsItemActive();
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(140);
+        if (ImGui.InputInt("LiveSplit port", ref _liveSplitPort))
+        {
+            _liveSplitPort = Math.Clamp(_liveSplitPort, 1, 65535);
+        }
+
+        editing |= ImGui.IsItemActive();
+
+        // Committed the moment both boxes are left alone: a half-typed host would otherwise send
+        // the reconnect loop somewhere nobody asked for.
+        bool changed = !string.Equals(_liveSplitHost.Trim(), autosplit.Host, StringComparison.OrdinalIgnoreCase)
+                       || _liveSplitPort != autosplit.Port;
+        if (changed && !editing) ApplyLiveSplit(state, autosplit);
+
+        Ui.Hint($"LiveSplit's TCP server, {LiveSplitClient.DefaultHost}:{LiveSplitClient.DefaultPort} unless you "
+                + "moved it. The Autosplitter panel connects to whatever is here.");
+    }
+
+    /// <summary>Saves the LiveSplit endpoint and, while the autosplitter is on, points it at the new one.</summary>
+    private static void ApplyLiveSplit(AppState state, AutosplitSettings autosplit)
+    {
+        string host = _liveSplitHost.Trim();
+        autosplit.Host = host.Length == 0 ? LiveSplitClient.DefaultHost : host;
+        autosplit.Port = _liveSplitPort;
+        _liveSplitHost = autosplit.Host;
+        state.Settings.Save();
+
+        if (!autosplit.Enabled) return;
+
+        // Start only restarts a connection that is now pointed somewhere else, and a failure there
+        // is one the user asked for, so it earns the popup.
+        LiveSplitModal.ArmForAttempt();
+        state.LiveSplit.Start(autosplit.Host, autosplit.Port);
     }
 
     // ---------------------------------------------------------------- import

@@ -47,11 +47,6 @@ public sealed class LiveSplitClient : IDisposable
 
     public const int DefaultPort = 16834;
 
-    /// <summary>How LiveSplit's server is switched on, which is not obvious and not on by default.</summary>
-    public const string ServerHint =
-        "LiveSplit's server ships with LiveSplit but is not running until you start it: right-click "
-        + "LiveSplit, Control -> Start TCP Server. It listens on port 16834.";
-
     // Fire and forget.
     public const string StartTimer = "starttimer";
     public const string StartOrSplit = "startorsplit";
@@ -117,6 +112,7 @@ public sealed class LiveSplitClient : IDisposable
     private Task<int>? _pendingRead;
 
     private volatile LiveSplitStatus _status = LiveSplitStatus.Disconnected;
+    private int _connectFailures;
     private bool _disposed;
 
     private sealed class Operation
@@ -152,6 +148,14 @@ public sealed class LiveSplitClient : IDisposable
 
     /// <summary>Every command actually written to LiveSplit, in order. Debug aid and test hook.</summary>
     public int CommandsSent { get; private set; }
+
+    /// <summary>
+    /// How many attempts never opened a connection at all: nothing was listening, or the machine
+    /// refused it. A socket that dies once the connection is up is a drop and is not counted, so
+    /// this really is "LiveSplit's server was not there". Read from the render thread, which is how
+    /// the client tells a failure the user asked for from the reconnect loop's own retries.
+    /// </summary>
+    public int ConnectFailures => Volatile.Read(ref _connectFailures);
 
     /// <summary>Raised on the worker thread once a connection is up and the handshake is done.</summary>
     public event Action? Established;
@@ -309,6 +313,7 @@ public sealed class LiveSplitClient : IDisposable
         while (!token.IsCancellationRequested)
         {
             TcpClient? client = null;
+            bool established = false;
             try
             {
                 _status = LiveSplitStatus.Connecting;
@@ -325,6 +330,7 @@ public sealed class LiveSplitClient : IDisposable
                 attempt = 0;
                 LastError = null;
                 LastNote = null;
+                established = true;
                 _status = LiveSplitStatus.Connected;
 
                 // The whole handshake: one query every LiveSplit server has answered for as long
@@ -342,6 +348,10 @@ public sealed class LiveSplitClient : IDisposable
             catch (Exception ex)
             {
                 LastError = ex is SocketException socket ? socket.SocketErrorCode.ToString() : ex.Message;
+
+                // Nothing was listening: the one failure the user can do something about, and the
+                // one the panel puts a popup on.
+                if (!established) Interlocked.Increment(ref _connectFailures);
             }
             finally
             {

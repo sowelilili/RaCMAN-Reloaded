@@ -976,6 +976,50 @@ public class AutosplitterTests : IDisposable
         Assert.Equal(LiveSplitStatus.Connected, h.LiveSplit.Status);
     }
 
+    /// <summary>
+    /// Nothing listening is the everyday case: LiveSplit's server is off until somebody starts it.
+    /// The client has to report it as a failed attempt rather than sit in "Connecting...", because
+    /// that count is what puts the "LiveSplit not found" popup on the screen, and it has to keep
+    /// counting so a second attempt the user asked for is told from the first.
+    /// </summary>
+    [Fact]
+    public async Task AConnectToAPortNothingListensOnIsCountedAsAFailedAttempt()
+    {
+        // A listener started and stopped leaves a port nothing is on, which is exactly the shape
+        // of LiveSplit with its server switched off.
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int deadPort = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        using var client = new LiveSplitClient();
+        Assert.Equal(0, client.ConnectFailures);
+
+        client.Start(LiveSplitClient.DefaultHost, deadPort);
+
+        Assert.True(await WaitFor(() => client.ConnectFailures >= 1), "the refused connection was never reported");
+        Assert.False(client.IsConnected);
+        Assert.Equal(LiveSplitStatus.Disconnected, client.Status);
+        Assert.NotNull(client.LastError);
+        Assert.Contains($"Not connected to {LiveSplitClient.DefaultHost}:{deadPort}", client.StatusLine);
+
+        // The reconnect loop keeps trying, and every retry counts: the panel is what decides which
+        // of them is worth a popup.
+        Assert.True(await WaitFor(() => client.ConnectFailures >= 2), "the reconnect loop stopped retrying");
+
+        client.Stop();
+    }
+
+    /// <summary>The other half of it: a connection that comes up is not a failure of any kind.</summary>
+    [Fact]
+    public async Task AConnectionThatComesUpCountsNoFailure()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" });
+        await h.ReadyAsync();
+
+        Assert.Equal(0, h.LiveSplit.ConnectFailures);
+    }
+
     // ---------------------------------------------------------------- the route files
 
     [Fact]

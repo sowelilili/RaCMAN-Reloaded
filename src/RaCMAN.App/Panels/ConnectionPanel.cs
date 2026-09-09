@@ -179,8 +179,16 @@ public static class ConnectionPanel
         DrawConsoleSection(state);
     }
 
+    /// <summary>
+    /// The console utilities: a notification to prove the module is listening, and the three
+    /// commands that re-read or rewrite qwark's own state. None of it is part of playing a game,
+    /// and each one is a request nobody needs to make by hand, so the whole section only appears
+    /// with debug information on.
+    /// </summary>
     private static void DrawConsoleSection(AppState state)
     {
+        if (!Ui.Debug) return;
+
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Console");
@@ -239,8 +247,11 @@ public static class ConnectionPanel
     /// <summary>Starts the helper if nothing is serving the port yet, then connects to this PC.</summary>
     public static void ConnectToRpcs3(AppState state)
     {
+        // The port lives on the Settings panel now, so take it from there rather than from a copy
+        // this panel made when it was first drawn.
+        _pinePort = state.Settings.Rpcs3PinePort;
+
         state.Settings.LastHost = LocalHost;
-        state.Settings.Rpcs3PinePort = _pinePort;
         state.Settings.Save();
 
         if (!state.Rpcs3.Ensure(state.Settings.Rpcs3QwarkPath, _pinePort, out string message))
@@ -299,16 +310,9 @@ public static class ConnectionPanel
 
         if (host.Problem is { } problem) Ui.Error(problem);
 
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("RPCS3 IPC port", ref _pinePort))
-        {
-            _pinePort = Math.Clamp(_pinePort, 1, 65535);
-            state.Settings.Rpcs3PinePort = _pinePort;
-            state.Settings.Save();
-        }
-
-        Ui.Hint($"Turn RPCS3's IPC server on (Settings, the \"IPC server\" option) and leave it on port {_pinePort}. "
-                + "Start the game in RPCS3, then Connect.");
+        int port = state.Settings.Rpcs3PinePort;
+        Ui.Hint($"Turn RPCS3's IPC server on (Settings, the \"IPC server\" option) and leave it on port {port}. "
+                + "Start the game in RPCS3, then Connect. The port is on this client's Settings panel.");
         Ui.Warning("Code patches do not work on RPCS3: cheats that patch game code, mods and client "
                    + "patches are greyed out. Everything that reads and writes values still works.");
 

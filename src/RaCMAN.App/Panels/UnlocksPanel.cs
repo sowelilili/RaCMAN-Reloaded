@@ -14,21 +14,19 @@ namespace RaCMAN.App.Panels;
 /// console-side actions that rewrite the whole table (UYA's weapon-level pair), which belong with
 /// the list they change rather than on the Game page.
 ///
-/// Refresh policy: the whole list is re-read once a second while the panel is open, and again
-/// straight after any UNLOCK_SET. Re-reading everything is simpler than patching one row back
-/// into the list and it keeps another client's edits visible.
+/// Refresh policy: the whole list is re-read on the Settings panel's table refresh interval while
+/// the panel is open, and again straight after any UNLOCK_SET. Re-reading everything is simpler
+/// than patching one row back into the list and it keeps another client's edits visible. An
+/// interval of zero leaves the Refresh button as the only thing that reads.
 /// </summary>
 public static class UnlocksPanel
 {
-    private const float AutoRefreshSeconds = 1f;
-
     /// <summary>How wide the search box is, and how wide a flag and a number column are.</summary>
     private const float SearchWidth = 200f;
     private const float FlagColumnWidth = 70f;
     private const float NumberColumnWidth = 110f;
 
     private static bool _opened;
-    private static bool _autoRefresh = true;
     private static float _sinceRefresh;
 
     /// <summary>Half-typed number edits, kept only while the box has focus.</summary>
@@ -86,17 +84,21 @@ public static class UnlocksPanel
         }
 
         ImGui.EndDisabled();
-        ImGui.SameLine();
-        ImGui.Checkbox("Auto-refresh (1 Hz)", ref _autoRefresh);
 
-        if (_autoRefresh && state.Connected)
+        // The interval is read every frame, so a change on the Settings panel takes effect at once.
+        float period = state.Settings.TableRefreshSeconds;
+        if (period > 0 && state.Connected)
         {
             _sinceRefresh += ImGui.GetIO().DeltaTime;
-            if (_sinceRefresh >= AutoRefreshSeconds)
+            if (_sinceRefresh >= period)
             {
                 _sinceRefresh = 0;
                 state.RefreshUnlocks(quiet: true);
             }
+        }
+        else
+        {
+            _sinceRefresh = 0;
         }
 
         if (!enabled)
