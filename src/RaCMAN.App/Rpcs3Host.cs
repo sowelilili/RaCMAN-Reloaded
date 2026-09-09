@@ -92,10 +92,30 @@ public sealed class Rpcs3Host : IDisposable
             lock (_gate)
             {
                 if (_process is { HasExited: false }) return $"running (pid {_pid})";
-                if (_exitCode is { } code) return $"exited (code {code})";
+                if (_exitCode is { } code) return DescribeExit(code);
                 return "not started";
             }
         }
+    }
+
+    /// <summary>
+    /// True once <see cref="WaitForPortAsync"/> found the helper gone before it ever opened its
+    /// port. Connecting then would only start the reconnect loop against nothing; the callers
+    /// check this and show <see cref="Problem"/> instead.
+    /// </summary>
+    public bool DiedOnStartup { get; private set; }
+
+    /// <summary>
+    /// "exited (code N)", with the one code worth decoding: STATUS_DLL_NOT_FOUND, which is what a
+    /// helper that needs a DLL the user's PATH does not carry dies with at once, before it has
+    /// printed a line or opened its port.
+    /// </summary>
+    public static string DescribeExit(int code)
+    {
+        const int StatusDllNotFound = unchecked((int)0xC0000135);
+        return code == StatusDllNotFound
+            ? $"exited (code {code}, STATUS_DLL_NOT_FOUND: a DLL it needs is missing beside it or on PATH)"
+            : $"exited (code {code})";
     }
 
     /// <summary>The last "pine: ..." line the helper printed: what it says about RPCS3 itself.</summary>
@@ -223,8 +243,14 @@ public sealed class Rpcs3Host : IDisposable
         {
             if (PortInUse(QwarkPort)) return true;
 
-            // A helper that died on the way up is never going to open the port.
-            if (!IsRunning && !Adopted && ExitCode is not null) return false;
+            // A helper that died on the way up is never going to open the port. Say so where the
+            // panel shows it, and let the caller decide not to connect to nothing.
+            if (!IsRunning && !Adopted && ExitCode is { } code)
+            {
+                Problem = $"{ExeName} {DescribeExit(code)} before it opened port {QwarkPort}";
+                DiedOnStartup = true;
+                return false;
+            }
 
             await Task.Delay(50, cancellationToken).ConfigureAwait(false);
         }
@@ -266,6 +292,8 @@ public sealed class Rpcs3Host : IDisposable
             _lastPine = null;
             _exitCode = null;
         }
+
+        DiedOnStartup = false;
 
         process.Start();
         process.BeginOutputReadLine();

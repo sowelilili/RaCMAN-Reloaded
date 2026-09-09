@@ -99,7 +99,17 @@ else if (settings.Rpcs3Target)
     {
         state.Run(async () =>
         {
-            await state.Rpcs3.WaitForPortAsync(ConnectionPanel.HelperStartupWait).ConfigureAwait(false);
+            bool up = await state.Rpcs3.WaitForPortAsync(ConnectionPanel.HelperStartupWait).ConfigureAwait(false);
+            if (!up && state.Rpcs3.DiedOnStartup)
+            {
+                // Same rule as the Connect button: a helper that died on the way up is reported,
+                // not reconnected to.
+                string why = state.Rpcs3.Problem ?? $"{Rpcs3Host.ExeName} exited before it opened its port";
+                Console.Error.WriteLine($"rpcs3: {why}");
+                state.Post(() => state.AddToast(why, ToastKind.Error));
+                return;
+            }
+
             await state.Client.ConnectAsync(ConnectionPanel.LocalHost).ConfigureAwait(false);
         });
     }

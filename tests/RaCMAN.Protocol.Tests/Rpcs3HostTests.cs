@@ -156,6 +156,44 @@ public class Rpcs3HostTests
     }
 
     [Fact]
+    public async Task AHelperThatDiesOnTheWayUpIsReportedNotWaitedFor()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string stub = WriteDyingStub(folder, 3);
+            using var host = new Rpcs3Host(folder, FreePort());
+
+            Assert.True(host.Ensure(stub, 28012, out _));
+
+            // The wait gives up as soon as the helper is gone, not when the timeout runs out.
+            var started = DateTime.UtcNow;
+            Assert.False(await host.WaitForPortAsync(TimeSpan.FromSeconds(10)));
+            Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(8), "waited for the whole timeout");
+
+            Assert.True(host.DiedOnStartup);
+            Assert.Equal(3, host.ExitCode);
+            Assert.Equal("exited (code 3)", host.Status);
+            Assert.NotNull(host.Problem);
+            Assert.Contains("exited (code 3)", host.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TheMissingDllExitCodeIsDecoded()
+    {
+        // 0xC0000135, what qwark-rpcs3.exe died with while it still imported libwinpthread-1.dll.
+        string dll = Rpcs3Host.DescribeExit(unchecked((int)0xC0000135));
+        Assert.StartsWith("exited (code -1073741515", dll, StringComparison.Ordinal);
+        Assert.Contains("STATUS_DLL_NOT_FOUND", dll, StringComparison.Ordinal);
+        Assert.Equal("exited (code 0)", Rpcs3Host.DescribeExit(0));
+    }
+
+    [Fact]
     public void StoppingSomethingThatWasNeverStartedIsHarmless()
     {
         var folder = TempFolder();
@@ -207,6 +245,22 @@ public class Rpcs3HostTests
             "done",
             "exit 0",
             string.Empty));
+        File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        return sh;
+    }
+
+    /// <summary>A stand-in for a helper that dies at once, the way one missing a DLL does.</summary>
+    private static string WriteDyingStub(string folder, int code)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            string cmd = Path.Combine(folder, "dying-qwark-rpcs3.cmd");
+            File.WriteAllText(cmd, "@echo off\r\nexit /b " + code + "\r\n");
+            return cmd;
+        }
+
+        string sh = Path.Combine(folder, "dying-qwark-rpcs3.sh");
+        File.WriteAllText(sh, "#!/bin/sh\nexit " + code + "\n");
         File.SetUnixFileMode(sh, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         return sh;
     }

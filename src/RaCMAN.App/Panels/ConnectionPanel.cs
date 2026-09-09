@@ -252,7 +252,16 @@ public static class ConnectionPanel
         state.AddToast(message);
         state.Run(async () =>
         {
-            await state.Rpcs3.WaitForPortAsync(HelperStartupWait).ConfigureAwait(false);
+            bool up = await state.Rpcs3.WaitForPortAsync(HelperStartupWait).ConfigureAwait(false);
+            if (!up && state.Rpcs3.DiedOnStartup)
+            {
+                // Connecting now would only start the reconnect loop against a port nothing will
+                // ever open; the RPCS3 section below carries the exit code and what it means.
+                string why = state.Rpcs3.Problem ?? $"{Rpcs3Host.ExeName} exited before it opened its port";
+                state.Post(() => state.AddToast(why, ToastKind.Error));
+                return;
+            }
+
             await state.Client.ConnectAsync(LocalHost).ConfigureAwait(false);
         });
     }
