@@ -189,6 +189,11 @@ internal sealed class FakeLiveSplitServer : IDisposable
                 case LiveSplitClient.GetPreviousSplitName:
                     return NameAt(SplitIndex - 1);
 
+                // The final segment, but only once the run has started: before that the real server
+                // answers "-" here exactly as it does for the other two names.
+                case LiveSplitClient.GetLastSplitName:
+                    return SplitIndex >= 0 ? NameAt(Splits.Length - 1) : "-";
+
                 case LiveSplitClient.Ping:
                     return "pong";
 
@@ -213,7 +218,7 @@ internal sealed class FakeLiveSplitServer : IDisposable
 /// half is not involved here — events are handed straight to the engine, which is exactly what
 /// QwarkClient does when a push or a poll turns one up.
 /// </summary>
-public class AutosplitterTests
+public class AutosplitterTests : IDisposable
 {
     private static readonly AutosplitEventDesc PlanetEntered = new(
         1, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute,
@@ -242,6 +247,25 @@ public class AutosplitterTests
     private static readonly AutosplitEventDesc FlatLoad = new(
         6, AutosplitKind.LoadStart, AutosplitEventFlags.Flat, 1_000_000, "Long load");
 
+    /// <summary>This test's own folder for the splits files it writes; dropped when it is over.</summary>
+    private readonly string _folder =
+        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(),
+            "racman-splits-" + Guid.NewGuid().ToString("N"))).FullName;
+
+    public void Dispose()
+    {
+        try { Directory.Delete(_folder, recursive: true); } catch { /* the test is over */ }
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>Writes a splits file with these segment names and answers where it went.</summary>
+    private string WriteSplits(string category, params string[] segments)
+    {
+        string path = Path.Combine(_folder, $"{category}.lss");
+        File.WriteAllText(path, LiveSplitRunTests.Lss("Ratchet &amp; Clank", category, segments));
+        return path;
+    }
+
     private static async Task<bool> WaitFor(Func<bool> condition, int timeoutMs = 5000)
     {
         var sw = Stopwatch.StartNew();
@@ -257,10 +281,26 @@ public class AutosplitterTests
     private sealed class Harness : IDisposable
     {
         public Harness(GameId game, string[] splits, params AutosplitEventDesc[] descriptors)
+            : this(game, splits, null, descriptors)
+        {
+        }
+
+        /// <param name="splitsFile">
+        /// A <c>.lss</c> the engine should read the run's names from, for the LiveSplit builds that
+        /// will not name the upcoming split. Null is the normal case: LiveSplit is asked.
+        /// </param>
+        public Harness(GameId game, string[] splits, string? splitsFile, AutosplitEventDesc[] descriptors)
         {
             Server = new FakeLiveSplitServer(splits);
             Settings = new Settings();
             Settings.Autosplit.Enabled = true;
+            Settings.Autosplit.SplitsFile = splitsFile ?? string.Empty;
+
+            // Discovery must never reach the machine's own LiveSplit: a test that read the
+            // developer's fifty recent runs would be both slow and different on every box. The
+            // test binaries' own folder exists and holds no settings.cfg, so nothing is found.
+            Settings.Autosplit.LiveSplitFolder = AppContext.BaseDirectory;
+
             LiveSplit = new LiveSplitClient();
 
             // The app hands results to the render thread; a test applies them where they happen.
@@ -426,6 +466,130 @@ public class AutosplitterTests
         // Every other reason still splits: the route only ever gates the planet code.
         h.Engine.Handle(Split(BossDefeated.Code, seq: 2));
         Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    // ------------------------------------------------- the route without getupcomingsplitname
+
+    [Fact]
+    public async Task TheRunFileNamesTheNextSplitWhenLiveSplitWillNot()
+    {
+        // The user's own LiveSplit: it knows getsplitindex and the two names either side of the
+        // current split, and nothing at all about getupcomingsplitname. The run file is what turns
+        // "split 0 of three" into "the next one is called Oozla".
+        string splits = WriteSplits("GC NG+", "Aranos", "Oozla", "Maktar Resort");
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar Resort" }, splits,
+            new[] { PlanetEntered });
+        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        Assert.False(h.Engine.View.UpcomingSupported);
+        Assert.Equal(UpcomingNameSource.SplitsFile, h.Engine.View.UpcomingSource);
+        Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
+        Assert.Equal(0, h.Engine.View.SplitIndex);
+
+        // And the run file was confirmed against LiveSplit rather than assumed.
+        var runs = h.Engine.Runs.State;
+        Assert.True(runs.Verified);
+        Assert.Equal("GC NG+.lss, GC NG+, 3 segments, verified", runs.Summary);
+
+        // Maktar (planet 2) is not where the run goes next, so it does not split; Oozla is.
+        h.Engine.Handle(Split(PlanetEntered.Code, 2));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
+
+        h.Engine.Handle(Split(PlanetEntered.Code, 1, seq: 2));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Contains("Oozla", h.Engine.Log()[^1].Action);
+    }
+
+    [Fact]
+    public async Task OnTheLastSegmentOfARunFileAPlanetEventStillNeverSplits()
+    {
+        string splits = WriteSplits("GC NG+", "Aranos", "Oozla");
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, splits,
+            new[] { PlanetEntered, BossDefeated });
+        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        h.Server.SplitIndex = 1;
+        await h.RefreshAsync();
+        Assert.Null(h.Engine.View.UpcomingSplit);
+        Assert.True(h.Engine.View.NamesKnown);
+
+        h.Engine.Handle(Split(PlanetEntered.Code, 1));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("last segment", h.Engine.Log()[^1].Action);
+
+        // Every other reason still splits: the route only ever gates the planet code.
+        h.Engine.Handle(Split(BossDefeated.Code, seq: 2));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    [Fact]
+    public async Task WithNeitherLiveSplitNorAFileNamingTheNextSplitTheRouteSaysSo()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered);
+        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        Assert.False(h.Engine.View.UpcomingSupported);
+        Assert.False(h.Engine.View.NamesKnown);
+        Assert.Equal(UpcomingNameSource.None, h.Engine.View.UpcomingSource);
+
+        // Oozla is where the run goes next, but nothing here can know that, so nothing splits.
+        h.Engine.Handle(Split(PlanetEntered.Code, 1));
+        await Task.Delay(200);
+
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("split names are not known", h.Engine.Log()[^1].Action);
+    }
+
+    [Fact]
+    public async Task ANewerLiveSplitIsBelievedOverTheRunFile()
+    {
+        // A file that disagrees with the LiveSplit answering for itself: the live answer wins, and
+        // the file is not consulted behind its back.
+        string splits = WriteSplits("stale", "Aranos", "Endako", "Maktar Resort");
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar Resort" }, splits,
+            new[] { PlanetEntered });
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        Assert.True(h.Engine.View.UpcomingSupported);
+        Assert.Equal(UpcomingNameSource.LiveSplit, h.Engine.View.UpcomingSource);
+        Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
+
+        // The file said Endako (planet 3) came next; LiveSplit said Oozla, and Oozla splits.
+        h.Engine.Handle(Split(PlanetEntered.Code, 3));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+
+        h.Engine.Handle(Split(PlanetEntered.Code, 1, seq: 2));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    [Fact]
+    public async Task AFilePickedByHandThatDisagreesWithLiveSplitIsSaidToBeUnverified()
+    {
+        // The file names a run LiveSplit is not on. It was named by hand, so it is not thrown away
+        // — the user said it was theirs — but nothing claims it was confirmed, and the panel shows
+        // that in yellow rather than green.
+        string splits = WriteSplits("someone elses", "Veldin", "Novalis", "Aridia");
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar Resort" }, splits,
+            new[] { PlanetEntered });
+        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
+        await h.ReadyAsync();
+
+        var runs = h.Engine.Runs.State;
+        Assert.True(runs.Manual);
+        Assert.False(runs.Verified);
+        Assert.Contains("unverified", runs.Summary);
+        Assert.Equal("Novalis", h.Engine.View.UpcomingSplit);
     }
 
     [Fact]
@@ -876,6 +1040,8 @@ public class AutosplitterTests
             saved.Autosplit.Enabled = true;
             saved.Autosplit.Host = "10.0.0.4";
             saved.Autosplit.Port = 16835;
+            saved.Autosplit.SplitsFile = @"C:\splits\GC NG+.lss";
+            saved.Autosplit.LiveSplitFolder = @"C:\LiveSplit";
 
             var rac2 = saved.Autosplit.For(GameId.Rac2);
             rac2.PlanetRoute = true;
@@ -894,6 +1060,8 @@ public class AutosplitterTests
             Assert.True(loaded.Autosplit.Enabled);
             Assert.Equal("10.0.0.4", loaded.Autosplit.Host);
             Assert.Equal(16835, loaded.Autosplit.Port);
+            Assert.Equal(@"C:\splits\GC NG+.lss", loaded.Autosplit.SplitsFile);
+            Assert.Equal(@"C:\LiveSplit", loaded.Autosplit.LiveSplitFolder);
 
             var back = loaded.Autosplit.For(GameId.Rac2);
             Assert.True(back.PlanetRoute);
@@ -934,6 +1102,10 @@ public class AutosplitterTests
             Assert.Equal(LiveSplitClient.DefaultHost, loaded.Autosplit.Host);
             Assert.Equal(LiveSplitClient.DefaultPort, loaded.Autosplit.Port);
             Assert.Empty(loaded.Autosplit.Games);
+
+            // No splits file named is "find LiveSplit's own", which is what it does unconfigured.
+            Assert.Equal(string.Empty, loaded.Autosplit.SplitsFile);
+            Assert.Equal(string.Empty, loaded.Autosplit.LiveSplitFolder);
         }
         finally
         {

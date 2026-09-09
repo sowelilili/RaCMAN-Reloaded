@@ -266,6 +266,22 @@ public sealed class AutosplitSettings
     [JsonPropertyName("port")]
     public int Port { get; set; } = LiveSplitClient.DefaultPort;
 
+    /// <summary>
+    /// A <c>.lss</c> the user picked, which overrides discovery entirely. Empty is the normal case:
+    /// the run is found in LiveSplit's own recent-splits list and confirmed against what its server
+    /// says the current split is.
+    /// </summary>
+    [JsonPropertyName("splitsFile")]
+    public string SplitsFile { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Where LiveSplit is installed, for the case where its folder cannot be found from the running
+    /// process (LiveSplit closed, or a platform with no process list). Empty means "ask the running
+    /// LiveSplit", which is what works without anyone configuring anything.
+    /// </summary>
+    [JsonPropertyName("liveSplitFolder")]
+    public string LiveSplitFolder { get; set; } = string.Empty;
+
     [JsonPropertyName("games")]
     public Dictionary<string, AutosplitGameSettings> Games { get; set; } = new();
 

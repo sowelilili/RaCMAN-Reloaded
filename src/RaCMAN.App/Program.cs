@@ -117,6 +117,16 @@ if (exitAfter > 0)
                       $"livesplit={state.LiveSplit.Status} sent={state.LiveSplit.CommandsSent} " +
                       $"unanswered=[{string.Join(" ", state.LiveSplit.Unanswered)}]");
 
+    // Which run the split names were read from, and what LiveSplit itself said about the timer:
+    // the whole of the planet route's input, so a headless run can be checked against LiveSplit.
+    var runs = state.Autosplitter.Runs.State;
+    var view = state.Autosplitter.View;
+    Console.WriteLine($"livesplit-run: candidates={runs.Candidates} manual={runs.Manual} "
+                      + $"run={runs.Summary} problem={runs.Problem ?? "(none)"}");
+    Console.WriteLine($"livesplit-timer: phase={view.Phase} index={view.SplitIndex} "
+                      + $"current=\"{view.CurrentSplit}\" upcoming=\"{view.UpcomingSplit}\" "
+                      + $"from={view.UpcomingSourceLabel}");
+
     // The run-event log, so a headless run says what it decided and not only how much of it.
     foreach (var entry in state.Autosplitter.Log())
     {

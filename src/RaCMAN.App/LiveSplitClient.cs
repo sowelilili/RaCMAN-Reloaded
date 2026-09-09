@@ -74,13 +74,23 @@ public sealed class LiveSplitClient : IDisposable
     public const string GetCurrentSplitName = "getcurrentsplitname";
     public const string GetUpcomingSplitName = "getupcomingsplitname";
     public const string GetPreviousSplitName = "getprevioussplitname";
+
+    /// <summary>
+    /// The final segment's name — but only once the timer is running; before that the server
+    /// answers "-", the same as it answers the other two name queries at split index -1. It is the
+    /// one name that does not move as the run goes on, so it is what tells two routes through the
+    /// same game apart. What a build means by "last" is not guaranteed, so a run it does not match
+    /// is only set aside while some other run does match it.
+    /// </summary>
+    public const string GetLastSplitName = "getlastsplitname";
+
     public const string GetSplitIndex = "getsplitindex";
     public const string GetCurrentTimerPhase = "getcurrenttimerphase";
     public const string Ping = "ping";
 
     private static readonly HashSet<string> QueryCommands = new(StringComparer.Ordinal)
     {
-        GetCurrentSplitName, GetUpcomingSplitName, GetPreviousSplitName,
+        GetCurrentSplitName, GetUpcomingSplitName, GetPreviousSplitName, GetLastSplitName,
         GetSplitIndex, GetCurrentTimerPhase, Ping,
     };
 

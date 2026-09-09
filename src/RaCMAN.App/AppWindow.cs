@@ -338,7 +338,9 @@ public sealed class AppWindow : GameWindow
                     _ => Ui.Neutral,
                 };
 
-                ImGui.TextColored(colour, toast.Text);
+                // A toast carries file names and run categories, and ImGui's Text is printf: an
+                // "Any% (co-op)" would arrive on screen as "Any(co-op)".
+                Ui.Text(colour, toast.Text);
             }
         }
 

@@ -49,10 +49,27 @@ public static class Ui
         if (Debug) Wrapped(Grey, text);
     }
 
+    /// <summary>
+    /// Coloured text that is text and not a format string. Everything ImGui calls Text is printf
+    /// underneath, so a LiveSplit category called "Any% (co-op)" reaches the screen as
+    /// "Any(co-op)": the per cent and what follows it are read as a conversion and eaten.
+    /// </summary>
+    public static void Text(Vector4 colour, string text)
+    {
+        ImGui.PushStyleColor(ImGuiCol.Text, colour);
+        ImGui.TextUnformatted(text);
+        ImGui.PopStyleColor();
+    }
+
     private static void Wrapped(Vector4 colour, string text)
     {
         ImGui.PushStyleColor(ImGuiCol.Text, colour);
-        ImGui.TextWrapped(text);
+
+        // TextUnformatted inside a wrap region rather than TextWrapped, for the same reason.
+        ImGui.PushTextWrapPos(0f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+
         ImGui.PopStyleColor();
     }
 

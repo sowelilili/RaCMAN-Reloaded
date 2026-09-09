@@ -16,7 +16,7 @@ namespace RaCMAN.App;
 /// </summary>
 public static class FakeScript
 {
-    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, drop, "
+    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, rac4, drop, "
                                 + "start, split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
@@ -129,6 +129,19 @@ public static class FakeScript
                     State = SessionState.Ingame,
                     Game = GameId.Rac2,
                     TitleId = "NPEA00386",
+                    Generation = session.Generation + 1,
+                };
+                break;
+
+            // Deadlocked, so a headless run can exercise the game whose route file and game-time
+            // normalisation differ most from the other three.
+            case "rac4":
+                fake.Describe = fake.Describe with { Game = GameId.Rac4 };
+                fake.Session = session with
+                {
+                    State = SessionState.Ingame,
+                    Game = GameId.Rac4,
+                    TitleId = "NPEA00423",
                     Generation = session.Generation + 1,
                 };
                 break;

@@ -1,17 +1,44 @@
+using System.Globalization;
 using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
 
 /// <summary>What LiveSplit last told us about itself. Replaced whole, so it is always self-consistent.</summary>
+/// <param name="UpcomingSplit">
+/// The name of the split after the current one, whether LiveSplit answered it or it was counted out
+/// of the run file. Null means there is none, which the route reads as "do not split".
+/// </param>
 /// <param name="UpcomingSupported">
-/// False once this LiveSplit build has shown it does not answer <c>getupcomingsplitname</c>, which
-/// is the only name the planet route compares. The panel says so rather than letting the route
-/// look broken.
+/// False once this LiveSplit build has shown it does not answer <c>getupcomingsplitname</c>. Most
+/// installed builds do not, which is why the run file exists as the second way to the same name.
+/// </param>
+/// <param name="SplitIndex">
+/// <c>getsplitindex</c>, which is -1 while the timer is not running. It is what lines the run file
+/// up with LiveSplit.
+/// </param>
+/// <param name="UpcomingSource">Which of the two ways produced <paramref name="UpcomingSplit"/>.</param>
+/// <param name="NamesKnown">
+/// True when a splits file is in hand, so an empty upcoming name really is the end of the run
+/// rather than a name nobody could look up.
 /// </param>
 public sealed record LiveSplitView(
-    LiveSplitPhase Phase, string? CurrentSplit, string? UpcomingSplit, bool UpcomingSupported = true)
+    LiveSplitPhase Phase,
+    string? CurrentSplit,
+    string? UpcomingSplit,
+    bool UpcomingSupported = true,
+    int SplitIndex = -1,
+    UpcomingNameSource UpcomingSource = UpcomingNameSource.None,
+    bool NamesKnown = false)
 {
     public static LiveSplitView Empty { get; } = new(LiveSplitPhase.Unknown, null, null);
+
+    /// <summary>How the panel names where the route's comparison name came from.</summary>
+    public string UpcomingSourceLabel => UpcomingSource switch
+    {
+        UpcomingNameSource.LiveSplit => "LiveSplit",
+        UpcomingNameSource.SplitsFile => "splits file",
+        _ => "nowhere",
+    };
 }
 
 /// <summary>One line of the panel's rolling log: what arrived, and what was done about it.</summary>
@@ -29,9 +56,15 @@ public sealed record AutosplitLogEntry(uint Seq, uint TimeMs, AutosplitKind Kind
 /// time is never paused and never set outright.
 /// </para>
 /// <para>
-/// The timer phase and the two split names are read back from LiveSplit on connect, after every
-/// command sent and once a second, so a manual reset or undo in LiveSplit is followed rather than
-/// fought, and the name the planet route needs is already in hand when a planet event lands.
+/// The timer phase, the split index and the split names are read back from LiveSplit on connect,
+/// after every command sent and once a second, so a manual reset or undo in LiveSplit is followed
+/// rather than fought, and the name the planet route needs is already in hand when a planet event
+/// lands.
+/// </para>
+/// <para>
+/// LiveSplit's server has no command that returns a split by index, and most installed builds do
+/// not answer <c>getupcomingsplitname</c> at all, so the name the route compares comes from the
+/// run's own <c>.lss</c> when LiveSplit will not say: see <see cref="LiveSplitRunLibrary"/>.
 /// </para>
 /// </summary>
 public sealed class Autosplitter
@@ -45,6 +78,7 @@ public sealed class Autosplitter
     private readonly LiveSplitClient _liveSplit;
     private readonly Action<Action> _post;
     private readonly List<AutosplitLogEntry> _log = new();
+    private readonly LiveSplitRunLibrary _runs = new();
 
     /// <summary>The open half of every normalised pair: the reason code against its start time.</summary>
     private readonly Dictionary<byte, uint> _openPairs = new();
@@ -69,8 +103,14 @@ public sealed class Autosplitter
         _liveSplit = liveSplit;
         _post = post;
 
-        // A fresh connection knows nothing about the run; ask before the first event arrives.
-        _liveSplit.Established += () => _ = RefreshAsync();
+        // A fresh connection knows nothing about the run: find the splits files and ask LiveSplit
+        // which of them it has open, before the first event arrives. Off the worker thread, which
+        // has a socket to pump and must not wait on fifty files being read.
+        _liveSplit.Established += () => _ = Task.Run(async () =>
+        {
+            await ReloadRunsAsync().ConfigureAwait(false);
+            await RefreshAsync().ConfigureAwait(false);
+        });
     }
 
     /// <summary>The running game, from telemetry. Chooses the settings entry and the planet route.</summary>
@@ -94,6 +134,12 @@ public sealed class Autosplitter
     public IReadOnlyList<string> PlanetNames { get; set; } = Array.Empty<string>();
 
     public LiveSplitView View => _view;
+
+    /// <summary>
+    /// The splits files this client can see and the one LiveSplit is believed to have open. Read
+    /// by the panel on the render thread; only ever written off it.
+    /// </summary>
+    public LiveSplitRunLibrary Runs => _runs;
 
     /// <summary>Events received from the console, whatever was done with them.</summary>
     public int Received => Volatile.Read(ref _received);
@@ -319,7 +365,8 @@ public sealed class Autosplitter
     /// A split candidate. The master switch, then the row's own checkbox, then — for the planet
     /// code alone — the route: the split names are the planets of the run, so the planet just
     /// entered has to be the one the <em>upcoming</em> split names, exactly as every old script
-    /// compared <c>timer.Run[timer.CurrentSplitIndex + 1].Name</c>.
+    /// compared <c>timer.Run[timer.CurrentSplitIndex + 1].Name</c>. Where that name came from —
+    /// LiveSplit or the run file — makes no difference here.
     /// </summary>
     private bool HandleSplit(AutosplitEvent ev, AutosplitEventDesc? desc, string what, AutosplitGameSettings game)
     {
@@ -345,9 +392,12 @@ public sealed class Autosplitter
         string? name = view.UpcomingSplit;
         if (string.IsNullOrWhiteSpace(name))
         {
-            Record(ev, what, view.UpcomingSupported
+            // Two different silences: the run really has nothing after this split, or nobody could
+            // say what comes next because neither LiveSplit nor a splits file would answer.
+            Record(ev, what, view.UpcomingSupported || view.NamesKnown
                 ? "no split: there is no upcoming split, so this is the last segment"
-                : $"no split: this LiveSplit does not answer {LiveSplitClient.GetUpcomingSplitName}", false);
+                : "no split: the run's split names are not known; load your splits in LiveSplit "
+                  + "or pick the .lss file", false);
             return false;
         }
 
@@ -477,9 +527,16 @@ public sealed class Autosplitter
     }
 
     /// <summary>
-    /// Reads the timer phase and the two split names back. One refresh runs at a time: a burst of
-    /// events would otherwise queue three queries each behind the same connection. A query this
-    /// LiveSplit does not answer costs one timeout on the first refresh and nothing afterwards.
+    /// Re-reads the splits files: the one the user named, or LiveSplit's own recent list. Runs off
+    /// the render thread, and answers what it found so the caller can say why nothing was.
+    /// </summary>
+    public Task<LiveSplitRunState> ReloadRunsAsync() => Task.Run(() =>
+        _runs.Load(_settings.Autosplit.SplitsFile, _settings.Autosplit.LiveSplitFolder));
+
+    /// <summary>
+    /// Reads the timer phase, the split index and the split names back. One refresh runs at a time:
+    /// a burst of events would otherwise queue six queries each behind the same connection. A query
+    /// this LiveSplit does not answer costs one timeout on the first refresh and nothing afterwards.
     /// </summary>
     public async Task RefreshAsync()
     {
@@ -489,19 +546,53 @@ public sealed class Autosplitter
         {
             if (!_liveSplit.IsConnected) return;
 
-            var phase = LiveSplitClient.ParsePhase(await _liveSplit.QueryAsync(LiveSplitClient.GetCurrentTimerPhase)
-                .ConfigureAwait(false));
-            string? current = await _liveSplit.QueryAsync(LiveSplitClient.GetCurrentSplitName).ConfigureAwait(false);
-            string? upcoming = await _liveSplit.QueryAsync(LiveSplitClient.GetUpcomingSplitName).ConfigureAwait(false);
+            var phase = LiveSplitClient.ParsePhase(await Ask(LiveSplitClient.GetCurrentTimerPhase));
+            string? current = Clean(await Ask(LiveSplitClient.GetCurrentSplitName));
+            int index = ParseIndex(await Ask(LiveSplitClient.GetSplitIndex));
+            string? previous = Clean(await Ask(LiveSplitClient.GetPreviousSplitName));
+            string? last = Clean(await Ask(LiveSplitClient.GetLastSplitName));
+
+            // Asked last, and its answer is only trusted when the build answers it at all: the
+            // first ask is also how that is found out, and it costs one timeout to find out.
+            string? live = Clean(await Ask(LiveSplitClient.GetUpcomingSplitName));
             bool upcomingSupported = _liveSplit.Answers(LiveSplitClient.GetUpcomingSplitName);
 
-            var view = new LiveSplitView(phase, Clean(current), Clean(upcoming), upcomingSupported);
+            _runs.Validate(index, current, previous, last);
+            var runs = _runs.State;
+
+            var (upcoming, source) = ResolveUpcoming(index, live, upcomingSupported);
+
+            var view = new LiveSplitView(
+                phase, current, upcoming, upcomingSupported, index, source, runs.HasNames);
             _post(() => _view = view);
         }
         finally
         {
             Volatile.Write(ref _refreshing, 0);
         }
+
+        Task<string?> Ask(string command) => _liveSplit.QueryAsync(command);
+    }
+
+    /// <summary>
+    /// The name the planet route compares, in the only order that can be right: LiveSplit's own
+    /// answer when this build gives one, else the run file counted forward from the split index,
+    /// else nothing at all — and nothing means the route cannot gate, so it does not split.
+    /// </summary>
+    private (string? Name, UpcomingNameSource Source) ResolveUpcoming(
+        int index, string? live, bool upcomingSupported)
+    {
+        if (upcomingSupported)
+        {
+            // An empty answer from a build that answers is the last segment, not a missing name,
+            // so the run file is not consulted behind its back.
+            return live is null
+                ? (null, UpcomingNameSource.None)
+                : (live, UpcomingNameSource.LiveSplit);
+        }
+
+        string? fromFile = _runs.Upcoming(index);
+        return fromFile is null ? (null, UpcomingNameSource.None) : (fromFile, UpcomingNameSource.SplitsFile);
     }
 
     /// <summary>LiveSplit answers a query it cannot serve with an empty line; that is "no split".</summary>
@@ -510,6 +601,16 @@ public sealed class Autosplitter
         var trimmed = reply?.Trim();
         return string.IsNullOrEmpty(trimmed) || trimmed == "-" ? null : trimmed;
     }
+
+    /// <summary>
+    /// <c>getsplitindex</c>, which is -1 while the timer is not running. An answer that is not a
+    /// number, or none at all, is treated the same way: nothing to line the run file up with.
+    /// </summary>
+    private static int ParseIndex(string? reply) =>
+        int.TryParse((reply ?? string.Empty).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture,
+            out int index)
+            ? index
+            : -1;
 
     /// <summary>The panel's test buttons: one command, no decisions, logged as a manual action.</summary>
     public void SendManual(string command)
