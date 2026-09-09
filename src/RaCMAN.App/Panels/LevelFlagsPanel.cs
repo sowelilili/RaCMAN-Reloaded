@@ -8,17 +8,15 @@ namespace RaCMAN.App.Panels;
 /// LEVELFLAGS_GET for one planet. The flags are a bitfield, so the view is one byte per row with a
 /// checkbox per bit (7 down to 0) and the hex value beside them; ticking a bit sends the whole byte
 /// with LEVELFLAGS_SET. The bytes are the game's flag regions concatenated, so an offset here means
-/// nothing to this client beyond "byte n". Auto-refresh is on by default: a flag flips as the game
-/// runs, and a stale table is worse than a re-read a second.
+/// nothing to this client beyond "byte n". The table re-reads itself on the Settings panel's table
+/// refresh interval: a flag flips as the game runs, and a stale table is worse than a re-read a
+/// second. An interval of zero leaves the Refresh button as the only thing that reads.
 /// </summary>
 public static class LevelFlagsPanel
 {
-    private const float AutoRefreshSeconds = 1f;
-
     private static byte[] _flags = Array.Empty<byte>();
     private static int _loadedPlanet = -1;
     private static int _planet = -1;
-    private static bool _autoRefresh = true;
     private static float _sinceRefresh;
     private static bool _resetArmed;
 
@@ -29,7 +27,6 @@ public static class LevelFlagsPanel
     {
         ClearData();
         _planet = -1;
-        _autoRefresh = true;
     }
 
     /// <summary>
@@ -79,9 +76,6 @@ public static class LevelFlagsPanel
         if (ImGui.Button("Refresh")) Load(state);
 
         ImGui.SameLine();
-        ImGui.Checkbox("Auto-refresh (1 Hz)", ref _autoRefresh);
-
-        ImGui.SameLine();
         if (_resetArmed)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
@@ -110,14 +104,20 @@ public static class LevelFlagsPanel
         // Quiet outside INGAME: the automatic first read between sessions is not worth a toast.
         if (state.Connected && _loadedPlanet != _planet) Load(state, quiet: !state.Ingame);
 
-        if (_autoRefresh && state.Connected)
+        // The interval is read every frame, so a change on the Settings panel takes effect at once.
+        float period = state.Settings.TableRefreshSeconds;
+        if (period > 0 && state.Connected)
         {
             _sinceRefresh += ImGui.GetIO().DeltaTime;
-            if (_sinceRefresh >= AutoRefreshSeconds)
+            if (_sinceRefresh >= period)
             {
                 _sinceRefresh = 0;
                 Load(state, quiet: true);
             }
+        }
+        else
+        {
+            _sinceRefresh = 0;
         }
 
         if (session.CurrentPlanet != _planet && state.Ingame)

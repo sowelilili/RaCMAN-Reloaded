@@ -97,7 +97,7 @@ public class SettingsTests
     }
 
     [Fact]
-    public void TheInputDisplayStartsInThePanelAndTheModeMapsOntoTheTwoFlags()
+    public void TheInputDisplayStartsInThePanelAndTheModeMapsOntoTheWindowFlag()
     {
         var settings = new Settings();
 
@@ -114,13 +114,27 @@ public class SettingsTests
         Assert.True(settings.InputWindowed);
         Assert.False(settings.InputFloating);
 
-        settings.InputMode = InputDisplayMode.Floating;
-        Assert.False(settings.InputWindowed);
-        Assert.True(settings.InputFloating);
-
         settings.InputMode = InputDisplayMode.Panel;
         Assert.False(settings.InputWindowed);
         Assert.False(settings.InputFloating);
+    }
+
+    /// <summary>
+    /// The floating pad is gone, and the flag it left behind is what an upgrading user's file
+    /// still says. Setting the mode clears it, so the file stops carrying a dead key.
+    /// </summary>
+    [Fact]
+    public void TheOldFloatingFlagReadsAsThePadWindowAndIsClearedWhenTheModeIsSet()
+    {
+        var settings = new Settings { InputFloating = true };
+
+        Assert.Equal(InputDisplayMode.Window, settings.InputMode);
+
+        settings.InputMode = InputDisplayMode.Panel;
+
+        Assert.False(settings.InputFloating);
+        Assert.False(settings.InputWindowed);
+        Assert.Equal(InputDisplayMode.Panel, settings.InputMode);
     }
 
     [Fact]
@@ -156,8 +170,9 @@ public class SettingsTests
         }
     }
 
+    /// <summary>Nobody loses their pad when the floating mode goes away: it opens in its own window.</summary>
     [Fact]
-    public void AFileThatOnlyKnowsInputFloatingStillOpensOnTheFloatingPad()
+    public void AFileThatOnlyKnowsInputFloatingOpensThePadWindow()
     {
         var folder = TempFolder();
         try
@@ -167,11 +182,95 @@ public class SettingsTests
 
             var loaded = Settings.Load(path);
 
-            Assert.Equal(InputDisplayMode.Floating, loaded.InputMode);
-            Assert.False(loaded.InputWindowed);
+            Assert.Equal(InputDisplayMode.Window, loaded.InputMode);
             Assert.False(loaded.InputWindowOnTop);
             Assert.Null(loaded.InputWindowX);
             Assert.Null(loaded.InputWindowW);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // ---------------------------------------------------------------- table refresh
+
+    [Fact]
+    public void TablesRefreshOnceASecondUntilSomethingSaysOtherwise()
+    {
+        Assert.Equal(1f, new Settings().TableRefreshSeconds);
+        Assert.Equal(1f, Settings.DefaultTableRefreshSeconds);
+    }
+
+    /// <summary>
+    /// The file is hand-editable and the box takes typing, so the period is clamped where it is
+    /// stored: zero is "manual only", and nothing can ask for a re-read every frame.
+    /// </summary>
+    [Theory]
+    [InlineData(0f, 0f)]
+    [InlineData(2.5f, 2.5f)]
+    [InlineData(10f, 10f)]
+    [InlineData(99f, 10f)]
+    [InlineData(-3f, 0f)]
+    [InlineData(float.NaN, 1f)]
+    [InlineData(float.PositiveInfinity, 1f)]
+    public void TheTableRefreshPeriodIsClampedToWhatThePanelsCanUse(float written, float kept)
+    {
+        Assert.Equal(kept, new Settings { TableRefreshSeconds = written }.TableRefreshSeconds);
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripTheTableRefreshPeriod()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.TableRefreshSeconds = 0f;
+            saved.Save();
+
+            Assert.Equal(0f, Settings.Load(path).TableRefreshSeconds);
+
+            saved.TableRefreshSeconds = 2.5f;
+            saved.Save();
+
+            Assert.Equal(2.5f, Settings.Load(path).TableRefreshSeconds);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AFileFromBeforeTheTableRefreshSettingRefreshesOnceASecond()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "old.settings.json");
+            File.WriteAllText(path, """{ "lastHost": "192.168.1.50" }""");
+
+            Assert.Equal(1f, Settings.Load(path).TableRefreshSeconds);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>A period nobody could have typed still loads: the setter is what clamps it.</summary>
+    [Fact]
+    public void AHandEditedRefreshPeriodIsClampedOnLoad()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "hand-edited.settings.json");
+            File.WriteAllText(path, """{ "tableRefreshSeconds": -12.5 }""");
+
+            Assert.Equal(0f, Settings.Load(path).TableRefreshSeconds);
         }
         finally
         {

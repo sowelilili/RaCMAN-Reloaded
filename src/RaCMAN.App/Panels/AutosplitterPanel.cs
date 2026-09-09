@@ -10,13 +10,11 @@ namespace RaCMAN.App.Panels;
 /// </summary>
 public static class AutosplitterPanel
 {
-    private static string _host = string.Empty;
-    private static int _port;
     private static string _splitsFile = string.Empty;
     private static bool _initialised;
     private static bool _dialogOpen;
 
-    /// <summary>Drops the host, port and splits-file drafts, so an import or a restart is picked up.</summary>
+    /// <summary>Drops the splits-file draft, so an import or a restart is picked up.</summary>
     public static void Reset() => _initialised = false;
 
     public static void Draw(AppState state)
@@ -26,14 +24,11 @@ public static class AutosplitterPanel
 
         if (!_initialised)
         {
-            _host = autosplit.Host;
-            _port = autosplit.Port;
             _splitsFile = autosplit.SplitsFile;
             _initialised = true;
         }
 
         Ui.Heading("Autosplitter");
-        Ui.Hint("The console reports what happened in the run and keeps no timer. This client decides what splits.");
 
         // No separator of its own before the game section: its heading draws one, and the panel
         // has to hold a game with eight subsplits inside 940x580 without scrolling.
@@ -55,30 +50,19 @@ public static class AutosplitterPanel
         {
             autosplit.Enabled = enabled;
             settings.Save();
-            if (enabled) state.LiveSplit.Start(autosplit.Host, autosplit.Port);
+            if (enabled) Connect(state, autosplit);
             else state.LiveSplit.Stop();
         }
 
-        ImGui.SetNextItemWidth(180);
-        ImGui.InputText("LiveSplit host", ref _host, 64);
         ImGui.SameLine();
-        ImGui.SetNextItemWidth(110);
-        if (ImGui.InputInt("Port", ref _port)) _port = Math.Clamp(_port, 1, 65535);
-
-        ImGui.SameLine();
-        bool changed = !string.Equals(_host.Trim(), autosplit.Host, StringComparison.OrdinalIgnoreCase)
-                       || _port != autosplit.Port;
-        if (ImGui.Button(changed ? "Apply" : "Reconnect"))
+        ImGui.BeginDisabled(!autosplit.Enabled);
+        if (ImGui.Button(state.LiveSplit.IsConnected ? "Reconnect" : "Connect"))
         {
-            autosplit.Host = _host.Trim();
-            autosplit.Port = _port;
-            settings.Save();
-            if (autosplit.Enabled)
-            {
-                state.LiveSplit.Stop();
-                state.LiveSplit.Start(autosplit.Host, autosplit.Port);
-            }
+            state.LiveSplit.Stop();
+            Connect(state, autosplit);
         }
+
+        ImGui.EndDisabled();
 
         var colour = state.LiveSplit.Status switch
         {
@@ -89,8 +73,11 @@ public static class AutosplitterPanel
 
         ImGui.TextColored(colour, state.LiveSplit.StatusLine);
 
-        if (!state.LiveSplit.IsConnected) Ui.Hint(LiveSplitClient.ServerHint);
-        else Ui.Hint(DescribeTimer(state.Autosplitter.View));
+        // The endpoint is on the Settings panel: it is typed once, if ever, and the rest of this
+        // panel is about the run.
+        Ui.Hint(state.LiveSplit.IsConnected
+            ? DescribeTimer(state.Autosplitter.View)
+            : $"Looking for LiveSplit's server at {autosplit.Host}:{autosplit.Port}; change that in Settings.");
 
         DrawSplitsFile(state, autosplit);
 
@@ -101,6 +88,16 @@ public static class AutosplitterPanel
         ImGui.EndDisabled();
         ImGui.SameLine();
         Ui.Hint("Test the connection without waiting for the game.");
+    }
+
+    /// <summary>
+    /// Points the client at LiveSplit, and says the attempt was the user's: a failure from here
+    /// earns the "LiveSplit not found" popup even if the reconnect loop has already had its one.
+    /// </summary>
+    private static void Connect(AppState state, AutosplitSettings autosplit)
+    {
+        LiveSplitModal.ArmForAttempt();
+        state.LiveSplit.Start(autosplit.Host, autosplit.Port);
     }
 
     private static string DescribeTimer(LiveSplitView view)
@@ -247,9 +244,6 @@ public static class AutosplitterPanel
             ImGui.EndTable();
         }
 
-        // One line, ASCII only: the panel has to fit and the font atlas has no em dash.
-        Ui.Hint("The old autosplitters' game-time normalisation is applied automatically.");
-
         if (options.PlanetRoute && state.Autosplitter.PlanetDescriptor is not null
             && !AutosplitRoutes.Knows(game, state.Session.CurrentPlanet))
         {
@@ -320,40 +314,34 @@ public static class AutosplitterPanel
         if (!any) Ui.Hint("This game reports only timing events, so there is nothing to choose.");
     }
 
-    /// <summary>The right column: what each kind of event is allowed to do to the timer.</summary>
+    /// <summary>
+    /// The right column: what each kind of event is allowed to do to the timer. Three plain
+    /// checkboxes under one label, because "Start" beside "Timer control" already says it.
+    /// </summary>
     private static void DrawMasters(AutosplitGameSettings options, Settings settings)
     {
         ImGui.TextUnformatted("Timer control");
 
         bool start = options.Start;
-        if (Master("Start", "START events start the timer", ref start))
+        if (ImGui.Checkbox("Start", ref start))
         {
             options.Start = start;
             settings.Save();
         }
 
         bool split = options.Split;
-        if (Master("Split", "SPLIT events split", ref split))
+        if (ImGui.Checkbox("Split", ref split))
         {
             options.Split = split;
             settings.Save();
         }
 
         bool reset = options.Reset;
-        if (Master("Reset", "RESET events reset the timer", ref reset))
+        if (ImGui.Checkbox("Reset", ref reset))
         {
             options.Reset = reset;
             settings.Save();
         }
-    }
-
-    /// <summary>One master and what it means, on one line so eight subsplits still fit beside it.</summary>
-    private static bool Master(string label, string meaning, ref bool value)
-    {
-        bool changed = ImGui.Checkbox(label, ref value);
-        ImGui.SameLine();
-        ImGui.TextColored(Ui.Grey, meaning);
-        return changed;
     }
 
     private static void DrawLog(AppState state)

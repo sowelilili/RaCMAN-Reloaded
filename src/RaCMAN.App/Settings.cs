@@ -11,9 +11,6 @@ public enum InputDisplayMode
     /// <summary>Inside the Input display panel, with the other controls.</summary>
     Panel,
 
-    /// <summary>A plain ImGui window that can be dragged anywhere inside the main window.</summary>
-    Floating,
-
     /// <summary>Its own OS window, which a capture tool can pick up on its own.</summary>
     Window,
 }
@@ -73,6 +70,27 @@ public sealed class Settings
     [JsonIgnore]
     public bool LightTheme => !string.Equals(Theme, "dark", StringComparison.OrdinalIgnoreCase);
 
+    public const float DefaultTableRefreshSeconds = 1f;
+
+    public const float MaxTableRefreshSeconds = 10f;
+
+    private float _tableRefreshSeconds = DefaultTableRefreshSeconds;
+
+    /// <summary>
+    /// How often the tables that watch live game state (Unlocks, Level flags) re-read themselves,
+    /// in seconds. Zero means never: the panels' Refresh buttons are then the only thing that
+    /// reads. Clamped to 0..<see cref="MaxTableRefreshSeconds"/> on the way in, because the file is
+    /// hand-editable and a negative or infinite period would be a re-read every frame.
+    /// </summary>
+    [JsonPropertyName("tableRefreshSeconds")]
+    public float TableRefreshSeconds
+    {
+        get => _tableRefreshSeconds;
+        set => _tableRefreshSeconds = float.IsFinite(value)
+            ? Math.Clamp(value, 0f, MaxTableRefreshSeconds)
+            : DefaultTableRefreshSeconds;
+    }
+
     [JsonPropertyName("webManSlot")]
     public int WebManSlot { get; set; } = 5;
 
@@ -96,7 +114,12 @@ public sealed class Settings
     [JsonPropertyName("inputScale")]
     public float InputScale { get; set; } = 1f;
 
-    /// <summary>The pad floats in a plain ImGui window inside the main window. Predates <see cref="InputWindowed"/>.</summary>
+    /// <summary>
+    /// The pad floated in a plain ImGui window inside the main window. That mode is gone: the pad's
+    /// own OS window does everything it did and can be captured on its own. The key is still read,
+    /// so a file that asks for it opens the pad window instead of nothing, and it is cleared the
+    /// first time the mode is set.
+    /// </summary>
     [JsonPropertyName("inputFloating")]
     public bool InputFloating { get; set; }
 
@@ -125,19 +148,17 @@ public sealed class Settings
     public int? InputWindowH { get; set; }
 
     /// <summary>
-    /// The three ways the pad can be shown, over the two flags an older settings file may hold:
-    /// a file that only knows "inputFloating" still opens on the floating pad.
+    /// The two ways the pad can be shown, over the flags a settings file may hold. A file that asks
+    /// for the old floating pad opens the pad's own window, so nobody loses their pad on an upgrade.
     /// </summary>
     [JsonIgnore]
     public InputDisplayMode InputMode
     {
-        get => InputWindowed ? InputDisplayMode.Window
-            : InputFloating ? InputDisplayMode.Floating
-            : InputDisplayMode.Panel;
+        get => InputWindowed || InputFloating ? InputDisplayMode.Window : InputDisplayMode.Panel;
         set
         {
             InputWindowed = value == InputDisplayMode.Window;
-            InputFloating = value == InputDisplayMode.Floating;
+            InputFloating = false;
         }
     }
 

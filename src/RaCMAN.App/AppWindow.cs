@@ -160,10 +160,11 @@ public sealed class AppWindow : GameWindow
         catch (Exception ex) when (ex is GLFWException or PlatformNotSupportedException
                                        or InvalidOperationException)
         {
-            // A second window is a nicety: the client keeps working with the pad back inside it,
-            // and the message says what went wrong rather than the window silently not appearing.
+            // A second window is a nicety: the client keeps working with the pad back inside the
+            // panel, and the message says what went wrong rather than the window silently not
+            // appearing.
             ClosePadWindow();
-            settings.InputMode = InputDisplayMode.Floating;
+            settings.InputMode = InputDisplayMode.Panel;
             settings.Save();
             _state.AddToast($"Pad window: {ex.Message}", ToastKind.Error);
         }
@@ -252,10 +253,10 @@ public sealed class AppWindow : GameWindow
 
         ImGui.End();
 
-        // The floating pad is drawn outside the root window so it survives a panel switch.
-        InputDisplayPanel.DrawFloating(_state, controller);
+        // The modals are drawn outside the root window, so they survive a panel switch.
         PreviousSessionModal.Draw(_state);
         FirewallModal.Draw(_state);
+        LiveSplitModal.Draw(_state);
         DrawToasts();
     }
 
