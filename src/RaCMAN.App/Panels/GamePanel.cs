@@ -34,6 +34,7 @@ public static class GamePanel
         Drafts.Clear();
         LastSet.Clear();
         SubPage = null;
+        ResetPresets();
     }
 
     /// <summary>The feature's current value: its readout when it names one, else what we last sent.</summary>
@@ -383,7 +384,21 @@ public static class GamePanel
         if (toggles.Length > 0 && (actions.Length > 0 || choices.Length > 0)) ImGui.Spacing();
         DrawActionGrid(state, actions);
         if (choices.Length > 0) ImGui.Spacing();
-        foreach (var feature in choices) DrawChoice(state, describe, feature);
+
+        // The preset row belongs to the colour editors, so it goes in front of the first of them
+        // rather than at the top of the section: an ENUM that shares the section keeps its place.
+        var colours = choices.Where(f => f.Kind == FeatureKind.Color).ToArray();
+        bool presetsDrawn = false;
+        foreach (var feature in choices)
+        {
+            if (feature.Kind == FeatureKind.Color && !presetsDrawn)
+            {
+                presetsDrawn = true;
+                DrawColourPresets(state, colours, section);
+            }
+
+            DrawChoice(state, describe, feature);
+        }
 
         if (section == GameLayout.PlayerSection) DrawPositionButtons(state);
     }
@@ -582,5 +597,193 @@ public static class GamePanel
         }
 
         ImGui.PopID();
+    }
+
+    // ---------------------------------------------------------------- colour presets
+
+    /// <summary>The presets on offer, for the game and section the row was last listed for.</summary>
+    private static ColourPreset[] _presets = Array.Empty<ColourPreset>();
+
+    private static int _presetIndex = -1;
+
+    /// <summary>"&lt;game&gt;/&lt;section&gt;", so the listing happens on a change rather than once a frame.</summary>
+    private static string _presetKey = string.Empty;
+
+    private static string _presetName = string.Empty;
+
+    private static bool _presetDeleteArmed;
+
+    /// <summary>
+    /// Makes the preset row list its files again on the next frame it draws, for when something
+    /// other than the row itself wrote a preset (the import on the Settings panel).
+    /// </summary>
+    public static void InvalidatePresets() => _presetKey = string.Empty;
+
+    private static void ResetPresets()
+    {
+        _presets = Array.Empty<ColourPreset>();
+        _presetIndex = -1;
+        _presetKey = string.Empty;
+        _presetName = string.Empty;
+        _presetDeleteArmed = false;
+    }
+
+    /// <summary>
+    /// The saved-colours row above a section's colour editors: pick one to apply it, type a name and
+    /// Save to capture what the section currently shows, Delete... to drop the picked one. Presets
+    /// are the PC's and are keyed by game, so they survive a game change and a reconnect alike.
+    /// </summary>
+    private static void DrawColourPresets(AppState state, Feature[] colours, string? section)
+    {
+        if (colours.Length == 0) return;
+
+        var game = state.Session.Game;
+        string key = $"{(byte)game}/{section}";
+        if (!string.Equals(_presetKey, key, StringComparison.Ordinal)) RefreshPresets(state, game, key);
+
+        ImGui.PushID("colour-presets");
+
+        string preview = _presetIndex >= 0 && _presetIndex < _presets.Length ? _presets[_presetIndex].Name : "(none)";
+
+        ImGui.SetNextItemWidth(200);
+        ImGui.BeginDisabled(_presets.Length == 0);
+        if (ImGui.BeginCombo("Presets", preview))
+        {
+            for (int i = 0; i < _presets.Length; i++)
+            {
+                if (!ImGui.Selectable(_presets[i].Name, i == _presetIndex)) continue;
+
+                _presetIndex = i;
+                _presetDeleteArmed = false;
+                _presetName = _presets[i].Name;
+                ApplyPreset(state, colours, _presets[i]);
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.EndDisabled();
+        ImGui.SameLine();
+
+        // The same two-step the watchlists use: nothing here deletes a saved file on one click.
+        if (_presetDeleteArmed)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
+            if (ImGui.Button("Confirm delete")) DeletePreset(state, game, key);
+            ImGui.PopStyleColor();
+
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel")) _presetDeleteArmed = false;
+        }
+        else
+        {
+            ImGui.BeginDisabled(_presetIndex < 0);
+            if (ImGui.Button("Delete...")) _presetDeleteArmed = true;
+            ImGui.EndDisabled();
+        }
+
+        ImGui.SetNextItemWidth(200);
+        if (Ui.InputTextWithHint("##preset-name", "Preset name", ref _presetName, 64))
+        {
+            // Typing is how a new preset is made, so the combo follows the box; a name with no
+            // preset behind it simply selects nothing.
+            SelectPreset(_presetName);
+            _presetDeleteArmed = false;
+        }
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(_presetName.Trim().Length == 0);
+        if (ImGui.Button("Save")) SavePreset(state, game, colours, key);
+        ImGui.EndDisabled();
+
+        ImGui.PopID();
+        ImGui.Spacing();
+    }
+
+    private static void RefreshPresets(AppState state, GameId game, string key)
+    {
+        _presetKey = key;
+        _presetDeleteArmed = false;
+        _presets = state.ColourPresets.List(game, out string? problem).ToArray();
+        if (problem is not null) state.AddToast($"Colour presets: {problem}", ToastKind.Error);
+        SelectPreset(_presetName);
+    }
+
+    /// <summary>Points the combo at the preset the name box names, or at nothing.</summary>
+    private static void SelectPreset(string name)
+    {
+        string wanted = (name ?? string.Empty).Trim();
+        _presetIndex = wanted.Length == 0
+            ? -1
+            : Array.FindIndex(_presets, p => string.Equals(p.Name, wanted, StringComparison.OrdinalIgnoreCase));
+    }
+
+    /// <summary>
+    /// Sends every colour the preset names, in one go. LastSet is updated as well as the console,
+    /// so a COLOR feature that mirrors no readout still shows what was just applied.
+    /// </summary>
+    private static void ApplyPreset(AppState state, Feature[] colours, ColourPreset preset)
+    {
+        var wanted = new List<(byte Id, uint Value)>();
+        foreach (var feature in colours)
+        {
+            if (!preset.TryGetColour(feature.Label, out uint rgb)) continue;
+            wanted.Add((feature.Id, rgb));
+            LastSet[feature.Id] = rgb;
+        }
+
+        if (wanted.Count == 0)
+        {
+            state.AddToast($"Preset {preset.Name} has nothing for these colours", ToastKind.Error);
+            return;
+        }
+
+        state.Run(async () =>
+        {
+            foreach (var (id, value) in wanted)
+            {
+                await state.Client.FeatureSetAsync(id, value).ConfigureAwait(false);
+            }
+        }, $"Applied colour preset {preset.Name}");
+    }
+
+    private static void SavePreset(AppState state, GameId game, Feature[] colours, string key)
+    {
+        string name = _presetName.Trim();
+        var values = colours
+            .Select(f => new KeyValuePair<string, uint>(f.Label, CurrentValue(state, f) & 0xFFFFFFu))
+            .ToArray();
+
+        try
+        {
+            state.ColourPresets.Save(game, name, values);
+            state.AddToast($"Colour preset {name} saved to {state.ColourPresets.FileFor(game)}", ToastKind.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            state.AddToast($"Colour preset save failed: {ex.Message}", ToastKind.Error);
+        }
+
+        RefreshPresets(state, game, key);
+    }
+
+    private static void DeletePreset(AppState state, GameId game, string key)
+    {
+        _presetDeleteArmed = false;
+        if (_presetIndex < 0 || _presetIndex >= _presets.Length) return;
+
+        string name = _presets[_presetIndex].Name;
+        try
+        {
+            if (state.ColourPresets.Delete(game, name)) state.AddToast($"Colour preset {name} deleted", ToastKind.Success);
+            else state.AddToast($"Colour preset {name} was already gone", ToastKind.Error);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            state.AddToast($"Colour preset delete failed: {ex.Message}", ToastKind.Error);
+        }
+
+        _presetName = string.Empty;
+        RefreshPresets(state, game, key);
     }
 }

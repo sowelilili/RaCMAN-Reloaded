@@ -163,3 +163,150 @@ public class PanelDataTests : IDisposable
         Assert.Equal(FileDialog.IsSupported, FileDialog.IsSupported);
     }
 }
+
+/// <summary>
+/// The colour preset files behind the Game panel's "Presets" row: one file per game, names unique
+/// however they are capitalised, and nothing on disk that can stop the row from drawing.
+/// </summary>
+public class ColourPresetStoreTests : IDisposable
+{
+    private const string Front = ColourPresetStore.ChargebootFront;
+    private const string Back = ColourPresetStore.ChargebootBack;
+    private const string Tint = ColourPresetStore.ChargebootTint;
+
+    private readonly string _folder = Path.Combine(Path.GetTempPath(), "racman-colours-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_folder)) Directory.Delete(_folder, recursive: true);
+        GC.SuppressFinalize(this);
+    }
+
+    private static KeyValuePair<string, uint>[] Chargeboots(uint front, uint back, uint tint) => new[]
+    {
+        new KeyValuePair<string, uint>(Front, front),
+        new KeyValuePair<string, uint>(Back, back),
+        new KeyValuePair<string, uint>(Tint, tint),
+    };
+
+    [Fact]
+    public void APresetComesBackWithTheColoursItWasSavedWith()
+    {
+        var store = new ColourPresetStore(_folder);
+        store.Save(GameId.Rac2, "neon", Chargeboots(0x2080FF, 0x0060CF, 0x00FFFF));
+
+        var preset = Assert.Single(store.List(GameId.Rac2));
+        Assert.Equal("neon", preset.Name);
+
+        Assert.True(preset.TryGetColour(Front, out uint front));
+        Assert.True(preset.TryGetColour(Back, out uint back));
+        Assert.True(preset.TryGetColour(Tint, out uint tint));
+        Assert.Equal(0x2080FFu, front);
+        Assert.Equal(0x0060CFu, back);
+        Assert.Equal(0x00FFFFu, tint);
+
+        // Hex on disk, so the file is worth opening in an editor.
+        Assert.Contains("2080FF", File.ReadAllText(store.FileFor(GameId.Rac2)), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void PresetsAreKeyedByGameSoOneGamesFileIsNotAnothers()
+    {
+        var store = new ColourPresetStore(_folder);
+        store.Save(GameId.Rac2, "neon", Chargeboots(1, 2, 3));
+
+        Assert.Equal("rac2.json", Path.GetFileName(store.FileFor(GameId.Rac2)));
+        Assert.Empty(store.List(GameId.Rac3));
+        Assert.Single(store.List(GameId.Rac2));
+    }
+
+    [Fact]
+    public void SavingAgainUnderTheSameNameReplacesItWhateverTheCase()
+    {
+        var store = new ColourPresetStore(_folder);
+        store.Save(GameId.Rac3, "Neon", Chargeboots(0x111111, 0x222222, 0x333333));
+        store.Save(GameId.Rac3, "  neon  ", Chargeboots(0xAABBCC, 0, 0));
+
+        var preset = Assert.Single(store.List(GameId.Rac3));
+        Assert.Equal("neon", preset.Name);
+        Assert.True(preset.TryGetColour(Front, out uint front));
+        Assert.Equal(0xAABBCCu, front);
+
+        // The lookup is case-insensitive too, so a hand-typed label still matches.
+        Assert.True(preset.TryGetColour("chargeboots primary front", out uint again));
+        Assert.Equal(0xAABBCCu, again);
+    }
+
+    [Fact]
+    public void ASecondNameIsASecondPresetAndTheListIsAlphabetical()
+    {
+        var store = new ColourPresetStore(_folder);
+        store.Save(GameId.Rac2, "zebra", Chargeboots(1, 2, 3));
+        store.Save(GameId.Rac2, "apple", Chargeboots(4, 5, 6));
+
+        Assert.Equal(new[] { "apple", "zebra" }, store.List(GameId.Rac2).Select(p => p.Name));
+        Assert.NotNull(store.Load(GameId.Rac2, "APPLE"));
+        Assert.Null(store.Load(GameId.Rac2, "pear"));
+    }
+
+    [Fact]
+    public void DeleteDropsOnePresetAndSaysSoWhenThereWasNoneToDrop()
+    {
+        var store = new ColourPresetStore(_folder);
+        store.Save(GameId.Rac2, "keep", Chargeboots(1, 2, 3));
+        store.Save(GameId.Rac2, "drop", Chargeboots(4, 5, 6));
+
+        Assert.True(store.Delete(GameId.Rac2, "DROP"));
+        Assert.Equal(new[] { "keep" }, store.List(GameId.Rac2).Select(p => p.Name));
+
+        Assert.False(store.Delete(GameId.Rac2, "drop"));
+        Assert.False(store.Delete(GameId.Rac4, "keep"));
+    }
+
+    [Fact]
+    public void AMissingFolderOrFileIsSimplyNoPresets()
+    {
+        var store = new ColourPresetStore(Path.Combine(_folder, "not-there"));
+
+        Assert.Empty(store.List(GameId.Rac1, out string? problem));
+        Assert.Null(problem);
+        Assert.Null(store.Load(GameId.Rac1, "neon"));
+    }
+
+    [Fact]
+    public void ABrokenFileReadsAsEmptyAndSaysWhyInsteadOfThrowing()
+    {
+        Directory.CreateDirectory(_folder);
+        var store = new ColourPresetStore(_folder);
+        File.WriteAllText(store.FileFor(GameId.Rac2), "{ this is not the list it should be");
+
+        Assert.Empty(store.List(GameId.Rac2, out string? problem));
+        Assert.NotNull(problem);
+
+        // And the row can still save over it.
+        store.Save(GameId.Rac2, "neon", Chargeboots(1, 2, 3));
+        Assert.Single(store.List(GameId.Rac2));
+    }
+
+    [Fact]
+    public void APresetNeedsAName()
+    {
+        var store = new ColourPresetStore(_folder);
+        Assert.ThrowsAny<ArgumentException>(() => store.Save(GameId.Rac2, "   ", Chargeboots(1, 2, 3)));
+    }
+
+    [Theory]
+    [InlineData("2080FF", true, 0x2080FFu)]
+    [InlineData("#2080ff", true, 0x2080FFu)]
+    [InlineData("0x2080FF", true, 0x2080FFu)]
+    [InlineData("F", true, 0xFu)]
+    [InlineData("", false, 0u)]
+    [InlineData("nothex", false, 0u)]
+    [InlineData("2080FF00", false, 0u)]
+    public void ColoursOnDiskAreSixHexDigits(string text, bool ok, uint expected)
+    {
+        Assert.Equal(ok, ColourPresetStore.TryParseColour(text, out uint rgb));
+        Assert.Equal(expected, rgb);
+        if (ok) Assert.Equal(6, ColourPresetStore.FormatColour(rgb).Length);
+    }
+}

@@ -43,6 +43,7 @@ public sealed class AppState : IDisposable
         Client = new QwarkClient { AutoReconnect = settings.AutoReconnect };
         Mods = new ModLibrary(ResolvePath(settings.ModsPath));
         Watchlists = new WatchlistStore(ResolvePath("watchlists"));
+        ColourPresets = new ColourPresetStore(ResolvePath("colours"));
         SaveFiles = new SaveFileLibrary(ResolvePath(settings.SaveFilesPath));
         WebMan = new WebManLoader();
 
@@ -80,6 +81,9 @@ public sealed class AppState : IDisposable
     public ModLibrary Mods { get; }
 
     public WatchlistStore Watchlists { get; }
+
+    /// <summary>Named colour presets for the games' COLOR features, one file per game.</summary>
+    public ColourPresetStore ColourPresets { get; }
 
     /// <summary>The PC-side savefile library, <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c>.</summary>
     public SaveFileLibrary SaveFiles { get; }

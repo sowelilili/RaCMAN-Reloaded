@@ -91,8 +91,9 @@ public static class SettingsPanel
     /// </summary>
     private static void DrawImport(AppState state)
     {
-        Ui.Hint("Reads the old RaCMAN's config.txt (beside racman.exe): the console IP, the controller combos and "
-                + "the auto-apply mod list. Saved positions and chargeboot colour slots are not imported.");
+        Ui.Hint("Reads the old RaCMAN's config.txt (beside racman.exe): the console IP, the controller combos, "
+                + "the auto-apply mod list and the chargeboot colour picker's saved slots. Saved positions are not "
+                + "imported; the console owns those now.");
 
         ImGui.SetNextItemWidth(-110);
         Ui.InputTextWithHint("##legacy-config", "C:\\RaCMAN\\config.txt", ref _importPath, 512);
@@ -151,9 +152,18 @@ public static class SettingsPanel
             }
         }
 
+        var slots = config.ColourSlots;
+        if (slots.Count > 0)
+        {
+            ImGui.TextUnformatted($"{slots.Count} chargeboot colour slot(s)");
+            Ui.Hint("Saved as colour presets named \"RaCMAN slot N\" for both RaC2 and RaC3, since the old picker was "
+                    + "shared by the two games. This part is the PC's own and needs no console.");
+        }
+
         if (!state.Connected)
         {
-            Ui.Warning("Not connected: only the IP will be imported now. Connect to import the combos and mod flags.");
+            Ui.Warning("Not connected: only the IP and the colour slots will be imported now. Connect to import the "
+                       + "combos and mod flags.");
         }
 
         ImGui.Spacing();
@@ -221,6 +231,11 @@ public static class SettingsPanel
             done.Add($"IP {ip}");
         }
 
+        // The colour slots become files beside this executable, so they are imported whether or not
+        // a console is listening; everything below this point is a request to the console.
+        int presets = ImportColourSlots(state, config);
+        if (presets > 0) done.Add($"{presets} colour preset(s) for RaC2 and RaC3");
+
         if (!state.Connected)
         {
             state.AddToast(done.Count > 0 ? $"Imported {string.Join(", ", done)}; connect to import the rest" : "Nothing imported: not connected",
@@ -268,6 +283,44 @@ public static class SettingsPanel
                 state.Post(() => _importing = false);
             }
         });
+    }
+
+    /// <summary>
+    /// The old chargeboot picker's slots, saved as named presets for RaC2 and RaC3 both: one picker
+    /// drove the two games, and the presets are keyed by game, so a slot has to land in each file.
+    /// Returns how many slots were written; a file that cannot be written is a toast, not a throw.
+    /// </summary>
+    private static int ImportColourSlots(AppState state, LegacyConfig config)
+    {
+        var slots = config.ColourSlots;
+        if (slots.Count == 0) return 0;
+
+        int written = 0;
+        foreach (var slot in slots)
+        {
+            var colours = new[]
+            {
+                new KeyValuePair<string, uint>(ColourPresetStore.ChargebootFront, slot.Front),
+                new KeyValuePair<string, uint>(ColourPresetStore.ChargebootBack, slot.Back),
+                new KeyValuePair<string, uint>(ColourPresetStore.ChargebootTint, slot.Tint),
+            };
+
+            try
+            {
+                state.ColourPresets.Save(GameId.Rac2, $"RaCMAN slot {slot.Slot}", colours);
+                state.ColourPresets.Save(GameId.Rac3, $"RaCMAN slot {slot.Slot}", colours);
+                written++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+            {
+                state.AddToast($"Colour slot {slot.Slot} not saved: {ex.Message}", ToastKind.Error);
+            }
+        }
+
+        // The Game panel lists the presets once per game and section, so make it list them again.
+        if (written > 0) GamePanel.InvalidatePresets();
+
+        return written;
     }
 
     // ---------------------------------------------------------------- helpers

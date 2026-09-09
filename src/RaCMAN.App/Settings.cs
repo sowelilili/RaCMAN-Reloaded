@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
 
@@ -257,6 +259,159 @@ public sealed class WatchlistStore
         if (!File.Exists(path)) return false;
 
         File.Delete(path);
+        return true;
+    }
+}
+
+/// <summary>
+/// One named set of COLOR feature values: the feature's exact DESCRIBE label against its colour as
+/// a six-digit "RRGGBB" string, because a preset file is something people hand-edit.
+/// </summary>
+public sealed class ColourPreset
+{
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
+    [JsonPropertyName("colours")]
+    public Dictionary<string, string> Colours { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The colour saved for one feature label, as 0xRRGGBB. The lookup is a scan rather than a
+    /// dictionary hit because deserialization replaces <see cref="Colours"/> with a plain
+    /// dictionary of its own, comparer and all, and a hand-typed label should still match.
+    /// </summary>
+    public bool TryGetColour(string label, out uint rgb)
+    {
+        foreach (var (key, text) in Colours)
+        {
+            if (string.Equals(key, label, StringComparison.OrdinalIgnoreCase)
+                && ColourPresetStore.TryParseColour(text, out rgb))
+            {
+                return true;
+            }
+        }
+
+        rgb = 0;
+        return false;
+    }
+}
+
+/// <summary>
+/// Named colour presets, one JSON file per game under <c>colours/</c>. Keyed by game rather than by
+/// title id on purpose: the BCES01503 disc hosts RaC1 to RaC3, and its RaC2 chargeboots are the
+/// same chargeboots as the NPEA release's, so both see the same presets.
+/// <para>
+/// A missing or broken file reads as "no presets"; a save or a delete throws its IO error, because
+/// a write that quietly did nothing is worse than a message.
+/// </para>
+/// </summary>
+public sealed class ColourPresetStore
+{
+    /// <summary>The RaC2 and RaC3 chargeboot COLOR labels, as qwark's DESCRIBE spells them.</summary>
+    public const string ChargebootFront = "Chargeboots primary front";
+
+    public const string ChargebootBack = "Chargeboots primary back";
+
+    public const string ChargebootTint = "Chargeboots tint";
+
+    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+
+    public ColourPresetStore(string folder)
+    {
+        Folder = folder;
+    }
+
+    public string Folder { get; }
+
+    /// <summary>The file's stem: the GameId's own name in lower case, "rac1" to "rac4".</summary>
+    public static string KeyFor(GameId game) => game.ToString().ToLowerInvariant();
+
+    public string FileFor(GameId game) => System.IO.Path.Combine(Folder, KeyFor(game) + ".json");
+
+    public List<ColourPreset> List(GameId game) => List(game, out _);
+
+    /// <summary>Every preset for a game, by name. <paramref name="problem"/> says why an existing file was ignored.</summary>
+    public List<ColourPreset> List(GameId game, out string? problem)
+    {
+        problem = null;
+        var path = FileFor(game);
+        try
+        {
+            if (File.Exists(path))
+            {
+                var loaded = JsonSerializer.Deserialize<List<ColourPreset>>(File.ReadAllText(path));
+                if (loaded is not null)
+                {
+                    var kept = loaded.Where(p => !string.IsNullOrWhiteSpace(p.Name)).ToList();
+                    Sort(kept);
+                    return kept;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            problem = ex.Message;
+        }
+
+        return new List<ColourPreset>();
+    }
+
+    public ColourPreset? Load(GameId game, string name) =>
+        List(game).FirstOrDefault(p => string.Equals(p.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Writes one preset, replacing any that already had that name (names differ by more than case).</summary>
+    public void Save(GameId game, string name, IEnumerable<KeyValuePair<string, uint>> colours)
+    {
+        name = (name ?? string.Empty).Trim();
+        if (name.Length == 0) throw new ArgumentException("A colour preset needs a name", nameof(name));
+
+        var presets = List(game);
+        presets.RemoveAll(p => string.Equals(p.Name, name, StringComparison.OrdinalIgnoreCase));
+
+        var preset = new ColourPreset { Name = name };
+        foreach (var (label, rgb) in colours) preset.Colours[label] = FormatColour(rgb);
+        presets.Add(preset);
+
+        Write(game, presets);
+    }
+
+    /// <summary>Drops one preset. False when the game had no preset by that name.</summary>
+    public bool Delete(GameId game, string name)
+    {
+        var presets = List(game);
+        if (presets.RemoveAll(p => string.Equals(p.Name, name.Trim(), StringComparison.OrdinalIgnoreCase)) == 0)
+        {
+            return false;
+        }
+
+        Write(game, presets);
+        return true;
+    }
+
+    private void Write(GameId game, List<ColourPreset> presets)
+    {
+        Sort(presets);
+        Directory.CreateDirectory(Folder);
+        File.WriteAllText(FileFor(game), JsonSerializer.Serialize(presets, SerializerOptions));
+    }
+
+    private static void Sort(List<ColourPreset> presets) =>
+        presets.Sort((left, right) => string.Compare(left.Name, right.Name, StringComparison.OrdinalIgnoreCase));
+
+    public static string FormatColour(uint rgb) => (rgb & 0xFFFFFFu).ToString("X6", CultureInfo.InvariantCulture);
+
+    /// <summary>"RRGGBB", with a leading "#" or "0x" tolerated because the file is hand-editable.</summary>
+    public static bool TryParseColour(string? text, out uint rgb)
+    {
+        rgb = 0;
+        var value = (text ?? string.Empty).Trim();
+        if (value.StartsWith('#')) value = value[1..];
+        else if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) value = value[2..];
+
+        if (value.Length == 0 || value.Length > 6) return false;
+        if (!uint.TryParse(value, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint parsed)) return false;
+
+        rgb = parsed & 0xFFFFFFu;
         return true;
     }
 }
