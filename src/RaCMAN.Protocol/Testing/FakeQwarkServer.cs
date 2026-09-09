@@ -68,6 +68,10 @@ public sealed class FakeQwarkServer : IDisposable
 
                 // Revision 1.3: a TOGGLE that is a game-memory byte qwark polls. No "on boot".
                 new Feature(8, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Goodies menu"),
+
+                // A TOGGLE that patches instructions, so a platform that refuses code patches
+                // (flags.NO_CODE_PATCHES) has something the panels must grey out.
+                new Feature(9, FeatureKind.Toggle, 0, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Infinite jump"),
             });
 
         Mods = new List<ModEntry>
@@ -313,6 +317,46 @@ public sealed class FakeQwarkServer : IDisposable
         set { lock (_gate) _session = value; }
     }
 
+    /// <summary>
+    /// flags.EMULATOR: the fake console reports that it is running under an emulator. Only a
+    /// readout, but it is half of what the RPCS3 build of qwark says about itself.
+    /// </summary>
+    public bool Emulator
+    {
+        get => (Session.Flags & SessionFlags.Emulator) != 0;
+        set => SetSessionFlag(SessionFlags.Emulator, value);
+    }
+
+    /// <summary>
+    /// flags.NO_CODE_PATCHES, and the behaviour behind it: with this on, FEATURE_SET on a
+    /// WRITES_CODE feature, MOD_LOAD and PATCH_APPLY all answer UNSUPPORTED, exactly as qwark
+    /// does on a platform whose instruction memory it cannot write.
+    /// </summary>
+    public bool NoCodePatches
+    {
+        get => (Session.Flags & SessionFlags.NoCodePatches) != 0;
+        set => SetSessionFlag(SessionFlags.NoCodePatches, value);
+    }
+
+    private void SetSessionFlag(SessionFlags flag, bool on)
+    {
+        lock (_gate)
+        {
+            _session = _session with { Flags = on ? _session.Flags | flag : _session.Flags & ~flag };
+        }
+    }
+
+    /// <summary>The ops a platform without writable instruction memory refuses outright.</summary>
+    private bool RefusedWithoutCodePatches(Opcode opcode, byte[] payload)
+    {
+        if (!NoCodePatches) return false;
+        if (opcode is Opcode.PatchApply or Opcode.ModLoad) return true;
+
+        // A FEATURE_SET only fails for the features that patch instructions; a data cheat is fine.
+        if (opcode != Opcode.FeatureSet || payload.Length < 1) return false;
+        return Array.Find(Describe.Features, f => f.Id == payload[0])?.WritesCode ?? false;
+    }
+
     public void Start() => _ = Task.Run(AcceptLoopAsync);
 
     /// <summary>Kills every accepted connection, the way a console crash or a reboot would.</summary>
@@ -422,6 +466,8 @@ public sealed class FakeQwarkServer : IDisposable
             {
                 return (Status.NotIngame, null);
             }
+
+            if (RefusedWithoutCodePatches(opcode, payload)) return (Status.Unsupported, null);
 
             switch (opcode)
             {

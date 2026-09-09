@@ -233,11 +233,26 @@ public enum FileMode : byte
     WriteTruncate = 1,
 }
 
+/// <summary>
+/// SessionInfo.flags, section 3 of PROTOCOL.md. EMULATOR and NO_CODE_PATCHES arrived with the
+/// RPCS3 build of qwark: the module says up front what the platform it runs on cannot do, so the
+/// client can grey a control out rather than let the user press it and read UNSUPPORTED.
+/// </summary>
 [Flags]
 public enum SessionFlags : byte
 {
     None = 0,
     PreviousPending = 1 << 0,
+
+    /// <summary>qwark is running against an emulator rather than on a console.</summary>
+    Emulator = 1 << 1,
+
+    /// <summary>
+    /// Code patches are refused on this platform: qwark answers UNSUPPORTED to FEATURE_SET on a
+    /// WRITES_CODE feature, to MOD_LOAD of a mod that carries patch words or code caves, and to
+    /// PATCH_ADD. Everything that only reads and writes data still works.
+    /// </summary>
+    NoCodePatches = 1 << 2,
 }
 
 /// <summary>

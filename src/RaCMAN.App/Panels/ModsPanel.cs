@@ -17,6 +17,11 @@ public static class ModsPanel
     {
         Ui.Heading("Mods");
 
+        // Every mod is patch words, code caves or both, so on a platform that refuses code patches
+        // the whole panel is a library you can keep up to date and not load. Uploading still
+        // works, which is what keeps the console's copy current for the next PS3 session.
+        if (state.CodePatchesUnsupported) Ui.Warning(Ui.ModsAreCodePatches);
+
         string title = state.Session.TitleId;
         if (string.IsNullOrEmpty(title))
         {
@@ -142,7 +147,16 @@ public static class ModsPanel
         bool loaded = remote?.Loaded ?? false;
         if (!loaded)
         {
-            if (ImGui.SmallButton("Load"))
+            // MOD_LOAD is answered UNSUPPORTED for a mod with patch words or caves on a platform
+            // without code patches, which is every mod: the button is greyed out rather than left
+            // to produce an error toast.
+            bool blocked = state.CodePatchesUnsupported;
+            ImGui.BeginDisabled(blocked);
+            bool load = ImGui.SmallButton("Load");
+            ImGui.EndDisabled();
+            if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NoCodePatches);
+
+            if (load)
             {
                 var library = state.Mods;
                 var target = mod;

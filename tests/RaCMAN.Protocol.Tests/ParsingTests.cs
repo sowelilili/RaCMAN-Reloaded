@@ -79,6 +79,41 @@ public class ParsingTests
         Assert.Equal(2u, info.ModPrevious);
     }
 
+    /// <summary>
+    /// The three flag bits are read independently: bit0 PREVIOUS_PENDING as it always was, and the
+    /// two the RPCS3 build of qwark added, bit1 EMULATOR and bit2 NO_CODE_PATCHES.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00, false, false, false)]
+    [InlineData(0x01, true, false, false)]
+    [InlineData(0x02, false, true, false)]
+    [InlineData(0x04, false, false, true)]
+    [InlineData(0x06, false, true, true)]
+    [InlineData(0x07, true, true, true)]
+    public void SessionInfoFlagsCarryTheEmulatorAndCodePatchBits(
+        byte flags, bool previous, bool emulator, bool noCodePatches)
+    {
+        var bytes = HandBuiltSessionInfo();
+        bytes[24] = flags;
+
+        var info = SessionInfo.Parse(bytes);
+
+        Assert.Equal(previous, info.PreviousPending);
+        Assert.Equal(emulator, info.IsEmulator);
+        Assert.Equal(noCodePatches, info.CodePatchesUnsupported);
+
+        // And the byte survives a round trip, so a client that echoes a session does not lose them.
+        Assert.Equal(flags, info.ToBytes()[24]);
+    }
+
+    [Fact]
+    public void SessionFlagBitsAreTheDocumentedOnes()
+    {
+        Assert.Equal(1, (byte)SessionFlags.PreviousPending);
+        Assert.Equal(2, (byte)SessionFlags.Emulator);
+        Assert.Equal(4, (byte)SessionFlags.NoCodePatches);
+    }
+
     [Fact]
     public void SessionInfoRoundTripsThroughItsOwnWriter()
     {

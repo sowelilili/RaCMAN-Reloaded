@@ -85,7 +85,7 @@ public class ClientTests
             var describe = await client.DescribeAsync();
             Assert.Equal(GameId.Rac1, describe.Game);
             Assert.Equal(new[] { "Cheats", "Movement" }, describe.Groups);
-            Assert.Equal(9, describe.Features.Length);
+            Assert.Equal(10, describe.Features.Length);
             Assert.Equal("Infinite ammo", describe.Features[0].Label);
             Assert.Equal(FeatureKind.Color, describe.Features[5].Kind);
 
@@ -100,6 +100,9 @@ public class ClientTests
             var refused = await Assert.ThrowsAsync<QwarkStatusException>(
                 () => client.FeatureSetAutoAsync(describe.Features[8].Id, true));
             Assert.Equal(Status.Unsupported, refused.Status);
+
+            // The toggle that patches instructions, which a platform without code patches refuses.
+            Assert.True(describe.Features[9].WritesCode);
         }
     }
 
@@ -704,5 +707,89 @@ public class ClientTests
     {
         Assert.Equal(5, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
+    }
+
+    // ------------------------------------------------------------------ RPCS3 (the session flags)
+
+    [Fact]
+    public async Task TheEmulatorAndCodePatchFlagsReachTheSession()
+    {
+        using var server = new FakeQwarkServer();
+        server.Emulator = true;
+        server.NoCodePatches = true;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Hello is not null));
+        Assert.True(state.Hello!.IsEmulator);
+        Assert.True(state.Hello.CodePatchesUnsupported);
+
+        // And through telemetry, which is what the panels actually read.
+        Assert.True(await PumpAsync(state, () => state.Telemetry is not null));
+        Assert.True(state.IsEmulator);
+        Assert.True(state.CodePatchesUnsupported);
+    }
+
+    [Fact]
+    public async Task WithoutTheFlagsNothingIsGatedAndPreviousPendingStillWorks()
+    {
+        using var server = new FakeQwarkServer();
+        server.Session = server.Session with { Flags = SessionFlags.PreviousPending };
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Telemetry is not null));
+        Assert.True(state.Session.PreviousPending);
+        Assert.False(state.IsEmulator);
+        Assert.False(state.CodePatchesUnsupported);
+    }
+
+    [Fact]
+    public async Task CodePatchOpsAreRefusedWhenTheConsoleSaysItCannotPatchCode()
+    {
+        var server = new FakeQwarkServer();
+        server.NoCodePatches = true;
+        server.Start();
+
+        var client = new QwarkClient { AutoReconnect = false };
+        using (server)
+        using (client)
+        {
+            await client.ConnectAsync("127.0.0.1", server.Port);
+            var describe = await client.DescribeAsync();
+            var patcher = Array.Find(describe.Features, f => f.WritesCode)!;
+
+            var setting = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.FeatureSetAsync(patcher.Id, 1));
+            Assert.Equal(Status.Unsupported, setting.Status);
+
+            var loading = await Assert.ThrowsAsync<QwarkStatusException>(() => client.ModLoadAsync("crash-patch"));
+            Assert.Equal(Status.Unsupported, loading.Status);
+
+            var patching = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.PatchApplyAsync(new[] { new PatchWord(0x300100, 0x60000000) }));
+            Assert.Equal(Status.Unsupported, patching.Status);
+
+            // A cheat that only writes data is untouched: the flag is about instructions.
+            await client.FeatureSetAsync(0, 1);
+            Assert.True((server.Session.ToggleState & 1ul) != 0);
+        }
+    }
+
+    [Fact]
+    public async Task TheSameOpsWorkWithTheFlagOff()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            Assert.False(server.NoCodePatches);
+
+            var describe = await client.DescribeAsync();
+            var patcher = Array.Find(describe.Features, f => f.WritesCode)!;
+
+            await client.FeatureSetAsync(patcher.Id, 1);
+            Assert.True((server.Session.ToggleState & (1ul << patcher.Id)) != 0);
+        }
     }
 }

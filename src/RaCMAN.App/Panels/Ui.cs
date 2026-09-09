@@ -16,6 +16,18 @@ public static class Ui
     /// <summary>Mirrors the "Show debug information" setting; gates <see cref="DebugHint"/>.</summary>
     public static bool Debug { get; set; }
 
+    /// <summary>
+    /// Why a control is greyed out when the session carries flags.NO_CODE_PATCHES. One spelling,
+    /// because it is the same reason on a cheat, on a mod and on a client patch, and the user
+    /// meets it in three panels.
+    /// </summary>
+    public const string NoCodePatches = "Needs a code patch, which RPCS3 cannot apply";
+
+    /// <summary>The same fact as a sentence, for the panels that are entirely about code patches.</summary>
+    public const string ModsAreCodePatches = "Mods are code patches, which RPCS3 cannot apply";
+
+    public const string PatchesAreCodePatches = "Client patches are code patches, which RPCS3 cannot apply";
+
     public static Vector4 Green => Light ? new(0.10f, 0.55f, 0.15f, 1f) : new(0.45f, 0.85f, 0.45f, 1f);
     public static Vector4 Red => Light ? new(0.80f, 0.15f, 0.15f, 1f) : new(0.95f, 0.45f, 0.45f, 1f);
     public static Vector4 Yellow => Light ? new(0.70f, 0.45f, 0.00f, 1f) : new(0.95f, 0.82f, 0.35f, 1f);

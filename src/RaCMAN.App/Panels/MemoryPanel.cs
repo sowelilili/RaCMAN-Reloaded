@@ -805,10 +805,15 @@ public static class MemoryPanel
 
     private static void DrawPatches(AppState state, bool enabled)
     {
+        // PATCH_APPLY is refused outright on a platform without code patches (RPCS3). Reverting is
+        // left alone: there is nothing to revert there, and a stale entry should still be clearable.
+        bool blocked = state.CodePatchesUnsupported;
+        if (blocked) Ui.Warning(Ui.PatchesAreCodePatches);
+
         Ui.Hint("One 'address: word' per line, at most 64 words. The first address is the patch's key.");
         ImGui.InputTextMultiline("##patch", ref _patchText, 8192, new Vector2(-1, 120));
 
-        ImGui.BeginDisabled(!enabled);
+        ImGui.BeginDisabled(!enabled || blocked);
         if (ImGui.Button("Apply patch"))
         {
             var words = ParsePatch(_patchText, out string? error);
@@ -826,6 +831,10 @@ public static class MemoryPanel
             }
         }
 
+        ImGui.EndDisabled();
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NoCodePatches);
+
+        ImGui.BeginDisabled(!enabled);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(160);
         ImGui.InputText("First address", ref _revertAddress, 16);

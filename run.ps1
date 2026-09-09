@@ -3,13 +3,14 @@
     Build RaCMAN Reloaded with all its assets and run it.
 
 .DESCRIPTION
-    Stages a full copy (the app, the controller skins, the moby layout data, the mod library and
-    qwark.sprx, plus the Windows firewall helper) into .\run\ exactly the way the release is built,
-    then launches it. Everything the input display, mods and firewall need is therefore beside the
-    executable, so a run behaves like the shipped build rather than a bare "dotnet run".
+    Stages a full copy (the app, the controller skins, the moby layout data, the mod library,
+    qwark.sprx and qwark-rpcs3.exe, plus the Windows firewall helper) into .\run\ exactly the way
+    the release is built, then launches it. Everything the input display, mods, firewall and the
+    RPCS3 target need is therefore beside the executable, so a run behaves like the shipped build
+    rather than a bare "dotnet run".
 
-    This does not rebuild qwark.sprx; it copies the one from ..\qwark. Rebuild that separately (see
-    ..\qwark\CLAUDE.md) if you changed the PS3 module.
+    This does not rebuild qwark.sprx or qwark-rpcs3.exe; it copies the ones from ..\qwark. Rebuild
+    those separately (see ..\qwark\CLAUDE.md) if you changed the module.
 
     Anything after -Configuration is passed straight to the app.
 
@@ -29,8 +30,10 @@ $runRoot = Join-Path $here 'run'
 
 # A previous launch from .\run\ locks its own files, which would fail the rebuild. Stop only those
 # instances (started from this run\ folder), never a copy the user is running from anywhere else.
+# qwark-rpcs3.exe is in the list because the app starts it from beside itself for the RPCS3 target,
+# and a helper left behind by a killed app holds the staged copy open just as the app would.
 $runFull = [System.IO.Path]::GetFullPath($runRoot)
-Get-Process -Name 'RaCMAN.App' -ErrorAction SilentlyContinue |
+Get-Process -Name 'RaCMAN.App', 'qwark-rpcs3' -ErrorAction SilentlyContinue |
     Where-Object { $_.Path -and $_.Path.StartsWith($runFull, [System.StringComparison]::OrdinalIgnoreCase) } |
     Stop-Process -Force -ErrorAction SilentlyContinue
 

@@ -486,15 +486,27 @@ public static class GamePanel
 
             ulong bit = 1UL << feature.Id;
             bool on = (session.ToggleState & bit) != 0;
+
+            // A cheat that patches instructions is nothing this platform can do (RPCS3), and
+            // qwark would answer UNSUPPORTED: the box is drawn, so the cheat is still listed
+            // where it belongs, but it cannot be pressed and the tooltip says why.
+            bool blocked = feature.WritesCode && state.CodePatchesUnsupported;
+
+            ImGui.BeginDisabled(blocked);
             if (ImGui.Checkbox(feature.Label, ref on))
             {
                 byte id = feature.Id;
                 uint value = on ? 1u : 0u;
                 state.Run(() => state.Client.FeatureSetAsync(id, value));
             }
-            if (ImGui.IsItemHovered())
+
+            ImGui.EndDisabled();
+
+            // AllowWhenDisabled: a greyed-out box is exactly the one whose tooltip is the point.
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             {
-                if (feature.IsLive) ImGui.SetTooltip("Read from the game's memory");
+                if (blocked) ImGui.SetTooltip(Ui.NoCodePatches);
+                else if (feature.IsLive) ImGui.SetTooltip("Read from the game's memory");
                 else if (feature.WritesCode) ImGui.SetTooltip("Patches game code");
             }
 
@@ -505,16 +517,21 @@ public static class GamePanel
             {
                 ImGui.SameLine(columnLabel[i % columns] + AutoBoxGap);
                 bool auto = (session.ToggleAuto & bit) != 0;
+                ImGui.BeginDisabled(blocked);
                 ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
                 bool changed = ImGui.Checkbox("on boot", ref auto);
                 ImGui.PopStyleColor();
+                ImGui.EndDisabled();
                 if (changed)
                 {
                     byte id = feature.Id;
                     bool wanted = auto;
                     state.Run(() => state.Client.FeatureSetAutoAsync(id, wanted));
                 }
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip("Auto-apply this toggle when the game boots");
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+                {
+                    ImGui.SetTooltip(blocked ? Ui.NoCodePatches : "Auto-apply this toggle when the game boots");
+                }
             }
 
             ImGui.PopID();

@@ -46,6 +46,7 @@ public sealed class AppState : IDisposable
         ColourPresets = new ColourPresetStore(ResolvePath("colours"));
         SaveFiles = new SaveFileLibrary(ResolvePath(settings.SaveFilesPath));
         WebMan = new WebManLoader();
+        Rpcs3 = new Rpcs3Host();
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
 
@@ -98,6 +99,12 @@ public sealed class AppState : IDisposable
 
     public WebManLoader WebMan { get; }
 
+    /// <summary>
+    /// The local qwark-rpcs3.exe, for the RPCS3 target. Nothing is started until the Connection
+    /// panel (or the startup path) asks for it, so a PS3 session never spawns a process.
+    /// </summary>
+    public Rpcs3Host Rpcs3 { get; }
+
     /// <summary>The connection to LiveSplit's TCP server. Only the autosplitter drives it.</summary>
     public LiveSplitClient LiveSplit { get; }
 
@@ -114,6 +121,15 @@ public sealed class AppState : IDisposable
     public bool Connected => Client.IsConnected;
 
     public bool Ingame => Connected && Session.State == SessionState.Ingame;
+
+    /// <summary>
+    /// The console refuses code patches (RPCS3). Read straight off the session flags, so every
+    /// panel that greys a control out agrees with every other one and with the module.
+    /// </summary>
+    public bool CodePatchesUnsupported => Session.CodePatchesUnsupported;
+
+    /// <summary>qwark reports it is driving an emulator rather than a console.</summary>
+    public bool IsEmulator => Session.IsEmulator;
 
     /// <summary>
     /// True while the connected console runs a qwark build older than the one this client shipped
@@ -590,5 +606,8 @@ public sealed class AppState : IDisposable
     {
         LiveSplit.Dispose();
         Client.Dispose();
+
+        // Last, so the client has already dropped its connection when the helper is asked to go.
+        Rpcs3.Dispose();
     }
 }

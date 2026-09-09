@@ -39,6 +39,16 @@ public sealed record SessionInfo(
 
     public bool PreviousPending => (Flags & SessionFlags.PreviousPending) != 0;
 
+    /// <summary>qwark is running against an emulator (RPCS3) rather than on a console.</summary>
+    public bool IsEmulator => (Flags & SessionFlags.Emulator) != 0;
+
+    /// <summary>
+    /// The platform refuses code patches, so everything that would write an instruction — a
+    /// WRITES_CODE toggle, a mod, a client patch — is answered UNSUPPORTED. The panels grey those
+    /// controls out rather than offer a button whose only outcome is an error toast.
+    /// </summary>
+    public bool CodePatchesUnsupported => (Flags & SessionFlags.NoCodePatches) != 0;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>The readout at <paramref name="index"/>, or null when the index names none.</summary>

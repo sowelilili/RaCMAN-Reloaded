@@ -9,6 +9,7 @@ int startPanel = 0;
 string? connectTo = null;
 string? fakeScript = null;
 bool fakeServer = false;
+bool fakeRpcs3 = false;
 bool padWindow = false;
 
 for (int i = 0; i < args.Length; i++)
@@ -30,6 +31,10 @@ for (int i = 0; i < args.Length; i++)
         case "--fake-server":
             fakeServer = true;
             break;
+        case "--fake-rpcs3":
+            fakeServer = true;
+            fakeRpcs3 = true;
+            break;
         case "--pad-window":
             padWindow = true;
             break;
@@ -41,6 +46,7 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("RaCMAN Reloaded");
             Console.WriteLine("  --connect <host>       connect to qwark on start");
             Console.WriteLine("  --fake-server          run the in-process fake qwark and connect to it");
+            Console.WriteLine("  --fake-rpcs3           as --fake-server, with the emulator and no-code-patches flags set");
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
             Console.WriteLine("  --panel <n>            open on panel n: 0 connection, 1 game, 2 positions,");
             Console.WriteLine("                         3 unlocks, 4 level flags, 5 memory, 6 mods,");
@@ -67,6 +73,11 @@ using var scriptCts = new CancellationTokenSource();
 if (fakeServer)
 {
     fake = new FakeQwarkServer();
+
+    // The RPCS3 look, from the flags alone: an emulator that refuses code patches.
+    fake.Emulator = fakeRpcs3;
+    fake.NoCodePatches = fakeRpcs3;
+
     fake.Start();
     connectTo ??= "127.0.0.1";
     Console.WriteLine($"Fake qwark listening on 127.0.0.1:{fake.Port}");
@@ -77,6 +88,21 @@ else if (connectTo is not null)
 {
     settings.LastHost = connectTo;
     state.Run(() => state.Client.ConnectAsync(connectTo));
+}
+else if (settings.Rpcs3Target)
+{
+    // The RPCS3 target is a helper on this PC, so there is nothing to type and nothing to wait
+    // for: start it and connect, exactly as the panel's Connect button would.
+    bool ready = state.Rpcs3.Ensure(settings.Rpcs3QwarkPath, settings.Rpcs3PinePort, out string rpcs3Message);
+    Console.WriteLine($"rpcs3: {rpcs3Message}");
+    if (ready)
+    {
+        state.Run(async () =>
+        {
+            await state.Rpcs3.WaitForPortAsync(ConnectionPanel.HelperStartupWait).ConfigureAwait(false);
+            await state.Client.ConnectAsync(ConnectionPanel.LocalHost).ConfigureAwait(false);
+        });
+    }
 }
 else if (fakeScript is not null)
 {
@@ -101,7 +127,18 @@ if (exitAfter > 0)
     var sess = state.Session;
     uint readout0 = sess is not null && sess.Readout.Length > 0 ? sess.Readout[0] : 0u;
     uint padMask = sess?.PadMask ?? 0u;
-    Console.WriteLine($"summary: connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
+
+    // Which qwark this run talked to, and — for RPCS3 — what became of the helper process. The
+    // helper is still alive here: the AppState that owns it is disposed after this block.
+    string target = settings.Rpcs3Target ? Settings.Rpcs3TargetName : Settings.Ps3TargetName;
+    string helper = settings.Rpcs3Target
+        ? $" rpcs3helper=\"{state.Rpcs3.Status}{(state.Rpcs3.Adopted ? ", adopted" : string.Empty)}\""
+          + $" rpcs3pine=\"{state.Rpcs3.LastPineLine ?? "(none)"}\""
+        : string.Empty;
+
+    Console.WriteLine($"summary: target={target}{helper} " +
+                      $"connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
+                      $"emulator={sess?.IsEmulator ?? false} nocodepatches={sess?.CodePatchesUnsupported ?? false} " +
                       $"features={state.Describe.Features.Length} planets={state.Planets.Length} " +
                       $"slots={state.Positions.Slots.Length} mods={state.ConsoleMods.Length} " +
                       $"watches={state.Watches.Length} combos={state.Combos.Length} " +

@@ -47,6 +47,11 @@ public static class PreviousSessionModal
 
         var describe = state.Describe;
 
+        // On a platform that refuses code patches the mods and the client patches are still worth
+        // listing — they say what the last session had — but nothing can put them back, so their
+        // boxes are dead and carry the same reason the panels give.
+        bool noCode = state.CodePatchesUnsupported;
+
         DrawCategory("Toggles", ref _toggles, () =>
         {
             for (int i = 0; i < 64; i++)
@@ -65,7 +70,7 @@ public static class PreviousSessionModal
                 var mod = state.ConsoleMods.FirstOrDefault(m => m.Index == i);
                 ImGui.BulletText(mod?.Name ?? $"mod {i}");
             }
-        }, previous.Mods != 0);
+        }, previous.Mods != 0, noCode);
 
         DrawCategory("Freezes", ref _freezes, () =>
         {
@@ -81,7 +86,9 @@ public static class PreviousSessionModal
             {
                 ImGui.BulletText($"0x{patch.FirstAddress:X8}, {patch.WordCount} words");
             }
-        }, previous.Patches.Length > 0);
+        }, previous.Patches.Length > 0, noCode);
+
+        if (noCode) _mods = _patches = false;
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -114,7 +121,11 @@ public static class PreviousSessionModal
         ImGui.SameLine();
         const PreviousCategories all = PreviousCategories.Toggles | PreviousCategories.Mods
                                        | PreviousCategories.Freezes | PreviousCategories.Patches;
-        if (ImGui.Button("Reapply all")) Reapply(all);
+
+        // "All" is all of what this platform can do: asking for the mods and the patches here
+        // would only earn an UNSUPPORTED for the whole request.
+        var everything = noCode ? all & ~(PreviousCategories.Mods | PreviousCategories.Patches) : all;
+        if (ImGui.Button("Reapply all")) Reapply(everything);
 
         ImGui.SameLine();
         if (ImGui.Button("Dismiss"))
@@ -132,9 +143,10 @@ public static class PreviousSessionModal
         if (!open) Close(state);
     }
 
-    private static void DrawCategory(string label, ref bool selected, Action drawItems, bool any)
+    private static void DrawCategory(string label, ref bool selected, Action drawItems, bool any,
+        bool refused = false)
     {
-        ImGui.BeginDisabled(!any);
+        ImGui.BeginDisabled(!any || refused);
         ImGui.Checkbox(label, ref selected);
         ImGui.EndDisabled();
 
@@ -143,6 +155,12 @@ public static class PreviousSessionModal
             ImGui.SameLine();
             ImGui.TextColored(Ui.Grey, "(none)");
             return;
+        }
+
+        if (refused)
+        {
+            ImGui.SameLine();
+            Ui.Text(Ui.Yellow, Ui.NoCodePatches);
         }
 
         ImGui.Indent();

@@ -5,7 +5,8 @@
 .DESCRIPTION
     Publishes src/RaCMAN.App framework-dependent for win-x64 (and, with -All, for linux-x64 and
     osx-x64 as well), then stages ..\build\RaCMAN-Reloaded\ with the published app, the
-    controller skins, the moby layout data, ..\qwark\qwark.sprx when it has been built, and the
+    controller skins, the moby layout data, ..\qwark\qwark.sprx when it has been built,
+    ..\qwark\qwark-rpcs3.exe (the RPCS3 helper, win-* only) when it has been built, and the
     mod library, and zips it to ..\build\RaCMAN-Reloaded.zip.
 
     Each runtime gets its own complete folder and zip: the app finds controllerskins\, data\,
@@ -28,7 +29,8 @@ param(
     [string]$Configuration = 'Release',
     [string]$OutputRoot,
     [string]$ModsSource,
-    [string]$SprxPath
+    [string]$SprxPath,
+    [string]$Rpcs3Path
 )
 
 $ErrorActionPreference = 'Stop'
@@ -37,6 +39,7 @@ $repo = $PSScriptRoot
 if (-not $OutputRoot) { $OutputRoot = Join-Path $repo '..\build' }
 if (-not $ModsSource) { $ModsSource = Join-Path $repo '..\..\legacy\racman-official\mods' }
 if (-not $SprxPath)   { $SprxPath   = Join-Path $repo '..\qwark\qwark.sprx' }
+if (-not $Rpcs3Path)  { $Rpcs3Path  = Join-Path $repo '..\qwark\qwark-rpcs3.exe' }
 
 # The mod library the client ships with: one folder per title plus the shared Lua helpers.
 $ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00387', 'NPEA00423', 'libs')
@@ -125,6 +128,18 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
     }
     else {
         Write-Warning "qwark.sprx not found at $SprxPath; the release will not carry the module"
+    }
+
+    # The RPCS3 helper: qwark's core built for the PC, which the client starts beside itself when
+    # the target is RPCS3. A Windows executable for now, so it only goes into the win-* payloads.
+    if ($rid -like 'win-*') {
+        if (Test-Path $Rpcs3Path) {
+            Copy-Item -Force $Rpcs3Path (Join-Path $stageDir 'qwark-rpcs3.exe')
+            Write-Host "  qwark-rpcs3.exe: $(Resolve-Full $Rpcs3Path)"
+        }
+        else {
+            Write-Warning "qwark-rpcs3.exe not found at $Rpcs3Path; the release will not carry the RPCS3 helper"
+        }
     }
 
     $modsDir = Join-Path $stageDir 'mods'

@@ -21,8 +21,39 @@ public enum InputDisplayMode
 /// <summary>Client preferences. Nothing about the game lives here: qwark owns all of that.</summary>
 public sealed class Settings
 {
+    /// <summary>The PS3 the address box points at. Unused while <see cref="Rpcs3Target"/> is on.</summary>
     [JsonPropertyName("lastHost")]
     public string LastHost { get; set; } = "192.168.1.";
+
+    /// <summary>
+    /// Which qwark this client talks to: "ps3" (the module on a console, over the network) or
+    /// "rpcs3" (qwark-rpcs3.exe on this PC, driving RPCS3 through its IPC server). Anything
+    /// unrecognised reads as "ps3", so an older or hand-edited file still opens on the console.
+    /// </summary>
+    [JsonPropertyName("target")]
+    public string Target { get; set; } = Ps3TargetName;
+
+    public const string Ps3TargetName = "ps3";
+
+    public const string Rpcs3TargetName = "rpcs3";
+
+    [JsonIgnore]
+    public bool Rpcs3Target
+    {
+        get => string.Equals(Target, Rpcs3TargetName, StringComparison.OrdinalIgnoreCase);
+        set => Target = value ? Rpcs3TargetName : Ps3TargetName;
+    }
+
+    /// <summary>The port RPCS3's IPC server listens on, which qwark-rpcs3.exe is pointed at.</summary>
+    [JsonPropertyName("rpcs3PinePort")]
+    public int Rpcs3PinePort { get; set; } = Rpcs3Host.DefaultPinePort;
+
+    /// <summary>
+    /// An explicit qwark-rpcs3.exe, for a layout the search does not cover. Empty is the normal
+    /// case: the helper ships beside this executable.
+    /// </summary>
+    [JsonPropertyName("rpcs3QwarkPath")]
+    public string Rpcs3QwarkPath { get; set; } = string.Empty;
 
     [JsonPropertyName("autoReconnect")]
     public bool AutoReconnect { get; set; } = true;
