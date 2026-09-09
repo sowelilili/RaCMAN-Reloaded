@@ -55,14 +55,15 @@ public static class ModsPanel
         {
             Ui.Hint("The local library has no mods for this title. Install one from a ZIP below.");
         }
-        else if (ImGui.BeginTable("mods", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             // Mod is the only stretching column, so every pixel the fixed ones do not need is a
             // pixel of mod name that survives; at the default window width they are the difference
-            // between "Incremental RNG" and "Incremental R".
+            // between "Incremental RNG" and "Incremental R". The author had a column of its own and
+            // it cost the name 90 of those pixels, so it moved to the name's tooltip and to the
+            // details below, which have room for it.
             ImGui.TableSetupColumn("Mod");
             ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 60);
-            ImGui.TableSetupColumn("Author", ImGuiTableColumnFlags.WidthFixed, 90);
             ImGui.TableSetupColumn("Console", ImGuiTableColumnFlags.WidthFixed, 130);
             ImGui.TableSetupColumn("Auto", ImGuiTableColumnFlags.WidthFixed, 40);
             ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 130);
@@ -83,11 +84,13 @@ public static class ModsPanel
                     _selected = mod.DirName;
                 }
 
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version);
+                // The name is also where the author is read now, and where a name too long for the
+                // column can be read in full. The row's selectable spans every column, so the
+                // tooltip waits for the pointer to settle rather than following it across the row.
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal)) ImGui.SetTooltip(TooltipFor(mod));
 
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Author) ? "-" : mod.Author);
+                ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version);
 
                 ImGui.TableNextColumn();
                 DrawConsoleState(mod, remote);
@@ -120,6 +123,14 @@ public static class ModsPanel
         DrawDetails(state, locals, console);
         DrawZipInstall(state, title);
     }
+
+    /// <summary>
+    /// What hovering a row's name says: the full name, which the column may have clipped, and the
+    /// author, which no longer has a column of its own. An unnamed author is left out rather than
+    /// spelled "by -".
+    /// </summary>
+    public static string TooltipFor(LocalMod mod) =>
+        string.IsNullOrWhiteSpace(mod.Author) ? mod.Name : $"{mod.Name}\nby {mod.Author}";
 
     private static void DrawConsoleState(LocalMod mod, ModEntry? remote)
     {

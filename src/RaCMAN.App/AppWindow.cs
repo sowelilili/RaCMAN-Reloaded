@@ -196,8 +196,11 @@ public sealed class AppWindow : GameWindow
 
             if (ImGui.BeginChild("##nav", new Vector2(190, -1), ImGuiChildFlags.Borders))
             {
-                // If the current panel is one the running game doesn't support, fall back to Game.
+                // If the current panel is one the running game doesn't support, fall back to Game;
+                // if it is one this console cannot drive at all, to Connection, which is the panel
+                // that says which target is connected.
                 if (!PanelVisible(_panel)) _panel = 1;
+                if (DisabledReason(_panel) is not null) _panel = 0;
 
                 for (int i = 0; i < PanelNames.Length; i++)
                 {
@@ -205,7 +208,21 @@ public sealed class AppWindow : GameWindow
 
                     bool isGame = i == 1;
                     bool selected = _panel == i && (!isGame || GamePanel.SubPage is null);
-                    if (ImGui.Selectable(PanelNames[i], selected, ImGuiSelectableFlags.None, new Vector2(0, 26)))
+
+                    string? disabled = DisabledReason(i);
+                    ImGui.BeginDisabled(disabled is not null);
+                    bool clicked = ImGui.Selectable(PanelNames[i], selected, ImGuiSelectableFlags.None, new Vector2(0, 26));
+                    ImGui.EndDisabled();
+
+                    if (disabled is not null)
+                    {
+                        // Greyed out and still listed, with the reason on hover: the panel is not
+                        // gone, it is the console underneath that cannot do what it asks for.
+                        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(disabled);
+                        continue;
+                    }
+
+                    if (clicked)
                     {
                         _panel = i;
                         if (isGame) GamePanel.SubPage = null;
@@ -266,6 +283,12 @@ public sealed class AppWindow : GameWindow
         4 => !_state.LevelFlagsUnsupported,
         _ => true,
     };
+
+    /// <summary>
+    /// Why the nav greys a panel out, or null when it is usable. The rule is
+    /// <see cref="PanelNav.DisabledReason"/>; the state it reads is the session's.
+    /// </summary>
+    private string? DisabledReason(int panel) => PanelNav.DisabledReason(panel, _state.CodePatchesUnsupported);
 
     private void DrawHeader()
     {

@@ -61,12 +61,6 @@ public static class PositionsPanel
                 byte flags = (byte)((_resetLevelFlags ? 1 : 0) | (_resetSpecialBolts ? 2 : 0));
                 state.Run(() => state.Client.PlanetLoadAsync(planet, flags));
             }
-
-            ImGui.SameLine();
-            if (ImGui.Button("Load selected on console"))
-            {
-                state.Run(() => state.Client.PlanetLoadAsync());
-            }
         }
 
         ImGui.Spacing();

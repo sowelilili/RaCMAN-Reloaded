@@ -6,7 +6,9 @@ namespace RaCMAN.App.Panels;
 public static class CombosPanel
 {
     private static ComboAction? _capturing;
-    private static uint _captured;
+
+    /// <summary>The pad watcher behind the Capture button; only one row captures at a time.</summary>
+    private static readonly ComboCapture Capture = new();
 
     private static readonly ComboAction[] Actions =
     {
@@ -21,7 +23,7 @@ public static class CombosPanel
     public static void Reset()
     {
         _capturing = null;
-        _captured = 0;
+        Capture.Reset();
     }
 
     public static string Label(ComboAction action) => action switch
@@ -35,24 +37,15 @@ public static class CombosPanel
     };
 
     /// <summary>
-    /// Capture watches the pad mask in telemetry: the first non-zero mask is held until the pad
-    /// returns to 0, which is exactly when qwark re-arms a combo.
+    /// Feeds the telemetry pad mask to the capture in flight. <see cref="ComboCapture"/> keeps the
+    /// fullest mask of the press and answers with it when the pad returns to 0, which is exactly
+    /// when qwark re-arms a combo.
     /// </summary>
     public static void Update(AppState state)
     {
         if (_capturing is not { } action) return;
+        if (Capture.Feed(state.Session.PadMask) is not { } value) return;
 
-        uint mask = state.Session.PadMask;
-        if (mask != 0)
-        {
-            _captured = mask;
-            return;
-        }
-
-        if (_captured == 0) return;
-
-        uint value = _captured;
-        _captured = 0;
         _capturing = null;
         state.Run(async () =>
         {
@@ -65,6 +58,7 @@ public static class CombosPanel
     {
         Ui.Heading("Controller combos");
         Ui.Hint("The console watches the pad and fires a combo when exactly those buttons are held, re-arming once they are released.");
+        Ui.Hint("Capture stores the most buttons you held at once, so let go of them however you like.");
 
         if (!state.Connected)
         {
@@ -96,9 +90,10 @@ public static class CombosPanel
             uint mask = current.GetValueOrDefault(action);
             if (_capturing == action)
             {
-                ImGui.TextColored(Ui.Yellow, _captured == 0
+                uint held = Capture.Captured;
+                ImGui.TextColored(Ui.Yellow, held == 0
                     ? "Press a combo on the pad..."
-                    : $"{PadButtons.Describe(_captured)} — release to store");
+                    : $"{PadButtons.Describe(held)}, release to store");
             }
             else
             {
@@ -111,13 +106,13 @@ public static class CombosPanel
                 if (ImGui.SmallButton("Cancel"))
                 {
                     _capturing = null;
-                    _captured = 0;
+                    Capture.Reset();
                 }
             }
             else if (ImGui.SmallButton("Capture"))
             {
                 _capturing = action;
-                _captured = 0;
+                Capture.Reset();
             }
 
             ImGui.SameLine();

@@ -150,6 +150,29 @@ public class PanelDataTests : IDisposable
         Assert.Equal(string.Empty, ModsPanel.NormalizeZipPath(string.Empty));
     }
 
+    // ---------------------------------------------------------------- the mods table
+
+    private static LocalMod Mod(string name, string author) => new()
+    {
+        Directory = Path.Combine("mods", name),
+        DirName = name.ToLowerInvariant(),
+        Name = name,
+        Author = author,
+    };
+
+    [Fact]
+    public void TheAuthorLeftTheTableForTheNamesTooltip()
+    {
+        Assert.Equal("Incremental RNG\nby Someone", ModsPanel.TooltipFor(Mod("Incremental RNG", "Someone")));
+    }
+
+    [Fact]
+    public void AModWithNoAuthorIsJustItsNameOnHover()
+    {
+        Assert.Equal("Incremental RNG", ModsPanel.TooltipFor(Mod("Incremental RNG", string.Empty)));
+        Assert.Equal("Incremental RNG", ModsPanel.TooltipFor(Mod("Incremental RNG", "   ")));
+    }
+
     // ---------------------------------------------------------------- file dialog
 
     [Fact]
@@ -308,5 +331,130 @@ public class ColourPresetStoreTests : IDisposable
         Assert.Equal(ok, ColourPresetStore.TryParseColour(text, out uint rgb));
         Assert.Equal(expected, rgb);
         if (ok) Assert.Equal(6, ColourPresetStore.FormatColour(rgb).Length);
+    }
+}
+
+/// <summary>
+/// The Combos panel's capture, fed the way telemetry feeds it: one pad mask per frame at 30 Hz,
+/// which is slow enough that two buttons pressed together are rarely released together.
+/// </summary>
+public class ComboCaptureTests
+{
+    private const uint Cross = (uint)PadButton.Cross;
+    private const uint Square = (uint)PadButton.Square;
+    private const uint L1 = (uint)PadButton.L1;
+
+    /// <summary>Feeds a run of frames and gives back what the capture committed, or null.</summary>
+    private static uint? Press(ComboCapture capture, params uint[] frames)
+    {
+        uint? committed = null;
+        foreach (uint frame in frames)
+        {
+            uint? answer = capture.Feed(frame);
+            if (answer is not null) committed = answer;
+        }
+
+        return committed;
+    }
+
+    [Fact]
+    public void TheFullestMaskOfThePressIsWhatIsStored()
+    {
+        // Cross first, Square added, then Cross let go of a frame before Square: the old capture
+        // kept the last non-zero mask and stored Square on its own.
+        var capture = new ComboCapture();
+        Assert.Equal(Cross | Square, Press(capture, Cross, Cross | Square, Square, 0));
+    }
+
+    [Fact]
+    public void OneButtonIsStillOneButton()
+    {
+        var capture = new ComboCapture();
+        Assert.Equal(Cross, Press(capture, Cross, 0));
+    }
+
+    [Fact]
+    public void NothingIsCommittedUntilThePadIsEmpty()
+    {
+        var capture = new ComboCapture();
+
+        Assert.Null(capture.Feed(Cross));
+        Assert.Null(capture.Feed(Cross | Square));
+        Assert.Null(capture.Feed(Square));
+
+        // And the panel can say what it has so far while the buttons are still down.
+        Assert.Equal(Cross | Square, capture.Captured);
+
+        Assert.Equal(Cross | Square, capture.Feed(0));
+    }
+
+    [Fact]
+    public void ThePadSittingAtZeroCommitsNothingAtAll()
+    {
+        var capture = new ComboCapture();
+        Assert.Null(capture.Feed(0));
+        Assert.Null(capture.Feed(0));
+        Assert.Equal(0u, capture.Captured);
+    }
+
+    [Fact]
+    public void ASecondCaptureStartsFromNothing()
+    {
+        var capture = new ComboCapture();
+        Assert.Equal(Cross | Square, Press(capture, Cross, Cross | Square, 0));
+        Assert.Equal(0u, capture.Captured);
+
+        Assert.Equal(L1, Press(capture, L1, 0));
+    }
+
+    [Fact]
+    public void AnEquallyFullMaskLaterInThePressWins()
+    {
+        // Sliding off Cross onto Square without a frame in between: two masks of one button each,
+        // and the one the user ended on is the one they meant.
+        var capture = new ComboCapture();
+        Assert.Equal(Square, Press(capture, Cross, Square, 0));
+    }
+
+    [Fact]
+    public void CancellingThrowsAwayWhatWasHeld()
+    {
+        var capture = new ComboCapture();
+        Assert.Null(capture.Feed(Cross | Square));
+
+        capture.Reset();
+
+        Assert.Equal(0u, capture.Captured);
+        Assert.Null(capture.Feed(0));
+    }
+}
+
+/// <summary>The side nav's rule for the panels an RPCS3 session cannot drive.</summary>
+public class PanelNavTests
+{
+    [Fact]
+    public void ModsAndSaveFilesAreGreyedOutWhenTheConsoleRefusesCodePatches()
+    {
+        Assert.Equal(Ui.ModsAreCodePatches, PanelNav.DisabledReason(PanelNav.Mods, true));
+
+        // The savefile helper is a mod, so the panel that drives it goes the same way.
+        Assert.Equal(Ui.NoCodePatches, PanelNav.DisabledReason(PanelNav.SaveFiles, true));
+    }
+
+    [Fact]
+    public void OnAConsoleThatPatchesCodeNothingIsGreyedOut()
+    {
+        Assert.Null(PanelNav.DisabledReason(PanelNav.Mods, false));
+        Assert.Null(PanelNav.DisabledReason(PanelNav.SaveFiles, false));
+    }
+
+    [Fact]
+    public void EveryOtherPanelIsLeftAlone()
+    {
+        for (int panel = 0; panel < 12; panel++)
+        {
+            if (panel == PanelNav.Mods || panel == PanelNav.SaveFiles) continue;
+            Assert.Null(PanelNav.DisabledReason(panel, true));
+        }
     }
 }
