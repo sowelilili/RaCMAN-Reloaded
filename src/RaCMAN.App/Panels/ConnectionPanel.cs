@@ -275,7 +275,18 @@ public static class ConnectionPanel
         // The helper's own words about RPCS3, not this client's: being connected to the helper says
         // nothing about whether the helper has found the emulator, so the line is not coloured
         // green on the strength of our own connection.
-        Ui.Hint(host.LastPineLine ?? "pine: no word from the helper yet");
+        string pine = host.LastPineLine ?? "pine: no word from the helper yet";
+        if (pine.Contains("has not answered", StringComparison.Ordinal)
+            || pine.Contains("lost", StringComparison.Ordinal))
+        {
+            // The helper diagnosing a silent or vanished RPCS3, in its own words: most often
+            // another program sitting on the IPC port, which RPCS3 serves one at a time.
+            Ui.Warning(pine);
+        }
+        else
+        {
+            Ui.Hint(pine);
+        }
 
         if (host.Problem is { } problem) Ui.Error(problem);
 
