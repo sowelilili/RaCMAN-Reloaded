@@ -54,22 +54,7 @@ public static class SettingsPanel
         }
 
         Ui.Hint("How often the Unlocks and Level flags tables re-read themselves from the console. "
-                + "0 means only when you press Refresh.");
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Debug");
-
-        bool debug = settings.DebugInfo;
-        if (ImGui.Checkbox("Show debug information", ref debug))
-        {
-            settings.DebugInfo = debug;
-            settings.Save();
-            state.ThemeDirty = true;
-        }
-
-        Ui.Hint("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
-                + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
+                + "0 means never, and those two panels then show a Refresh button instead.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -87,8 +72,10 @@ public static class SettingsPanel
                 GameLayout.Problems.Count == 0 ? ToastKind.Success : ToastKind.Error);
         }
 
+        ImGui.SameLine();
+        Ui.OpenFolderButton(state, FolderOf(GameLayout.DefaultPath), GameLayout.DefaultPath);
+
         foreach (var problem in GameLayout.Problems) Ui.Warning(problem);
-        Ui.Hint(GameLayout.DefaultPath);
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -104,9 +91,29 @@ public static class SettingsPanel
         ImGui.Separator();
         Ui.Heading("Files");
 
-        Path("Settings file", string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path);
-        Path("Mods folder", state.Mods.RootPath);
-        Path("Save files folder", state.SaveFiles.RootPath);
+        string settingsFile = string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path;
+        Folder(state, "Settings file", FolderOf(settingsFile), settingsFile);
+        Folder(state, "Mods folder", state.Mods.RootPath);
+        Folder(state, "Save files folder", state.SaveFiles.RootPath);
+
+        // Last, because it is the one switch here that is about this client's own workings rather
+        // than about the user's files, and because everything it reveals is elsewhere.
+        ImGui.Spacing();
+        ImGui.Separator();
+        Ui.Heading("Debug");
+
+        bool debug = settings.DebugInfo;
+        if (ImGui.Checkbox("Show debug information", ref debug))
+        {
+            settings.DebugInfo = debug;
+            settings.Save();
+            state.ThemeDirty = true;
+        }
+
+        Ui.Hint("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
+                + "counters, request names in error messages, frame rate, raw readouts and internal addresses. "
+                + "It also brings back the settings behind the Connection panel's webMAN load and the "
+                + "autosplitter's manual split and reset.");
     }
 
     // ---------------------------------------------------------------- ports
@@ -432,9 +439,18 @@ public static class SettingsPanel
         state.ThemeDirty = true;
     }
 
-    private static void Path(string label, string value)
+    /// <summary>
+    /// One of this client's own places on disk: what it is, and a button that opens it. The path
+    /// is on the button's tooltip, where a file has room to be named in full.
+    /// </summary>
+    private static void Folder(AppState state, string label, string folder, string? tooltip = null)
     {
         ImGui.TextUnformatted(label);
-        Ui.Hint(value);
+        ImGui.SameLine();
+        Ui.OpenFolderButton(state, folder, tooltip);
     }
+
+    /// <summary>The folder a file sits in, for the buttons that lead to a file rather than a folder.</summary>
+    private static string FolderOf(string file) =>
+        System.IO.Path.GetDirectoryName(file) is { Length: > 0 } folder ? folder : AppContext.BaseDirectory;
 }

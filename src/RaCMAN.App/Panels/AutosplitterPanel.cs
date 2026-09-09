@@ -81,13 +81,18 @@ public static class AutosplitterPanel
 
         DrawSplitsFile(state, autosplit);
 
-        ImGui.BeginDisabled(!state.LiveSplit.IsConnected);
-        if (ImGui.Button("Split now")) state.Autosplitter.SendManual(LiveSplitClient.Split);
-        ImGui.SameLine();
-        if (ImGui.Button("Reset")) state.Autosplitter.SendManual(LiveSplitClient.Reset);
-        ImGui.EndDisabled();
-        ImGui.SameLine();
-        Ui.Hint("Test the connection without waiting for the game.");
+        // Sending a split by hand is a way of proving the wiring, not a way of running: during a
+        // run the console decides, and a stray press here would put the timer out of step with it.
+        if (Ui.Debug)
+        {
+            ImGui.BeginDisabled(!state.LiveSplit.IsConnected);
+            if (ImGui.Button("Split now")) state.Autosplitter.SendManual(LiveSplitClient.Split);
+            ImGui.SameLine();
+            if (ImGui.Button("Reset")) state.Autosplitter.SendManual(LiveSplitClient.Reset);
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+            Ui.Hint("Test the connection without waiting for the game.");
+        }
     }
 
     /// <summary>
