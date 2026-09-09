@@ -279,6 +279,14 @@ public enum FeatureFlags : byte
     /// nothing to auto-apply on boot and FEATURE_SET_AUTO is refused for it (revision 1.3).
     /// </summary>
     Live = 1 << 4,
+
+    /// <summary>
+    /// The field behind this VALUE is two's complement in <see cref="Feature.Bits"/> bits, so the
+    /// readout mirroring it carries the raw field and the client sign-extends it before showing it.
+    /// FEATURE_SET still takes a <c>u32</c>: the low <c>Bits</c> bits of the number the user typed
+    /// (revision 1.7).
+    /// </summary>
+    Signed = 1 << 5,
 }
 
 [Flags]

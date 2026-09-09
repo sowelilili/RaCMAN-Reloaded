@@ -85,7 +85,7 @@ public class ClientTests
             var describe = await client.DescribeAsync();
             Assert.Equal(GameId.Rac1, describe.Game);
             Assert.Equal(new[] { "Cheats", "Movement" }, describe.Groups);
-            Assert.Equal(10, describe.Features.Length);
+            Assert.Equal(11, describe.Features.Length);
             Assert.Equal("Infinite ammo", describe.Features[0].Label);
             Assert.Equal(FeatureKind.Color, describe.Features[5].Kind);
 
@@ -103,6 +103,51 @@ public class ClientTests
 
             // The toggle that patches instructions, which a platform without code patches refuses.
             Assert.True(describe.Features[9].WritesCode);
+
+            // Revision 1.7: the signed VALUE, and the width the row carries in its `bits` byte.
+            var signed = describe.Features[10];
+            Assert.True(signed.IsSigned);
+            Assert.Equal(16, signed.FieldBits);
+            Assert.Equal(0u, signed.Min);
+            Assert.Equal(0u, signed.Max);
+        }
+    }
+
+    /// <summary>
+    /// Revision 1.7, end to end: the console reports the raw field, the client reads it as the
+    /// number the game means, and what it sends back is the low bits of that field again.
+    /// </summary>
+    [Fact]
+    public async Task SignedValueRoundTripsThroughDescribeAndFeatureSet()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var describe = await client.DescribeAsync();
+            var qe = Assert.Single(Array.FindAll(describe.Features, f => f.IsSigned));
+            Assert.Equal("QE offset", qe.Label);
+            Assert.Equal(16, qe.FieldBits);
+            Assert.Equal((byte?)4, qe.MirrorReadout);
+            const byte mirror = 4;
+
+            // The console holds 0xFFFF in the halfword, which is the -1 the old dialog offered.
+            var state = await client.GetStateAsync();
+            Assert.Equal(0xFFFFu, state.Session.ReadoutAt(mirror));
+            Assert.Equal(-1L, qe.SignExtend(state.Session.ReadoutAt(mirror)!.Value));
+
+            await client.FeatureSetAsync(qe.Id, qe.Encode(-42));
+
+            state = await client.GetStateAsync();
+            Assert.Equal(0xFFD6u, state.Session.ReadoutAt(mirror));
+            Assert.Equal(-42L, qe.SignExtend(state.Session.ReadoutAt(mirror)!.Value));
+
+            // A value past the end of the field is clamped on the way out, never wrapped.
+            await client.FeatureSetAsync(qe.Id, qe.Encode(-70000));
+
+            state = await client.GetStateAsync();
+            Assert.Equal(0x8000u, state.Session.ReadoutAt(mirror));
+            Assert.Equal(-32768L, qe.SignExtend(state.Session.ReadoutAt(mirror)!.Value));
         }
     }
 
@@ -700,12 +745,12 @@ public class ClientTests
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(5, true)]     // the build before the one this client ships with
-    [InlineData(6, false)]    // exactly the expected build, the one that added the RPCS3 flags
-    [InlineData(7, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(6, true)]     // the build before the one this client ships with
+    [InlineData(7, false)]    // exactly the expected build, the one that added the signed VALUEs
+    [InlineData(8, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(6, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(7, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 

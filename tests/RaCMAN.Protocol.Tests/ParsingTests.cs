@@ -255,6 +255,111 @@ public class ParsingTests
         Assert.False(plain.IsLive);
     }
 
+    /// <summary>
+    /// Revision 1.7: the first of the row's two pad bytes carries the width of the field behind a
+    /// VALUE, and flag bit 5 says that field is two's complement.
+    /// </summary>
+    [Fact]
+    public void SignedFlagAndFieldWidthRoundTripOnAValue()
+    {
+        var entry = new byte[Feature.Size];
+        entry[0] = 23;
+        entry[1] = (byte)FeatureKind.Value;
+        entry[4] = 0x20;                                     // flags: SIGNED
+        entry[5] = 5;                                        // the readout it mirrors
+        entry[6] = 16;                                       // bits: a signed halfword
+        Encoding.ASCII.GetBytes("QE save write-offset").CopyTo(entry, 16);
+
+        var feature = Feature.Parse(entry);
+
+        Assert.Equal(FeatureFlags.Signed, feature.Flags);
+        Assert.True(feature.IsSigned);
+        Assert.Equal(16, feature.Bits);
+        Assert.Equal(16, feature.FieldBits);
+        Assert.Equal(entry, feature.ToBytes());
+
+        // Only a VALUE is ever signed, and a row that names no width is a 32-bit field.
+        var toggle = new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.Signed, 0xFF, 0, 0, "Ghost");
+        Assert.False(toggle.IsSigned);
+
+        var wordWide = new Feature(2, FeatureKind.Value, 0, 0, FeatureFlags.None, 0, 0, 0, "Bolts");
+        Assert.False(wordWide.IsSigned);
+        Assert.Equal(0, wordWide.Bits);
+        Assert.Equal(32, wordWide.FieldBits);
+
+        // A width the console never promises is read as the default rather than believed.
+        var odd = new Feature(3, FeatureKind.Value, 0, 0, FeatureFlags.Signed, 0, 0, 0, "Odd", 24);
+        Assert.Equal(32, odd.FieldBits);
+    }
+
+    /// <summary>
+    /// The readout carries the raw field, so the client is the side that reads it as a number: a
+    /// halfword of 0xFFFF is -1, and the number the user types goes back as those same bits.
+    /// </summary>
+    [Fact]
+    public void SignedValuesExtendAndEncodeAcrossTheirWidth()
+    {
+        var half = new Feature(23, FeatureKind.Value, 0, 0, FeatureFlags.Signed, 5, 0, 0, "QE offset", 16);
+
+        Assert.Equal(-1L, half.SignExtend(0xFFFF));
+        Assert.Equal(-32768L, half.SignExtend(0x8000));
+        Assert.Equal(32767L, half.SignExtend(0x7FFF));
+        Assert.Equal(0L, half.SignExtend(0));
+
+        Assert.Equal(0xFFFFu, half.Encode(-1));
+        Assert.Equal(0x8000u, half.Encode(-32768));
+        Assert.Equal(0x7FFFu, half.Encode(32767));
+        Assert.Equal(0u, half.Encode(0));
+
+        // The width is the range, and anything past it is clamped rather than wrapped.
+        Assert.Equal(-32768L, half.RangeMin);
+        Assert.Equal(32767L, half.RangeMax);
+        Assert.True(half.HasRange);
+        Assert.Equal(0x8000u, half.Encode(-40000));
+        Assert.Equal(0x7FFFu, half.Encode(40000));
+
+        var word = new Feature(10, FeatureKind.Value, 0, 0, FeatureFlags.Signed, 4, 0, 0, "Health XP", 32);
+
+        Assert.Equal(-1L, word.SignExtend(0xFFFFFFFF));
+        Assert.Equal(int.MinValue, word.SignExtend(0x80000000));
+        Assert.Equal(int.MaxValue, word.SignExtend(0x7FFFFFFF));
+        Assert.Equal(0xFFFFFFFFu, word.Encode(-1));
+        Assert.Equal(0x80000000u, word.Encode(int.MinValue));
+        Assert.Equal(int.MinValue, word.RangeMin);
+        Assert.Equal(int.MaxValue, word.RangeMax);
+
+        var eighth = new Feature(4, FeatureKind.Value, 0, 0, FeatureFlags.Signed, 0, 0, 0, "Byte", 8);
+        Assert.Equal(-1L, eighth.SignExtend(0xFF));
+        Assert.Equal(-128L, eighth.SignExtend(0x80));
+        Assert.Equal(0xFFu, eighth.Encode(-1));
+        Assert.Equal(-128L, eighth.RangeMin);
+        Assert.Equal(127L, eighth.RangeMax);
+    }
+
+    /// <summary>An unsigned VALUE reads and clamps exactly as it did before revision 1.7.</summary>
+    [Fact]
+    public void UnsignedValuesAreUntouchedByTheSignedHelpers()
+    {
+        var bounded = new Feature(3, FeatureKind.Value, 0, 0, FeatureFlags.None, 0, 1, 99, "Bolts");
+
+        Assert.Equal(0xFFFFFFFFL, bounded.SignExtend(0xFFFFFFFF));
+        Assert.True(bounded.HasRange);
+        Assert.Equal(1L, bounded.RangeMin);
+        Assert.Equal(99L, bounded.RangeMax);
+        Assert.Equal(99u, bounded.Encode(4242));
+        Assert.Equal(1u, bounded.Encode(-5));
+
+        // Unbounded means the whole unsigned word, which is what a negative entry clamps to zero.
+        var open = new Feature(4, FeatureKind.Value, 0, 0, FeatureFlags.None, 1, 0, 0, "Raritanium");
+
+        Assert.False(open.HasRange);
+        Assert.Equal(0L, open.RangeMin);
+        Assert.Equal(uint.MaxValue, open.RangeMax);
+        Assert.Equal(0u, open.Encode(-1));
+        Assert.Equal(4242u, open.Encode(4242));
+        Assert.Equal(uint.MaxValue, open.Encode(long.MaxValue));
+    }
+
     [Fact]
     public void DescribeParsesGroupsReadoutsAndFeatures()
     {

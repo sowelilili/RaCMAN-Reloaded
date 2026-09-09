@@ -199,6 +199,14 @@ public static class GamePanel
         ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableHeadersRow();
 
+        // A readout a signed VALUE mirrors is shown as that feature reads it, with the raw word
+        // still beside it: this table is where someone goes to see the bits.
+        var signedBy = new Dictionary<int, Feature>();
+        foreach (var feature in describe.Features)
+        {
+            if (feature.IsSigned && feature.MirrorReadout is { } r) signedBy[r] = feature;
+        }
+
         for (int i = 0; i < describe.Readouts.Length; i++)
         {
             ImGui.TableNextRow();
@@ -208,7 +216,8 @@ public static class GamePanel
             ImGui.TextUnformatted(describe.Readouts[i]);
             ImGui.TableNextColumn();
             uint value = i < session.Readout.Length ? session.Readout[i] : 0u;
-            ImGui.TextUnformatted($"{value}  (0x{value:X8})");
+            long shown = signedBy.TryGetValue(i, out var signed) ? signed.SignExtend(value) : value;
+            ImGui.TextUnformatted($"{shown}  (0x{value:X8})");
         }
 
         ImGui.EndTable();
@@ -320,7 +329,9 @@ public static class GamePanel
 
     private static void DrawValueEditor(AppState state, DescribeResult describe, Feature feature)
     {
-        uint live = CurrentValue(state, feature);
+        // A signed feature's readout carries the raw field, so the box shows the number behind it
+        // rather than the bits: -1 on a halfword, not 65535 (revision 1.7).
+        long live = feature.SignExtend(CurrentValue(state, feature));
 
         // The field sits in a table row, so let the row show through it. Hovered and active keep the
         // theme's own colours, which is what makes the field light up when you reach for it.
@@ -331,13 +342,14 @@ public static class GamePanel
         ImGui.PopStyleColor();
         ImGui.PopID();
 
-        if (feature.Max > feature.Min && ImGui.IsItemHovered())
-            ImGui.SetTooltip($"{feature.Min}..{feature.Max}" + (feature.MirrorReadout is null ? "  (no live readout)" : ""));
+        if (feature.HasRange && ImGui.IsItemHovered())
+            ImGui.SetTooltip($"{feature.RangeMin}..{feature.RangeMax}" + (feature.MirrorReadout is null ? "  (no live readout)" : ""));
 
         if (!sent) return;
 
-        uint value = (uint)Math.Clamp(typed, 0, uint.MaxValue);
-        if (feature.Max > feature.Min) value = Math.Clamp(value, feature.Min, feature.Max);
+        // Encode clamps to the feature's range and sends the low bits of the field, so a negative
+        // number reaches qwark as the word the game already stores.
+        uint value = feature.Encode(typed);
 
         byte id = feature.Id;
         LastSet[id] = value;

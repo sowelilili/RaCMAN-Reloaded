@@ -52,7 +52,7 @@ public sealed class FakeQwarkServer : IDisposable
         Describe = new DescribeResult(
             GameId.Rac1,
             new[] { "Cheats", "Movement" },
-            new[] { "Bolts", "Health", "Ghost mode", "Armor colour" },
+            new[] { "Bolts", "Health", "Ghost mode", "Armor colour", "QE offset" },
             new[]
             {
                 new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite ammo"),
@@ -72,6 +72,10 @@ public sealed class FakeQwarkServer : IDisposable
                 // A TOGGLE that patches instructions, so a platform that refuses code patches
                 // (flags.NO_CODE_PATCHES) has something the panels must grey out.
                 new Feature(9, FeatureKind.Toggle, 0, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Infinite jump"),
+
+                // Revision 1.7: a VALUE whose field is a signed halfword, unbounded because the
+                // width is the range. Its readout carries the raw 0xFFFF the game holds for -1.
+                new Feature(10, FeatureKind.Value, 0, 0, FeatureFlags.Signed, 4, 0, 0, "QE offset", 16),
             });
 
         Mods = new List<ModEntry>
@@ -116,6 +120,7 @@ public sealed class FakeQwarkServer : IDisposable
         readouts[1] = 40;        // Health
         readouts[2] = 1;         // Ghost mode, mirrored by the ENUM feature
         readouts[3] = 0x00CC4400; // Armor colour, mirrored by the COLOR feature
+        readouts[4] = 0xFFFF;     // QE offset: the raw halfword a signed VALUE reads as -1
         return readouts;
     }
 
