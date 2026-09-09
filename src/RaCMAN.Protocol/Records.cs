@@ -198,7 +198,11 @@ public sealed record TelemetryPacket(SessionInfo Session, WatchValue[] Watches)
     }
 }
 
-/// <summary>One entry of a DESCRIBE feature table, 48 bytes since revision 1.1.</summary>
+/// <summary>
+/// One entry of a DESCRIBE feature table, 48 bytes since revision 1.1. <c>Bits</c> is the width of
+/// the field behind a VALUE, which revision 1.7 took from the row's padding; 0 is what every row
+/// sent before that revision and stands for 32.
+/// </summary>
 public sealed record Feature(
     byte Id,
     FeatureKind Kind,
@@ -208,7 +212,8 @@ public sealed record Feature(
     byte Readout,
     uint Min,
     uint Max,
-    string Label)
+    string Label,
+    byte Bits = 0)
 {
     public const int Size = 48;
 
@@ -230,6 +235,70 @@ public sealed record Feature(
 
     /// <summary>The ENUM option count. Zero for every other kind since revision 1.1.</summary>
     public byte OptionCount => Kind == FeatureKind.Enum ? Aux : (byte)0;
+
+    /// <summary>
+    /// The width in bits of the field behind this VALUE: 8, 16 or 32, and 32 for the 0 an older
+    /// module sends and for anything the console names that is not one of the three. Meaningless
+    /// for the other kinds, which never carry a width.
+    /// </summary>
+    public int FieldBits => Bits is 8 or 16 or 32 ? Bits : 32;
+
+    /// <summary>
+    /// The field behind this VALUE is two's complement, so what the readout carries is bits rather
+    /// than a number and the client has to sign-extend it (revision 1.7).
+    /// </summary>
+    public bool IsSigned => Kind == FeatureKind.Value && (Flags & FeatureFlags.Signed) != 0;
+
+    /// <summary>
+    /// True when there is a range worth showing the user: the console named one, or the row is
+    /// signed and its width names one for it.
+    /// </summary>
+    public bool HasRange => IsSigned || Max > Min;
+
+    /// <summary>
+    /// The smallest value this feature accepts. A signed row takes its floor from the width, a
+    /// bounded one from <see cref="Min"/>, and an unbounded unsigned one bottoms out at zero.
+    /// </summary>
+    public long RangeMin => IsSigned ? -(1L << (FieldBits - 1)) : Max > Min ? Min : 0L;
+
+    /// <summary>
+    /// The largest value this feature accepts, by the same reading: the width's ceiling, the
+    /// console's <see cref="Max"/>, or the whole unsigned word.
+    /// </summary>
+    public long RangeMax =>
+        IsSigned ? (1L << (FieldBits - 1)) - 1 : Max > Min ? Max : uint.MaxValue;
+
+    /// <summary>
+    /// The number behind a readout: the raw word for an unsigned feature, and the same word read
+    /// as two's complement in <see cref="FieldBits"/> bits for a signed one, so the -1 the game
+    /// holds in a halfword reads as -1 rather than 65535.
+    /// </summary>
+    public long SignExtend(uint raw)
+    {
+        if (!IsSigned) return raw;
+
+        int bits = FieldBits;
+        if (bits >= 32) return (int)raw;
+
+        long mask = (1L << bits) - 1;
+        long value = raw & mask;
+        long sign = 1L << (bits - 1);
+        return (value ^ sign) - sign;
+    }
+
+    /// <summary>
+    /// What FEATURE_SET carries for <paramref name="value"/>: the low <see cref="FieldBits"/> bits,
+    /// so -1 on a 16-bit field goes out as 0xFFFF and qwark writes the halfword it always wrote.
+    /// The value is clamped to <see cref="RangeMin"/>..<see cref="RangeMax"/> first, so a number
+    /// typed past the end of the field never wraps round into a different one.
+    /// </summary>
+    public uint Encode(long value)
+    {
+        long clamped = Math.Clamp(value, RangeMin, RangeMax);
+        int bits = FieldBits;
+        if (!IsSigned || bits >= 32) return unchecked((uint)clamped);
+        return (uint)(clamped & ((1L << bits) - 1));
+    }
 
     /// <summary>
     /// The index into <c>SessionInfo.readout[]</c> that mirrors this feature's current value,
@@ -256,11 +325,12 @@ public sealed record Feature(
         byte aux = r.ReadU8();
         var flags = (FeatureFlags)r.ReadU8();
         byte readout = r.ReadU8();
-        r.Skip(2);
+        byte bits = r.ReadU8();
+        r.Skip(1);
         uint min = r.ReadU32();
         uint max = r.ReadU32();
         string label = r.ReadFixedString(32);
-        return new Feature(id, kind, group, aux, flags, readout, min, max, label);
+        return new Feature(id, kind, group, aux, flags, readout, min, max, label, bits);
     }
 
     public byte[] ToBytes()
@@ -273,7 +343,8 @@ public sealed record Feature(
         w.WriteU8(Aux);
         w.WriteU8((byte)Flags);
         w.WriteU8(Readout);
-        w.WriteZeros(2);
+        w.WriteU8(Bits);
+        w.WriteZeros(1);
         w.WriteU32(Min);
         w.WriteU32(Max);
         w.WriteFixedString(Label, 32);
