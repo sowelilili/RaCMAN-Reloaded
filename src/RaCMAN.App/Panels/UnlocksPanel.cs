@@ -76,14 +76,19 @@ public static class UnlocksPanel
 
         bool enabled = state.Ingame;
 
-        ImGui.BeginDisabled(!state.Connected);
-        if (ImGui.Button("Refresh"))
+        // Only where nothing else reads the table: with an interval set on the Settings panel the
+        // table is never more than that many seconds old, and the button had nothing to add.
+        if (!state.Settings.AutoRefreshesTables)
         {
-            state.RefreshUnlocks();
-            _sinceRefresh = 0;
-        }
+            ImGui.BeginDisabled(!state.Connected);
+            if (ImGui.Button("Refresh"))
+            {
+                state.RefreshUnlocks();
+                _sinceRefresh = 0;
+            }
 
-        ImGui.EndDisabled();
+            ImGui.EndDisabled();
+        }
 
         // The interval is read every frame, so a change on the Settings panel takes effect at once.
         float period = state.Settings.TableRefreshSeconds;

@@ -93,7 +93,10 @@ public static class SaveFilesPanel
         if (!string.Equals(_title, title, StringComparison.Ordinal)) Rescan(state, title);
 
         ImGui.Spacing();
-        Ui.Hint($"Library: {state.SaveFiles.CategoryFolder(title, Category)}");
+
+        // The category's own folder, since that is the one a file lands in; its path is on the
+        // button's tooltip rather than printed, being absolute and long enough to wrap.
+        Ui.OpenFolderButton(state, state.SaveFiles.CategoryFolder(title, Category));
         Ui.DebugHint($"Console: {SaveFileLibrary.TempSavePath(title)}");
         if (hasHelper)
         {

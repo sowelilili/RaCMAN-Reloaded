@@ -29,8 +29,8 @@ public static class ModsPanel
             return;
         }
 
-        // The buttons come first and the library path below them: the path is absolute and long
-        // enough to need wrapping, which would push anything on the same line off the panel.
+        // The library is a button that opens the folder rather than the path printed out: the path
+        // is absolute and long enough to need wrapping, and reading it was never the point.
         if (ImGui.SmallButton("Rescan library")) state.RescanLocalMods();
         ImGui.SameLine();
         ImGui.BeginDisabled(!state.Connected);
@@ -44,7 +44,8 @@ public static class ModsPanel
         }
 
         ImGui.EndDisabled();
-        Ui.Hint($"Library: {Path.Combine(state.Mods.RootPath, title)}");
+        ImGui.SameLine();
+        Ui.OpenFolderButton(state, Path.Combine(state.Mods.RootPath, title));
 
         ImGui.Spacing();
 

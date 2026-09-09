@@ -91,6 +91,14 @@ public sealed class Settings
             : DefaultTableRefreshSeconds;
     }
 
+    /// <summary>
+    /// True while those tables read themselves on a timer, which is also what decides whether the
+    /// Unlocks and Level flags panels carry a Refresh button: with an interval set there is
+    /// nothing to press, and with zero the button is the only thing that reads.
+    /// </summary>
+    [JsonIgnore]
+    public bool AutoRefreshesTables => TableRefreshSeconds > 0f;
+
     [JsonPropertyName("webManSlot")]
     public int WebManSlot { get; set; } = 5;
 

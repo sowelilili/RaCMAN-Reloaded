@@ -113,36 +113,65 @@ public static class ConnectionPanel
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Load qwark through webMAN");
-        Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot.");
 
-        ImGui.SetNextItemWidth(360);
-        ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
+        // Two buttons is the whole of this for anybody who is not developing qwark: the SPRX ships
+        // beside the client and the slot is a number nobody has a reason to move. What the load
+        // does, which file it sends and which slot it goes into are details, so they only appear
+        // with debug information on, and the load itself names the path when the SPRX is missing.
+        if (Ui.Debug)
+        {
+            Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot.");
+
+            ImGui.SetNextItemWidth(360);
+            ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
+        }
+        else
+        {
+            // The boxes that edit these two are hidden, so the stored values are the only ones
+            // there are; taking them here also picks up an import that landed after this panel was
+            // first drawn.
+            _sprxPath = state.Settings.SprxPath;
+            _slot = state.Settings.WebManSlot;
+        }
 
         // The default is qwark.sprx beside the executable, which is where the release layout puts it.
-        // The resolved path is absolute and long, so both spellings of this line wrap.
         string sprx = ResolveSprx(_sprxPath);
-        bool sprxExists = File.Exists(sprx);
-        if (sprxExists) Ui.Hint(sprx);
-        else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
 
-        ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("VSH slot", ref _slot))
+        if (Ui.Debug)
         {
-            _slot = Math.Clamp(_slot, 0, 7);
+            // The resolved path is absolute and long, so both spellings of this line wrap.
+            if (File.Exists(sprx)) Ui.Hint(sprx);
+            else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
+
+            ImGui.SetNextItemWidth(120);
+            if (ImGui.InputInt("VSH slot", ref _slot))
+            {
+                _slot = Math.Clamp(_slot, 0, 7);
+            }
         }
 
         if (ImGui.Button("Load qwark via webMAN"))
         {
-            state.Settings.SprxPath = _sprxPath;
-            state.Settings.WebManSlot = _slot;
-            state.Settings.Save();
+            if (!File.Exists(sprx))
+            {
+                // With the path box hidden this is the only place the path is named, and "it did
+                // not work" without a path is nothing anybody can act on.
+                state.AddToast($"No qwark.sprx at {sprx}. Build ../qwark, or turn on \"Show debug information\" "
+                               + "in Settings to point this at the SPRX.", ToastKind.Error);
+            }
+            else
+            {
+                state.Settings.SprxPath = _sprxPath;
+                state.Settings.WebManSlot = _slot;
+                state.Settings.Save();
 
-            string ip = _host.Trim();
-            string path = sprx;
-            int slot = _slot;
-            state.Run(
-                () => state.WebMan.LoadAsync(ip, path, slot, new Progress<string>(message => state.Post(() => state.AddToast(message)))),
-                $"qwark.sprx loaded into slot {slot}");
+                string ip = _host.Trim();
+                string path = sprx;
+                int slot = _slot;
+                state.Run(
+                    () => state.WebMan.LoadAsync(ip, path, slot, new Progress<string>(message => state.Post(() => state.AddToast(message)))),
+                    $"qwark.sprx loaded into slot {slot}");
+            }
         }
 
         ImGui.SameLine();
@@ -154,27 +183,32 @@ public static class ConnectionPanel
                     loaded ? ToastKind.Success : ToastKind.Info));
         }
 
-        ImGui.Spacing();
-        Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
-        ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
-        ImGui.BeginDisabled(!_confirmBootInstall);
-        if (ImGui.Button("Install to boot_plugins.txt"))
+        // A boot install is a change to how the console starts, and a bad one needs a recovery to
+        // undo, so it stays with the rest of the detail rather than sitting under the two buttons.
+        if (Ui.Debug)
         {
-            string ip = _host.Trim();
-            string path = sprx;
-            state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                changed => state.AddToast(changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it"));
-        }
+            ImGui.Spacing();
+            Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
+            ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
+            ImGui.BeginDisabled(!_confirmBootInstall);
+            if (ImGui.Button("Install to boot_plugins.txt"))
+            {
+                string ip = _host.Trim();
+                string path = sprx;
+                state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
+                    changed => state.AddToast(changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it"));
+            }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Remove from boot_plugins.txt"))
-        {
-            string ip = _host.Trim();
-            state.Run(() => state.WebMan.RemoveFromBootAsync(ip, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt did not list it"));
-        }
+            ImGui.SameLine();
+            if (ImGui.Button("Remove from boot_plugins.txt"))
+            {
+                string ip = _host.Trim();
+                state.Run(() => state.WebMan.RemoveFromBootAsync(ip, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
+                    changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt did not list it"));
+            }
 
-        ImGui.EndDisabled();
+            ImGui.EndDisabled();
+        }
 
         DrawConsoleSection(state);
     }

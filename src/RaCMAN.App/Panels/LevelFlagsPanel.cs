@@ -72,8 +72,13 @@ public static class LevelFlagsPanel
             }
         }
 
-        ImGui.SameLine();
-        if (ImGui.Button("Refresh")) Load(state);
+        // Only where nothing else reads the table: with an interval set on the Settings panel the
+        // flags are never more than that many seconds old, and the button had nothing to add.
+        if (!state.Settings.AutoRefreshesTables)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Refresh")) Load(state);
+        }
 
         ImGui.SameLine();
         if (_resetArmed)

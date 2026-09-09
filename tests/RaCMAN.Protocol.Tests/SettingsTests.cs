@@ -219,6 +219,43 @@ public class SettingsTests
         Assert.Equal(kept, new Settings { TableRefreshSeconds = written }.TableRefreshSeconds);
     }
 
+    /// <summary>
+    /// The same number decides two things, so the panels ask one question: a period means the
+    /// tables read themselves, and zero means the Refresh button is the only thing that reads and
+    /// is therefore the only time Unlocks and Level flags draw one.
+    /// </summary>
+    [Theory]
+    [InlineData(0f, false)]
+    [InlineData(0.5f, true)]
+    [InlineData(1f, true)]
+    [InlineData(-3f, false)]
+    public void ARefreshButtonAppearsOnlyWhereNothingRefreshesOnItsOwn(float period, bool automatic)
+    {
+        var settings = new Settings { TableRefreshSeconds = period };
+
+        Assert.Equal(automatic, settings.AutoRefreshesTables);
+    }
+
+    /// <summary>The switch is derived, so it must not become a key in the file.</summary>
+    [Fact]
+    public void TheAutoRefreshSwitchIsNotWrittenToTheSettingsFile()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.TableRefreshSeconds = 2f;
+            saved.Save();
+
+            Assert.DoesNotContain("autoRefreshesTables", File.ReadAllText(path), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     [Fact]
     public void SaveAndLoadRoundTripTheTableRefreshPeriod()
     {

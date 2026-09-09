@@ -62,6 +62,40 @@ public static class Ui
     }
 
     /// <summary>
+    /// A small button that opens a folder of this client's in the platform's file manager, with
+    /// the path itself on the tooltip. The libraries live at absolute paths long enough to wrap
+    /// over three lines of panel, and printing one was never something the user could act on.
+    /// The tooltip may name a file inside the folder instead, for the buttons that lead to one.
+    /// </summary>
+    public static void OpenFolderButton(AppState state, string folder, string? tooltip = null)
+    {
+        string shown = tooltip ?? folder;
+
+        // Several of these can share a panel, and they all read "Open folder", so the path is what
+        // tells them apart to ImGui.
+        ImGui.PushID(shown);
+        ImGui.BeginDisabled(!FileExplorer.IsSupported);
+        if (ImGui.SmallButton("Open folder"))
+        {
+            var (ok, message) = FileExplorer.Open(folder);
+            if (!ok) state.AddToast(message, ToastKind.Error);
+        }
+
+        ImGui.EndDisabled();
+        ImGui.PopID();
+
+        // AllowWhenDisabled so the path can still be read where there is no file manager to ask,
+        // and the tooltip is built by hand because SetTooltip is printf underneath, for the same
+        // reason as below.
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted(shown);
+            ImGui.EndTooltip();
+        }
+    }
+
+    /// <summary>
     /// Coloured text that is text and not a format string. Everything ImGui calls Text is printf
     /// underneath, so a LiveSplit category called "Any% (co-op)" reaches the screen as
     /// "Any(co-op)": the per cent and what follows it are read as a conversion and eaten.
