@@ -19,14 +19,17 @@ public static class PanelState
         SaveFilesPanel.ClearTransfer();
     }
 
-    /// <summary>Everything, drafts and per-title selections included. Called on a game or connection change.</summary>
-    public static void ResetAll()
+    /// <summary>
+    /// Everything, drafts and per-title selections included. Called on a game or connection change.
+    /// The state comes in because a dropped combo capture has a request to send to the console.
+    /// </summary>
+    public static void ResetAll(AppState state)
     {
         GamePanel.Reset();
         UnlocksPanel.Reset();
         LevelFlagsPanel.Reset();
         MemoryPanel.Reset();
-        CombosPanel.Reset();
+        CombosPanel.Reset(state);
         SaveFilesPanel.Reset();
         AutosplitterPanel.Reset();
     }

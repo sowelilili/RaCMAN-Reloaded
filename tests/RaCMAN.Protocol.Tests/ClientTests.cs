@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 
 using RaCMAN.App;
+using RaCMAN.App.Panels;
 using RaCMAN.Protocol.Testing;
 
 namespace RaCMAN.Protocol.Tests;
@@ -274,6 +275,28 @@ public class ClientTests
             await client.ComboSetAsync(ComboAction.SavePosition, 0x0B);
             var combos = await client.ComboListAsync();
             Assert.Equal(new ComboEntry(ComboAction.SavePosition, 0x0B), Assert.Single(combos));
+        }
+    }
+
+    /// <summary>
+    /// COMBO_SUSPEND, revision 1.8. The fake server takes `u8 suspend` and nothing else, so a
+    /// request encoded any other way comes back BAD_ARG rather than being recorded.
+    /// </summary>
+    [Fact]
+    public async Task ComboSuspendRoundTrips()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            Assert.Equal(0x0082, (int)Opcode.ComboSuspend);
+            Assert.Null(server.CombosSuspended);
+
+            await client.ComboSuspendAsync(true);
+            Assert.True(server.CombosSuspended);
+
+            await client.ComboSuspendAsync(false);
+            Assert.False(server.CombosSuspended);
         }
     }
 
@@ -740,18 +763,102 @@ public class ClientTests
 
         Assert.True(await PumpAsync(state, () => state.Hello is not null));
         Assert.Equal(QwarkClient.ClientProtocolVersion, state.Hello!.ProtocolVersion);
-        Assert.Equal(7, state.Hello.QwarkVersion);
+        Assert.Equal(8, state.Hello.QwarkVersion);
     }
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(6, true)]     // the build before the one this client ships with
-    [InlineData(7, false)]    // exactly the expected build, the one that added the signed VALUEs
-    [InlineData(8, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(7, true)]     // the build before the one this client ships with
+    [InlineData(8, false)]    // exactly the expected build, the one that added COMBO_SUSPEND
+    [InlineData(9, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(7, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(8, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
+    }
+
+    // ------------------------------------------------------------------ the combo capture hold
+    //
+    // The Combos panel keeps the ImGui out of the sequence: Capture, Cancel and the session reset
+    // are three calls that only move a static and send one request, so the whole of the hold can
+    // be driven here with the same frame loop.
+
+    private const uint CaptureMask = (uint)PadButton.Cross | (uint)PadButton.Square;
+
+    /// <summary>Runs frames with the pad at <paramref name="mask"/> until the panel has seen it.</summary>
+    private static async Task PressAsync(AppState state, FakeQwarkServer server, uint mask)
+    {
+        server.Session = server.Session with { PadMask = mask };
+        Assert.True(await PumpAsync(state, () => state.Session.PadMask == mask));
+        CombosPanel.Update(state);
+    }
+
+    [Fact]
+    public async Task CapturingHoldsTheCombosOffAndCommitCommitsAndResumes()
+    {
+        using var server = new FakeQwarkServer();
+        // The pad has to sit still to be captured; the fake console walks it through the buttons.
+        server.AnimateInput = false;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Hello is not null));
+        Assert.Null(server.CombosSuspended);
+
+        CombosPanel.BeginCapture(state, ComboAction.Die);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+
+        // The press, then the release that commits it: the same run of masks telemetry delivers.
+        await PressAsync(state, server, CaptureMask);
+        Assert.False(server.Combos.ContainsKey(ComboAction.Die));
+
+        await PressAsync(state, server, 0);
+
+        Assert.True(await PumpAsync(state, () => server.Combos.ContainsKey(ComboAction.Die)));
+        Assert.Equal(CaptureMask, server.Combos[ComboAction.Die]);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
+    }
+
+    [Fact]
+    public async Task CancellingACaptureHandsTheCombosBackAndStoresNothing()
+    {
+        using var server = new FakeQwarkServer();
+        server.AnimateInput = false;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Hello is not null));
+
+        CombosPanel.BeginCapture(state, ComboAction.LoadPlanet);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+
+        await PressAsync(state, server, CaptureMask);
+
+        CombosPanel.EndCapture(state);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
+
+        // And the buttons that were down when Cancel was pressed store nothing on the way up.
+        await PressAsync(state, server, 0);
+        Assert.Empty(server.Combos);
+    }
+
+    [Fact]
+    public async Task AGameChangeDropsTheCaptureAndTheHoldWithIt()
+    {
+        using var server = new FakeQwarkServer();
+        server.AnimateInput = false;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Hello is not null));
+
+        CombosPanel.BeginCapture(state, ComboAction.SavePosition);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+
+        server.Session = server.Session with { Game = GameId.Rac2, TitleId = "NPEA00386" };
+
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
+        Assert.Empty(server.Combos);
     }
 
     // ------------------------------------------------------------------ RPCS3 (the session flags)

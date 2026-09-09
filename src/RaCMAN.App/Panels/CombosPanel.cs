@@ -20,10 +20,42 @@ public static class CombosPanel
     };
 
     /// <summary>A capture in flight must not survive a game or connection change.</summary>
-    public static void Reset()
+    public static void Reset(AppState state) => EndCapture(state);
+
+    /// <summary>
+    /// Starts a capture on one row. The console is watching the same pad the capture reads out of
+    /// telemetry, so the buttons the user is about to press would fire the combos already stored:
+    /// COMBO_SUSPEND holds them off until the capture commits, is cancelled or is dropped.
+    /// </summary>
+    public static void BeginCapture(AppState state, ComboAction action)
     {
+        _capturing = action;
+        Capture.Reset();
+        Suspend(state, true);
+    }
+
+    /// <summary>Drops a capture in flight and hands the console's combos back. Idempotent.</summary>
+    public static void EndCapture(AppState state)
+    {
+        if (_capturing is null)
+        {
+            Capture.Reset();
+            return;
+        }
+
         _capturing = null;
         Capture.Reset();
+        Suspend(state, false);
+    }
+
+    /// <summary>
+    /// The console expires a hold by itself, so a disconnected client owes it nothing: there is
+    /// nowhere to send the resume to, and the combos come back on their own.
+    /// </summary>
+    private static void Suspend(AppState state, bool on)
+    {
+        if (!state.Connected) return;
+        state.Run(() => state.Client.ComboSuspendAsync(on));
     }
 
     public static string Label(ComboAction action) => action switch
@@ -50,6 +82,9 @@ public static class CombosPanel
         state.Run(async () =>
         {
             await state.Client.ComboSetAsync(action, value);
+            // The pad is empty by now, which is why the capture committed, so handing the combos
+            // back here cannot fire the one just stored: qwark waits for the next press.
+            await state.Client.ComboSuspendAsync(false);
             state.Post(state.RefreshCombos);
         }, $"{Label(action)} = {PadButtons.Describe(value)}");
     }
@@ -59,6 +94,7 @@ public static class CombosPanel
         Ui.Heading("Controller combos");
         Ui.Hint("The console watches the pad and fires a combo when exactly those buttons are held, re-arming once they are released.");
         Ui.Hint("Capture stores the most buttons you held at once, so let go of them however you like.");
+        Ui.Hint("The console holds every combo off while you are capturing, so recording one never fires another.");
 
         if (!state.Connected)
         {
@@ -103,16 +139,11 @@ public static class CombosPanel
             ImGui.TableNextColumn();
             if (_capturing == action)
             {
-                if (ImGui.SmallButton("Cancel"))
-                {
-                    _capturing = null;
-                    Capture.Reset();
-                }
+                if (ImGui.SmallButton("Cancel")) EndCapture(state);
             }
             else if (ImGui.SmallButton("Capture"))
             {
-                _capturing = action;
-                Capture.Reset();
+                BeginCapture(state, action);
             }
 
             ImGui.SameLine();
