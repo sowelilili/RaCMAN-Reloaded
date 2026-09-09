@@ -700,8 +700,8 @@ public class ClientTests
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(4, true)]     // the build before the one this client ships with
-    [InlineData(5, false)]    // exactly the expected build, the one that added the timing rows
+    [InlineData(5, true)]     // the build before the one this client ships with
+    [InlineData(6, false)]    // exactly the expected build, the one that added the RPCS3 flags
     [InlineData(7, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
