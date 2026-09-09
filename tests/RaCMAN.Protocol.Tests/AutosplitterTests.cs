@@ -401,6 +401,27 @@ public class AutosplitterTests
     }
 
     [Fact]
+    public async Task ResetThenStartInTheSameBurstStartsTheNewRun()
+    {
+        // The console sends RESET and START back to back on a new game. The read-back after the
+        // reset is asynchronous, so the engine has to assume the reset landed or the START that
+        // follows a millisecond later would still see the old run as Running.
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
+        h.Server.ClearCommands();
+
+        h.Engine.Handle(new AutosplitEvent(2, 20, AutosplitKind.Reset, 0, 0));
+        h.Engine.Handle(new AutosplitEvent(3, 20, AutosplitKind.Start, 0, 0));
+
+        Assert.True(await h.Sent(LiveSplitClient.Reset));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+    }
+
+    [Fact]
     public async Task ResetGoesThroughUnlessNeverResetIsOn()
     {
         using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered);

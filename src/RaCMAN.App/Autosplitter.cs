@@ -215,7 +215,19 @@ public sealed class Autosplitter
         Interlocked.Increment(ref _acted);
         Record(ev, what, because is null ? command : $"{command} ({because})", true);
 
-        // What we just sent moved the timer, so the phase and the split names are now stale.
+        // What we just sent moved the timer. The read-back below is asynchronous, and the console
+        // sends RESET and START back to back on a new game, so the phase is moved here first:
+        // otherwise the START would still see the old run as Running and leave the timer stopped.
+        var assumed = command switch
+        {
+            LiveSplitClient.Reset => LiveSplitPhase.NotRunning,
+            LiveSplitClient.StartTimer => LiveSplitPhase.Running,
+            LiveSplitClient.Pause => LiveSplitPhase.Paused,
+            LiveSplitClient.Resume => LiveSplitPhase.Running,
+            _ => _view.Phase,
+        };
+        _view = _view with { Phase = assumed };
+
         _ = RefreshAsync();
     }
 
