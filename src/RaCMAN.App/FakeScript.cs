@@ -8,10 +8,16 @@ namespace RaCMAN.App;
 /// Drives the in-process fake console through a session change while the window is up, so the
 /// "side panels never outlive the game" rule can be watched rather than argued about.
 /// Format: <c>--fake-script "2:quit,3:xmb,5:boot,8:rac2,10:drop"</c>, seconds from start.
+/// <para>
+/// The run-event steps emit an autosplit event, ring and UDP push included, so the whole chain
+/// from the console's detection to a LiveSplit command can be exercised headless:
+/// <c>--fake-script "5:split:1:3"</c> emits a SPLIT for code 1 with planet index 3 at five seconds.
+/// </para>
 /// </summary>
 public static class FakeScript
 {
-    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, drop";
+    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, drop, "
+                                + "start, split[:code[:arg]], reset, pause, resume";
 
     public static IReadOnlyList<(double At, string Step)> Parse(string script)
     {
@@ -48,8 +54,29 @@ public static class FakeScript
         }, cancellationToken);
     }
 
+    /// <summary>The run-event steps, by the name they are written with. Everything else is a session step.</summary>
+    private static readonly Dictionary<string, AutosplitKind> EventSteps = new(StringComparer.Ordinal)
+    {
+        ["start"] = AutosplitKind.Start,
+        ["split"] = AutosplitKind.Split,
+        ["reset"] = AutosplitKind.Reset,
+        ["pause"] = AutosplitKind.Pause,
+        ["resume"] = AutosplitKind.Resume,
+    };
+
     public static void Apply(FakeQwarkServer fake, string step)
     {
+        // "split:1:3" is one step: the kind, then the reason code and its argument.
+        var parts = step.Split(':');
+        if (EventSteps.TryGetValue(parts[0], out var kind))
+        {
+            byte code = parts.Length > 1 && byte.TryParse(parts[1], out var c) ? c : (byte)0;
+            uint arg = parts.Length > 2 && uint.TryParse(parts[2], out var a) ? a : 0u;
+            var emitted = fake.EmitAutosplitEvent(kind, code, arg);
+            Console.WriteLine($"fake-script emit seq={emitted.Seq} kind={kind} code={code} arg={arg}");
+            return;
+        }
+
         var session = fake.Session;
         switch (step)
         {

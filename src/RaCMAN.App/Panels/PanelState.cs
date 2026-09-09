@@ -28,5 +28,6 @@ public static class PanelState
         MemoryPanel.Reset();
         CombosPanel.Reset();
         SaveFilesPanel.Reset();
+        AutosplitterPanel.Reset();
     }
 }

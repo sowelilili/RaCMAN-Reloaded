@@ -82,6 +82,43 @@ public enum Opcode : ushort
     // 5.10 Config
     ConfigReload = 0x0090,
     ConfigSave = 0x0091,
+
+    // 5.11 Autosplitting (revision 1.4)
+    AutosplitEvents = 0x00A0,
+    AutosplitDescribe = 0x00A1,
+}
+
+/// <summary>
+/// What an <see cref="AutosplitEvent"/> says happened, section 5.11 of PROTOCOL.md. qwark reports
+/// the event; which of them become LiveSplit commands is entirely the client's decision.
+/// </summary>
+public enum AutosplitKind : byte
+{
+    None = 0,
+    Start = 1,
+    Split = 2,
+    Reset = 3,
+    Pause = 4,
+    Resume = 5,
+}
+
+/// <summary>
+/// AutosplitEventDesc.flags. Bit0 is the state the client's checkbox takes when the settings file
+/// has nothing to say about the label; bit1 marks the one code the planet route applies to.
+/// </summary>
+[Flags]
+public enum AutosplitEventFlags : byte
+{
+    None = 0,
+
+    /// <summary>The user's checkbox for this code starts ticked.</summary>
+    EnabledByDefault = 1 << 0,
+
+    /// <summary>
+    /// This code carries a planet index in <c>arg</c>, so the "split by planet route" setting
+    /// applies to it. Only ever set on code 1.
+    /// </summary>
+    PlanetRoute = 1 << 1,
 }
 
 /// <summary>Reply status codes, section 2 of PROTOCOL.md.</summary>

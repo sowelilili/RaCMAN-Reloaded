@@ -114,6 +114,13 @@ public sealed class Settings
     [JsonPropertyName("firewallOffered")]
     public bool FirewallOffered { get; set; }
 
+    /// <summary>
+    /// The autosplitter: whether it drives LiveSplit at all, where LiveSplit's server is, and what
+    /// each game's run events should do. qwark reports the events; every choice here is the PC's.
+    /// </summary>
+    [JsonPropertyName("autosplit")]
+    public AutosplitSettings Autosplit { get; set; } = new();
+
     [JsonIgnore]
     public string Path { get; private set; } = string.Empty;
 
@@ -157,6 +164,98 @@ public sealed class Settings
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+}
+
+/// <summary>
+/// What one game's run events should do. Keyed by the event's DESCRIBE label rather than its
+/// reason code, because a label is what the user ticked and a code is a number qwark may reuse.
+/// A label the file has never seen takes the default the console's descriptor carries, and a
+/// label this build no longer knows is kept in the file rather than dropped on the next save.
+/// </summary>
+public sealed class AutosplitGameSettings
+{
+    [JsonPropertyName("events")]
+    public Dictionary<string, bool> Events { get; set; } = new();
+
+    /// <summary>Only split on a planet when its name matches the split the route expects next.</summary>
+    [JsonPropertyName("planetRoute")]
+    public bool PlanetRoute { get; set; }
+
+    /// <summary>
+    /// False (the default): split names are the planet you are on, so the planet entered is
+    /// compared against the upcoming split, exactly as the old LiveSplit scripts did. True: the
+    /// names are the planet you are travelling to, so the current split is compared instead.
+    /// </summary>
+    [JsonPropertyName("namesAreDestination")]
+    public bool NamesAreDestination { get; set; }
+
+    /// <summary>Never send LiveSplit a reset, for a category (All Exterminator Cards) where a death is not a reset.</summary>
+    [JsonPropertyName("neverReset")]
+    public bool NeverReset { get; set; }
+
+    /// <summary>Whether this event is on, falling back to the console's own default for the label.</summary>
+    public bool EventEnabled(string label, bool byDefault)
+    {
+        foreach (var (key, value) in Events)
+        {
+            if (string.Equals(key, label, StringComparison.OrdinalIgnoreCase)) return value;
+        }
+
+        return byDefault;
+    }
+
+    /// <summary>Records a choice for one label, replacing whatever spelling of it the file had.</summary>
+    public void SetEvent(string label, bool enabled)
+    {
+        foreach (var key in Events.Keys)
+        {
+            if (!string.Equals(key, label, StringComparison.OrdinalIgnoreCase) || key == label) continue;
+            Events.Remove(key);
+            break;
+        }
+
+        Events[label] = enabled;
+    }
+}
+
+/// <summary>
+/// Where LiveSplit is and what to tell it. The per-game entries are keyed by game ("rac1".."rac4")
+/// rather than by title id, because BCES01503 hosts three games under one title id.
+/// </summary>
+public sealed class AutosplitSettings
+{
+    [JsonPropertyName("enabled")]
+    public bool Enabled { get; set; }
+
+    [JsonPropertyName("host")]
+    public string Host { get; set; } = LiveSplitClient.DefaultHost;
+
+    [JsonPropertyName("port")]
+    public int Port { get; set; } = LiveSplitClient.DefaultPort;
+
+    [JsonPropertyName("games")]
+    public Dictionary<string, AutosplitGameSettings> Games { get; set; } = new();
+
+    /// <summary>The key a game is stored under: the lower-case enum name, "rac1".."rac4".</summary>
+    public static string KeyFor(GameId game) => game.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// One game's settings, created on first use so the panel can bind straight to it. Matching is
+    /// case-insensitive because the file is hand-editable, but deserialization hands back a plain
+    /// dictionary with its own comparer, so the scan does the work.
+    /// </summary>
+    public AutosplitGameSettings For(GameId game)
+    {
+        string key = KeyFor(game);
+        foreach (var (existing, settings) in Games)
+        {
+            if (string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)) return settings;
+        }
+
+        var created = new AutosplitGameSettings();
+        Games[key] = created;
+        return created;
+    }
 }
 
 /// <summary>One saved watch name, so a watchlist survives a restart even though qwark owns the watch.</summary>

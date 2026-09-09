@@ -1,0 +1,37 @@
+null
+veldin
+florana
+phoenix,starship
+marcadia
+daxx
+phoenix rescue,rescue
+annihilation,nation,arena
+aquatos
+tyhrranosis,tyhrra
+zeldrin starport,starport
+obani gemini,gemini
+blackwater,bwc
+holostar,studios
+koros
+null
+metropolis
+crash site,zeldrin crash,crash
+aridia
+qwark's hideout,qwarks hideout,hideout
+launch site,launch
+obani draco,draco
+command center,command centre,command
+holostar clank,agent clank
+insomniac museum,museum
+null
+metropolis rangers,rangers
+aquatos clank,clank
+aquatos sewers,sewers
+tyhrranosis rangers,rangers
+vid comic 6,qwark 6,vc6
+vid comic 1,qwark 1,vc1
+vid comic 4,qwark 4,vc4
+vid comic 2,qwark 2,vc2
+vid comic 3,qwark 3,vc3
+vid comic 5,qwark 5,vc5
+vid comic 1 se,qwark se,vc1se

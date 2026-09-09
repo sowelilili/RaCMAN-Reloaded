@@ -9,7 +9,8 @@ namespace RaCMAN.Protocol.Testing;
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
 /// memory primitives, POS_LIST, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
-/// MOD_LIST, the file ops and COMBO_SET/LIST. Everything else answers UNKNOWN_OP.
+/// MOD_LIST, the file ops, COMBO_SET/LIST and the two AUTOSPLIT ops with their UDP push.
+/// Everything else answers UNKNOWN_OP.
 /// </summary>
 public sealed class FakeQwarkServer : IDisposable
 {
@@ -182,6 +183,55 @@ public sealed class FakeQwarkServer : IDisposable
     };
 
     public string[] Planets { get; set; } = { "Veldin", "Novalis", "Aridia", "Kerwan" };
+
+    /// <summary>
+    /// What AUTOSPLIT_DESCRIBE reports. Empty means the running game has no watcher, which the op
+    /// answers UNSUPPORTED, exactly as a game qwark has no autosplitter for would.
+    /// </summary>
+    public List<AutosplitEventDesc> AutosplitDescriptors { get; set; } = new()
+    {
+        new AutosplitEventDesc(1, AutosplitKind.Split,
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, "Planet entered"),
+        new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, "Boss defeated"),
+        new AutosplitEventDesc(3, AutosplitKind.Split, AutosplitEventFlags.None, "Arena entered"),
+    };
+
+    /// <summary>The event ring AUTOSPLIT_EVENTS reads from, oldest first.</summary>
+    public List<AutosplitEvent> AutosplitRing { get; } = new();
+
+    /// <summary>
+    /// Off makes both autosplit ops answer UNKNOWN_OP, which is what a module from before
+    /// revision 1.4 does and what the client has to stop asking about.
+    /// </summary>
+    public bool AutosplitSupported { get; set; } = true;
+
+    /// <summary>
+    /// Whether <see cref="EmitAutosplitEvent"/> also sends the UDP push. Off lets a test put an
+    /// event in the ring without announcing it, which is how a lost datagram is staged.
+    /// </summary>
+    public bool AutosplitPush { get; set; } = true;
+
+    /// <summary>How many UDP copies of one event go out, one per telemetry tick (section 5.11).</summary>
+    public const int AutosplitPushCopies = 3;
+
+    private readonly List<(AutosplitEvent Event, int Left)> _autosplitPushes = new();
+    private uint _autosplitSeq;
+
+    /// <summary>
+    /// Appends one event to the ring the way the console's watcher would, and queues its three
+    /// datagram copies when the push is on. Returns the event, sequence number and all.
+    /// </summary>
+    public AutosplitEvent EmitAutosplitEvent(AutosplitKind kind, byte code = 0, uint arg = 0)
+    {
+        lock (_gate)
+        {
+            var ev = new AutosplitEvent(++_autosplitSeq, _session.Tick, kind, code, arg);
+            AutosplitRing.Add(ev);
+            if (AutosplitRing.Count > AutosplitEventsReply.MaxEvents) AutosplitRing.RemoveAt(0);
+            if (AutosplitPush) _autosplitPushes.Add((ev, AutosplitPushCopies));
+            return ev;
+        }
+    }
 
     public List<WatchEntry> Watches { get; } = new();
 
@@ -693,6 +743,22 @@ public sealed class FakeQwarkServer : IDisposable
                     ModRescanCount++;
                     return (Status.Ok, null);
 
+                case Opcode.AutosplitEvents when AutosplitSupported:
+                {
+                    if (payload.Length < 4) return (Status.BadArg, null);
+                    uint since = new SpanReader(payload).ReadU32();
+
+                    var events = AutosplitRing.Where(e => e.Seq > since).Take(AutosplitEventsReply.MaxEvents).ToArray();
+                    uint latest = AutosplitRing.Count == 0 ? _autosplitSeq : AutosplitRing[^1].Seq;
+                    return (Status.Ok, new AutosplitEventsReply(latest, events).ToBytes());
+                }
+
+                case Opcode.AutosplitDescribe when AutosplitSupported:
+                {
+                    if (AutosplitDescriptors.Count == 0) return (Status.Unsupported, null);
+                    return (Status.Ok, AutosplitEventDesc.EncodeList(AutosplitDescriptors));
+                }
+
                 case Opcode.ComboSet:
                 {
                     if (payload.Length < 8) return (Status.BadArg, null);
@@ -912,6 +978,7 @@ public sealed class FakeQwarkServer : IDisposable
         {
             IPEndPoint? target;
             byte[] bytes;
+            List<byte[]>? pushes = null;
             lock (_gate)
             {
                 // The tick thread runs at 120 Hz and telemetry goes out every fourth tick.
@@ -930,6 +997,18 @@ public sealed class FakeQwarkServer : IDisposable
 
                 target = _telemetryTarget;
                 bytes = target is null ? Array.Empty<byte>() : BuildTelemetry().ToBytes();
+
+                // One copy of each pending autosplit event per tick, on the telemetry socket.
+                if (target is not null && _autosplitPushes.Count > 0)
+                {
+                    pushes = _autosplitPushes.Select(p => AutosplitDatagram.Build(p.Event)).ToList();
+                    for (int i = _autosplitPushes.Count - 1; i >= 0; i--)
+                    {
+                        var (ev, left) = _autosplitPushes[i];
+                        if (left <= 1) _autosplitPushes.RemoveAt(i);
+                        else _autosplitPushes[i] = (ev, left - 1);
+                    }
+                }
             }
 
             if (target is not null)
@@ -937,6 +1016,10 @@ public sealed class FakeQwarkServer : IDisposable
                 try
                 {
                     await udp.SendAsync(bytes, bytes.Length, target);
+                    foreach (var push in pushes ?? Enumerable.Empty<byte[]>())
+                    {
+                        await udp.SendAsync(push, push.Length, target);
+                    }
                 }
                 catch (SocketException)
                 {

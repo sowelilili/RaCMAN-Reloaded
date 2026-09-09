@@ -697,12 +697,12 @@ public class ClientTests
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(2, true)]     // the build before the one this client ships with
-    [InlineData(3, false)]    // exactly the expected build
+    [InlineData(3, true)]     // the build before the one this client ships with
+    [InlineData(4, false)]    // exactly the expected build, the one that added the autosplit ops
     [InlineData(7, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(3, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(4, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 }

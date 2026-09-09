@@ -7,6 +7,9 @@
   <ItemGroup>
     <!-- Moby row offsets per game: view metadata, read at runtime rather than compiled in. -->
     <None Include="data\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- Autosplit planet routes: one line of accepted split names per planet, the user's to edit. -->
+    <None Include="data\**\*.txt" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

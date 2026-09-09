@@ -46,6 +46,14 @@ public sealed class AppState : IDisposable
         ColourPresets = new ColourPresetStore(ResolvePath("colours"));
         SaveFiles = new SaveFileLibrary(ResolvePath(settings.SaveFilesPath));
         WebMan = new WebManLoader();
+        LiveSplit = new LiveSplitClient();
+        Autosplitter = new Autosplitter(settings, LiveSplit, Post);
+
+        // The console pushes run events whether or not anyone is listening; the decision about
+        // what any of them means is the autosplitter's, and it is the only subscriber.
+        Client.AutosplitEventReceived += ev => Autosplitter.Handle(ev);
+
+        if (settings.Autosplit.Enabled) LiveSplit.Start(settings.Autosplit.Host, settings.Autosplit.Port);
 
         Client.SessionEstablished += info => Post(() =>
         {
@@ -90,6 +98,12 @@ public sealed class AppState : IDisposable
 
     public WebManLoader WebMan { get; }
 
+    /// <summary>The connection to LiveSplit's TCP server. Only the autosplitter drives it.</summary>
+    public LiveSplitClient LiveSplit { get; }
+
+    /// <summary>Turns the console's run events into LiveSplit commands, per the user's settings.</summary>
+    public Autosplitter Autosplitter { get; }
+
     /// <summary>The SessionInfo the last HELLO returned, for the version readout. Null when offline.</summary>
     public SessionInfo? Hello { get; private set; }
 
@@ -109,6 +123,12 @@ public sealed class AppState : IDisposable
     public bool QwarkStale => Connected && Hello is not null && QwarkClient.IsStaleBuild(Hello.QwarkVersion);
 
     public DescribeResult Describe { get; private set; } = DescribeResult.Empty;
+
+    /// <summary>
+    /// AUTOSPLIT_DESCRIBE for the running game: what each reason code means. Empty when the game
+    /// has no watcher, which the op answers UNSUPPORTED and the panel reads as "nothing to offer".
+    /// </summary>
+    public AutosplitEventDesc[] AutosplitEvents { get; private set; } = Array.Empty<AutosplitEventDesc>();
 
     public string[] Planets { get; private set; } = Array.Empty<string>();
 
@@ -222,6 +242,13 @@ public sealed class AppState : IDisposable
 
         Telemetry = Client.LatestTelemetry;
 
+        // The autosplitter reads settings per game, so it follows telemetry rather than the panel.
+        Autosplitter.Game = Session.Game;
+        Autosplitter.Tick(deltaSeconds);
+
+        // With autosplitting off nothing acts on a run event, so the console is not polled for one.
+        Client.AutosplitSafetyPoll = Settings.Autosplit.Enabled;
+
         for (int i = _toasts.Count - 1; i >= 0; i--)
         {
             _toasts[i].Remaining -= deltaSeconds;
@@ -303,7 +330,10 @@ public sealed class AppState : IDisposable
     public void ResetPanels()
     {
         Describe = DescribeResult.Empty;
+        AutosplitEvents = Array.Empty<AutosplitEventDesc>();
+        Autosplitter.Descriptors = AutosplitEvents;
         Planets = Array.Empty<string>();
+        Autosplitter.PlanetNames = Planets;
         Watches = Array.Empty<WatchEntry>();
         Freezes = Array.Empty<FreezeEntry>();
         Patches = Array.Empty<PatchEntry>();
@@ -363,7 +393,13 @@ public sealed class AppState : IDisposable
             }
         });
 
-        Run(() => Client.PlanetListAsync(), planets => Planets = planets);
+        Run(() => Client.PlanetListAsync(), planets =>
+        {
+            Planets = planets;
+            Autosplitter.PlanetNames = planets;
+        });
+
+        RefreshAutosplitEvents();
         RefreshPositions();
         RefreshWatches();
         RefreshFreezes();
@@ -394,6 +430,37 @@ public sealed class AppState : IDisposable
             {
                 bool unsupported = ex.Status == Status.Unsupported;
                 Post(() => LevelFlagsUnsupported = unsupported);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Re-reads AUTOSPLIT_DESCRIBE. UNSUPPORTED is the normal answer for a game qwark has no
+    /// autosplitter for, and for a module older than revision 1.4 the op is unknown; both mean the
+    /// panel has no per-game rows to draw, and neither is worth a toast.
+    /// </summary>
+    public void RefreshAutosplitEvents()
+    {
+        if (!Connected) return;
+
+        Run(async () =>
+        {
+            try
+            {
+                var events = await Client.AutosplitDescribeAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    AutosplitEvents = events;
+                    Autosplitter.Descriptors = events;
+                });
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp)
+            {
+                Post(() =>
+                {
+                    AutosplitEvents = Array.Empty<AutosplitEventDesc>();
+                    Autosplitter.Descriptors = AutosplitEvents;
+                });
             }
         });
     }
@@ -521,6 +588,7 @@ public sealed class AppState : IDisposable
 
     public void Dispose()
     {
+        LiveSplit.Dispose();
         Client.Dispose();
     }
 }

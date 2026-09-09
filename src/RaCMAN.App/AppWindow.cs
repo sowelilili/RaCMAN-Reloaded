@@ -21,6 +21,7 @@ public sealed class AppWindow : GameWindow
         "Mods",
         "Save files",
         "Combos",
+        "Autosplitter",
         "Input display",
         "Settings",
     };
@@ -304,8 +305,9 @@ public sealed class AppWindow : GameWindow
             case 6: ModsPanel.Draw(_state); break;
             case 7: SaveFilesPanel.Draw(_state); break;
             case 8: CombosPanel.Draw(_state); break;
-            case 9: InputDisplayPanel.Draw(_state, controller); break;
-            case 10: SettingsPanel.Draw(_state); break;
+            case 9: AutosplitterPanel.Draw(_state); break;
+            case 10: InputDisplayPanel.Draw(_state, controller); break;
+            case 11: SettingsPanel.Draw(_state); break;
         }
     }
 

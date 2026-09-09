@@ -44,7 +44,8 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
             Console.WriteLine("  --panel <n>            open on panel n: 0 connection, 1 game, 2 positions,");
             Console.WriteLine("                         3 unlocks, 4 level flags, 5 memory, 6 mods,");
-            Console.WriteLine("                         7 save files, 8 combos, 9 input display, 10 settings");
+            Console.WriteLine("                         7 save files, 8 combos, 9 autosplitter,");
+            Console.WriteLine("                         10 input display, 11 settings");
             Console.WriteLine("  --game-section <name>  open the Game panel on that side sub-page (Debug, Cosmetics, ...)");
             Console.WriteLine("  --pad-window           show the input display in its own OS window");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
@@ -109,7 +110,9 @@ if (exitAfter > 0)
                       $"mobylayouts={MobyLayouts.All.Count} skin='{InputDisplayPanel.Status}' " +
                       $"savehelper={state.Describe.HasSaveFileHelper} savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
-                      $"tcpfallback={state.Client.TelemetryViaTcp}");
+                      $"tcpfallback={state.Client.TelemetryViaTcp} " +
+                      $"autosplitevents={state.AutosplitEvents.Length} " +
+                      $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}");
 }
 
 if (padWindowWas is { } previousMode) settings.InputMode = previousMode;

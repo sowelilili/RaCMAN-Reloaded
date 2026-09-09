@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 3;
+    public const byte ExpectedQwarkBuild = 4;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -33,6 +33,14 @@ public sealed class QwarkClient : IDisposable
 
     private readonly ConcurrentDictionary<ushort, TaskCompletionSource<Frame>> _pending = new();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
+
+    /// <summary>
+    /// Serialises autosplit delivery: the UDP push, the gap fetch it may trigger and the safety
+    /// poll all raise events through here, so <see cref="AutosplitEventReceived"/> only ever sees
+    /// each sequence number once and always in order.
+    /// </summary>
+    private readonly SemaphoreSlim _autosplitGate = new(1, 1);
+
     private readonly object _gate = new();
 
     private Socket? _socket;
@@ -54,6 +62,10 @@ public sealed class QwarkClient : IDisposable
     private int _reconnectAttempt;
     private bool _disposed;
 
+    private uint _lastAutosplitSeq;
+    private volatile bool _autosplitPrimed;
+    private volatile bool _autosplitAvailable = true;
+
     /// <summary>Fires after HELLO and SUBSCRIBE have succeeded, on connect and on every reconnect.</summary>
     public event Action<SessionInfo>? SessionEstablished;
 
@@ -61,6 +73,14 @@ public sealed class QwarkClient : IDisposable
     public event Action<Exception?>? Disconnected;
 
     public event Action<TelemetryPacket>? TelemetryReceived;
+
+    /// <summary>
+    /// One run event from the console, deduped by sequence number and raised in sequence order,
+    /// however it arrived: the UDP push, the fetch that fills a gap the push exposed, or the
+    /// safety poll. Events already in the ring when the connection opened are recorded, not
+    /// raised, so a client never acts on a run that happened before it was watching.
+    /// </summary>
+    public event Action<AutosplitEvent>? AutosplitEventReceived;
 
     /// <summary>Attempt number and the delay before it, for the reconnect countdown.</summary>
     public event Action<int, TimeSpan>? Reconnecting;
@@ -93,6 +113,23 @@ public sealed class QwarkClient : IDisposable
     public bool TelemetryViaTcp => _telemetryViaTcp;
 
     public int ReconnectAttempt => Volatile.Read(ref _reconnectAttempt);
+
+    /// <summary>The newest autosplit sequence number this client has seen. 0 before the first one.</summary>
+    public uint LastAutosplitSeq => Volatile.Read(ref _lastAutosplitSeq);
+
+    /// <summary>
+    /// False once the console has answered UNKNOWN_OP for AUTOSPLIT_EVENTS, i.e. it runs a module
+    /// from before revision 1.4. The poll then stops rather than asking again every second.
+    /// </summary>
+    public bool AutosplitAvailable => _autosplitAvailable;
+
+    /// <summary>
+    /// The backstop for a lost UDP push: AUTOSPLIT_EVENTS at 1 Hz while a game is running, or at
+    /// 10 Hz when telemetry is already coming over TCP, because that says UDP is being eaten. It
+    /// only runs while something is subscribed to <see cref="AutosplitEventReceived"/>; a client
+    /// with the autosplitter switched off turns it back off here and stops asking.
+    /// </summary>
+    public bool AutosplitSafetyPoll { get; set; } = true;
 
     /// <summary>How long until the next reconnect attempt; zero when not waiting.</summary>
     public TimeSpan ReconnectRemaining
@@ -161,6 +198,13 @@ public sealed class QwarkClient : IDisposable
             }
 
             TelemetryPort = ((IPEndPoint)udp.Client.LocalEndPoint!).Port;
+
+            // Until the ring has been read once, a push carries a sequence number this client has
+            // no baseline for; dropping those is what stops a reconnect replaying an old run.
+            _autosplitPrimed = false;
+            _autosplitAvailable = true;
+            Volatile.Write(ref _lastAutosplitSeq, 0);
+
             Interlocked.Exchange(ref _lastSendTicks, Environment.TickCount64);
             // Start the age clock now; the poll loop waits this out before falling back to TCP.
             Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
@@ -173,6 +217,8 @@ public sealed class QwarkClient : IDisposable
 
             var info = await HelloAsync(cancellationToken).ConfigureAwait(false);
             await SubscribeAsync((ushort)TelemetryPort, cancellationToken).ConfigureAwait(false);
+            await PrimeAutosplitAsync(cancellationToken).ConfigureAwait(false);
+            _ = Task.Run(() => AutosplitPollLoopAsync(cts.Token));
 
             Interlocked.Exchange(ref _reconnectAtTicks, 0);
             Volatile.Write(ref _reconnectAttempt, 0);
@@ -367,6 +413,19 @@ public sealed class QwarkClient : IDisposable
             {
                 var result = await udp.ReceiveAsync(token).ConfigureAwait(false);
                 if (DropUdp) continue;
+
+                // The autosplit push shares this socket with telemetry, so it is picked off by its
+                // magic and its length before the telemetry parser ever sees the bytes.
+                if (AutosplitDatagram.Matches(result.Buffer))
+                {
+                    if (AutosplitDatagram.TryParse(result.Buffer, out var pushed))
+                    {
+                        await DeliverAutosplitAsync(pushed, token).ConfigureAwait(false);
+                    }
+
+                    continue;
+                }
+
                 TelemetryPacket packet;
                 try
                 {
@@ -930,6 +989,177 @@ public sealed class QwarkClient : IDisposable
     public Task ConfigSaveAsync(CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.ConfigSave, null, cancellationToken);
 
+    // ---------------------------------------------------------------- 5.11 autosplitting
+
+    /// <summary>
+    /// AUTOSPLIT_EVENTS: every event the console has emitted with a sequence number above
+    /// <paramref name="sinceSeq"/>, oldest first, at most 64. Zero asks for whatever the ring holds.
+    /// </summary>
+    public async Task<AutosplitEventsReply> AutosplitEventsAsync(
+        uint sinceSeq,
+        CancellationToken cancellationToken = default)
+    {
+        var payload = await RequestAsync(
+            Opcode.AutosplitEvents,
+            Bytes(4, (scoped ref SpanWriter w) => w.WriteU32(sinceSeq)),
+            cancellationToken).ConfigureAwait(false);
+        return AutosplitEventsReply.Parse(payload);
+    }
+
+    /// <summary>
+    /// AUTOSPLIT_DESCRIBE: what the running game's reason codes mean and which of them are on by
+    /// default. UNSUPPORTED when the game has no watcher, which the caller reads as "no rows".
+    /// </summary>
+    public async Task<AutosplitEventDesc[]> AutosplitDescribeAsync(CancellationToken cancellationToken = default) =>
+        AutosplitEventDesc.ParseList(
+            await RequestAsync(Opcode.AutosplitDescribe, null, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// Reads the ring once on connect and records where the console has got to without raising
+    /// anything: the events in it belong to a run this client was not watching.
+    /// </summary>
+    private async Task PrimeAutosplitAsync(CancellationToken token)
+    {
+        try
+        {
+            var reply = await AutosplitEventsAsync(0, token).ConfigureAwait(false);
+            Volatile.Write(ref _lastAutosplitSeq, reply.HighestSeq);
+            _autosplitPrimed = true;
+        }
+        catch (QwarkStatusException ex)
+        {
+            // A module from before revision 1.4 knows neither the op nor the push, so stop asking.
+            if (ex.Status == Status.UnknownOp) _autosplitAvailable = false;
+            _autosplitPrimed = true;
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException)
+        {
+            // The connection is in trouble; the poll loop primes again once it settles.
+        }
+    }
+
+    /// <summary>
+    /// Raises one pushed event, or (with null) whatever a poll turns up. A pushed sequence number
+    /// more than one past the last one seen means a datagram was lost, so the missing events are
+    /// fetched over TCP and raised first: subscribers always see the run in order.
+    /// </summary>
+    private async Task DeliverAutosplitAsync(AutosplitEvent? pushed, CancellationToken token)
+    {
+        // Without a baseline a push cannot be told from an old event; the prime and poll cover it.
+        if (pushed is not null && !_autosplitPrimed) return;
+
+        await _autosplitGate.WaitAsync(token).ConfigureAwait(false);
+        try
+        {
+            if (pushed is not { } ev)
+            {
+                await FetchAutosplitAsync(token).ConfigureAwait(false);
+                return;
+            }
+
+            uint last = Volatile.Read(ref _lastAutosplitSeq);
+            if (ev.Seq <= last) return;   // one of the three copies of a push already handled
+
+            // Hold the push back when the fetch that should precede it failed, rather than
+            // delivering it out of order: the next poll replays the whole gap in sequence.
+            if (ev.Seq > last + 1 && !await FetchAutosplitAsync(token).ConfigureAwait(false)) return;
+
+            RaiseAutosplit(ev);
+        }
+        finally
+        {
+            _autosplitGate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Asks for everything past the last sequence number seen and raises it in order. False when
+    /// the request failed, which is not fatal: the next poll asks again from the same point.
+    /// Callers hold <see cref="_autosplitGate"/>.
+    /// </summary>
+    private async Task<bool> FetchAutosplitAsync(CancellationToken token)
+    {
+        try
+        {
+            var reply = await AutosplitEventsAsync(Volatile.Read(ref _lastAutosplitSeq), token).ConfigureAwait(false);
+            foreach (var ev in reply.Events) RaiseAutosplit(ev);
+
+            // latest_seq also accounts for events the ring dropped before this client asked.
+            if (reply.LatestSeq > Volatile.Read(ref _lastAutosplitSeq))
+            {
+                Volatile.Write(ref _lastAutosplitSeq, reply.LatestSeq);
+            }
+
+            return true;
+        }
+        catch (QwarkStatusException ex)
+        {
+            if (ex.Status == Status.UnknownOp) _autosplitAvailable = false;
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or TimeoutException
+                                       or InvalidOperationException or ProtocolException)
+        {
+            return false;
+        }
+    }
+
+    private void RaiseAutosplit(AutosplitEvent ev)
+    {
+        if (ev.Seq <= Volatile.Read(ref _lastAutosplitSeq)) return;
+
+        Volatile.Write(ref _lastAutosplitSeq, ev.Seq);
+
+        try
+        {
+            AutosplitEventReceived?.Invoke(ev);
+        }
+        catch (Exception)
+        {
+            // A subscriber that throws is its own problem: this runs on the telemetry receive
+            // loop, and losing that would take the whole connection's live state with it.
+        }
+    }
+
+    /// <summary>
+    /// The backstop for a lost push. A few ms of latency is fine here: the datagram is what makes
+    /// a split prompt, and this only exists so a blocked or dropped one still lands. It runs at
+    /// 10 Hz when telemetry is already falling back to TCP, because that says UDP is not arriving.
+    /// </summary>
+    private async Task AutosplitPollLoopAsync(CancellationToken token)
+    {
+        try
+        {
+            while (!token.IsCancellationRequested)
+            {
+                await Task.Delay(_telemetryViaTcp ? 100 : 1000, token).ConfigureAwait(false);
+
+                // No subscriber means nothing is watching a run, and polling a console once a
+                // second for events nobody reads would also keep an otherwise idle connection
+                // from ever reaching the heartbeat.
+                if (!AutosplitSafetyPoll || AutosplitEventReceived is null) continue;
+                if (!_transportUp || !_autosplitAvailable) continue;
+                if (_latestSession is not { State: SessionState.Ingame }) continue;
+
+                if (!_autosplitPrimed)
+                {
+                    await PrimeAutosplitAsync(token).ConfigureAwait(false);
+                    continue;
+                }
+
+                await DeliverAutosplitAsync(null, token).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Torn down deliberately.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Torn down deliberately.
+        }
+    }
+
     // ---------------------------------------------------------------- disposal
 
     public void Dispose()
@@ -940,5 +1170,6 @@ public sealed class QwarkClient : IDisposable
         StopReconnectLoop();
         TeardownAsync(null, raiseEvent: false).GetAwaiter().GetResult();
         _sendLock.Dispose();
+        _autosplitGate.Dispose();
     }
 }
