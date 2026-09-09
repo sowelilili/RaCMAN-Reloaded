@@ -705,7 +705,7 @@ public class ClientTests
     [InlineData(7, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(5, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(6, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
