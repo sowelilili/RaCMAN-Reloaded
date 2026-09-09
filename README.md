@@ -25,7 +25,7 @@ If the connection drops, the client reconnects on its own; there is nothing to r
 - **Combos**: controller combos executed on the console.
 - **Input display**: the 21 controller skins from RaCMAN, drawn in the panel, floating inside the main window, or in a window of its own (with an always-on-top option) so a capture tool can pick it up as its own source.
 - **Save files**: a category library in `savefiles/<TITLEID>/<category>/`, moved through the game's savefile helper: the two ACTIONs the console flags SAVE_ASIDE and LOAD_ASIDE, plus the generic file ops.
-- **Settings**: local PC preferences. Light (default) or dark theme, and a "show debug information" switch that reveals the protocol-level detail (tick and generation counters, opcode hints, table addresses) that is hidden otherwise. Also reloads `gamelayout.json` without a restart.
+- **Settings**: local PC preferences. Light (default) or dark theme, and a "show debug information" switch that reveals the protocol-level detail (tick and generation counters, opcode hints, table addresses) that is hidden otherwise. Also reloads `gamelayout.json` without a restart, and imports the old RaCMAN's `config.txt`: the console IP into this client, the five controller combos and the auto-apply mod list onto the console (the mod list per running title).
 
 When the game reboots, the console keeps read-only watches and asks, through this client, whether to re-apply anything that writes memory (toggles, freezes, patches, mods). Nothing that writes is re-applied silently unless its auto flag is set.
 

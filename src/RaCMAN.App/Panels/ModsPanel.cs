@@ -166,6 +166,14 @@ public static class ModsPanel
             }, $"{mod.Name} unloaded");
         }
 
+        // Load uploads on its own when the console's copy is missing or stale, so a manual
+        // upload is only a debugging tool; it stays behind the debug switch.
+        if (!Ui.Debug)
+        {
+            ImGui.EndDisabled();
+            return;
+        }
+
         ImGui.SameLine();
         if (ImGui.SmallButton("Upload"))
         {

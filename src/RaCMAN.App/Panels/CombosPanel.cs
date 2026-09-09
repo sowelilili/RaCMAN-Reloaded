@@ -24,7 +24,7 @@ public static class CombosPanel
         _captured = 0;
     }
 
-    private static string Label(ComboAction action) => action switch
+    public static string Label(ComboAction action) => action switch
     {
         ComboAction.SavePosition => "Save position",
         ComboAction.LoadPosition => "Load position",

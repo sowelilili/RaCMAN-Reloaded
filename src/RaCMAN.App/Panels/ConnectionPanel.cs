@@ -12,6 +12,13 @@ public static class ConnectionPanel
     private static bool _confirmBootInstall;
     private static bool _initialised;
 
+    /// <summary>Puts a host into the address box (the settings import uses it), whether or not the panel has been drawn yet.</summary>
+    public static void UseHost(string host)
+    {
+        _host = host;
+        _initialised = true;
+    }
+
     public static void Draw(AppState state)
     {
         if (!_initialised)
