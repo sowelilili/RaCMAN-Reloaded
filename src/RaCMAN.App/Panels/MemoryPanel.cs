@@ -439,7 +439,7 @@ public static class MemoryPanel
 
         if (state.Watches.Length == 0)
         {
-            Ui.Hint("No watches. The console owns this list and keeps it across a same-game reboot.");
+            Ui.Hint("No watches...");
         }
         else if (ImGui.BeginTable("watches", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -759,7 +759,7 @@ public static class MemoryPanel
 
         if (state.Freezes.Length == 0)
         {
-            Ui.Hint("No freezes. The console keeps re-writing every active freeze while the game runs.");
+            Ui.Hint("No freezes...");
         }
         else if (ImGui.BeginTable("freezes", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
         {

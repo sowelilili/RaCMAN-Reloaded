@@ -77,7 +77,7 @@ public static class AutosplitterPanel
         // panel is about the run.
         Ui.Hint(state.LiveSplit.IsConnected
             ? DescribeTimer(state.Autosplitter.View)
-            : $"Looking for LiveSplit's server at {autosplit.Host}:{autosplit.Port}; change that in Settings.");
+            : $"Listening for LiveSplit at {autosplit.Host}:{autosplit.Port}...");
 
         DrawSplitsFile(state, autosplit);
 
@@ -215,7 +215,7 @@ public static class AutosplitterPanel
         }
 
         var descriptors = state.AutosplitEvents;
-        Ui.Heading($"{game.DisplayName()} run events");
+        Ui.Heading("Settings");
 
         if (descriptors.Length == 0)
         {

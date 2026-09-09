@@ -155,7 +155,7 @@ public static class ConnectionPanel
         }
 
         ImGui.Spacing();
-        Ui.Hint($"A boot install puts the SPRX in {WebManLoader.BootPath} and lists it in {WebManLoader.BootPluginsPath}.");
+        Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
         ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
         ImGui.BeginDisabled(!_confirmBootInstall);
         if (ImGui.Button("Install to boot_plugins.txt"))
@@ -225,7 +225,7 @@ public static class ConnectionPanel
         ImGui.SameLine();
         ImGui.RadioButton("PS3", ref chosen, 0);
         ImGui.SameLine();
-        ImGui.RadioButton("RPCS3 (this PC)", ref chosen, 1);
+        ImGui.RadioButton("RPCS3", ref chosen, 1);
 
         if (chosen != target)
         {
