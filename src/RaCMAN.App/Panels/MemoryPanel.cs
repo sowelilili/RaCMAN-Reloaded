@@ -422,7 +422,7 @@ public static class MemoryPanel
                 state.Run(async () =>
                 {
                     await state.Client.WatchAddAsync(address, size);
-                    state.Post(state.RefreshWatches);
+                    state.Post(() => state.RefreshWatches());
                 });
             }
             else
@@ -504,7 +504,7 @@ public static class MemoryPanel
                     state.Run(async () =>
                     {
                         await state.Client.WatchRemoveAsync(id);
-                        state.Post(state.RefreshWatches);
+                        state.Post(() => state.RefreshWatches());
                     });
                 }
 
@@ -518,7 +518,9 @@ public static class MemoryPanel
         ImGui.Separator();
         Ui.Heading("Watchlist file");
 
-        string title = string.IsNullOrEmpty(state.Session.TitleId) ? "unknown" : state.Session.TitleId;
+        // The described title, so a quit to the XMB does not swap the saved lists for "unknown"
+        // and walk the folder again on the way back.
+        string title = string.IsNullOrEmpty(state.DescribedTitle) ? "unknown" : state.DescribedTitle;
 
         // Only when the title changes: this walks the watchlists folder, which is not something to
         // do once a frame.
@@ -692,7 +694,7 @@ public static class MemoryPanel
                 await state.Client.WatchAddAsync(entry.Address, entry.Size);
             }
 
-            state.Post(state.RefreshWatches);
+            state.Post(() => state.RefreshWatches());
         }, $"Added {entries.Count} watches");
     }
 
@@ -746,7 +748,7 @@ public static class MemoryPanel
                 state.Run(async () =>
                 {
                     await state.Client.FreezeAddAsync(address, size, value);
-                    state.Post(state.RefreshFreezes);
+                    state.Post(() => state.RefreshFreezes());
                 });
             }
         }
@@ -792,7 +794,7 @@ public static class MemoryPanel
                     state.Run(async () =>
                     {
                         await state.Client.FreezeRemoveAsync(id);
-                        state.Post(state.RefreshFreezes);
+                        state.Post(() => state.RefreshFreezes());
                     });
                 }
 
@@ -826,7 +828,7 @@ public static class MemoryPanel
                 state.Run(async () =>
                 {
                     await state.Client.PatchApplyAsync(words);
-                    state.Post(state.RefreshPatches);
+                    state.Post(() => state.RefreshPatches());
                 }, $"Applied {words.Count} words at 0x{words[0].Address:X8}");
             }
         }
@@ -846,7 +848,7 @@ public static class MemoryPanel
                 state.Run(async () =>
                 {
                     await state.Client.PatchRevertAsync(address);
-                    state.Post(state.RefreshPatches);
+                    state.Post(() => state.RefreshPatches());
                 });
             }
             else
@@ -896,7 +898,7 @@ public static class MemoryPanel
                     state.Run(async () =>
                     {
                         await state.Client.PatchRevertAsync(address);
-                        state.Post(state.RefreshPatches);
+                        state.Post(() => state.RefreshPatches());
                     });
                 }
 

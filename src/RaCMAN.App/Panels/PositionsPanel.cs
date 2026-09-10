@@ -118,7 +118,7 @@ public static class PositionsPanel
                 state.Run(async () =>
                 {
                     await state.Client.PosSaveAsync(index);
-                    state.Post(state.RefreshPositions);
+                    state.Post(() => state.RefreshPositions());
                 });
             }
 
@@ -131,7 +131,7 @@ public static class PositionsPanel
                 state.Run(async () =>
                 {
                     await state.Client.PosClearAsync(index);
-                    state.Post(state.RefreshPositions);
+                    state.Post(() => state.RefreshPositions());
                 });
             }
 

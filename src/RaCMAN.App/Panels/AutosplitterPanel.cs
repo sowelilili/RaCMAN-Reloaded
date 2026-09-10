@@ -101,8 +101,10 @@ public static class AutosplitterPanel
 
     private static void DrawGameSection(AppState state, AutosplitSettings autosplit)
     {
-        var game = state.Session.Game;
-        if (!state.Connected || game == GameId.None)
+        // The described game, so the rows and their checkboxes are still here between sessions:
+        // a Deadlocked quit is part of a run, not the end of one.
+        var game = state.DescribedGame;
+        if (game == GameId.None)
         {
             Ui.Hint("Connect and start a game to choose what its run events do.");
             return;
@@ -138,7 +140,8 @@ public static class AutosplitterPanel
             ImGui.EndTable();
         }
 
-        if (options.PlanetRoute && state.Autosplitter.PlanetDescriptor is not null
+        // Only while a game is running: the planet the session reports at the XMB is nobody's.
+        if (state.Ingame && options.PlanetRoute && state.Autosplitter.PlanetDescriptor is not null
             && !AutosplitRoutes.Knows(game, state.Session.CurrentPlanet))
         {
             Ui.Warning($"{Path.GetFileName(AutosplitRoutes.FileFor(game))} has no names for planet "

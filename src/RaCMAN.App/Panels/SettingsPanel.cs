@@ -61,6 +61,11 @@ public static class SettingsPanel
         {
             GameLayout.Invalidate();
 
+            // The layout decides where the console's features land, so this is also one of the two
+            // places the user can throw the cached description away and have it read back: the
+            // page is rebuilt from a fresh DESCRIBE rather than from what was on screen.
+            state.ForceRefresh();
+
             // Touching the layout re-reads the file now, so a broken edit is reported here
             // instead of on the next visit to the Game page.
             _ = GameLayout.SideSections;

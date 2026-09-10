@@ -73,6 +73,16 @@ public sealed class LiveSplitClient : IDisposable
     public const string AddLoadingTimes = "addloadingtimes";
 
     /// <summary>
+    /// The whole of "make sure this run has a game time": adding nothing to the loading times gives
+    /// LiveSplit's <c>LoadingTimes</c> a value, and from that moment game time exists as real time
+    /// less the loading times rather than not existing at all. It moves nothing — game time comes
+    /// out equal to real time, with no round trip and no rewind — and sending it again later
+    /// changes nothing, so it goes out with every <see cref="StartTimer"/> and before every
+    /// <see cref="PauseGameTime"/>.
+    /// </summary>
+    public const string InitialiseGameTime = AddLoadingTimes + " 0.000000";
+
+    /// <summary>
     /// Stops and starts game time while real time keeps running, which is what LiveSplit does for
     /// an ASL's <c>isLoading</c>. Neither moves the timer phase: a paused game time is still a
     /// Running timer, unlike <see cref="Pause"/>.
@@ -120,8 +130,8 @@ public sealed class LiveSplitClient : IDisposable
     /// <para>
     /// LiveSplit's game time is <b>null until something sets it</b>, and while it is null this
     /// answers real time and <see cref="PauseGameTime"/> freezes nothing the query can see. That is
-    /// why the Deadlocked quit writes the clock back to itself before it pauses it: see
-    /// <see cref="Autosplitter"/>. Once game time exists and is paused this answers the frozen
+    /// why <see cref="InitialiseGameTime"/> goes out before the Deadlocked quit stops the clock:
+    /// see <see cref="Autosplitter"/>. Once game time exists and is paused this answers the frozen
     /// value, so it is stable to read, add to and write back.
     /// </para>
     /// </summary>

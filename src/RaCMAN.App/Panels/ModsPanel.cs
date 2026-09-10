@@ -22,7 +22,9 @@ public static class ModsPanel
         // works, which is what keeps the console's copy current for the next PS3 session.
         if (state.CodePatchesUnsupported) Ui.Warning(Ui.ModsAreCodePatches);
 
-        string title = state.Session.TitleId;
+        // The described title: between sessions the library is still the one whose game just quit,
+        // and the buttons that need a console are disabled below whether or not one is running.
+        string title = string.IsNullOrEmpty(state.Session.TitleId) ? state.DescribedTitle : state.Session.TitleId;
         if (string.IsNullOrEmpty(title))
         {
             Ui.Hint("No game is running, so there is no mod library to show.");
@@ -39,7 +41,7 @@ public static class ModsPanel
             state.Run(async () =>
             {
                 await state.Client.ModRescanAsync();
-                state.Post(state.RefreshMods);
+                state.Post(() => state.RefreshMods());
             }, "Console rescanned its mod folder");
         }
 
@@ -106,7 +108,7 @@ public static class ModsPanel
                     state.Run(async () =>
                     {
                         await state.Client.ModSetAutoAsync(dir, wanted);
-                        state.Post(state.RefreshMods);
+                        state.Post(() => state.RefreshMods());
                     });
                 }
 
@@ -178,7 +180,7 @@ public static class ModsPanel
                     await library.EnsureUploadedAsync(state.Client, title, target, consoleHash,
                         new Progress<string>(message => state.Post(() => state.AddToast(message))));
                     await state.Client.ModLoadAsync(target.DirName);
-                    state.Post(state.RefreshMods);
+                    state.Post(() => state.RefreshMods());
                 }, $"{mod.Name} loaded");
             }
         }
@@ -188,7 +190,7 @@ public static class ModsPanel
             state.Run(async () =>
             {
                 await state.Client.ModUnloadAsync(dir);
-                state.Post(state.RefreshMods);
+                state.Post(() => state.RefreshMods());
             }, $"{mod.Name} unloaded");
         }
 

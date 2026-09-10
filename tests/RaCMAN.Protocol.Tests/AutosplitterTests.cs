@@ -35,8 +35,13 @@ internal sealed class FakeLiveSplitServer : IDisposable
     private readonly List<string> _commands = new();
     private readonly object _gate = new();
 
-    /// <summary>Real time less game time while game time runs; null while the run has no game time.</summary>
-    private TimeSpan? _gameOffset;
+    /// <summary>
+    /// The run's loading times, which is what game time is measured against: while game time runs
+    /// it is real time less this. Null until a loading-times or a game-time command creates one,
+    /// which is where every LiveSplit run starts and why <c>addloadingtimes 0</c> is enough to give
+    /// a run a game time in place, equal to real time and with nothing read back.
+    /// </summary>
+    private TimeSpan? _loadingTimes;
 
     /// <summary>What the pause froze, when there was a game time to freeze.</summary>
     private TimeSpan? _frozenGameTime;
@@ -69,8 +74,8 @@ internal sealed class FakeLiveSplitServer : IDisposable
 
     /// <summary>
     /// The run's game time, or null while the run has none — which is where LiveSplit starts, and
-    /// the whole reason the quit writes the clock back to itself before it stops it. Setting this
-    /// from a test is the same move <c>setgametime</c> makes.
+    /// the whole reason the quit sends <c>addloadingtimes 0</c> before it stops the clock. Setting
+    /// this from a test is the same move <c>setgametime</c> makes.
     /// </summary>
     public TimeSpan? GameTime
     {
@@ -81,7 +86,7 @@ internal sealed class FakeLiveSplitServer : IDisposable
             {
                 if (value is null)
                 {
-                    _gameOffset = null;
+                    _loadingTimes = null;
                     _frozenGameTime = null;
                     return;
                 }
@@ -253,8 +258,15 @@ internal sealed class FakeLiveSplitServer : IDisposable
                 case LiveSplitClient.GetCurrentTimerPhase:
                     return Phase;
 
+                // Loading times are the other half of LiveSplit's game time, and the half that
+                // creates one: LoadingTimes is null until a write like this lands, and from then
+                // on game time is real time less it. So a correction takes time off the clock,
+                // and adding nothing at all still leaves the run with a game time where it had
+                // none. While game time is stopped the frozen value is what the timer shows and
+                // the unpause recomputes the loading times from it, exactly as LiveSplit does.
                 case LiveSplitClient.AddLoadingTimes:
                     LoadingTimes.Add(command);
+                    _loadingTimes = (_loadingTimes ?? TimeSpan.Zero) + ParseSeconds(argument);
                     return null;
 
                 // Game time the way LiveSplitState keeps it. Stopping it freezes a clock that
@@ -262,14 +274,14 @@ internal sealed class FakeLiveSplitServer : IDisposable
                 // is null the timer answers real time, pause or no pause.
                 case LiveSplitClient.PauseGameTime:
                     GameTimePaused = true;
-                    if (_gameOffset is { } running) _frozenGameTime = RealTime - running;
+                    if (_loadingTimes is { } loading) _frozenGameTime = RealTime - loading;
                     return null;
 
                 case LiveSplitClient.UnpauseGameTime:
                     GameTimePaused = false;
                     if (_frozenGameTime is { } frozen)
                     {
-                        _gameOffset = RealTime - frozen;
+                        _loadingTimes = RealTime - frozen;
                         _frozenGameTime = null;
                     }
 
@@ -309,19 +321,26 @@ internal sealed class FakeLiveSplitServer : IDisposable
 
     private string NameAt(int index) => index >= 0 && index < Splits.Length ? Splits[index] : string.Empty;
 
+    /// <summary>A time argument as the server's own parser reads a bare number: seconds.</summary>
+    private static TimeSpan ParseSeconds(string argument) =>
+        TimeSpan.FromSeconds(double.Parse(argument, System.Globalization.CultureInfo.InvariantCulture));
+
     /// <summary>Game time as the server would report it right now, real time while it has none.</summary>
     private TimeSpan CurrentGameTime()
     {
         if (_frozenGameTime is { } frozen) return frozen;
-        if (_gameOffset is { } offset) return RealTime - offset;
+        if (_loadingTimes is { } loading) return RealTime - loading;
         return RealTime;
     }
 
-    /// <summary>What <c>SetGameTime</c> does: the run has a game time from here on, at this value.</summary>
+    /// <summary>
+    /// What <c>SetGameTime</c> does: the run has a game time from here on, at this value. LiveSplit
+    /// writes it as loading times, and as the pause value too while game time is stopped.
+    /// </summary>
     private void Write(TimeSpan value)
     {
+        _loadingTimes = RealTime - value;
         if (GameTimePaused) _frozenGameTime = value;
-        else _gameOffset = RealTime - value;
     }
 
     public void Dispose()
@@ -770,20 +789,21 @@ public class AutosplitterTests
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
         await Task.Delay(200);
 
-        // Read the clock, write it straight back, stop it. The write is what gives the run a game
-        // time to freeze; it changes nothing, and here it is a no-op twice over.
-        Assert.Equal(new[] { "setgametime 0:10:00.0000000", LiveSplitClient.PauseGameTime }, h.Server.Actions);
+        // Make sure there is a game time, then stop it. The first command adds nothing to the
+        // loading times and so moves nothing: it is there because a run whose game time does not
+        // exist yet has nothing for the pause to freeze. Nothing is read and nothing is rewound.
+        Assert.Equal(new[] { LiveSplitClient.InitialiseGameTime, LiveSplitClient.PauseGameTime },
+            h.Server.Actions);
 
         var quit = h.Server.Commands;
-        int asked = Array.IndexOf(quit, LiveSplitClient.GetCurrentGameTime);
-        int wrote = Array.FindIndex(quit, c => c.StartsWith(LiveSplitClient.SetGameTime, StringComparison.Ordinal));
+        int made = Array.IndexOf(quit, LiveSplitClient.InitialiseGameTime);
         int stopped = Array.IndexOf(quit, LiveSplitClient.PauseGameTime);
-        Assert.True(asked >= 0 && asked < wrote && wrote < stopped,
-            $"the quit has to read, set and only then pause, got {string.Join(", ", quit)}");
+        Assert.True(made >= 0 && made < stopped,
+            $"the quit has to make a game time and only then pause, got {string.Join(", ", quit)}");
+        Assert.DoesNotContain(LiveSplitClient.GetCurrentGameTime, quit);
 
         Assert.True(h.Server.GameTimePaused);
         Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
-        Assert.Empty(h.Server.LoadingTimes);
         Assert.Contains(LiveSplitClient.PauseGameTime, h.Engine.Log()[^1].Action);
 
         // Five seconds in the XMB, which real time keeps and game time must not.
@@ -801,11 +821,13 @@ public class AutosplitterTests
 
         Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
         Assert.False(h.Server.GameTimePaused);
-        Assert.Equal(new[] { "setgametime 0:10:00.0000000", "setgametime 0:10:14.8000000" },
-            h.Server.GameTimesSet.ToArray());
 
-        // Never the loading times, and never the timer's own pause: the phase stayed Running.
-        Assert.Empty(h.Server.LoadingTimes);
+        // One write, at the resume: the quit no longer has to rewind the clock to itself first.
+        Assert.Equal(new[] { "setgametime 0:10:14.8000000" }, h.Server.GameTimesSet.ToArray());
+
+        // No correction of any length went out, only the zero that makes a game time exist, and
+        // never the timer's own pause: the phase stayed Running.
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
         Assert.DoesNotContain(LiveSplitClient.Pause, h.Server.Actions);
         Assert.DoesNotContain(LiveSplitClient.Resume, h.Server.Actions);
         Assert.Equal("Running", h.Server.Phase);
@@ -834,16 +856,16 @@ public class AutosplitterTests
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
 
         Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
-        Assert.Empty(h.Server.LoadingTimes);
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
         Assert.Null(h.Server.Fault);
     }
 
     /// <summary>
     /// The case the ordering exists for. A run that has not had its game time set yet has none at
-    /// all: LiveSplit answers real time and stopping game time freezes nothing. Writing the clock
-    /// back to itself before the pause is what makes the freeze real, so the resume reads where the
-    /// player left rather than where the wall clock has got to, and the quit still costs 14.8 s.
-    /// Skip that write and this test reads 30 s of XMB into the run.
+    /// all: LiveSplit answers real time and stopping game time freezes nothing. The zero write
+    /// before the pause is what makes the freeze real, so the resume reads where the player left
+    /// rather than where the wall clock has got to, and the quit still costs 14.8 s. Skip it and
+    /// this test reads 30 s of XMB into the run.
     /// </summary>
     [Fact]
     public async Task AQuitBeforeAnythingHasSetGameTimeStillCostsExactlyTheFixedTime()
@@ -855,7 +877,11 @@ public class AutosplitterTests
 
         h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
-        Assert.Equal(new[] { "setgametime 0:10:00.0000000", LiveSplitClient.PauseGameTime }, h.Server.Actions);
+        Assert.Equal(new[] { LiveSplitClient.InitialiseGameTime, LiveSplitClient.PauseGameTime },
+            h.Server.Actions);
+
+        // The zero moved nothing: game time is still the clock the player left, and it exists now.
+        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
 
         // Half a minute in the XMB. Game time is a real value now and frozen, so it does not move.
         h.Server.RealTime = TimeSpan.FromSeconds(630);
@@ -865,16 +891,16 @@ public class AutosplitterTests
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
 
         Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
-        Assert.Equal(new[] { "setgametime 0:10:00.0000000", "setgametime 0:10:14.8000000" },
-            h.Server.GameTimesSet.ToArray());
-        Assert.Empty(h.Server.LoadingTimes);
+        Assert.Equal(new[] { "setgametime 0:10:14.8000000" }, h.Server.GameTimesSet.ToArray());
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
         Assert.Null(h.Server.Fault);
     }
 
     /// <summary>
-    /// A build that will not say what the clock reads cannot be corrected — nothing here invents a
-    /// value, and <c>setgametime</c> with no argument would take LiveSplit down. Both halves say so
-    /// in the log, and game time is never left stopped.
+    /// A build that will not say what the clock reads cannot have time put back on it — nothing
+    /// here invents a value, and <c>setgametime</c> with no argument would take LiveSplit down. The
+    /// resume says so in the log, and game time is never left stopped. The quit itself no longer
+    /// asks LiveSplit anything, so there is nothing there to go wrong.
     /// </summary>
     [Fact]
     public async Task AQuitWhoseClockCannotBeReadIsLoggedAsAnErrorAndStillUnpaused()
@@ -884,15 +910,15 @@ public class AutosplitterTests
 
         h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
-        Assert.Contains("error", h.Engine.Log()[^1].Action);
+        Assert.DoesNotContain("error", h.Engine.Log()[^1].Action);
 
         h.Engine.Handle(new AutosplitEvent(3, 6_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
         Assert.Contains("error", h.Engine.Log()[^1].Action);
 
-        // Nothing was guessed at: no clock written, no loading time, and the timer runs again.
+        // Nothing was guessed at: no clock written, no correction, and the timer runs again.
         Assert.Empty(h.Server.GameTimesSet);
-        Assert.Empty(h.Server.LoadingTimes);
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
         Assert.False(h.Server.GameTimePaused);
         Assert.Equal(0, h.Engine.Adjustments);
         Assert.Null(h.Server.Fault);
@@ -900,20 +926,137 @@ public class AutosplitterTests
     }
 
     /// <summary>
-    /// A RESUME with no PAUSE of its own — the client connected in the middle of a quit — must not
-    /// start a clock nobody here stopped.
+    /// A RESUME with no PAUSE of its own — the client connected in the middle of a quit, or the
+    /// pair went with a different game. Nothing is added to game time, because this engine never
+    /// stopped it and does not know what it would be adding to, but the unpause goes out all the
+    /// same: it does nothing when nothing is paused, and it is the only thing that can rescue a
+    /// run whose clock somebody else froze. A frozen game time is the one state to never leave.
     /// </summary>
     [Fact]
-    public async Task AResumeWithNoQuitBehindItSendsNothing()
+    public async Task AResumeWithNoQuitBehindItStillUnpausesGameTime()
     {
         using var h = await RunningDeadlockedAsync(600, 600);
 
         h.Engine.Handle(new AutosplitEvent(2, 6_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
-        await Task.Delay(300);
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        await Task.Delay(200);
 
-        Assert.Empty(h.Server.Actions);
+        Assert.Equal(new[] { LiveSplitClient.UnpauseGameTime }, h.Server.Actions);
         Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
-        Assert.Contains("nothing of that code had started", h.Engine.Log()[^1].Action);
+        Assert.Empty(h.Server.GameTimesSet);
+        Assert.Contains("no pause of that code was open", h.Engine.Log()[^1].Action);
+    }
+
+    // ---------------------------------------------------------------- a quit outlives its session
+
+    /// <summary>
+    /// The whole point of this build. A Deadlocked quit takes the console to the XMB and boots the
+    /// game again, so the RESUME belongs to a different session, a different generation and, for a
+    /// moment, no descriptors at all: the client is told the game is None and then the same game
+    /// again, and the AUTOSPLIT_DESCRIBE rows only come back once it is INGAME. The pause has to
+    /// survive all of that, or game time stays frozen for the rest of the run.
+    /// </summary>
+    [Fact]
+    public async Task AQuitSurvivesTheSessionGoingAwayAndComingBack()
+    {
+        using var h = await RunningDeadlockedAsync(600, 600);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+
+        // QUITTING, XMB, BOOTING, INGAME. The descriptors go with the session and are not back yet
+        // when the resume lands, so the row that opened the pair is the only one there is.
+        h.Engine.Game = GameId.None;
+        h.Engine.Descriptors = Array.Empty<AutosplitEventDesc>();
+        h.Engine.Game = GameId.Rac4;
+
+        // Thirty seconds of quit and reboot on the wall clock, and the module's own clock kept
+        // counting through all of it, which is why the event stamps still line up.
+        h.Server.RealTime = TimeSpan.FromSeconds(630);
+        h.Engine.Handle(new AutosplitEvent(3, 31_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+
+        Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
+        Assert.Equal(new[] { "setgametime 0:10:14.8000000" }, h.Server.GameTimesSet.ToArray());
+        Assert.False(h.Server.GameTimePaused);
+        Assert.Equal(1, h.Engine.Adjustments);
+        Assert.Contains("then unpausegametime", h.Engine.Log()[^1].Action);
+        Assert.Null(h.Server.Fault);
+    }
+
+    /// <summary>
+    /// The other side of it: a different game is a different run, so nothing of the last one is
+    /// still owed. The unpause still goes out, because game time must never be left frozen.
+    /// </summary>
+    [Fact]
+    public async Task ADifferentGameDropsTheQuitAndTheResumeOnlyUnpauses()
+    {
+        using var h = await RunningDeadlockedAsync(600, 600);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        h.Server.ClearCommands();
+
+        h.Engine.Game = GameId.None;
+        h.Engine.Game = GameId.Rac2;
+
+        h.Server.RealTime = TimeSpan.FromSeconds(630);
+        h.Engine.Handle(new AutosplitEvent(3, 31_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        await Task.Delay(200);
+
+        Assert.Equal(new[] { LiveSplitClient.UnpauseGameTime }, h.Server.Actions);
+        Assert.Empty(h.Server.GameTimesSet);
+        Assert.False(h.Server.GameTimePaused);
+        Assert.Contains("no pause of that code was open", h.Engine.Log()[^1].Action);
+    }
+
+    /// <summary>A new run starts with nothing open, whatever the last one left behind.</summary>
+    [Fact]
+    public async Task AStartClearsWhateverTheLastRunLeftOpen()
+    {
+        using var h = await RunningDeadlockedAsync(600, 600);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        h.Server.ClearCommands();
+
+        // The timer is already running, so this start sends nothing at all; it still ends the run
+        // the quit belonged to.
+        h.Engine.Handle(new AutosplitEvent(3, 20_000, AutosplitKind.Start, 0, 0));
+        Assert.Contains("the timer is Running", h.Engine.Log()[^1].Action);
+
+        h.Engine.Handle(new AutosplitEvent(4, 31_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        await Task.Delay(200);
+
+        Assert.Equal(new[] { LiveSplitClient.UnpauseGameTime }, h.Server.Actions);
+        Assert.Empty(h.Server.GameTimesSet);
+        Assert.Contains("no pause of that code was open", h.Engine.Log()[^1].Action);
+    }
+
+    /// <summary>
+    /// The run gets its game time with the timer, so the first quit has something real to freeze
+    /// and nothing has to be read back to make it so.
+    /// </summary>
+    [Fact]
+    public async Task TheStartGivesTheRunAGameTime()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
+        await h.ReadyAsync();
+        h.Server.RealTime = TimeSpan.FromSeconds(12);
+
+        h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.InitialiseGameTime));
+
+        Assert.Equal(new[] { LiveSplitClient.StartTimer, LiveSplitClient.InitialiseGameTime },
+            h.Server.Actions);
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
+
+        // It moved nothing: game time is still real time, it simply exists now.
+        Assert.Equal(TimeSpan.FromSeconds(12), h.Server.GameTime!.Value);
+        Assert.Contains($"then {LiveSplitClient.InitialiseGameTime}", h.Engine.Log()[^1].Action);
+        Assert.Null(h.Server.Fault);
     }
 
     [Fact]
@@ -964,6 +1107,11 @@ public class AutosplitterTests
 
         Assert.Equal("-0.500000", LiveSplitClient.FormatTime(-500_000));
         Assert.Equal("addloadingtimes -14.800000", LiveSplitClient.AddLoadingTimesCommand(-14_800_000));
+
+        // The one that corrects nothing and is sent for its side effect: a run that had no game
+        // time has one after it, equal to real time.
+        Assert.Equal("addloadingtimes 0.000000", LiveSplitClient.InitialiseGameTime);
+        Assert.Equal(LiveSplitClient.InitialiseGameTime, LiveSplitClient.AddLoadingTimesCommand(0));
     }
 
     [Fact]

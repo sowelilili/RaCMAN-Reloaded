@@ -80,6 +80,9 @@ public static class LevelFlagsPanel
             if (ImGui.Button("Refresh")) Load(state);
         }
 
+        // Resetting a planet's flags writes game memory, so unlike the reads above it needs a
+        // game to write to. The rest of the row keeps working between sessions.
+        ImGui.BeginDisabled(!state.Ingame);
         ImGui.SameLine();
         if (_resetArmed)
         {
@@ -104,6 +107,7 @@ public static class LevelFlagsPanel
             _resetArmed = true;
         }
 
+        ImGui.EndDisabled();
         ImGui.EndDisabled();
 
         // Quiet outside INGAME: the automatic first read between sessions is not worth a toast.

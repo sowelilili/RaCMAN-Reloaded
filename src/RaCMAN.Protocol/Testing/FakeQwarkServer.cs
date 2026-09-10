@@ -316,6 +316,12 @@ public sealed class FakeQwarkServer : IDisposable
 
     public int HelloCount { get; private set; }
 
+    /// <summary>
+    /// How many times DESCRIBE was asked. The client keeps what a game described for as long as
+    /// the same game keeps coming back, so this is how a test tells a re-read from a reuse.
+    /// </summary>
+    public int DescribeCount { get; private set; }
+
     public int SubscribeCount { get; private set; }
 
     public TimeSpan TelemetryInterval { get; set; } = TimeSpan.FromMilliseconds(33);
@@ -513,6 +519,7 @@ public sealed class FakeQwarkServer : IDisposable
                     return (Status.Ok, BuildTelemetry().ToBytes());
 
                 case Opcode.Describe:
+                    DescribeCount++;
                     return (Status.Ok, EncodeDescribe(Describe));
 
                 case Opcode.FeatureSet:

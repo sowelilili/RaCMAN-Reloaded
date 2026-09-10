@@ -49,7 +49,7 @@ public static class GamePanel
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<string>();
 
-        var sections = Assign(state.Session.TitleId ?? string.Empty, state.Session.Game, describe, out _);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
         return GameLayout.SideSections
             .Where(s => !GameLayout.IsReserved(s) && sections.ContainsKey(s))
             .ToArray();
@@ -65,7 +65,7 @@ public static class GamePanel
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<Feature>();
 
-        var sections = Assign(state.Session.TitleId ?? string.Empty, state.Session.Game, describe, out _);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
         return sections.TryGetValue(section, out var features) ? features : Array.Empty<Feature>();
     }
 
@@ -92,8 +92,10 @@ public static class GamePanel
     public static void Draw(AppState state)
     {
         var describe = state.Describe;
-        string title = state.Session.TitleId ?? string.Empty;
-        var game = state.Session.Game;
+        // The described game, not the running one: at the XMB the page keeps the layout it had,
+        // greyed out, rather than re-sorting itself into qwark's default groups and back again.
+        string title = state.DescribedTitle;
+        var game = state.DescribedGame;
         var order = new List<string>();
         var sections = describe.Features.Length > 0 ? Assign(title, game, describe, out order) : null;
 
@@ -434,7 +436,7 @@ public static class GamePanel
             state.Run(async () =>
             {
                 await state.Client.PosSaveAsync().ConfigureAwait(false);
-                state.Post(state.RefreshPositions);
+                state.Post(() => state.RefreshPositions());
             });
         }
 
@@ -666,7 +668,7 @@ public static class GamePanel
     {
         if (colours.Length == 0) return;
 
-        var game = state.Session.Game;
+        var game = state.DescribedGame;
         string key = $"{(byte)game}/{section}";
         if (!string.Equals(_presetKey, key, StringComparison.Ordinal)) RefreshPresets(state, game, key);
 

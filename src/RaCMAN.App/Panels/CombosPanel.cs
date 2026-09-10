@@ -85,7 +85,7 @@ public static class CombosPanel
             // The pad is empty by now, which is why the capture committed, so handing the combos
             // back here cannot fire the one just stored: qwark waits for the next press.
             await state.Client.ComboSuspendAsync(false);
-            state.Post(state.RefreshCombos);
+            state.Post(() => state.RefreshCombos());
         }, $"{Label(action)} = {PadButtons.Describe(value)}");
     }
 
@@ -147,7 +147,7 @@ public static class CombosPanel
                 state.Run(async () =>
                 {
                     await state.Client.ComboSetAsync(target, 0);
-                    state.Post(state.RefreshCombos);
+                    state.Post(() => state.RefreshCombos());
                 });
             }
 

@@ -736,22 +736,104 @@ public class ClientTests
     }
 
     [Fact]
-    public async Task LosingTheConnectionClearsTheSessionAndEveryList()
+    public async Task LosingTheConnectionKeepsWhatTheConsoleDescribed()
     {
         using var server = new FakeQwarkServer();
         server.Start();
         using var state = await ConnectedStateAsync(server);
 
         Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0));
+        Assert.True(await PumpAsync(state, () => state.Positions.Slots.Length > 0));
 
         server.DropClients();
 
         Assert.True(await PumpAsync(state, () => !state.Connected));
-        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length == 0));
+        Assert.True(await PumpAsync(state, () => state.Positions.Slots.Length == 0));
         Assert.Empty(state.Session.TitleId);
-        Assert.Empty(state.Planets);
-        Assert.Empty(state.Positions.Slots);
         Assert.Null(state.Hello);
+
+        // The console still holds all of it and this client will be back, so the panels keep the
+        // layout they had rather than emptying every time the link hiccups.
+        Assert.NotEmpty(state.Describe.Features);
+        Assert.NotEmpty(state.Planets);
+        Assert.Equal(GameId.Rac1, state.DescribedGame);
+        Assert.Equal("NPEA00385", state.DescribedTitle);
+    }
+
+    /// <summary>
+    /// The user's Deadlocked session: quit, XMB, and the same game booted again. What the console
+    /// described is the panels' whole layout, and it is the same game's, so nothing is thrown away
+    /// and nothing is described a second time.
+    /// </summary>
+    [Fact]
+    public async Task AQuitAndARebootReuseTheDescriptionInsteadOfReadingItAgain()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0));
+        Assert.True(await PumpAsync(state, () => state.AutosplitEvents.Length > 0));
+        int described = server.DescribeCount;
+        int features = state.Describe.Features.Length;
+
+        // QUITTING, then the XMB with no game at all: the session change every panel follows.
+        server.Session = server.Session with { State = SessionState.Quitting };
+        Assert.True(await PumpAsync(state, () => state.Positions.Slots.Length == 0));
+
+        server.Session = server.Session with
+        {
+            State = SessionState.Xmb,
+            Game = GameId.None,
+            TitleId = string.Empty,
+        };
+
+        Assert.True(await PumpAsync(state, () => state.Session.State == SessionState.Xmb));
+        Assert.False(state.Ingame);
+
+        // Everything described is still here, and still says which game it belongs to.
+        Assert.Equal(features, state.Describe.Features.Length);
+        Assert.NotEmpty(state.AutosplitEvents);
+        Assert.NotEmpty(state.Planets);
+        Assert.Equal(GameId.Rac1, state.DescribedGame);
+        Assert.Equal(GameId.Rac1, state.Autosplitter.Game);
+        Assert.NotEmpty(state.Autosplitter.Descriptors);
+        Assert.Equal(described, server.DescribeCount);
+
+        // The same game boots again, one generation on.
+        server.Session = server.Session with
+        {
+            State = SessionState.Ingame,
+            Game = GameId.Rac1,
+            TitleId = "NPEA00385",
+            Generation = server.Session.Generation + 1,
+        };
+
+        Assert.True(await PumpAsync(state, () => state.Positions.Slots.Length > 0));
+        Assert.Equal(features, state.Describe.Features.Length);
+        Assert.Equal(described, server.DescribeCount);
+
+        // And none of it was said out loud. The reads that land mid-transition are nobody's doing,
+        // so a NOT_INGAME or an UNSUPPORTED from one of them is not a toast, and the reboot itself
+        // is debug-only now: the console handles it and the user has a game to play.
+        Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
+        Assert.DoesNotContain(state.Toasts, toast => toast.Text.Contains("rebooted", StringComparison.Ordinal));
+    }
+
+    /// <summary>The user asked, so this one does read all of it back.</summary>
+    [Fact]
+    public async Task ReReadEverythingDescribesTheGameAgain()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0));
+        int described = server.DescribeCount;
+
+        state.ForceRefresh();
+        Assert.True(await PumpAsync(state, () => server.DescribeCount > described));
+        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0));
     }
 
     [Fact]

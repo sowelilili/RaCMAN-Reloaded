@@ -34,7 +34,14 @@ public sealed record AutosplitLogEntry(uint Seq, uint TimeMs, AutosplitKind Kind
 /// connected, whatever any checkbox says. A load pair and a flat row go out as
 /// <c>addloadingtimes</c>. A normalised <em>pause</em> pair, which today is only Deadlocked's quit
 /// to the XMB, is the one place game time is stopped and set outright: see
-/// <see cref="StopGameTimeAsync"/> for the order and why it is that order.
+/// <see cref="StopGameTime"/> and <see cref="StartGameTimeAsync"/> for the order and why it is
+/// that order.
+/// </para>
+/// <para>
+/// A quit to the XMB takes the console session away and brings a new one back, so the two halves
+/// of that pair belong to different sessions and often to different generations of the same game.
+/// The open half is therefore kept across the session going away and coming back, and dropped only
+/// when a genuinely different game turns up or the run itself starts or resets.
 /// </para>
 /// <para>
 /// The timer phase, the split index and the split names are read back from LiveSplit on connect,
@@ -56,14 +63,33 @@ public sealed class Autosplitter
     private readonly Action<Action> _post;
     private readonly List<AutosplitLogEntry> _log = new();
 
-    /// <summary>The open half of every normalised pair: the reason code against its start time.</summary>
-    private readonly Dictionary<byte, uint> _openPairs = new();
+    /// <summary>
+    /// The open half of one normalised pair: when the console said it started, and the row it
+    /// started under. The row is kept with it because a Deadlocked quit takes the whole session
+    /// away, and the descriptors can come back after the resume does; the pair is then still paid
+    /// at the parameter it was opened with rather than falling through to a plain resume.
+    /// </summary>
+    private readonly record struct PairStart(uint TimeMs, AutosplitEventDesc? Row);
+
+    /// <summary>
+    /// The open half of every normalised pair, by the family it belongs to and its reason code.
+    /// The family is in the key because a load and a pause that happen to share a code are two
+    /// different pairs, and only the end of the right one closes each.
+    /// </summary>
+    private readonly Dictionary<(AutosplitKind Family, byte Code), PairStart> _openPairs = new();
+
+    /// <summary>
+    /// The game the open pairs belong to. A pair outlives the session that opened it — a quit to
+    /// the XMB is exactly the case the pairs exist for — so it is this, not the running game, that
+    /// says whether what is open still means anything.
+    /// </summary>
+    private GameId _pairsGame = GameId.None;
 
     private readonly object _gate = new();
 
     /// <summary>
-    /// The two halves of a normalised pause, one after the other. Each half reads game time and
-    /// writes it back, so a resume must never start asking while the quit that opened it is still
+    /// The two halves of a normalised pause, one after the other. The resume reads game time and
+    /// writes it back, so it must never start asking while the quit that opened it is still
     /// setting up, however close together the console reports them.
     /// </summary>
     private Task _gameTimeWork = Task.CompletedTask;
@@ -91,7 +117,11 @@ public sealed class Autosplitter
         _liveSplit.Established += () => _ = Task.Run(RefreshAsync);
     }
 
-    /// <summary>The running game, from telemetry. Chooses the settings entry and the planet route.</summary>
+    /// <summary>
+    /// The game this engine is deciding for. The app feeds it the game the console last described
+    /// rather than the one telemetry reports this instant, so a quit to the XMB does not turn it to
+    /// None and take the game's settings and route with it.
+    /// </summary>
     public GameId Game
     {
         get => _game;
@@ -100,8 +130,17 @@ public sealed class Autosplitter
             if (_game == value) return;
             _game = value;
 
-            // A half-finished load belongs to the game that started it.
-            lock (_gate) _openPairs.Clear();
+            // What is open belongs to the game that opened it, and a Deadlocked quit takes the
+            // session to the XMB and back with a pause still open: the module's clock keeps
+            // counting across the quit, so the pair still means what it meant. Only a genuinely
+            // different game leaves nothing of the last one worth keeping.
+            if (value == GameId.None) return;
+            lock (_gate)
+            {
+                if (_pairsGame == GameId.None || _pairsGame == value) return;
+                _openPairs.Clear();
+                _pairsGame = GameId.None;
+            }
         }
     }
 
@@ -180,6 +219,10 @@ public sealed class Autosplitter
         }
 
         var game = GameOptions;
+
+        // A run that starts or resets is a run in which nothing of the last one is still open,
+        // whatever the master switches say about the timer itself.
+        if (ev.Kind is AutosplitKind.Start or AutosplitKind.Reset) ClearPairs();
 
         // The game-time correction goes first: for a FLAT split row the old script took its
         // frames off before it split, and LiveSplit has to see the two in that order.
@@ -264,7 +307,7 @@ public sealed class Autosplitter
                 // The other half of the pair carries the same code, and the gap between the two
                 // stamps is the load. Only the newest start is kept: a start with no end is a load
                 // the console never finished reporting, and replacing it is what an ASL would do.
-                lock (_gate) _openPairs[ev.Code] = ev.TimeMs;
+                OpenPair(ev, desc);
                 logged = true;
                 Record(ev, what, $"timing: started, {Seconds(desc.ParamUs)} of it is free", false);
                 return false;
@@ -274,13 +317,10 @@ public sealed class Autosplitter
 
             case AutosplitKind.LoadEnd:
             {
-                uint start;
-                bool open;
-                lock (_gate) open = _openPairs.Remove(ev.Code, out start);
-                if (!open || !desc.Normalise) return false;
+                if (TakePair(ev) is not { } start || !desc.Normalise) return false;
 
                 logged = true;
-                long durationUs = (long)AutosplitEvent.Elapsed(start, ev.TimeMs) * 1000;
+                long durationUs = (long)AutosplitEvent.Elapsed(start.TimeMs, ev.TimeMs) * 1000;
                 long excess = durationUs - desc.ParamUs;
                 if (excess > 0)
                 {
@@ -313,7 +353,45 @@ public sealed class Autosplitter
         return true;
     }
 
-    /// <summary>Why a load or pause event did nothing, which is only ever one of two things.</summary>
+    /// <summary>
+    /// The key one pair is remembered under. The end of a pair carries its start's code and is
+    /// described by its start's row — a LOAD_END belongs to a LOAD_START, a RESUME to a PAUSE — so
+    /// both halves name the same key here, exactly as they do in <see cref="DescriptorFor"/>.
+    /// </summary>
+    private static (AutosplitKind Family, byte Code) PairKey(AutosplitEvent ev) => (ev.Kind switch
+    {
+        AutosplitKind.LoadEnd => AutosplitKind.LoadStart,
+        AutosplitKind.Resume => AutosplitKind.Pause,
+        _ => ev.Kind,
+    }, ev.Code);
+
+    /// <summary>Remembers the open half of a pair, with the row it was opened under.</summary>
+    private void OpenPair(AutosplitEvent ev, AutosplitEventDesc? desc)
+    {
+        lock (_gate)
+        {
+            _openPairs[PairKey(ev)] = new PairStart(ev.TimeMs, desc);
+            _pairsGame = _game;
+        }
+    }
+
+    /// <summary>Takes this event's open half back out, or null when nothing of its pair is open.</summary>
+    private PairStart? TakePair(AutosplitEvent ev)
+    {
+        lock (_gate) return _openPairs.Remove(PairKey(ev), out var start) ? start : null;
+    }
+
+    /// <summary>Drops every open pair: a different game, or a run that has just started or reset.</summary>
+    private void ClearPairs()
+    {
+        lock (_gate)
+        {
+            _openPairs.Clear();
+            _pairsGame = GameId.None;
+        }
+    }
+
+    /// <summary>Why a load event did nothing, which is only ever one of two things.</summary>
     private static string NoTimingReason(AutosplitEventDesc? desc) => desc is null
         ? "ignored: this game describes no timing for that code"
         : "ignored: nothing of that code had started";
@@ -334,8 +412,12 @@ public sealed class Autosplitter
         var phase = _view.Phase;
         if (phase is LiveSplitPhase.NotRunning or LiveSplitPhase.Unknown)
         {
+            // Game time is brought into existence with the run, so the first quit has something
+            // real to freeze and nothing has to be read back to make it so. Sending it again at
+            // the quit, or on a second run, changes nothing.
             return Act(ev, what, LiveSplitClient.StartTimer,
-                phase == LiveSplitPhase.Unknown ? "the timer phase is not known yet" : null);
+                phase == LiveSplitPhase.Unknown ? "the timer phase is not known yet" : null,
+                LiveSplitClient.InitialiseGameTime, "so the run has a game time from the first frame");
         }
 
         Record(ev, what, $"ignored: the timer is {phase}", false);
@@ -395,14 +477,40 @@ public sealed class Autosplitter
     {
         if (logged) return false;
 
-        if (desc is { Normalise: true })
+        if (ev.Kind == AutosplitKind.Pause)
         {
-            return ev.Kind == AutosplitKind.Pause
+            return desc is { Normalise: true }
                 ? StopGameTime(ev, desc, what)
-                : StartGameTime(ev, desc, what);
+                : Act(ev, what, LiveSplitClient.Pause);
         }
 
-        return Act(ev, what, ev.Kind == AutosplitKind.Pause ? LiveSplitClient.Pause : LiveSplitClient.Resume);
+        // The pause that opened this answers for it: the row is remembered with the pair, so a
+        // resume that arrives before the new session's descriptors do is still the normalised one.
+        var open = TakePair(ev);
+        var row = open?.Row ?? desc;
+        if (row is not { Normalise: true }) return Act(ev, what, LiveSplitClient.Resume);
+
+        // Game time must never be left frozen. An unpause with nothing paused does nothing at all
+        // in LiveSplit, so the safe move when no pause of this code is open is to send it anyway
+        // and say so, rather than to leave a run whose clock stopped at the quit.
+        if (open is null) return UnpauseWithNoPause(ev, row, what);
+
+        return StartGameTime(ev, row, what);
+    }
+
+    /// <summary>
+    /// A RESUME whose PAUSE this client never saw: the client connected in the middle of a quit,
+    /// or the pair was dropped with a different game. Nothing is added to game time, because the
+    /// engine never stopped it and does not know what it would be adding to, but the unpause goes
+    /// out regardless: it costs nothing when nothing is paused and it is the only thing that can
+    /// rescue a clock somebody else froze.
+    /// </summary>
+    private bool UnpauseWithNoPause(AutosplitEvent ev, AutosplitEventDesc desc, string what)
+    {
+        _liveSplit.Send(LiveSplitClient.UnpauseGameTime);
+        Record(ev, what, $"{LiveSplitClient.UnpauseGameTime} (unpaused, though no pause of that code "
+                         + $"was open, so the {Seconds(desc.ParamUs)} for it was not put on)", true);
+        return true;
     }
 
     /// <summary>
@@ -410,71 +518,47 @@ public sealed class Autosplitter
     /// <c>isLoading</c> returning true does. The timer phase does not move — LiveSplit is still
     /// Running — so the optimistic phase this engine keeps is left exactly as it is.
     /// <para>
-    /// Reading game time is a query and a query is answered on the connection's own worker, so the
-    /// pair runs off the thread that delivers console events, one half after the other.
+    /// Two commands, and the order is the whole of it. In LiveSplit's own <c>LiveSplitState</c> a
+    /// run's game time is <b>null</b> until something creates one; until then
+    /// <c>getcurrentgametime</c> answers real time and <c>IsGameTimePaused</c> freezes nothing a
+    /// query can see, so a pause on its own would leave the resume reading a real time with the
+    /// whole trip to the XMB in it. <c>addloadingtimes 0</c> creates one in place: it gives
+    /// <c>LoadingTimes</c> a value, game time comes out equal to real time, and the
+    /// <c>pausegametime</c> after it freezes something real. Nothing is read and nothing is
+    /// rewound, which is why this half no longer asks LiveSplit anything.
+    /// </para>
+    /// <para>
+    /// It is still queued behind whatever half went before it: the resume does ask, and the two
+    /// halves must reach the socket in the order the console reported them.
     /// </para>
     /// </summary>
     private bool StopGameTime(AutosplitEvent ev, AutosplitEventDesc desc, string what)
     {
-        // The pair is remembered by code so the resume knows a quit of its own is open: a RESUME
-        // that arrives with no PAUSE, because the client connected in the middle of one, must not
-        // start a clock nobody here stopped.
-        lock (_gate) _openPairs[ev.Code] = ev.TimeMs;
+        // The pair is remembered by code so the resume knows a quit of its own is open, and by
+        // game so the trip through the XMB the quit itself is does not lose it.
+        OpenPair(ev, desc);
 
-        QueueGameTime(() => StopGameTimeAsync(ev, desc, what));
-        return true;
-    }
-
-    /// <summary>
-    /// Three commands, and the order is the whole of it: read game time, write that same value
-    /// straight back, then stop the clock.
-    /// <para>
-    /// The middle one looks like a no-op and is not. In LiveSplit's own <c>LiveSplitState</c> a
-    /// run's game time is <b>null</b> until <c>SetGameTime</c> (or a loading-times write) puts one
-    /// there; until then <c>getcurrentgametime</c> answers real time and <c>IsGameTimePaused</c>
-    /// freezes nothing the query can see. Pausing first and reading at the resume would therefore
-    /// read a real time with the whole quit in it, and the run would be charged for the trip to the
-    /// XMB instead of the row's flat 14.8 s. Writing the clock back to itself brings game time into
-    /// existence at the value it already showed, and everything after it is frozen.
-    /// </para>
-    /// </summary>
-    private async Task StopGameTimeAsync(AutosplitEvent ev, AutosplitEventDesc desc, string what)
-    {
-        string? reply = await _liveSplit.QueryAsync(LiveSplitClient.GetCurrentGameTime).ConfigureAwait(false);
-        if (!LiveSplitClient.TryParseGameTime(reply, out var now))
+        QueueGameTime(() =>
         {
-            // Nothing to write back, and a setgametime with no argument would take LiveSplit down
-            // with it. The clock still stops, so the resume has something to unpause.
+            _liveSplit.Send(LiveSplitClient.InitialiseGameTime);
             _liveSplit.Send(LiveSplitClient.PauseGameTime);
-            Record(ev, what, $"{LiveSplitClient.PauseGameTime} (error: LiveSplit did not answer "
-                             + $"{LiveSplitClient.GetCurrentGameTime}, so game time could not be "
-                             + "initialised and this quit may cost the run its real length)", true);
-            return;
-        }
+            Record(ev, what, $"{LiveSplitClient.InitialiseGameTime} (so the run has a game time to "
+                             + $"freeze) then {LiveSplitClient.PauseGameTime} (the resume puts "
+                             + $"{Seconds(desc.ParamUs)} back on)", true);
+            return Task.CompletedTask;
+        });
 
-        string set = LiveSplitClient.SetGameTimeCommand(now);
-        _liveSplit.Send(set);
-        _liveSplit.Send(LiveSplitClient.PauseGameTime);
-        Record(ev, what, $"{set} (the time it already showed, so there is a game time to freeze) "
-                         + $"then {LiveSplitClient.PauseGameTime} (the resume puts "
-                         + $"{Seconds(desc.ParamUs)} back on)", true);
+        return true;
     }
 
     /// <summary>
     /// The game is back: the frozen clock is read, the row's parameter goes on it and game time
     /// starts again from there. The read is safe because the quit initialised game time before it
-    /// stopped it, so what comes back is the clock as it stood when the player left.
+    /// stopped it, so what comes back is the clock as it stood when the player left — even though
+    /// the console went to the XMB and came back with a new session in between.
     /// </summary>
     private bool StartGameTime(AutosplitEvent ev, AutosplitEventDesc desc, string what)
     {
-        bool open;
-        lock (_gate) open = _openPairs.Remove(ev.Code);
-        if (!open)
-        {
-            Record(ev, what, NoTimingReason(desc), false);
-            return false;
-        }
-
         QueueGameTime(() => StartGameTimeAsync(ev, desc, what));
         return true;
     }
@@ -520,10 +604,24 @@ public sealed class Autosplitter
         }
     }
 
-    private bool Act(AutosplitEvent ev, string what, string command, string? because = null)
+    /// <param name="then">
+    /// A second command sent straight after the first and named in the log with it, for the one
+    /// place where a decision is two commands rather than one.
+    /// </param>
+    private bool Act(
+        AutosplitEvent ev, string what, string command, string? because = null,
+        string? then = null, string? thenBecause = null)
     {
         _liveSplit.Send(command);
-        Record(ev, what, because is null ? command : $"{command} ({because})", true);
+        string line = because is null ? command : $"{command} ({because})";
+
+        if (then is not null)
+        {
+            _liveSplit.Send(then);
+            line += thenBecause is null ? $" then {then}" : $" then {then} ({thenBecause})";
+        }
+
+        Record(ev, what, line, true);
 
         // What we just sent moved the timer. The read-back below is asynchronous, and the console
         // sends RESET and START back to back on a new game, so the phase is moved here first:
