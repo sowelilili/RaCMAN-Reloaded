@@ -80,9 +80,18 @@ public static class ModsPanel
                 ImGui.PushID(mod.DirName);
 
                 ImGui.TableNextColumn();
+
+                // A name too long for the column takes a second line and the row grows for it,
+                // which is the difference between reading "Incremental RNG" and reading
+                // "Incremental R". A third line is where a table stops being a table, so the
+                // second one ends in an ellipsis and the tooltip has the rest.
+                string label = WrapName(mod.Name, ImGui.GetContentRegionAvail().X, MeasureText);
+
                 // SpanAllColumns makes the whole row select, but without AllowOverlap the selectable
                 // sits on top of the Auto checkbox and the Load/Upload buttons and eats their clicks.
-                if (ImGui.Selectable(mod.Name, _selected == mod.DirName,
+                // The id after the ## is the mod's, so wrapping the name differently as the window
+                // is resized does not make it a different item.
+                if (ImGui.Selectable($"{label}##name", _selected == mod.DirName,
                         ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
                 {
                     _selected = mod.DirName;
@@ -91,7 +100,14 @@ public static class ModsPanel
                 // The name is also where the author is read now, and where a name too long for the
                 // column can be read in full. The row's selectable spans every column, so the
                 // tooltip waits for the pointer to settle rather than following it across the row.
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal)) ImGui.SetTooltip(TooltipFor(mod));
+                // Built by hand rather than through SetTooltip, which is printf underneath: a mod
+                // called "100% Speed" would otherwise lose the per cent and what follows it.
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextUnformatted(TooltipFor(mod));
+                    ImGui.EndTooltip();
+                }
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version);
@@ -126,6 +142,64 @@ public static class ModsPanel
 
         DrawDetails(state, locals, console);
         DrawZipInstall(state, title);
+    }
+
+    /// <summary>How wide a piece of text is on screen. The measure WrapName uses in the panel.</summary>
+    private static float MeasureText(string text) => ImGui.CalcTextSize(text).X;
+
+    /// <summary>
+    /// A mod name as the table draws it: one line while it fits, two when it does not, and never a
+    /// third. The break is at a space where there is one, and what will not fit on the second line
+    /// ends in an ellipsis; the row's tooltip carries the name in full either way.
+    /// <para>
+    /// <paramref name="measure"/> is how wide a string is, which is ImGui.CalcTextSize in the panel
+    /// and a stand-in in the tests, so the wrapping itself can be checked without a window.
+    /// </para>
+    /// </summary>
+    public static string WrapName(string? name, float width, Func<string, float> measure)
+    {
+        string text = (name ?? string.Empty).Trim();
+        if (text.Length == 0 || width <= 0f || measure(text) <= width) return text;
+
+        int broke = BreakAt(text, width, measure);
+        string first = text[..broke].TrimEnd();
+        string rest = text[broke..].TrimStart();
+
+        if (rest.Length == 0) return first;
+        if (measure(rest) <= width) return first + "\n" + rest;
+
+        // The second line is the last one, so what is left of the name is cut to fit an ellipsis.
+        int keep = Fits(rest, width, measure, "...");
+        return first + "\n" + rest[..keep].TrimEnd() + "...";
+    }
+
+    /// <summary>Where the first line ends: on the last space that fits, or mid-word when there is none.</summary>
+    private static int BreakAt(string text, float width, Func<string, float> measure)
+    {
+        int fits = Fits(text, width, measure, string.Empty);
+        if (fits >= text.Length) return text.Length;
+
+        int space = text.LastIndexOf(' ', fits);
+        return space > 0 ? space : Math.Max(1, fits);
+    }
+
+    /// <summary>
+    /// How many characters of <paramref name="text"/> fit in <paramref name="width"/> with
+    /// <paramref name="suffix"/> after them. A binary search, so a long name costs a handful of
+    /// measurements rather than one per character.
+    /// </summary>
+    private static int Fits(string text, float width, Func<string, float> measure, string suffix)
+    {
+        int low = 0;
+        int high = text.Length;
+        while (low < high)
+        {
+            int mid = (low + high + 1) / 2;
+            if (measure(text[..mid] + suffix) <= width) low = mid;
+            else high = mid - 1;
+        }
+
+        return low;
     }
 
     /// <summary>

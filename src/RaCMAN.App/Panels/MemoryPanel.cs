@@ -8,24 +8,34 @@ namespace RaCMAN.App.Panels;
 
 public static class MemoryPanel
 {
-    private static string _readAddress = "0x300000";
+    /// <summary>
+    /// The address the boxes suggest. It is a hint rather than the box's contents: a default
+    /// sitting in the box is something to select and delete before every address anyone actually
+    /// wants, and there is nothing here worth reading twice.
+    /// </summary>
+    private const string AddressHint = "0x300000";
+
+    /// <summary>The same for the two patch boxes, whose addresses are code rather than data.</summary>
+    private const string PatchAddressHint = "0x1B0000";
+
+    private static string _readAddress = string.Empty;
     private static int _readLength = 64;
     private static string _dump = string.Empty;
     private static byte[] _dumpBytes = Array.Empty<byte>();
     private static uint _dumpBase;
 
-    private static string _writeAddress = "0x300000";
+    private static string _writeAddress = string.Empty;
     private static string _writeBytes = string.Empty;
 
-    private static string _watchAddress = "0x300000";
+    private static string _watchAddress = string.Empty;
     private static int _watchSizeIndex = 2;
 
-    private static string _freezeAddress = "0x300000";
+    private static string _freezeAddress = string.Empty;
     private static int _freezeSizeIndex = 2;
     private static string _freezeValue = "0";
 
-    private static string _patchText = "0x1B0000: 0x60000000";
-    private static string _revertAddress = "0x1B0000";
+    private static string _patchText = string.Empty;
+    private static string _revertAddress = string.Empty;
 
     private static string _watchlistName = string.Empty;
 
@@ -301,7 +311,7 @@ public static class MemoryPanel
         ImGui.BeginDisabled(!enabled);
 
         ImGui.SetNextItemWidth(160);
-        ImGui.InputText("Address", ref _readAddress, 16);
+        Ui.InputTextWithHint("Address", AddressHint, ref _readAddress, 16);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(120);
         if (ImGui.InputInt("Bytes", ref _readLength)) _readLength = Math.Clamp(_readLength, 1, 65536);
@@ -351,7 +361,7 @@ public static class MemoryPanel
 
         ImGui.BeginDisabled(!enabled);
         ImGui.SetNextItemWidth(160);
-        ImGui.InputText("Address##write", ref _writeAddress, 16);
+        Ui.InputTextWithHint("Address##write", AddressHint, ref _writeAddress, 16);
         ImGui.SetNextItemWidth(420);
         Ui.InputTextWithHint("Bytes (hex)", "60000000 or 60 00 00 00", ref _writeBytes, 4096);
         ImGui.SameLine();
@@ -409,7 +419,7 @@ public static class MemoryPanel
     {
         ImGui.BeginDisabled(!state.Connected);
         ImGui.SetNextItemWidth(160);
-        ImGui.InputText("Address##watch", ref _watchAddress, 16);
+        Ui.InputTextWithHint("Address##watch", AddressHint, ref _watchAddress, 16);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(80);
         ImGui.Combo("Size##watch", ref _watchSizeIndex, SizeLabels, SizeLabels.Length);
@@ -724,7 +734,7 @@ public static class MemoryPanel
     {
         ImGui.BeginDisabled(!enabled);
         ImGui.SetNextItemWidth(160);
-        ImGui.InputText("Address##freeze", ref _freezeAddress, 16);
+        Ui.InputTextWithHint("Address##freeze", AddressHint, ref _freezeAddress, 16);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(80);
         ImGui.Combo("Size##freeze", ref _freezeSizeIndex, SizeLabels, SizeLabels.Length);
@@ -812,7 +822,10 @@ public static class MemoryPanel
         bool blocked = state.CodePatchesUnsupported;
         if (blocked) Ui.Warning(Ui.PatchesAreCodePatches);
 
-        Ui.Hint("One 'address: word' per line, at most 64 words. The first address is the patch's key.");
+        // The example moved out of the box and into the sentence above it: a multiline box takes no
+        // hint text, and a default sitting in it was something to delete before every real patch.
+        Ui.Hint($"One 'address: word' per line, at most 64 words, like '{PatchAddressHint}: 0x60000000'. "
+                + "The first address is the patch's key.");
         ImGui.InputTextMultiline("##patch", ref _patchText, 8192, new Vector2(-1, 120));
 
         ImGui.BeginDisabled(!enabled || blocked);
@@ -839,9 +852,12 @@ public static class MemoryPanel
         ImGui.BeginDisabled(!enabled);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(160);
-        ImGui.InputText("First address", ref _revertAddress, 16);
+        Ui.InputTextWithHint("First address", PatchAddressHint, ref _revertAddress, 16);
         ImGui.SameLine();
-        if (ImGui.Button("Revert"))
+
+        // Spelled out rather than left as "Revert", which is also what every row of the table below
+        // calls its own button.
+        if (ImGui.Button("Revert##typed"))
         {
             if (Ui.TryParseAddress(_revertAddress, out uint address))
             {
@@ -876,10 +892,15 @@ public static class MemoryPanel
             ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 80);
             ImGui.TableHeadersRow();
 
-            foreach (var patch in state.Patches)
+            // The row's own place in the table is its id, not its first address: two patches can
+            // share one. A mod and the feature that carries the same words are the everyday case,
+            // Deadlocked's crash patches being both, and two rows under one id is what Dear ImGui
+            // reports as visible items with conflicting ID.
+            for (int row = 0; row < state.Patches.Length; row++)
             {
+                var patch = state.Patches[row];
                 ImGui.TableNextRow();
-                ImGui.PushID((int)patch.FirstAddress);
+                ImGui.PushID(row);
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"0x{patch.FirstAddress:X8}");
@@ -888,7 +909,7 @@ public static class MemoryPanel
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(patch.Kind.ToString());
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(patch.Name);
+                ImGui.TextUnformatted(PatchName(patch));
                 ImGui.TableNextColumn();
 
                 uint address = patch.FirstAddress;
@@ -909,6 +930,11 @@ public static class MemoryPanel
             ImGui.EndTable();
         }
 
+        // Every watch, freeze and client patch in one go, named after the op it sends: a wire-level
+        // tool, and one keystroke away from throwing away a session's work, so it stays behind the
+        // debug switch with the rest of them.
+        if (!Ui.Debug) return;
+
         ImGui.Spacing();
         ImGui.Separator();
         ImGui.BeginDisabled(!state.Connected);
@@ -927,6 +953,25 @@ public static class MemoryPanel
         }
 
         ImGui.EndDisabled();
+    }
+
+    /// <summary>
+    /// What the Name column shows. PATCH_LIST names every row: a mod's row carries the mod's own
+    /// name, a feature's the label of the toggle behind it, and a client patch the name qwark made
+    /// out of its first address. A row that arrives without one says what kind of thing it is
+    /// instead, which is still more than a blank cell.
+    /// </summary>
+    public static string PatchName(PatchEntry patch)
+    {
+        string name = (patch.Name ?? string.Empty).Trim();
+        if (name.Length > 0) return name;
+
+        return patch.Kind switch
+        {
+            PatchKind.Mod => "(a mod)",
+            PatchKind.Feature => "(a feature)",
+            _ => "(this client)",
+        };
     }
 
     private static List<PatchWord> ParsePatch(string text, out string? error)

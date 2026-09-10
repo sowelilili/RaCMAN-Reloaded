@@ -507,3 +507,300 @@ public class InputDisplayFitTests
         Assert.Equal(1f, InputDisplayPanel.FitScale(Width, Height, 1200f, 0f));
     }
 }
+
+/// <summary>
+/// What a planet combo offers. qwark numbers a planet list by the game's own planet ids and fills
+/// the gaps with parenthesised notes, so the client draws the real planets and remembers which id
+/// each of them was.
+/// </summary>
+public class PlanetChoiceTests
+{
+    // UYA's list, whose id 0 is a placeholder because RAC3Form's combo box was one-based.
+    private static string[] Uya() => new[] { "(none)", "Veldin", "Florana", "Starship Phoenix" };
+
+    // Deadlocked's, which has filler in the middle as well as at the front.
+    private static string[] Deadlocked() => new[]
+    {
+        "(unused)", "Dread Zone", "Catacrom", "(infinite loop)", "Sarathos",
+    };
+
+    [Theory]
+    [InlineData("(none)", true)]
+    [InlineData("(unused)", true)]
+    [InlineData("(infinite loop)", true)]
+    [InlineData("  (none)  ", true)]
+    [InlineData("Veldin", false)]
+    [InlineData("Aranos 2", false)]
+    [InlineData("Obani Gemini (part 2)", false)]
+    [InlineData("(", false)]
+    [InlineData("", false)]
+    [InlineData(null, false)]
+    public void APlaceholderIsANameThatIsNothingButANoteInBrackets(string? name, bool placeholder)
+    {
+        Assert.Equal(placeholder, PlanetChoices.IsPlaceholder(name));
+    }
+
+    [Fact]
+    public void ThePlaceholdersAreLeftOutAndTheIdsAroundThemAreNot()
+    {
+        var choices = PlanetChoices.For(Uya());
+
+        Assert.Equal(new[] { "Veldin", "Florana", "Starship Phoenix" }, choices.Labels);
+        Assert.Equal(new[] { 1, 2, 3 }, choices.Indices);
+        Assert.Equal(3, choices.Count);
+
+        // Picking the first entry is still planet 1, which is what PLANET_LOAD carries.
+        Assert.Equal(1, choices.PlanetAt(0));
+        Assert.Equal(3, choices.PlanetAt(2));
+    }
+
+    [Fact]
+    public void FillerInTheMiddleOfAListGoesTheSameWay()
+    {
+        var choices = PlanetChoices.For(Deadlocked());
+
+        Assert.Equal(new[] { "Dread Zone", "Catacrom", "Sarathos" }, choices.Labels);
+        Assert.Equal(new[] { 1, 2, 4 }, choices.Indices);
+        Assert.Equal(4, choices.PlanetAt(2));
+    }
+
+    [Fact]
+    public void APlanetKnowsWhereItSitsInTheComboAndAHiddenOneDoesNot()
+    {
+        var choices = PlanetChoices.For(Deadlocked());
+
+        Assert.Equal(0, choices.PositionOf(1));
+        Assert.Equal(2, choices.PositionOf(4));
+
+        // Ids 0 and 3 are the filler, and a selection left on one has nowhere to sit.
+        Assert.Equal(-1, choices.PositionOf(0));
+        Assert.Equal(-1, choices.PositionOf(3));
+        Assert.Equal(-1, choices.PositionOf(99));
+    }
+
+    [Fact]
+    public void AGameWithNoPlanetListHasNothingToOfferAndDoesNotThrow()
+    {
+        var choices = PlanetChoices.For(Array.Empty<string>());
+
+        Assert.Empty(choices.Labels);
+        Assert.Equal(0, choices.Count);
+        Assert.Equal(0, choices.PlanetAt(0));
+        Assert.Equal(-1, choices.PositionOf(0));
+    }
+
+    /// <summary>
+    /// An empty combo would leave no way to pick a planet at all, so a list that is somehow nothing
+    /// but placeholders is offered whole rather than hidden.
+    /// </summary>
+    [Fact]
+    public void AListOfNothingButPlaceholdersIsStillAList()
+    {
+        var choices = PlanetChoices.For(new[] { "(none)", "(unused)" });
+
+        Assert.Equal(new[] { "(none)", "(unused)" }, choices.Labels);
+        Assert.Equal(new[] { 0, 1 }, choices.Indices);
+    }
+
+    [Fact]
+    public void RaC1AndRaC2KeepEveryPlanetTheyHave()
+    {
+        var rac1 = PlanetChoices.For(new[] { "Veldin", "Novalis", "Aridia" });
+        Assert.Equal(new[] { 0, 1, 2 }, rac1.Indices);
+        Assert.Equal(3, rac1.Count);
+    }
+}
+
+/// <summary>Which boxes the Positions panel offers beside "Load planet", and for which games.</summary>
+public class PlanetResetOptionTests
+{
+    [Fact]
+    public void RaC1HasSpecialBoltsAndNoLevelFlags()
+    {
+        // The console is what says so, and for RaC1 it answers LEVELFLAGS_GET UNSUPPORTED.
+        var boxes = PlanetResetOptions.For(GameId.Rac1, levelFlagsUnsupported: true);
+
+        Assert.False(boxes.LevelFlags);
+        Assert.True(boxes.SpecialBolts);
+    }
+
+    [Fact]
+    public void RaC2AndUyaHaveBoth()
+    {
+        foreach (var game in new[] { GameId.Rac2, GameId.Rac3 })
+        {
+            var boxes = PlanetResetOptions.For(game, levelFlagsUnsupported: false);
+            Assert.True(boxes.LevelFlags);
+            Assert.True(boxes.SpecialBolts);
+        }
+    }
+
+    [Fact]
+    public void DeadlockedHasNeither()
+    {
+        var boxes = PlanetResetOptions.For(GameId.Rac4, levelFlagsUnsupported: true);
+
+        Assert.False(boxes.LevelFlags);
+        Assert.False(boxes.SpecialBolts);
+    }
+
+    [Fact]
+    public void AConsoleThatRefusesLevelFlagsTakesTheBoxAwayWhateverTheGame()
+    {
+        var boxes = PlanetResetOptions.For(GameId.Rac2, levelFlagsUnsupported: true);
+
+        Assert.False(boxes.LevelFlags);
+        Assert.True(boxes.SpecialBolts);
+    }
+
+    [Fact]
+    public void NoGameMeansNoBoxes()
+    {
+        var boxes = PlanetResetOptions.For(GameId.None, levelFlagsUnsupported: false);
+
+        Assert.False(boxes.LevelFlags);
+        Assert.False(boxes.SpecialBolts);
+    }
+}
+
+/// <summary>
+/// The two decimals the Positions panel draws, and the width that stops a row shuffling sideways
+/// while the player moves.
+/// </summary>
+public class PositionFormatTests
+{
+    [Fact]
+    public void ACoordinateIsTwoDecimalsInAFixedWidth()
+    {
+        Assert.Equal("     1.23", PositionsPanel.Coordinate(1.2345f));
+        Assert.Equal(" -1234.57", PositionsPanel.Coordinate(-1234.567f));
+        Assert.Equal("     0.00", PositionsPanel.Coordinate(0f));
+    }
+
+    [Fact]
+    public void AnEmptySlotIsTheSameWidthAsAFullOne()
+    {
+        Assert.Equal(PositionsPanel.CoordinateWidth, PositionsPanel.Coordinate(null).Length);
+        Assert.EndsWith("-", PositionsPanel.Coordinate(null));
+    }
+
+    [Fact]
+    public void EveryCoordinateAPlanetHoldsIsTheSameLength()
+    {
+        foreach (float value in new[] { 0f, 1f, -1f, 9.999f, -99.995f, 1234.5f, -1234.56f })
+        {
+            Assert.Equal(PositionsPanel.CoordinateWidth, PositionsPanel.Coordinate(value).Length);
+        }
+    }
+
+    [Fact]
+    public void ANumberTooBigForTheWidthIsShownWholeRatherThanCut()
+    {
+        // Padding never truncates: an impossible coordinate is still readable, it just pushes.
+        Assert.Equal("1234567.00", PositionsPanel.Coordinate(1234567f));
+    }
+}
+
+/// <summary>
+/// The mods table's name column: two lines at most, so a long name is readable without the row
+/// turning into a paragraph. The measure stands in for ImGui.CalcTextSize at one unit per
+/// character, which makes the widths below character counts.
+/// </summary>
+public class ModNameWrapTests
+{
+    private static float Measure(string text) => text.Length;
+
+    private static int Lines(string text) => text.Split('\n').Length;
+
+    [Fact]
+    public void ANameThatFitsIsLeftAlone()
+    {
+        Assert.Equal("Flight", ModsPanel.WrapName("Flight", 20f, Measure));
+        Assert.Equal("Flight", ModsPanel.WrapName("  Flight  ", 20f, Measure));
+    }
+
+    [Fact]
+    public void ALongerNameTakesASecondLineAtTheSpace()
+    {
+        Assert.Equal("Incremental\nRNG", ModsPanel.WrapName("Incremental RNG", 12f, Measure));
+    }
+
+    [Fact]
+    public void TheSecondLineIsTheLastOneAndEndsInAnEllipsis()
+    {
+        string wrapped = ModsPanel.WrapName("Aaaa Bbbb Cccc Dddd Eeee", 10f, Measure);
+
+        Assert.Equal(2, Lines(wrapped));
+        Assert.Equal("Aaaa Bbbb\nCccc Dd...", wrapped);
+    }
+
+    [Fact]
+    public void NoNameEverTakesAThirdLine()
+    {
+        foreach (string name in new[]
+                 {
+                     "One two three four five six seven eight nine ten eleven twelve",
+                     "Supercalifragilisticexpialidocious and then some more of it",
+                     "a b c d e f g h i j k l m n o p q r s t u v w x y z",
+                 })
+        {
+            foreach (float width in new[] { 6f, 10f, 25f, 40f })
+            {
+                Assert.True(Lines(ModsPanel.WrapName(name, width, Measure)) <= 2);
+            }
+        }
+    }
+
+    [Fact]
+    public void AWordWithNoSpaceInItIsBrokenWhereverItRunsOut()
+    {
+        Assert.Equal("Supercalif\nragilistic", ModsPanel.WrapName("Supercalifragilistic", 10f, Measure));
+    }
+
+    [Fact]
+    public void ANameWithNothingInItDrawsNothing()
+    {
+        Assert.Equal(string.Empty, ModsPanel.WrapName(null, 10f, Measure));
+        Assert.Equal(string.Empty, ModsPanel.WrapName("   ", 10f, Measure));
+    }
+
+    /// <summary>
+    /// A column with no room in it happens on the frame a window is dragged shut; the name is
+    /// handed back whole rather than measured into nothing.
+    /// </summary>
+    [Fact]
+    public void AColumnWithNoWidthIsNotWorthWrappingInto()
+    {
+        Assert.Equal("Incremental RNG", ModsPanel.WrapName("Incremental RNG", 0f, Measure));
+        Assert.Equal("Incremental RNG", ModsPanel.WrapName("Incremental RNG", -5f, Measure));
+    }
+}
+
+/// <summary>What the Memory panel's patch table calls each row.</summary>
+public class PatchNameTests
+{
+    private static PatchEntry Patch(PatchKind kind, string name) => new(0x1B0000, 2, kind, name);
+
+    [Fact]
+    public void AModsPatchIsNamedAfterTheMod()
+    {
+        Assert.Equal("Flight", MemoryPanel.PatchName(Patch(PatchKind.Mod, "Flight")));
+
+        // The name arrives in a fixed 32-byte field, so what is left of it is trimmed.
+        Assert.Equal("Flight", MemoryPanel.PatchName(Patch(PatchKind.Mod, "  Flight  ")));
+    }
+
+    [Fact]
+    public void AFeaturesPatchIsNamedAfterTheToggle()
+    {
+        Assert.Equal("Fast loads", MemoryPanel.PatchName(Patch(PatchKind.Feature, "Fast loads")));
+    }
+
+    [Fact]
+    public void ARowWithNoNameSaysWhatKindOfThingItIs()
+    {
+        Assert.Equal("(a mod)", MemoryPanel.PatchName(Patch(PatchKind.Mod, string.Empty)));
+        Assert.Equal("(a feature)", MemoryPanel.PatchName(Patch(PatchKind.Feature, "   ")));
+        Assert.Equal("(this client)", MemoryPanel.PatchName(Patch(PatchKind.Client, string.Empty)));
+    }
+}

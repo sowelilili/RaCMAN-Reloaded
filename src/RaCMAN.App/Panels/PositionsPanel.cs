@@ -1,3 +1,4 @@
+using System.Globalization;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
@@ -9,6 +10,22 @@ public static class PositionsPanel
     private static bool _resetLevelFlags;
     private static bool _resetSpecialBolts;
 
+    /// <summary>
+    /// How wide a coordinate is drawn, which is "-1234.56" and a digit of room. The client's font
+    /// is fixed-width, so padding to this is what stops the row shuffling sideways as the player
+    /// moves and a number gains or loses a digit.
+    /// </summary>
+    public const int CoordinateWidth = 9;
+
+    /// <summary>
+    /// One coordinate as the panel shows it: two decimals, right-aligned in
+    /// <see cref="CoordinateWidth"/>. Null is an empty slot, which gets the same width so the
+    /// column below it stays a column.
+    /// </summary>
+    public static string Coordinate(float? value) =>
+        (value is { } number ? number.ToString("0.00", CultureInfo.InvariantCulture) : "-")
+        .PadLeft(CoordinateWidth);
+
     public static void Draw(AppState state)
     {
         Ui.Heading("Positions and planets");
@@ -17,8 +34,8 @@ public static class PositionsPanel
         bool enabled = state.Ingame;
         if (!enabled) Ui.Warning($"Position and planet commands need INGAME (state is {session.State}).");
 
-        ImGui.Text($"Current planet: {PlanetName(state, session.CurrentPlanet)} ({session.CurrentPlanet})");
-        ImGui.Text($"Position: {session.PosX:0.###}, {session.PosY:0.###}, {session.PosZ:0.###}");
+        ImGui.TextUnformatted($"Current planet: {PlanetName(state, session.CurrentPlanet)} ({session.CurrentPlanet})");
+        ImGui.TextUnformatted($"Position: {Coordinate(session.PosX)}, {Coordinate(session.PosY)}, {Coordinate(session.PosZ)}");
         ImGui.SameLine();
         if (ImGui.SmallButton("Refresh slots")) state.RefreshPositions();
 
@@ -37,14 +54,40 @@ public static class PositionsPanel
         }
         else
         {
-            _selectedPlanet = Math.Clamp(_selectedPlanet, 0, state.Planets.Length - 1);
-            ImGui.SetNextItemWidth(260);
-            ImGui.Combo("Planet", ref _selectedPlanet, state.Planets, state.Planets.Length);
+            // The combo shows the planets the game has; the index behind the pick is the one the
+            // console numbered it with, filler entries included, because that is what a request
+            // carries. A selection left on a hidden entry moves to the first real one.
+            var choices = PlanetChoices.For(state.Planets);
+            int pick = Math.Max(0, choices.PositionOf(_selectedPlanet));
+            _selectedPlanet = choices.PlanetAt(pick);
 
-            _resetLevelFlags = (session.PlanetFlags & PlanetFlags.ResetLevelFlags) != 0 || _resetLevelFlags;
-            ImGui.Checkbox("Reset level flags", ref _resetLevelFlags);
-            ImGui.SameLine();
-            ImGui.Checkbox("Reset special bolts", ref _resetSpecialBolts);
+            ImGui.SetNextItemWidth(260);
+            if (ImGui.Combo("Planet", ref pick, choices.Labels, choices.Count))
+            {
+                _selectedPlanet = choices.PlanetAt(pick);
+            }
+
+            // Only the games that do these two on the way into a planet are offered them.
+            var boxes = PlanetResetOptions.For(state.DescribedGame, state.LevelFlagsUnsupported);
+            if (boxes.LevelFlags)
+            {
+                _resetLevelFlags = (session.PlanetFlags & PlanetFlags.ResetLevelFlags) != 0 || _resetLevelFlags;
+                ImGui.Checkbox("Reset level flags", ref _resetLevelFlags);
+            }
+            else
+            {
+                _resetLevelFlags = false;
+            }
+
+            if (boxes.SpecialBolts)
+            {
+                if (boxes.LevelFlags) ImGui.SameLine();
+                ImGui.Checkbox("Reset special bolts", ref _resetSpecialBolts);
+            }
+            else
+            {
+                _resetSpecialBolts = false;
+            }
 
             if (ImGui.Button("Select"))
             {
@@ -103,11 +146,11 @@ public static class PositionsPanel
             ImGui.TextColored(slot.Filled ? Ui.Green : Ui.Grey, slot.Filled ? "yes" : "-");
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(slot.Filled ? slot.X.ToString("0.###") : "-");
+            ImGui.TextUnformatted(Coordinate(slot.Filled ? slot.X : null));
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(slot.Filled ? slot.Y.ToString("0.###") : "-");
+            ImGui.TextUnformatted(Coordinate(slot.Filled ? slot.Y : null));
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(slot.Filled ? slot.Z.ToString("0.###") : "-");
+            ImGui.TextUnformatted(Coordinate(slot.Filled ? slot.Z : null));
 
             ImGui.TableNextColumn();
             byte index = slot.Slot;
