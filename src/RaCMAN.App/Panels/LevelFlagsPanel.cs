@@ -148,9 +148,6 @@ public static class LevelFlagsPanel
             return;
         }
 
-        Ui.Hint($"Planet {_loadedPlanet}. Ticking a bit writes the byte to the console.");
-        ImGui.Spacing();
-
         DrawBits(state);
     }
 

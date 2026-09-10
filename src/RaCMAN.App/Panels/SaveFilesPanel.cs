@@ -218,9 +218,6 @@ public static class SaveFilesPanel
         if (ImGui.Button("Load to console")) StartLoad(state, title, load!.Id);
         ImGui.EndDisabled();
 
-        Ui.Hint("Save puts the game's current save in the library under that name; Load sends the selected file back.");
-
-        ImGui.Spacing();
         ImGui.BeginDisabled(SelectedFile is null || _busy);
 
         ImGui.SetNextItemWidth(260);

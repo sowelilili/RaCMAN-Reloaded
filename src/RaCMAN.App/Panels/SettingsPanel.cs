@@ -142,8 +142,6 @@ public static class SettingsPanel
             state.Settings.Save();
         }
 
-        Ui.Hint("Looks at this project's GitHub releases, at most once a day. Nothing is downloaded until you ask.");
-
         ImGui.BeginDisabled(updates.IsInert || updates.Busy);
         if (ImGui.Button("Check now")) updates.CheckNow();
         ImGui.EndDisabled();
