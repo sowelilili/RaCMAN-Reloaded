@@ -11,8 +11,9 @@ namespace RaCMAN.Protocol.Tests;
 /// else left where qwark's DESCRIBE group put it. The file is keyed by game, not by title id, because
 /// BCES01503 hosts RaC1, RaC2 and RaC3 under one title id.
 /// <para>
-/// Three names are reserved for the panels that place them: "Values" and "Options" at the top of the
-/// Game page, "Unlocks" on the Unlocks panel. None of them may reach a side sub-page or the tab order.
+/// Four names are reserved for the panels that place them: "Quick", "Values" and "Options" on the
+/// Game page itself, "Unlocks" on the Unlocks panel. None of them may reach a side sub-page or the
+/// tab order.
 /// </para>
 /// </summary>
 public class GameLayoutTests
@@ -201,30 +202,63 @@ public class GameLayoutTests
         Assert.DoesNotContain("Savefile", side);
     }
 
+    /// <summary>Every name a panel places itself, so a loop can check them all the same way.</summary>
+    private static readonly string[] Reserved =
+    {
+        GameLayout.QuickSection, GameLayout.ValuesSection, GameLayout.OptionsSection, GameLayout.UnlocksSection,
+    };
+
     [Fact]
     public void TheReservedSectionsAreNeverSidePagesAndNeverInTheTabOrder()
     {
-        // A panel places each of these itself: Values and Options at the top of the Game page,
-        // Unlocks on the Unlocks panel. None may become a sub-page or a stacked header.
-        Assert.True(GameLayout.IsReserved(GameLayout.ValuesSection));
-        Assert.True(GameLayout.IsReserved(GameLayout.OptionsSection));
-        Assert.True(GameLayout.IsReserved(GameLayout.UnlocksSection));
+        // A panel places each of these itself: Quick at the very top of the Game page, Values and
+        // Options under it, Unlocks on the Unlocks panel. None may become a sub-page or a header.
+        foreach (var reserved in Reserved) Assert.True(GameLayout.IsReserved(reserved));
         Assert.False(GameLayout.IsReserved(GameLayout.PlayerSection));
 
-        foreach (var reserved in new[] { GameLayout.ValuesSection, GameLayout.OptionsSection, GameLayout.UnlocksSection })
-        {
-            Assert.DoesNotContain(reserved, GameLayout.SideSections);
-        }
+        foreach (var reserved in Reserved) Assert.DoesNotContain(reserved, GameLayout.SideSections);
 
         foreach (var game in new[] { GameId.Rac1, GameId.Rac2, GameId.Rac3, GameId.Rac4 })
         {
-            var order = GameLayout.TabOrder(string.Empty, game,
-                new[] { GameLayout.ValuesSection, GameLayout.OptionsSection, GameLayout.UnlocksSection, "Cheats" });
+            var order = GameLayout.TabOrder(string.Empty, game, Reserved.Append("Cheats"));
 
-            Assert.DoesNotContain(GameLayout.ValuesSection, order);
-            Assert.DoesNotContain(GameLayout.OptionsSection, order);
-            Assert.DoesNotContain(GameLayout.UnlocksSection, order);
+            foreach (var reserved in Reserved) Assert.DoesNotContain(reserved, order);
             Assert.Contains(GameLayout.PlayerSection, order);
+        }
+    }
+
+    /// <summary>
+    /// "Quick" is the name a layout sends a feature to the block at the top of the Game page with.
+    /// It is reserved like the other three, so a file that lists it as a side page or a tab is
+    /// ignored, but a move to it is honoured.
+    /// </summary>
+    [Fact]
+    public void AFeatureCanBeMovedToTheQuickBlockButTheSectionIsNeverDrawnAsOne()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-quick.json");
+        File.WriteAllText(path, """
+        {
+          "sideSections": ["Quick", "Debug"],
+          "games": {
+            "rac4": { "tabOrder": ["Quick", "Cheats"], "moves": { "Unlock all planets": "Quick" } }
+          }
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+            var planets = Make(11, FeatureKind.Action, 2, "Unlock all planets");
+            var d = Describe(GameId.Rac4, Rac4Groups, planets);
+
+            Assert.Equal(GameLayout.QuickSection, GameLayout.SectionFor("NPEA00423", GameId.Rac4, planets, d));
+            Assert.Equal(new[] { "Debug" }, GameLayout.SideSections);
+            Assert.Equal(new[] { "Cheats" }, GameLayout.TabOrder("NPEA00423", GameId.Rac4, Array.Empty<string>()));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
         }
     }
 

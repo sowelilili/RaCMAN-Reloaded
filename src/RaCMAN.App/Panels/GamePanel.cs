@@ -5,12 +5,13 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// The Game page and its sub-pages. The page itself is the everyday controls: the player-value
-/// table on top with the per-file "Options" switches in a column beside it, then the remaining
-/// sections stacked and always visible. The sections the layout marks as "side" (Manips,
-/// Collectables, Cosmetics, Debug by default) each get a sub-page, reached from the indented
-/// entries under Game in the side nav. Features moved to "Unlocks" are not drawn here at all; the
-/// Unlocks panel reads them through <see cref="FeaturesInSection"/>.
+/// The Game page and its sub-pages. The page itself is the everyday controls: the quick block at
+/// the very top (die, the position pair, the savefile ACTIONs, the slot and planet controls), then
+/// the player-value table with the per-file "Options" switches in a column beside it under a
+/// "Values" header, then the remaining sections stacked and always visible. The sections the layout
+/// marks as "side" (Manips, Collectables, Cosmetics, Debug by default) each get a sub-page, reached
+/// from the indented entries under Game in the side nav. Features moved to "Unlocks" are not drawn
+/// here at all; the Unlocks panel reads them through <see cref="FeaturesInSection"/>.
 /// </summary>
 public static class GamePanel
 {
@@ -69,14 +70,57 @@ public static class GamePanel
         return sections.TryGetValue(section, out var features) ? features : Array.Empty<Feature>();
     }
 
+    /// <summary>
+    /// What a game calls the ACTION that does what the console's own DIE opcode does. The quick
+    /// block sends the opcode, so a game that describes the action as well would otherwise put the
+    /// same button on the page twice.
+    /// </summary>
+    public const string DieLabel = "Die";
+
+    /// <summary>True for an ACTION a game describes for dying, whatever the label's spacing or case.</summary>
+    public static bool IsDieAction(Feature feature) =>
+        feature.Kind == FeatureKind.Action
+        && string.Equals(feature.Label.Trim(), DieLabel, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The features the quick block draws itself: the two ACTIONs the console flags SAVE_ASIDE and
+    /// LOAD_ASIDE, and a "Die" the game describes. <see cref="Assign"/> takes these out before it
+    /// sorts anything, so no section draws one of them a second time and a section left with
+    /// nothing but these (a Savefile group that was only the two of them) stops appearing.
+    /// </summary>
+    public static IReadOnlySet<byte> QuickClaims(DescribeResult describe)
+    {
+        var claimed = new HashSet<byte>();
+        if (describe.SaveAsideAction is { } save) claimed.Add(save.Id);
+        if (describe.LoadAsideAction is { } load) claimed.Add(load.Id);
+
+        foreach (var feature in describe.Features)
+        {
+            if (IsDieAction(feature)) claimed.Add(feature.Id);
+        }
+
+        return claimed;
+    }
+
+    /// <summary>
+    /// Every section the game has and what is in each of them, the quick block's own rows already
+    /// gone. This is what the page draws from, and what the layout tests read the sorting out of.
+    /// </summary>
+    public static IReadOnlyDictionary<string, List<Feature>> SectionsFor(
+        string title, GameId game, DescribeResult describe) =>
+        Assign(title, game, describe, out _);
+
     /// <summary>Puts every feature in its section (client layout first, qwark group as the default).</summary>
     private static Dictionary<string, List<Feature>> Assign(
         string title, GameId game, DescribeResult describe, out List<string> firstSeen)
     {
+        var claimed = QuickClaims(describe);
         var sections = new Dictionary<string, List<Feature>>(StringComparer.Ordinal);
         firstSeen = new List<string>();
         foreach (var feature in describe.Features)
         {
+            if (claimed.Contains(feature.Id)) continue;
+
             string section = GameLayout.SectionFor(title, game, feature, describe);
             if (!sections.TryGetValue(section, out var list))
             {
@@ -137,13 +181,26 @@ public static class GamePanel
         }
         else
         {
-            var topValues = sections.GetValueOrDefault(GameLayout.ValuesSection) ?? new List<Feature>();
-            var options = sections.GetValueOrDefault(GameLayout.OptionsSection) ?? new List<Feature>();
-            DrawTopArea(state, describe, topValues, options);
+            DrawQuickBlock(state, describe, sections.GetValueOrDefault(GameLayout.QuickSection));
             ImGui.Spacing();
 
-            // Everything not owned by a panel and not a side page, stacked in layout order.
-            bool playerDrawn = false;
+            // The value table and the Options column beside it, under a header of their own so the
+            // whole of the page folds away the same way.
+            var topValues = sections.GetValueOrDefault(GameLayout.ValuesSection) ?? new List<Feature>();
+            var options = sections.GetValueOrDefault(GameLayout.OptionsSection) ?? new List<Feature>();
+            if (topValues.Any(f => f.Kind == FeatureKind.Value) || options.Count > 0)
+            {
+                ImGui.PushID(GameLayout.ValuesSection);
+                if (ImGui.CollapsingHeader(GameLayout.ValuesSection, ImGuiTreeNodeFlags.DefaultOpen))
+                {
+                    DrawTopArea(state, describe, topValues, options);
+                    ImGui.Spacing();
+                }
+                ImGui.PopID();
+            }
+
+            // Everything not owned by a panel and not a side page, stacked in layout order. A
+            // section the quick block emptied is not in the dictionary at all, so it draws no header.
             var used = order.Where(s => !GameLayout.IsReserved(s));
             foreach (var section in GameLayout.TabOrder(title, game, used))
             {
@@ -154,21 +211,6 @@ public static class GamePanel
                 if (ImGui.CollapsingHeader(section, ImGuiTreeNodeFlags.DefaultOpen))
                 {
                     DrawSectionBody(state, describe, features, section);
-                    ImGui.Spacing();
-                }
-                ImGui.PopID();
-
-                if (section == GameLayout.PlayerSection) playerDrawn = true;
-            }
-
-            // Every game has position slots, so the save/load pair gets a header of its own when
-            // the running game (or the layout) left no Player section to hang it on.
-            if (!playerDrawn)
-            {
-                ImGui.PushID(GameLayout.PlayerSection);
-                if (ImGui.CollapsingHeader(GameLayout.PlayerSection, ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    DrawPositionButtons(state);
                     ImGui.Spacing();
                 }
                 ImGui.PopID();
@@ -231,7 +273,7 @@ public static class GamePanel
     private const float ValueColumnWeight = 0.58f;
 
     /// <summary>
-    /// The top of the Game page: the value table, and beside it the per-file switches the layout
+    /// The "Values" header's body: the value table, and beside it the per-file switches the layout
     /// moved to "Options". The table only ever needs a label and a number box, so the rest of the
     /// width would otherwise sit empty; a borderless two-column table puts the options there
     /// instead, top-aligned with the first value row. Either half alone takes the whole width.
@@ -361,8 +403,8 @@ public static class GamePanel
 
     /// <summary>
     /// One section's controls. <paramref name="section"/> is the section's name when it has one,
-    /// which is what earns "Player" its position buttons; <paramref name="toggleColumns"/> caps the
-    /// toggle grid (the narrow Options column asks for one) and <paramref name="leadingSpace"/> is
+    /// which is what keys its colour presets; <paramref name="toggleColumns"/> caps the toggle grid
+    /// (the narrow Options and Quick columns ask for one) and <paramref name="leadingSpace"/> is
     /// off for a body that has to line up with the top of a table cell.
     /// </summary>
     private static void DrawSectionBody(
@@ -412,25 +454,56 @@ public static class GamePanel
 
             DrawChoice(state, describe, feature);
         }
+    }
 
-        if (section == GameLayout.PlayerSection) DrawPositionButtons(state);
+    // ---------------------------------------------------------------- the quick block
+
+    /// <summary>How much of the quick block's row the stacked buttons take.</summary>
+    private const float QuickButtonWeight = 0.42f;
+
+    /// <summary>
+    /// The block at the very top of the Game page: the few controls a run reaches for every other
+    /// minute, above everything else and in one place. Buttons on the left, the console's position
+    /// slot and the planet controls on the right, and nothing here is drawn anywhere else on the
+    /// page: Die is the console's own opcode (an ACTION a game describes for it is claimed by
+    /// <see cref="QuickClaims"/>), the position pair used to end the Player section, and the two
+    /// buttons after them are the flagged savefile ACTIONs the Savefile section used to hold. A
+    /// game with no savefile helper simply gets the buttons it has, and one that named no planets
+    /// gets no planet controls.
+    /// </summary>
+    private static void DrawQuickBlock(AppState state, DescribeResult describe, List<Feature>? moved)
+    {
+        if (!ImGui.BeginTable("quick", 2, ImGuiTableFlags.SizingStretchProp)) return;
+
+        ImGui.TableSetupColumn("buttons", ImGuiTableColumnFlags.WidthStretch, QuickButtonWeight);
+        ImGui.TableSetupColumn("places", ImGuiTableColumnFlags.WidthStretch, 1f - QuickButtonWeight);
+
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        DrawQuickButtons(state, describe, moved);
+
+        ImGui.TableNextColumn();
+        PositionsPanel.SlotPicker(state);
+        ImGui.Spacing();
+        PositionsPanel.PlanetLoadControls(state);
+
+        ImGui.EndTable();
     }
 
     /// <summary>
-    /// Save and load the console's currently selected position slot: the pair the Positions panel
-    /// draws per row, on the page the user is already looking at. The slot is the console's, so the
-    /// label names it rather than offering a second place to choose one, and a save is followed by
+    /// The quick block's left column, one full-width button per row so the column stays a column
+    /// however narrow the window is. The slot the position pair acts on is the console's, so the
+    /// labels name it rather than offering a second place to choose one, and a save is followed by
     /// a POS_LIST so the Positions panel agrees about what is in the slot.
     /// </summary>
-    private static void DrawPositionButtons(AppState state)
+    private static void DrawQuickButtons(AppState state, DescribeResult describe, List<Feature>? moved)
     {
+        var wide = new Vector2(-1, 0);
         byte slot = state.Session.SelectedSlot;
 
-        ImGui.Spacing();
-        if (!ImGui.BeginTable("positions", 2, ImGuiTableFlags.SizingStretchSame)) return;
+        if (ImGui.Button("Die", wide)) state.Run(() => state.Client.DieAsync());
 
-        ImGui.TableNextColumn();
-        if (ImGui.Button($"Save position (slot {slot})", new Vector2(-1, 0)))
+        if (ImGui.Button($"Save position (slot {slot})", wide))
         {
             state.Run(async () =>
             {
@@ -439,13 +512,44 @@ public static class GamePanel
             });
         }
 
-        ImGui.TableNextColumn();
-        if (ImGui.Button($"Load position (slot {slot})", new Vector2(-1, 0)))
+        if (ImGui.Button($"Load position (slot {slot})", wide))
         {
             state.Run(() => state.Client.PosLoadAsync());
         }
 
-        ImGui.EndTable();
+        // The savefile helper is a code cave the console branches the game into, which is the one
+        // thing RPCS3 cannot do: the buttons stay where they are and say why instead.
+        bool blocked = state.CodePatchesUnsupported;
+        ImGui.BeginDisabled(blocked);
+        DrawAsideButton(state, describe.SaveAsideAction, blocked, wide);
+        DrawAsideButton(state, describe.LoadAsideAction, blocked, wide);
+        ImGui.EndDisabled();
+
+        // Whatever the layout sent to "Quick", under the buttons and in the same narrow column.
+        if (moved is { Count: > 0 })
+        {
+            ImGui.PushID(GameLayout.QuickSection);
+            DrawSectionBody(state, describe, moved, GameLayout.QuickSection, toggleColumns: 1);
+            ImGui.PopID();
+        }
+    }
+
+    /// <summary>One of the two flagged savefile ACTIONs, or nothing for a game that has no helper.</summary>
+    private static void DrawAsideButton(AppState state, Feature? feature, bool blocked, Vector2 size)
+    {
+        if (feature is not { } action) return;
+
+        ImGui.PushID(action.Id);
+        if (ImGui.Button(action.Label, size))
+        {
+            byte id = action.Id;
+            state.Run(() => state.Client.FeatureTriggerAsync(id));
+        }
+
+        ImGui.PopID();
+
+        // AllowWhenDisabled: the greyed-out button is the one whose tooltip is the point.
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NoCodePatches);
     }
 
     /// <summary>The gap between the widest label in a column and that column's "on boot" boxes.</summary>

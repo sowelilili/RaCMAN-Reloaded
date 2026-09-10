@@ -13,15 +13,18 @@
 // simply stops appearing.
 // "tabOrder" sets the section order; sections used but not listed follow in first-seen order.
 //
-// Three section names are reserved, because a panel decides where each of them is drawn. None of
+// Four section names are reserved, because a panel decides where each of them is drawn. None of
 // them can be a side sub-page, a stacked header or a tab-order entry:
-//   "Values"  the editable table at the top of the Game page (where a VALUE goes by default).
+//   "Quick"   the block at the very top of the Game page: die, the position pair, the savefile
+//             actions, and the slot and planet controls. A feature moved here is drawn with them.
+//   "Values"  the editable table under the quick block (where a VALUE goes by default).
 //   "Options" the column beside that table, for the few in-game switches that belong to the save
 //             file rather than to a run (UYA's quick-select pause, RaC1's goodies menu).
 //   "Unlocks" not drawn on the Game page at all; the Unlocks panel draws these as buttons above
 //             its table, for actions that rewrite the whole unlock list.
-// "Player" is an ordinary section, but it always gets the save/load buttons for the console's
-// currently selected position slot appended to it, and is created if the game has no Player group.
+// "Player" is an ordinary section. The quick block draws the two ACTIONs qwark flags SAVE_ASIDE and
+// LOAD_ASIDE and an ACTION labelled "Die" itself, wherever they are moved to, so a section left
+// with nothing but those is not drawn at all.
 //
 // Edit freely; the app reads this on start.
 {

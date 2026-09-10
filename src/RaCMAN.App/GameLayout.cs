@@ -47,7 +47,15 @@ public sealed class LayoutFile
 /// </summary>
 public static class GameLayout
 {
-    /// <summary>The pinned section at the top of the Game page, rendered as the player-value table.</summary>
+    /// <summary>
+    /// The block at the very top of the Game page: the controls a run reaches for every few
+    /// seconds. The page fills it with things that are not features at all (die, the position
+    /// pair, the planet and slot controls) and with the two flagged savefile ACTIONs; a layout
+    /// that moves a feature here has it drawn beside them instead of in a section of its own.
+    /// </summary>
+    public const string QuickSection = "Quick";
+
+    /// <summary>The player-value table, under its own header just below the quick block.</summary>
     public const string ValuesSection = "Values";
 
     /// <summary>
@@ -64,8 +72,9 @@ public static class GameLayout
     public const string UnlocksSection = "Unlocks";
 
     /// <summary>
-    /// The section the position save/load pair is appended to. An ordinary stacked section in every
-    /// other way; the Game page creates it when a layout leaves the game without one.
+    /// An ordinary stacked section, named here because the layout file has always called it out and
+    /// the shipped tab orders start with it. The position buttons that used to be appended to it
+    /// are in the quick block now, so a game with nothing in this section simply has no Player header.
     /// </summary>
     public const string PlayerSection = "Player";
 
@@ -74,7 +83,7 @@ public static class GameLayout
     /// them may become a side sub-page or a stacked header however the layout file is written.
     /// </summary>
     public static bool IsReserved(string section) =>
-        section is ValuesSection or OptionsSection or UnlocksSection;
+        section is QuickSection or ValuesSection or OptionsSection or UnlocksSection;
 
     /// <summary>What counts as a side sub-page when the file does not say.</summary>
     private static readonly string[] DefaultSideSections = { "Manips", "Collectables", "Cosmetics", "Debug" };

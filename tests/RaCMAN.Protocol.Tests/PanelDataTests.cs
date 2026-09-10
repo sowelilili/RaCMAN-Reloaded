@@ -611,6 +611,153 @@ public class PlanetChoiceTests
     }
 }
 
+/// <summary>
+/// What the quick block at the top of the Game page claims for itself, and what the sections below
+/// it are left with. Nothing may be drawn twice: the block sends the console's own DIE opcode and
+/// draws the two flagged savefile ACTIONs, so a game that describes any of those loses those rows
+/// from its sections, and a section left with nothing at all stops appearing.
+/// <para>
+/// The game and title here are ones no layout entry is keyed by, so the sorting is qwark's own
+/// DESCRIBE groups and nothing the shipped gamelayout.json says.
+/// </para>
+/// </summary>
+public class GameQuickBlockTests
+{
+    private const string UnknownTitle = "ZZZZ99999";
+
+    /// <summary>Group 0 is Cheats, 1 is Player and 2 is Savefile, as qwark names them.</summary>
+    private static readonly string[] Groups = { "Cheats", "Player", "Savefile" };
+
+    private static Feature Action(byte id, byte group, string label, FeatureFlags flags = FeatureFlags.None) =>
+        new(id, FeatureKind.Action, group, 0, flags, 0xFF, 0, 0, label);
+
+    private static Feature Toggle(byte id, byte group, string label) =>
+        new(id, FeatureKind.Toggle, group, 0, FeatureFlags.None, 0xFF, 0, 0, label);
+
+    private static DescribeResult Describe(params Feature[] features) =>
+        new(GameId.None, Groups, Array.Empty<string>(), features);
+
+    private static IReadOnlyDictionary<string, List<Feature>> Sections(DescribeResult describe) =>
+        GamePanel.SectionsFor(UnknownTitle, GameId.None, describe);
+
+    [Fact]
+    public void TheSavefileActionsAndADescribedDieAreTheQuickBlocks()
+    {
+        var describe = Describe(
+            Action(2, 1, "Die"),
+            Action(6, 2, "Set aside file", FeatureFlags.SaveAside),
+            Action(7, 2, "Load set-aside file", FeatureFlags.LoadAside),
+            Toggle(0, 0, "Fast loads"));
+
+        var claimed = GamePanel.QuickClaims(describe);
+
+        Assert.Equal(new byte[] { 2, 6, 7 }, claimed.OrderBy(id => id));
+    }
+
+    [Fact]
+    public void AGameWithNoHelperAndNoDieActionLeavesTheBlockNothingToClaim()
+    {
+        var describe = Describe(Toggle(0, 0, "Fast loads"), Action(1, 1, "Refill health"));
+
+        Assert.Empty(GamePanel.QuickClaims(describe));
+
+        // And the sections are exactly what the groups said, none of them emptied.
+        var sections = Sections(describe);
+        Assert.Equal(new[] { "Fast loads" }, sections["Cheats"].Select(f => f.Label));
+        Assert.Equal(new[] { "Refill health" }, sections["Player"].Select(f => f.Label));
+    }
+
+    [Theory]
+    [InlineData("Die", true)]
+    [InlineData("die", true)]
+    [InlineData("  Die  ", true)]
+    [InlineData("Die instantly", false)]
+    [InlineData("Suicide", false)]
+    public void OnlyAnActionCalledDieIsTheOneTheBlockAlreadyHas(string label, bool claimed)
+    {
+        Assert.Equal(claimed, GamePanel.IsDieAction(Action(2, 1, label)));
+
+        // A toggle of that name is a cheat, not the console's DIE, so it keeps its row.
+        Assert.False(GamePanel.IsDieAction(Toggle(2, 1, label)));
+    }
+
+    [Fact]
+    public void ASectionLeftWithNothingButTheBlocksRowsStopsAppearing()
+    {
+        // The Savefile group of a game whose helper is the whole of it.
+        var describe = Describe(
+            Toggle(0, 0, "Fast loads"),
+            Action(6, 2, "Set aside file", FeatureFlags.SaveAside),
+            Action(7, 2, "Load set-aside file", FeatureFlags.LoadAside));
+
+        var sections = Sections(describe);
+
+        Assert.False(sections.ContainsKey("Savefile"));
+        Assert.Equal(new[] { "Fast loads" }, sections["Cheats"].Select(f => f.Label));
+    }
+
+    [Fact]
+    public void ASectionWithSomethingElseInItKeepsThatAndLosesOnlyTheBlocksRows()
+    {
+        var describe = Describe(
+            Action(6, 2, "Set aside file", FeatureFlags.SaveAside),
+            Action(7, 2, "Load set-aside file", FeatureFlags.LoadAside),
+            Action(8, 2, "Refresh trophy state"),
+            Action(2, 1, "Die"),
+            Toggle(3, 1, "Invincible"));
+
+        var sections = Sections(describe);
+
+        Assert.Equal(new[] { "Refresh trophy state" }, sections["Savefile"].Select(f => f.Label));
+        Assert.Equal(new[] { "Invincible" }, sections["Player"].Select(f => f.Label));
+    }
+
+    /// <summary>
+    /// A VALUE still defaults to the top table and the block claims none of them, so the "Values"
+    /// header has what it always had.
+    /// </summary>
+    [Fact]
+    public void TheValueTableIsUntouchedByTheBlock()
+    {
+        var bolts = new Feature(3, FeatureKind.Value, 1, 0, FeatureFlags.None, 0, 0, 99999, "Bolts");
+        var describe = Describe(bolts, Action(2, 1, "Die"));
+
+        var sections = Sections(describe);
+
+        Assert.Equal(new[] { "Bolts" }, sections[GameLayout.ValuesSection].Select(f => f.Label));
+        Assert.False(sections.ContainsKey("Player"));
+    }
+}
+
+/// <summary>
+/// The slot dropdown the quick block draws beside the save and load buttons: the console's own
+/// slots, and what it says before the console has listed any.
+/// </summary>
+public class SlotPickerTests
+{
+    private static PositionList Slots(params bool[] filled)
+    {
+        var slots = new PositionSlot[filled.Length];
+        for (int i = 0; i < filled.Length; i++) slots[i] = new PositionSlot((byte)i, filled[i], 1f, 2f, 3f);
+        return new PositionList(2, slots);
+    }
+
+    [Fact]
+    public void EverySlotTheConsoleListedIsAnEntryAndTheFullOnesSaySo()
+    {
+        Assert.Equal(
+            new[] { "Slot 0 (saved)", "Slot 1", "Slot 2 (saved)" },
+            PositionsPanel.SlotLabels(Slots(true, false, true), selected: 1));
+    }
+
+    [Fact]
+    public void SlotsThatHaveNotBeenReadYetStillNameTheSelectedOne()
+    {
+        // Outside INGAME there is no POS_LIST to draw, and a blank box would say less than this.
+        Assert.Equal(new[] { "Slot 3" }, PositionsPanel.SlotLabels(PositionList.Empty, selected: 3));
+    }
+}
+
 /// <summary>Which boxes the Positions panel offers beside "Load planet", and for which games.</summary>
 public class PlanetResetOptionTests
 {
