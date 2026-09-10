@@ -9,8 +9,10 @@ namespace RaCMAN.App;
 /// This is the same file format and the same comparison the old LiveSplit scripts used
 /// (<c>rac2planets.txt</c>, <c>dlplanets.txt</c>): the split name is lower-cased and asked whether
 /// it <em>contains</em> any of the planet's aliases, so "Kerwan (Metropolis)" matches "kerwan".
-/// The files ship beside the app under <c>data/autosplit/</c> and are the user's to edit; a
-/// missing file simply means the route cannot be used for that game.
+/// The files ship under <c>data/autosplit/</c> beside the app; a copy of one in the data folder's
+/// <c>autosplit/</c> is read instead, which is where an edited route belongs since an update
+/// replaces the application folder. A missing file simply means the route cannot be used for that
+/// game.
 /// </para>
 /// </summary>
 public static class AutosplitRoutes
@@ -23,10 +25,17 @@ public static class AutosplitRoutes
 
     private static string _folder = DefaultFolder;
 
-    public static string DefaultFolder => Path.Combine(AppContext.BaseDirectory, "data", "autosplit");
+    public static string DefaultFolder => Path.Combine(AppPaths.ShippedData, "autosplit");
 
-    /// <summary>Where the files are read from. Tests point this at the source tree.</summary>
+    /// <summary>Where the shipped files are read from. Tests point this at the source tree.</summary>
     public static string Folder => _folder;
+
+    /// <summary>
+    /// The user's own route files. The shipped ones sit in the application folder, which an update
+    /// replaces whole, so an edited route goes here instead and is read in place of the shipped one
+    /// of the same name. The same rule as <c>gamelayout.json</c>, for the same reason.
+    /// </summary>
+    public static string OverrideFolder => Path.Combine(AppPaths.Root, "autosplit");
 
     /// <summary>Files that could not be read, for the panel to show rather than silently mismatch.</summary>
     public static IReadOnlyList<string> Problems => ProblemList;
@@ -34,7 +43,12 @@ public static class AutosplitRoutes
     /// <summary>The file's stem: the game's own name in lower case, "rac1".."rac4".</summary>
     public static string KeyFor(GameId game) => game.ToString().ToLowerInvariant();
 
-    public static string FileFor(GameId game) => Path.Combine(_folder, $"{KeyFor(game)}-planets.txt");
+    public static string FileFor(GameId game)
+    {
+        string name = $"{KeyFor(game)}-planets.txt";
+        string mine = Path.Combine(OverrideFolder, name);
+        return File.Exists(mine) ? mine : Path.Combine(_folder, name);
+    }
 
     /// <summary>Reads from a different folder (and forgets what was cached).</summary>
     public static void LoadFrom(string folder)

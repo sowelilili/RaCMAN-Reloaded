@@ -40,7 +40,10 @@ public sealed class AppWindow : GameWindow
             new NativeWindowSettings
             {
                 ClientSize = new OpenTK.Mathematics.Vector2i(940, 580),
-                Title = "RaCMAN Reloaded",
+
+                // The version is in the title because it is the first thing anyone is asked for
+                // when they report something, and the Settings panel is two clicks away.
+                Title = $"RaCMAN Reloaded {AppVersion.Current}",
                 APIVersion = new Version(3, 3),
                 Profile = ContextProfile.Core,
                 Flags = ContextFlags.ForwardCompatible,
@@ -192,6 +195,7 @@ public sealed class AppWindow : GameWindow
 
         if (ImGui.Begin("##root", flags))
         {
+            DrawUpdateBanner();
             DrawHeader();
             ImGui.Separator();
 
@@ -290,6 +294,48 @@ public sealed class AppWindow : GameWindow
     /// <see cref="PanelNav.DisabledReason"/>; the state it reads is the session's.
     /// </summary>
     private string? DisabledReason(int panel) => PanelNav.DisabledReason(panel, _state.CodePatchesUnsupported);
+
+    /// <summary>
+    /// The one line above everything else, and only while there is something to do about it: a new
+    /// version to fetch, one coming down, or one waiting for a restart. Later silences it until the
+    /// client is started again, and the Settings panel keeps the buttons for anyone who changes
+    /// their mind.
+    /// </summary>
+    private void DrawUpdateBanner()
+    {
+        var updates = _state.Updates;
+        if (!updates.HasBanner) return;
+
+        switch (updates.Stage)
+        {
+            case UpdateStage.Available:
+                Ui.Text(Ui.Yellow, $"RaCMAN Reloaded {updates.AvailableVersion} is available");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Download")) updates.Download();
+                break;
+
+            case UpdateStage.Downloading:
+                Ui.Text(Ui.Yellow, $"Downloading RaCMAN Reloaded {updates.AvailableVersion}...");
+                ImGui.SameLine();
+                ImGui.ProgressBar(Math.Clamp(updates.Percent / 100f, 0f, 1f), new Vector2(160, 0));
+                break;
+
+            case UpdateStage.Ready:
+                Ui.Text(Ui.Green, $"RaCMAN Reloaded {updates.AvailableVersion} is ready");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Restart to update")) updates.RestartAndApply();
+                break;
+        }
+
+        // Not offered mid-download: there is nothing to put off while the bytes are coming.
+        if (updates.Stage != UpdateStage.Downloading)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Later")) updates.Dismiss();
+        }
+
+        ImGui.Separator();
+    }
 
     private void DrawHeader()
     {

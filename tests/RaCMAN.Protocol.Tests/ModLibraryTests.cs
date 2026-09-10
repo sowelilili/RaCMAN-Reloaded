@@ -161,6 +161,72 @@ public class ModLibraryTests : IDisposable
         Assert.Equal("/dev_hdd0/qwark/mods/NPEA00385/crash-patch", ModLibrary.ConsoleFolder("NPEA00385", "crash-patch"));
     }
 
+    // ---------------------------------------------------------------- shipped and user libraries
+
+    /// <summary>The two roots the client runs with: the data folder's mods, and the release's own.</summary>
+    private (ModLibrary Library, string User, string Shipped) TwoLibraries()
+    {
+        var user = Path.Combine(_root, "user-mods");
+        var shipped = Path.Combine(_root, "shipped-mods");
+        return (new ModLibrary(user, shipped), user, shipped);
+    }
+
+    [Fact]
+    public void TheShippedLibraryAndTheUsersAreListedTogether()
+    {
+        var (library, user, shipped) = TwoLibraries();
+        MakeModFolder(Path.Combine(shipped, TitleId), "flight", "1.0.0");
+        MakeModFolder(Path.Combine(user, TitleId), "my-own-mod", "0.1.0");
+
+        var mods = library.Scan(TitleId);
+
+        Assert.Equal(2, mods.Count);
+        Assert.True(mods.Single(m => m.DirName == "flight").Shipped);
+        Assert.False(mods.Single(m => m.DirName == "my-own-mod").Shipped);
+    }
+
+    [Fact]
+    public void AUserModOfTheSameFolderNameHidesTheShippedOne()
+    {
+        var (library, user, shipped) = TwoLibraries();
+        MakeModFolder(Path.Combine(shipped, TitleId), "flight", "1.0.0");
+        MakeModFolder(Path.Combine(user, TitleId), "flight", "9.9.9");
+
+        var mod = Assert.Single(library.Scan(TitleId));
+
+        Assert.Equal("9.9.9", mod.Version);
+        Assert.False(mod.Shipped);
+    }
+
+    [Fact]
+    public void WithNoShippedLibraryNothingChanges()
+    {
+        var library = new ModLibrary(_root);
+        MakeModFolder(Path.Combine(_root, TitleId), "bolt-mod", "1.0.0");
+
+        Assert.Null(library.ShippedRootPath);
+        Assert.Null(library.ShippedTitleFolder(TitleId));
+        Assert.False(Assert.Single(library.Scan(TitleId)).Shipped);
+    }
+
+    [Fact]
+    public void AZipOverAShippedModIsAReplaceAndLandsInTheUsersFolder()
+    {
+        var (library, user, shipped) = TwoLibraries();
+        MakeModFolder(Path.Combine(shipped, TitleId), "bolt-mod", "1.0.0");
+
+        using (var candidate = library.OpenZip(BuildZip("bolt-mod", "1.0.0"), TitleId))
+        {
+            // The shipped mod is what it would replace, so the user is asked before it happens.
+            Assert.Equal(ZipInstallKind.Replace, candidate.Kind);
+            Assert.True(candidate.Installed?.Shipped);
+            library.CommitZip(candidate, TitleId);
+        }
+
+        Assert.True(File.Exists(Path.Combine(user, TitleId, "bolt-mod", "patch.txt")));
+        Assert.False(Assert.Single(library.Scan(TitleId)).Shipped);
+    }
+
     private string BuildZip(string dirName, string version, bool extraEmptyFolder = false)
     {
         var staging = Path.Combine(_root, "staging", Guid.NewGuid().ToString("N"));

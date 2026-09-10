@@ -209,7 +209,7 @@ public static class AutosplitterPanel
             {
                 ImGui.SetTooltip("Only split when the planet you have just reached is the one the "
                                  + "next split is named after, from "
-                                 + $"data/autosplit/{Path.GetFileName(AutosplitRoutes.FileFor(game))}.");
+                                 + $"{AutosplitRoutes.FileFor(game)}.");
             }
 
             ImGui.Unindent();

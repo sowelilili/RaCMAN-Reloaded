@@ -97,6 +97,84 @@ public class SettingsTests
     }
 
     [Fact]
+    public void TheUpdateSectionDefaultsToCheckingAndHasNeverChecked()
+    {
+        var updates = new Settings().Updates;
+
+        Assert.True(updates.Check);
+        Assert.Null(updates.LastCheckUtc);
+    }
+
+    [Fact]
+    public void TheUpdateSectionRoundTrips()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var stamp = new DateTime(2026, 9, 10, 8, 30, 0, DateTimeKind.Utc);
+
+            var saved = Settings.Load(path);
+            saved.Updates.Check = false;
+            saved.Updates.LastCheckUtc = stamp;
+            saved.Save();
+
+            Assert.Contains("\"updates\"", File.ReadAllText(path));
+
+            var loaded = Settings.Load(path);
+
+            Assert.False(loaded.Updates.Check);
+            Assert.Equal(stamp, loaded.Updates.LastCheckUtc?.ToUniversalTime());
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AFileFromBeforeTheUpdaterChecksAtOnce()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "old.settings.json");
+            File.WriteAllText(path, """{ "lastHost": "192.168.1.50" }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.True(loaded.Updates.Check);
+            Assert.Null(loaded.Updates.LastCheckUtc);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SavingCreatesTheDataFolderItWasPointedAt()
+    {
+        var folder = TempFolder();
+        try
+        {
+            // The first save is what makes the data folder on a fresh install.
+            string path = Path.Combine(folder, "not-there-yet", "racman-reloaded.settings.json");
+
+            var settings = Settings.Load(path);
+            settings.Theme = "dark";
+            settings.Save();
+
+            Assert.True(File.Exists(path));
+            Assert.Equal("dark", Settings.Load(path).Theme);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
     public void TheInputDisplayStartsInThePanelAndTheModeMapsOntoTheWindowFlag()
     {
         var settings = new Settings();

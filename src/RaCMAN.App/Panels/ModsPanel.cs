@@ -56,7 +56,8 @@ public static class ModsPanel
 
         if (locals.Count == 0)
         {
-            Ui.Hint("The local library has no mods for this title. Install one from a ZIP below.");
+            Ui.Hint("Neither your mods folder nor the one that ships with RaCMAN Reloaded has a mod for this "
+                    + "title. Install one from a ZIP below.");
         }
         else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -128,12 +129,15 @@ public static class ModsPanel
     }
 
     /// <summary>
-    /// What hovering a row's name says: the full name, which the column may have clipped, and the
-    /// author, which no longer has a column of its own. An unnamed author is left out rather than
-    /// spelled "by -".
+    /// What hovering a row's name says: the full name, which the column may have clipped, the
+    /// author, which no longer has a column of its own, and which library it came out of. An
+    /// unnamed author is left out rather than spelled "by -".
     /// </summary>
-    public static string TooltipFor(LocalMod mod) =>
-        string.IsNullOrWhiteSpace(mod.Author) ? mod.Name : $"{mod.Name}\nby {mod.Author}";
+    public static string TooltipFor(LocalMod mod)
+    {
+        string text = string.IsNullOrWhiteSpace(mod.Author) ? mod.Name : $"{mod.Name}\nby {mod.Author}";
+        return text + (mod.Shipped ? "\nShips with RaCMAN Reloaded" : "\nIn your mods folder");
+    }
 
     private static void DrawConsoleState(LocalMod mod, ModEntry? remote)
     {
@@ -231,7 +235,7 @@ public static class ModsPanel
         ImGui.Separator();
         Ui.Heading(mod.Name);
 
-        ImGui.Text($"Folder: {mod.DirName}");
+        ImGui.Text($"Folder: {mod.DirName}  ({(mod.Shipped ? "ships with RaCMAN Reloaded" : "yours")})");
         ImGui.Text($"Version: {(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version)}    Author: {(string.IsNullOrEmpty(mod.Author) ? "-" : mod.Author)}");
 
         // Word counts, code caves and checksums say nothing to someone who only wants the mod on;

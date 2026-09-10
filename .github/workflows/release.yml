@@ -1,0 +1,257 @@
+##
+## Cuts a release from a tag. Push "v1.2.0" and this builds the client for Windows and Linux,
+## packages both with Velopack and attaches them to the GitHub release the tag names.
+##
+## The payload comes from three places: this repository (the client, the skins, the layout and
+## autosplit data), sowelilili/qwark (the PS3 module and the RPCS3 helper, out of its committed
+## dist/ folder) and MichaelRelaxen/racman (the mod library the client ships with). The staging
+## itself is publish.ps1's, run with switches rather than copied here, so the release layout has
+## one description.
+##
+## Velopack's own releases index lives in the release assets, so the two jobs run one after the
+## other and the Linux one merges into the release the Windows one made.
+##
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+env:
+  PACK_ID: RaCMANReloaded
+  QWARK_REPO: sowelilili/qwark
+  MODS_REPO: MichaelRelaxen/racman
+
+jobs:
+  windows:
+    name: Windows (Setup.exe and portable)
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out the client
+        uses: actions/checkout@v4
+        with:
+          path: client
+
+      - name: Read the version from the tag
+        id: version
+        shell: bash
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      # The module is released alongside the client when the tags match, and is otherwise taken
+      # from qwark's main branch, which is what a client-only release wants.
+      - name: Decide which qwark to take
+        id: qwark
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --tags "https://github.com/${QWARK_REPO}" "refs/tags/${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "ref=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out qwark
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.QWARK_REPO }}
+          ref: ${{ steps.qwark.outputs.ref }}
+          path: qwark
+
+      - name: Check out the mod library
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MODS_REPO }}
+          path: racman-official
+
+      - name: Check qwark built what this release needs
+        shell: bash
+        run: |
+          missing=0
+          for file in qwark/dist/qwark.sprx qwark/dist/qwark-rpcs3.exe; do
+            if [ ! -f "$file" ]; then
+              echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no ${file#qwark/}. Build it and commit it to that repository's dist/ folder before tagging a release."
+              missing=1
+            fi
+          done
+          exit $missing
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Self-contained, which is what Velopack's own guide publishes for .NET 8: the updater
+      # replaces the application folder wholesale, so a build that carries its runtime can never
+      # land on a machine whose .NET was uninstalled between one version and the next, and the
+      # portable zip needs no installer step at all. The alternative, vpk's --framework flag,
+      # makes Setup.exe download and install the runtime, which the portable build cannot do.
+      - name: Build and stage
+        shell: pwsh
+        working-directory: client
+        run: |
+          ./publish.ps1 `
+            -Rid win-x64 `
+            -Version '${{ steps.version.outputs.version }}' `
+            -SelfContained `
+            -NoZip `
+            -OutputRoot '${{ github.workspace }}/stage' `
+            -StageName RaCMAN-Reloaded `
+            -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx' `
+            -Rpcs3Path '${{ github.workspace }}/qwark/dist/qwark-rpcs3.exe' `
+            -ModsSource '${{ github.workspace }}/racman-official/mods'
+
+      - name: Install vpk
+        run: dotnet tool install -g vpk
+
+      # The releases already published, so this one can be a delta of them and so the index that
+      # UpdateManager reads keeps its history. The first ever release has nothing to fetch.
+      - name: Fetch the existing releases
+        continue-on-error: true
+        run: >
+          vpk download github
+          --outputDir "${{ github.workspace }}/releases"
+          --channel win
+          --repoUrl "https://github.com/${{ github.repository }}"
+          --token "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Pack
+        run: >
+          vpk pack
+          --packId ${{ env.PACK_ID }}
+          --packVersion "${{ steps.version.outputs.version }}"
+          --packDir "${{ github.workspace }}/stage/RaCMAN-Reloaded"
+          --packTitle "RaCMAN Reloaded"
+          --packAuthors "sowelilili"
+          --mainExe RaCMAN.App.exe
+          --channel win
+          --outputDir "${{ github.workspace }}/releases"
+
+      - name: Upload to the release
+        run: >
+          vpk upload github
+          --outputDir "${{ github.workspace }}/releases"
+          --channel win
+          --repoUrl "https://github.com/${{ github.repository }}"
+          --token "${{ secrets.GITHUB_TOKEN }}"
+          --publish
+          --merge
+          --releaseName "RaCMAN Reloaded ${{ steps.version.outputs.version }}"
+          --tag "${{ github.ref_name }}"
+
+  linux:
+    name: Linux (AppImage)
+    runs-on: ubuntu-latest
+
+    # One at a time: both jobs write the same GitHub release, and the second one merges into it.
+    needs: windows
+
+    steps:
+      - name: Check out the client
+        uses: actions/checkout@v4
+        with:
+          path: client
+
+      - name: Read the version from the tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Decide which qwark to take
+        id: qwark
+        run: |
+          if git ls-remote --exit-code --tags "https://github.com/${QWARK_REPO}" "refs/tags/${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "ref=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check out qwark
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.QWARK_REPO }}
+          ref: ${{ steps.qwark.outputs.ref }}
+          path: qwark
+
+      - name: Check out the mod library
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.MODS_REPO }}
+          path: racman-official
+
+      # No qwark-rpcs3.exe here: the RPCS3 helper is a Windows executable, and publish.ps1 leaves
+      # it out of a non-Windows payload anyway.
+      - name: Check qwark built what this release needs
+        run: |
+          if [ ! -f qwark/dist/qwark.sprx ]; then
+            echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no dist/qwark.sprx. Build it and commit it to that repository's dist/ folder before tagging a release."
+            exit 1
+          fi
+
+      - name: Install .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build and stage
+        shell: pwsh
+        working-directory: client
+        run: |
+          ./publish.ps1 `
+            -Rid linux-x64 `
+            -Version '${{ steps.version.outputs.version }}' `
+            -SelfContained `
+            -NoZip `
+            -OutputRoot '${{ github.workspace }}/stage' `
+            -StageName RaCMAN-Reloaded `
+            -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx' `
+            -ModsSource '${{ github.workspace }}/racman-official/mods'
+
+      # The AppImage's entry point has to be executable, and a zip-free copy through PowerShell
+      # does not carry the bit.
+      - name: Make the app executable
+        run: chmod +x "${{ github.workspace }}/stage/RaCMAN-Reloaded/RaCMAN.App"
+
+      - name: Install vpk
+        run: |
+          dotnet tool install -g vpk
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Fetch the existing releases
+        continue-on-error: true
+        run: >
+          vpk download github
+          --outputDir "${{ github.workspace }}/releases"
+          --channel linux
+          --repoUrl "https://github.com/${{ github.repository }}"
+          --token "${{ secrets.GITHUB_TOKEN }}"
+
+      # An AppImage needs an icon, which is the one thing the Linux package asks for that the
+      # Windows one does not.
+      - name: Pack
+        run: >
+          vpk pack
+          --packId ${{ env.PACK_ID }}
+          --packVersion "${{ steps.version.outputs.version }}"
+          --packDir "${{ github.workspace }}/stage/RaCMAN-Reloaded"
+          --packTitle "RaCMAN Reloaded"
+          --packAuthors "sowelilili"
+          --mainExe RaCMAN.App
+          --icon "${{ github.workspace }}/client/packaging/racman-reloaded.png"
+          --channel linux
+          --outputDir "${{ github.workspace }}/releases"
+
+      - name: Upload to the release
+        run: >
+          vpk upload github
+          --outputDir "${{ github.workspace }}/releases"
+          --channel linux
+          --repoUrl "https://github.com/${{ github.repository }}"
+          --token "${{ secrets.GITHUB_TOKEN }}"
+          --publish
+          --merge
+          --releaseName "RaCMAN Reloaded ${{ steps.version.outputs.version }}"
+          --tag "${{ github.ref_name }}"

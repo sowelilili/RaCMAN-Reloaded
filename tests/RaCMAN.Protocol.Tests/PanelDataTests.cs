@@ -152,25 +152,37 @@ public class PanelDataTests : IDisposable
 
     // ---------------------------------------------------------------- the mods table
 
-    private static LocalMod Mod(string name, string author) => new()
+    private static LocalMod Mod(string name, string author, bool shipped = false) => new()
     {
         Directory = Path.Combine("mods", name),
         DirName = name.ToLowerInvariant(),
         Name = name,
         Author = author,
+        Shipped = shipped,
     };
 
     [Fact]
     public void TheAuthorLeftTheTableForTheNamesTooltip()
     {
-        Assert.Equal("Incremental RNG\nby Someone", ModsPanel.TooltipFor(Mod("Incremental RNG", "Someone")));
+        Assert.Equal("Incremental RNG\nby Someone\nIn your mods folder",
+            ModsPanel.TooltipFor(Mod("Incremental RNG", "Someone")));
     }
 
     [Fact]
-    public void AModWithNoAuthorIsJustItsNameOnHover()
+    public void AModWithNoAuthorIsJustItsNameAndItsLibraryOnHover()
     {
-        Assert.Equal("Incremental RNG", ModsPanel.TooltipFor(Mod("Incremental RNG", string.Empty)));
-        Assert.Equal("Incremental RNG", ModsPanel.TooltipFor(Mod("Incremental RNG", "   ")));
+        Assert.Equal("Incremental RNG\nIn your mods folder", ModsPanel.TooltipFor(Mod("Incremental RNG", string.Empty)));
+        Assert.Equal("Incremental RNG\nIn your mods folder", ModsPanel.TooltipFor(Mod("Incremental RNG", "   ")));
+    }
+
+    /// <summary>
+    /// Which library a mod came out of is worth a line, because a shipped one is replaced whole the
+    /// next time the client updates itself and is therefore not somewhere to keep an edit.
+    /// </summary>
+    [Fact]
+    public void TheTooltipSaysWhichLibraryTheModCameFrom()
+    {
+        Assert.EndsWith("\nShips with RaCMAN Reloaded", ModsPanel.TooltipFor(Mod("Flight", "Someone", shipped: true)));
     }
 
     // ---------------------------------------------------------------- file dialog

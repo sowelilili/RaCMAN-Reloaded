@@ -88,7 +88,18 @@ public static class GameLayout
 
     private static LayoutFile? _cache;
 
-    public static string DefaultPath => Path.Combine(AppContext.BaseDirectory, "data", "gamelayout.json");
+    /// <summary>The one the release ships, in the application folder, replaced on every update.</summary>
+    public static string ShippedPath => AppPaths.ShippedGameLayout;
+
+    /// <summary>
+    /// The file that is actually read: a <c>gamelayout.json</c> in the data folder if the user put
+    /// one there, else the shipped one. That is what keeps an edited layout through an update, since
+    /// the updater replaces the application folder whole.
+    /// </summary>
+    public static string DefaultPath => UsingOverride ? AppPaths.GameLayoutOverride : ShippedPath;
+
+    /// <summary>True while the user's own copy in the data folder is the one in use.</summary>
+    public static bool UsingOverride => File.Exists(AppPaths.GameLayoutOverride);
 
     public static IReadOnlyList<string> Problems { get; private set; } = Array.Empty<string>();
 

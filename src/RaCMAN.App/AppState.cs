@@ -65,18 +65,27 @@ public sealed class AppState : IDisposable
 
     private int _inFlight;
 
-    public AppState(Settings settings)
+    /// <summary>
+    /// <paramref name="updatesAllowed"/> is off by default so that nothing which merely constructs
+    /// an AppState — a test, a tool — can reach GitHub; only Program turns it on, and only for a
+    /// run none of the headless flags apply to.
+    /// </summary>
+    public AppState(Settings settings, bool updatesAllowed = false)
     {
         Settings = settings;
         Client = new QwarkClient { AutoReconnect = settings.AutoReconnect };
-        Mods = new ModLibrary(ResolvePath(settings.ModsPath));
-        Watchlists = new WatchlistStore(ResolvePath("watchlists"));
-        ColourPresets = new ColourPresetStore(ResolvePath("colours"));
-        SaveFiles = new SaveFileLibrary(ResolvePath(settings.SaveFilesPath));
+
+        // The user's own files are in the data folder; the shipped mod library is beside the
+        // executable, where the updater is free to replace it.
+        Mods = new ModLibrary(AppPaths.InData(settings.ModsPath), AppPaths.ShippedMods);
+        Watchlists = new WatchlistStore(AppPaths.Watchlists);
+        ColourPresets = new ColourPresetStore(AppPaths.Colours);
+        SaveFiles = new SaveFileLibrary(AppPaths.InData(settings.SaveFilesPath));
         WebMan = new WebManLoader();
-        Rpcs3 = new Rpcs3Host();
+        Rpcs3 = new Rpcs3Host(rootFolder: AppPaths.Rpcs3Root);
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
+        Updates = new UpdateService(settings, Post, AddToast, updatesAllowed);
 
         // The console pushes run events whether or not anyone is listening; the decision about
         // what any of them means is the autosplitter's, and it is the only subscriber.
@@ -146,6 +155,12 @@ public sealed class AppState : IDisposable
 
     /// <summary>Turns the console's run events into LiveSplit commands, per the user's settings.</summary>
     public Autosplitter Autosplitter { get; }
+
+    /// <summary>
+    /// Looks for a newer RaCMAN Reloaded on GitHub and installs it. Inert unless this copy was
+    /// installed by the installer and the run is one that may touch the network.
+    /// </summary>
+    public UpdateService Updates { get; }
 
     /// <summary>The SessionInfo the last HELLO returned, for the version readout. Null when offline.</summary>
     public SessionInfo? Hello { get; private set; }
@@ -233,9 +248,6 @@ public sealed class AppState : IDisposable
     public int InFlight => Volatile.Read(ref _inFlight);
 
     public string? LastError { get; private set; }
-
-    private static string ResolvePath(string path) =>
-        Path.IsPathRooted(path) ? path : Path.Combine(AppContext.BaseDirectory, path);
 
     // ---------------------------------------------------------------- plumbing
 

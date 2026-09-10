@@ -77,6 +77,11 @@ public static class SettingsPanel
         ImGui.SameLine();
         Ui.OpenFolderButton(state, FolderOf(GameLayout.DefaultPath), GameLayout.DefaultPath);
 
+        Ui.Hint(GameLayout.UsingOverride
+            ? "Using your own gamelayout.json from the data folder."
+            : "Using the gamelayout.json that ships with RaCMAN Reloaded. Put a copy of it in the data folder "
+              + "to edit it: an update replaces the application folder, and yours is read instead when it is there.");
+
         foreach (var problem in GameLayout.Problems) Ui.Warning(problem);
 
         ImGui.Spacing();
@@ -86,17 +91,18 @@ public static class SettingsPanel
 
         ImGui.Spacing();
         ImGui.Separator();
+        Ui.Heading("Updates");
+        DrawUpdates(state);
+
+        ImGui.Spacing();
+        ImGui.Separator();
         Ui.Heading("Import from RaCMAN");
         DrawImport(state);
 
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Files");
-
-        string settingsFile = string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path;
-        Folder(state, "Settings file", FolderOf(settingsFile), settingsFile);
-        Folder(state, "Mods folder", state.Mods.RootPath);
-        Folder(state, "Save files folder", state.SaveFiles.RootPath);
+        DrawFiles(state, settings);
 
         // Last, because it is the one switch here that is about this client's own workings rather
         // than about the user's files, and because everything it reveals is elsewhere.
@@ -114,6 +120,83 @@ public static class SettingsPanel
 
         Ui.Hint("Shows debug information: qwark and protocol versions, reboot and tick "
                 + "counters, request names in error messages, frame rate, raw readouts and internal addresses");
+    }
+
+    // ---------------------------------------------------------------- updates
+
+    /// <summary>
+    /// Which version this is, whether it looks for a newer one, and the button for asking now. A
+    /// copy the installer did not put here cannot replace itself, so it says that instead of
+    /// offering a check that could only end in a download link.
+    /// </summary>
+    private static void DrawUpdates(AppState state)
+    {
+        var updates = state.Updates;
+
+        ImGui.TextUnformatted($"Version {AppVersion.Current}");
+
+        bool check = state.Settings.Updates.Check;
+        if (ImGui.Checkbox("Check for updates on start", ref check))
+        {
+            state.Settings.Updates.Check = check;
+            state.Settings.Save();
+        }
+
+        Ui.Hint("Looks at this project's GitHub releases, at most once a day. Nothing is downloaded until you ask.");
+
+        ImGui.BeginDisabled(updates.IsInert || updates.Busy);
+        if (ImGui.Button("Check now")) updates.CheckNow();
+        ImGui.EndDisabled();
+
+        if (updates.Stage == UpdateStage.Available)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Download")) updates.Download();
+        }
+        else if (updates.Stage == UpdateStage.Ready)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Restart to update")) updates.RestartAndApply();
+        }
+
+        if (updates.InertReason is { } reason) Ui.Hint(reason);
+        else if (updates.Stage == UpdateStage.Failed) Ui.Error(updates.StatusLine());
+        else Ui.Hint(updates.StatusLine());
+
+        if (updates.Stage != UpdateStage.Idle && updates.LastCheckUtc is { } last)
+        {
+            Ui.Hint($"Last checked {last.ToLocalTime():yyyy-MM-dd HH:mm}.");
+        }
+
+        Ui.DebugHint(UpdateService.RepositoryUrl);
+    }
+
+    // ---------------------------------------------------------------- files
+
+    /// <summary>
+    /// The two folders and the difference between them, because it is the difference that matters:
+    /// what is in the data folder is the user's and survives an update, and what is beside the
+    /// executable is the release's and does not.
+    /// </summary>
+    private static void DrawFiles(AppState state, Settings settings)
+    {
+        Ui.Hint("Everything you make or install lives in the data folder. The application folder holds what "
+                + "RaCMAN Reloaded ships with, and an update replaces all of it.");
+
+        ImGui.Spacing();
+
+        string settingsFile = string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path;
+        Folder(state, "Data folder", AppPaths.Root);
+        Folder(state, "Settings file", FolderOf(settingsFile), settingsFile);
+        Folder(state, "Mods you installed", state.Mods.RootPath);
+        Folder(state, "Save files", state.SaveFiles.RootPath);
+        Folder(state, "Colour presets", state.ColourPresets.Folder);
+        Folder(state, "Watchlists", state.Watchlists.Folder);
+
+        ImGui.Spacing();
+
+        Folder(state, "Application folder (replaced on update)", AppPaths.Application);
+        if (state.Mods.ShippedRootPath is { } shipped) Folder(state, "Mods that ship with it", shipped);
     }
 
     // ---------------------------------------------------------------- ports
@@ -334,8 +417,8 @@ public static class SettingsPanel
             done.Add($"IP {ip}");
         }
 
-        // The colour slots become files beside this executable, so they are imported whether or not
-        // a console is listening; everything below this point is a request to the console.
+        // The colour slots become files in the data folder, so they are imported whether or not a
+        // console is listening; everything below this point is a request to the console.
         int presets = ImportColourSlots(state, config);
         if (presets > 0) done.Add($"{presets} colour preset(s) for RaC2 and RaC3");
 
@@ -448,5 +531,5 @@ public static class SettingsPanel
 
     /// <summary>The folder a file sits in, for the buttons that lead to a file rather than a folder.</summary>
     private static string FolderOf(string file) =>
-        System.IO.Path.GetDirectoryName(file) is { Length: > 0 } folder ? folder : AppContext.BaseDirectory;
+        System.IO.Path.GetDirectoryName(file) is { Length: > 0 } folder ? folder : AppPaths.Root;
 }

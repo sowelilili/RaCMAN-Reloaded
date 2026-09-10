@@ -36,14 +36,23 @@ public sealed class Rpcs3Host : IDisposable
     private int? _exitCode;
     private string? _lastPine;
 
-    public Rpcs3Host(string? baseDirectory = null, int qwarkPort = QwarkClient.DefaultPort)
+    public Rpcs3Host(string? baseDirectory = null, int qwarkPort = QwarkClient.DefaultPort, string? rootFolder = null)
     {
         BaseDirectory = baseDirectory ?? AppContext.BaseDirectory;
         QwarkPort = qwarkPort;
+        RootFolder = rootFolder;
     }
 
     /// <summary>Where the search for the helper starts: the folder this client runs from.</summary>
     public string BaseDirectory { get; }
+
+    /// <summary>
+    /// Where the helper maps <c>/dev_hdd0</c>, passed to it as <c>--root</c>. That tree holds the
+    /// console-side config, position slots and uploaded mods, so it is the user's data and belongs
+    /// in the data folder rather than beside an executable the updater replaces. Null leaves the
+    /// helper's own default, a <c>qwark-rpcs3-root</c> folder beside itself.
+    /// </summary>
+    public string? RootFolder { get; }
 
     /// <summary>The port the helper serves this client on, and the one an existing server is looked for on.</summary>
     public int QwarkPort { get; }
@@ -272,6 +281,23 @@ public sealed class Rpcs3Host : IDisposable
 
         info.ArgumentList.Add("--pine-port");
         info.ArgumentList.Add(pinePort.ToString(CultureInfo.InvariantCulture));
+
+        if (RootFolder is { Length: > 0 } root)
+        {
+            // The helper creates what it needs under this, but not the root itself, and a root it
+            // cannot open leaves it with no console filesystem at all.
+            try
+            {
+                Directory.CreateDirectory(root);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException)
+            {
+                // Let the helper say what it makes of the folder; it is the one that has to use it.
+            }
+
+            info.ArgumentList.Add("--root");
+            info.ArgumentList.Add(root);
+        }
 
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => Record(e.Data);

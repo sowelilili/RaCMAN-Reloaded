@@ -2,15 +2,22 @@ using System.Globalization;
 using RaCMAN.App;
 using RaCMAN.App.Panels;
 using RaCMAN.Protocol.Testing;
+using Velopack;
+
+// First, before anything reads a file or draws a pixel: this is where an install, an update and an
+// uninstall are carried out, and where a process started by the updater for one of those exits.
+VelopackApp.Build().Run();
 
 // --exit-after and --fake-server exist so the window can be smoke tested without a console.
 double exitAfter = 0;
 int startPanel = 0;
 string? connectTo = null;
 string? fakeScript = null;
+string? dataDir = null;
 bool fakeServer = false;
 bool fakeRpcs3 = false;
 bool padWindow = false;
+bool noUpdateCheck = false;
 
 for (int i = 0; i < args.Length; i++)
 {
@@ -41,9 +48,15 @@ for (int i = 0; i < args.Length; i++)
         case "--fake-script" when i + 1 < args.Length:
             fakeScript = args[++i];
             break;
+        case AppPaths.Flag when i + 1 < args.Length:
+            dataDir = args[++i];
+            break;
+        case "--no-update-check":
+            noUpdateCheck = true;
+            break;
         case "--help":
         case "-h":
-            Console.WriteLine("RaCMAN Reloaded");
+            Console.WriteLine($"RaCMAN Reloaded {AppVersion.Current}");
             Console.WriteLine("  --connect <host>       connect to qwark on start");
             Console.WriteLine("  --fake-server          run the in-process fake qwark and connect to it");
             Console.WriteLine("  --fake-rpcs3           as --fake-server, with the emulator and no-code-patches flags set");
@@ -55,17 +68,36 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --game-section <name>  open the Game panel on that side sub-page (Debug, Cosmetics, ...)");
             Console.WriteLine("  --pad-window           show the input display in its own OS window");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
+            Console.WriteLine("  --data-dir <path>      keep this run's settings, mods and savefiles there");
+            Console.WriteLine("  --no-update-check      do not look for a new version of this client");
             return 0;
     }
 }
 
+// Before anything opens a file: the data folder is where every one of them lives.
+if (dataDir is not null) AppPaths.Use(dataDir);
+AppPaths.EnsureRoot();
+
+// Once, on the first start that finds an empty data folder: whatever a build that kept its files
+// beside the executable left there is copied across. The originals are never removed.
+var migration = DataFolderMigration.Run(AppPaths.Application, AppPaths.Root);
+
 var settings = Settings.Load();
+
+// Everything that would reach the network is off for a run driven by the headless flags, and for
+// one that was told not to look.
+bool updatesAllowed = !fakeServer && !fakeRpcs3 && !noUpdateCheck && exitAfter <= 0;
 
 // --pad-window forces the mode on for a smoke run without leaving it on in the settings file.
 var padWindowWas = padWindow ? settings.InputMode : (InputDisplayMode?)null;
 if (padWindow) settings.InputMode = InputDisplayMode.Window;
 
-using var state = new AppState(settings);
+using var state = new AppState(settings, updatesAllowed);
+
+if (migration.MovedAnything) state.AddToast(migration.Describe(AppPaths.Root));
+
+// Once a day, and never for a run that must not touch the network.
+state.Updates.StartupCheck();
 
 FakeQwarkServer? fake = null;
 using var scriptCts = new CancellationTokenSource();
@@ -146,7 +178,8 @@ if (exitAfter > 0)
           + $" rpcs3pine=\"{state.Rpcs3.LastPineLine ?? "(none)"}\""
         : string.Empty;
 
-    Console.WriteLine($"summary: target={target}{helper} " +
+    Console.WriteLine($"summary: version={AppVersion.Current} data=\"{AppPaths.Root}\" " +
+                      $"target={target}{helper} " +
                       $"connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
                       $"emulator={sess?.IsEmulator ?? false} nocodepatches={sess?.CodePatchesUnsupported ?? false} " +
                       $"features={state.Describe.Features.Length} planets={state.Planets.Length} " +

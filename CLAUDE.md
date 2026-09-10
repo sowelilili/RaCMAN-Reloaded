@@ -20,4 +20,6 @@ For end-to-end runs use the simulator from the sibling repo: build `../qwark` wi
 - Every control sends one request and shows the status code; never swallow a non-OK status.
 - There is no client-side session state to restore on reconnect: HELLO, SUBSCRIBE, DESCRIBE, the list ops, done.
 - Never touch ImGui from a thread other than the render thread; the network client hands results over through a queue.
+- Nothing the user makes goes beside the executable. `AppPaths.Root` is the data folder and holds all of it; the application folder is what the release ships and the updater replaces it whole. New files belong on one side or the other, deliberately.
+- No test and no headless run may reach the network. The update check is behind `UpdateService.Allowed`, which `--exit-after`, the fake-server flags and `--no-update-check` turn off, and the test run has its own data folder (`TestDataFolder`).
 - Do not commit or add attribution trailers unless asked.

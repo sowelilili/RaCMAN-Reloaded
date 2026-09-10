@@ -187,11 +187,15 @@ public sealed class Settings
     [JsonPropertyName("autosplit")]
     public AutosplitSettings Autosplit { get; set; } = new();
 
+    /// <summary>Whether this client looks for a new version of itself, and when it last did.</summary>
+    [JsonPropertyName("updates")]
+    public UpdateSettings Updates { get; set; } = new();
+
     [JsonIgnore]
     public string Path { get; private set; } = string.Empty;
 
-    public static string DefaultPath =>
-        System.IO.Path.Combine(AppContext.BaseDirectory, "racman-reloaded.settings.json");
+    /// <summary>In the data folder, which is the user's rather than the release's; see <see cref="AppPaths"/>.</summary>
+    public static string DefaultPath => AppPaths.SettingsFile;
 
     public static Settings Load(string? path = null)
     {
@@ -222,6 +226,9 @@ public sealed class Settings
         try
         {
             if (string.IsNullOrEmpty(Path)) Path = DefaultPath;
+
+            // The data folder may not exist yet: this is the first thing written into it.
+            if (System.IO.Path.GetDirectoryName(Path) is { Length: > 0 } folder) Directory.CreateDirectory(folder);
             File.WriteAllText(Path, JsonSerializer.Serialize(this, SerializerOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -231,6 +238,25 @@ public sealed class Settings
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+}
+
+/// <summary>
+/// The auto-updater's two facts. On by default: a trainer that talks to a console over a protocol
+/// with a build number is worth keeping current, and the check is one request a day. Off is
+/// honoured everywhere, including the startup check and the Settings panel's own button.
+/// </summary>
+public sealed class UpdateSettings
+{
+    [JsonPropertyName("check")]
+    public bool Check { get; set; } = true;
+
+    /// <summary>
+    /// When the last check ran, whatever it found, so an offline PC asks once a day rather than on
+    /// every start. Null until the first one; a file written by a build that had no updater loads
+    /// as null and checks at once.
+    /// </summary>
+    [JsonPropertyName("lastCheckUtc")]
+    public DateTime? LastCheckUtc { get; set; }
 }
 
 /// <summary>

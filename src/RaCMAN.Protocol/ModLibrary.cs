@@ -28,6 +28,13 @@ public sealed class LocalMod
     /// <summary>True when the mod carries a Lua "automation:" line, which qwark cannot run yet.</summary>
     public bool NeedsLua { get; init; }
 
+    /// <summary>
+    /// True when this mod came out of the library the release ships rather than out of the user's
+    /// own folder. A shipped mod is replaced whole when the client updates itself, so it is not
+    /// somewhere to keep an edit; a user mod of the same folder name is used instead of it.
+    /// </summary>
+    public bool Shipped { get; init; }
+
     public int PatchWordCount { get; init; }
 
     /// <summary>Referenced .bin files, in the order they first appear in patch.txt.</summary>
@@ -103,36 +110,66 @@ public sealed class ModLibrary
 {
     public const string ConsoleRoot = "/dev_hdd0/qwark/mods";
 
-    public ModLibrary(string rootPath)
+    public ModLibrary(string rootPath, string? shippedRootPath = null)
     {
         RootPath = rootPath;
+        ShippedRootPath = shippedRootPath;
     }
 
-    /// <summary>The local library root, holding one folder per title id.</summary>
+    /// <summary>
+    /// The user's library root, holding one folder per title id. Everything written by this class
+    /// lands here: a ZIP install, an edit, a mod pulled off a forum.
+    /// </summary>
     public string RootPath { get; }
+
+    /// <summary>
+    /// The library the release ships, read but never written, or null when there is not one. It is
+    /// replaced wholesale when the client updates itself, which is why it is separate.
+    /// </summary>
+    public string? ShippedRootPath { get; }
 
     public string TitleFolder(string titleId) => System.IO.Path.Combine(RootPath, titleId);
 
+    /// <summary>The shipped library's folder for a title, or null when there is no shipped library.</summary>
+    public string? ShippedTitleFolder(string titleId) =>
+        ShippedRootPath is null ? null : System.IO.Path.Combine(ShippedRootPath, titleId);
+
     public static string ConsoleFolder(string titleId, string dirName) => $"{ConsoleRoot}/{titleId}/{dirName}";
 
-    /// <summary>Scans mods/&lt;TITLEID&gt;/, skipping folders without a patch.txt and mods marked invisible.</summary>
+    /// <summary>
+    /// Every mod for a title, the user's and the release's together, sorted by name: folders without
+    /// a patch.txt and mods marked invisible are skipped, and a user mod is used instead of a
+    /// shipped one with the same folder name, which is how a shipped mod is edited without the next
+    /// update overwriting the edit.
+    /// </summary>
     public IReadOnlyList<LocalMod> Scan(string titleId)
     {
-        var folder = TitleFolder(titleId);
-        if (!System.IO.Directory.Exists(folder)) return Array.Empty<LocalMod>();
-
         var mods = new List<LocalMod>();
-        foreach (var dir in System.IO.Directory.EnumerateDirectories(folder))
-        {
-            var mod = Read(dir);
-            if (mod is { Visible: true }) mods.Add(mod);
-        }
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // The user's folder first, so its DirName claims the name before the shipped one is read.
+        ScanInto(TitleFolder(titleId), shipped: false, mods, seen);
+        if (ShippedTitleFolder(titleId) is { } shippedFolder) ScanInto(shippedFolder, shipped: true, mods, seen);
 
         return mods.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
+    private static void ScanInto(string folder, bool shipped, List<LocalMod> mods, HashSet<string> seen)
+    {
+        if (!System.IO.Directory.Exists(folder)) return;
+
+        foreach (var dir in System.IO.Directory.EnumerateDirectories(folder))
+        {
+            var mod = Read(dir, shipped);
+            if (mod is not { Visible: true }) continue;
+            if (!seen.Add(mod.DirName)) continue;
+
+            mods.Add(mod);
+        }
+    }
+
     /// <summary>Reads one mod folder, or null when it has no patch.txt.</summary>
-    public static LocalMod? Read(string folder)
+    public static LocalMod? Read(string folder, bool shipped = false)
     {
         var patchFile = System.IO.Path.Combine(folder, "patch.txt");
         if (!File.Exists(patchFile)) return null;
@@ -194,6 +231,7 @@ public sealed class ModLibrary
             Link = variables.TryGetValue("href", out var href) ? href : string.Empty,
             Visible = !variables.TryGetValue("visible", out var visible) || !visible.Equals("false", StringComparison.OrdinalIgnoreCase),
             NeedsLua = needsLua,
+            Shipped = shipped,
             PatchWordCount = words,
             BinFiles = bins,
             Variables = variables,
@@ -307,7 +345,12 @@ public sealed class ModLibrary
                 throw new InvalidDataException("Invalid or corrupt mod: no folder in the ZIP contains a patch.txt.");
             }
 
-            var installed = Read(System.IO.Path.Combine(TitleFolder(titleId), mod.DirName));
+            // What this ZIP would replace: the user's copy if there is one, else the shipped mod of
+            // that folder name, since the install lands in front of it either way.
+            var installed = Read(System.IO.Path.Combine(TitleFolder(titleId), mod.DirName))
+                            ?? (ShippedTitleFolder(titleId) is { } shipped
+                                ? Read(System.IO.Path.Combine(shipped, mod.DirName), shipped: true)
+                                : null);
             var kind = ZipInstallKind.New;
             if (installed is not null)
             {
