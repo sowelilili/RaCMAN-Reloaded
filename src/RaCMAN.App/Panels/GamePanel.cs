@@ -324,7 +324,7 @@ public static class GamePanel
     {
         ImGui.TableNextRow();
         ImGui.TableNextColumn();
-        ImGui.TextUnformatted(feature.Label);
+        Ui.TableLabel(feature.Label);
         ImGui.TableNextColumn();
         DrawValueEditor(state, describe, feature);
     }
@@ -335,13 +335,12 @@ public static class GamePanel
         // rather than the bits: -1 on a halfword, not 65535 (revision 1.7).
         long live = feature.SignExtend(CurrentValue(state, feature));
 
-        // The field sits in a table row, so let the row show through it. Hovered and active keep the
-        // theme's own colours, which is what makes the field light up when you reach for it.
+        // The field sits in a table row, so it is drawn the way every boxed table cell is.
         ImGui.SetNextItemWidth(-1);
         ImGui.PushID(feature.Id);
-        ImGui.PushStyleColor(ImGuiCol.FrameBg, Vector4.Zero);
+        Ui.PushTableInput();
         bool sent = Ui.NumberOnEnter("##v", live, Drafts, feature.Id, out long typed);
-        ImGui.PopStyleColor();
+        Ui.PopTableInput();
         ImGui.PopID();
 
         if (feature.HasRange && ImGui.IsItemHovered())

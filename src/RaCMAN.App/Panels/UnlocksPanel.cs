@@ -250,18 +250,20 @@ public static class UnlocksPanel
             ImGui.TableNextRow();
             ImGui.PushID(unlock.Id);
 
+            // The rows are a checkbox or a value box high, so the text columns are put on the same
+            // line as the controls beside them rather than at the top of the row.
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(unlock.Id.ToString());
+            Ui.TableLabel(unlock.Id.ToString());
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(unlock.Name);
+            Ui.TableLabel(unlock.Name);
 
             foreach (int slot in present)
             {
                 ImGui.TableNextColumn();
                 if (!unlock.HasField(slot))
                 {
-                    ImGui.TextColored(Ui.Grey, "-");
+                    Ui.TableLabel(Ui.Grey, "-");
                     continue;
                 }
 
@@ -290,10 +292,10 @@ public static class UnlocksPanel
     private static void DrawNumberCell(AppState state, Unlock unlock, int field, UnlockField descriptor)
     {
         ImGui.SetNextItemWidth(-1);
-        if (!Ui.NumberOnEnter($"##field{field}", unlock.Values[field], Drafts, (unlock.Id, field), out long typed))
-        {
-            return;
-        }
+        Ui.PushTableInput();
+        bool sent = Ui.NumberOnEnter($"##field{field}", unlock.Values[field], Drafts, (unlock.Id, field), out long typed);
+        Ui.PopTableInput();
+        if (!sent) return;
 
         long ceiling = descriptor.Ceiling ?? uint.MaxValue;
         Send(state, unlock.Id, field, (uint)Math.Clamp(typed, 0, ceiling));

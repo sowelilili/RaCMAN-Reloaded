@@ -389,6 +389,20 @@ public class AutosplitterTests
     private static readonly AutosplitEventDesc FlatLoad = new(
         6, AutosplitKind.LoadStart, AutosplitEventFlags.Flat, 1_000_000, "Long load");
 
+    // ---------------------------------------------------------------- what the panel offers
+
+    [Fact]
+    public void OnlyAGameThatReportsAPausePairGetsThePauseSwitch()
+    {
+        // Deadlocked's table: the quit to the XMB is the one thing in any of the four games that
+        // stops the clock, so it is the only one the panel has a Pause box for.
+        Assert.True(AutosplitterPanel.HasPause(new[] { PlanetEntered, VoxDefeated, NormalisedPause }));
+
+        // RaC1, RaC2 and UYA report splits and loads and nothing else.
+        Assert.False(AutosplitterPanel.HasPause(new[] { PlanetEntered, FlatBoss, NormalisedLoad }));
+        Assert.False(AutosplitterPanel.HasPause(Array.Empty<AutosplitEventDesc>()));
+    }
+
     private static async Task<bool> WaitFor(Func<bool> condition, int timeoutMs = 5000)
     {
         var sw = Stopwatch.StartNew();

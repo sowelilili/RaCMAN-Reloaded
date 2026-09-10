@@ -136,7 +136,7 @@ public static class AutosplitterPanel
             DrawSplitOptions(game, options, settings, descriptors);
 
             ImGui.TableNextColumn();
-            DrawMasters(options, settings);
+            DrawMasters(options, settings, descriptors);
 
             ImGui.EndTable();
         }
@@ -219,10 +219,28 @@ public static class AutosplitterPanel
     }
 
     /// <summary>
-    /// The right column: what each kind of event is allowed to do to the timer. Four plain
-    /// checkboxes under one label, because "Start" beside "Timer control" already says it.
+    /// True when the running game reports a pause pair. Only Deadlocked's quit to the XMB does:
+    /// RaC1, RaC2 and UYA have nothing that stops the clock, so there is no pause for a switch to
+    /// gate. The setting behind the switch is untouched either way, so a game that has one keeps
+    /// what the user chose for it.
     /// </summary>
-    private static void DrawMasters(AutosplitGameSettings options, Settings settings)
+    public static bool HasPause(IReadOnlyList<AutosplitEventDesc> descriptors)
+    {
+        for (int i = 0; i < descriptors.Count; i++)
+        {
+            if (descriptors[i].Kind == AutosplitKind.Pause) return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The right column: what each kind of event is allowed to do to the timer. Plain checkboxes
+    /// under one label, because "Start" beside "Timer control" already says it. Pause is only there
+    /// for a game that reports one; the other three every game can do.
+    /// </summary>
+    private static void DrawMasters(
+        AutosplitGameSettings options, Settings settings, IReadOnlyList<AutosplitEventDesc> descriptors)
     {
         ImGui.TextUnformatted("Timer control");
 
@@ -246,6 +264,8 @@ public static class AutosplitterPanel
             options.Reset = reset;
             settings.Save();
         }
+
+        if (!HasPause(descriptors)) return;
 
         bool pause = options.Pause;
         if (ImGui.Checkbox("Pause", ref pause))

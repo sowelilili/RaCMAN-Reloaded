@@ -107,6 +107,40 @@ public static class Ui
         ImGui.PopStyleColor();
     }
 
+    // ---------------------------------------------------------------- inputs inside tables
+
+    /// <summary>
+    /// The frame colours for a box drawn in a table cell: the field's own background goes away, so
+    /// the row shows through it and the cell reads as part of that row rather than as a patch of a
+    /// different grey. Hovered and active keep the theme's own colours, which is what makes the
+    /// field light up when you reach for it. Always paired with <see cref="PopTableInput"/>.
+    /// <para>
+    /// Only for the boxes that are typed into. A checkbox is nothing but its frame, so one drawn
+    /// this way would be invisible until it was ticked.
+    /// </para>
+    /// </summary>
+    public static void PushTableInput() => ImGui.PushStyleColor(ImGuiCol.FrameBg, Vector4.Zero);
+
+    public static void PopTableInput() => ImGui.PopStyleColor();
+
+    /// <summary>
+    /// A label in a row whose other cells hold a box or a checkbox. Text is drawn at the top of a
+    /// row otherwise, so the name sits high beside the field it belongs to; this puts it on the
+    /// field's own line.
+    /// </summary>
+    public static void TableLabel(string text)
+    {
+        ImGui.AlignTextToFramePadding();
+        ImGui.TextUnformatted(text);
+    }
+
+    /// <summary>The same for the coloured readings the tables put beside their boxes.</summary>
+    public static void TableLabel(Vector4 colour, string text)
+    {
+        ImGui.AlignTextToFramePadding();
+        Text(colour, text);
+    }
+
     private static void Wrapped(Vector4 colour, string text)
     {
         ImGui.PushStyleColor(ImGuiCol.Text, colour);
