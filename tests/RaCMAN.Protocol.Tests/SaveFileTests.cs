@@ -460,6 +460,27 @@ public class SaveFileTests : IDisposable
         Assert.Equal(expected, SaveFileLibrary.EnsureExtension(typed));
     }
 
+    [Theory]
+    [InlineData("veldin.sav", "veldin")]
+    [InlineData("veldin.SAV", "veldin")]
+    [InlineData("start of veldin.sav", "start of veldin")]
+    [InlineData("veldin.100.sav", "veldin.100")]
+    [InlineData("veldin", "veldin")]
+    [InlineData(".sav", ".sav")]
+    [InlineData("", "")]
+    [InlineData(null, "")]
+    public void TheListingDropsTheSuffixEveryFileInTheLibraryHas(string? file, string expected)
+    {
+        Assert.Equal(expected, SaveFileLibrary.DisplayName(file));
+
+        // And what is shown goes back to the file it came from, which is what rename works on.
+        if (file is not null && file.EndsWith(SaveFileLibrary.Extension, StringComparison.OrdinalIgnoreCase))
+        {
+            Assert.Equal(file.ToLowerInvariant(),
+                SaveFileLibrary.EnsureExtension(SaveFileLibrary.DisplayName(file)).ToLowerInvariant());
+        }
+    }
+
     [Fact]
     public void ATitleWithNoFoldersOffersTheDefaultCategory()
     {

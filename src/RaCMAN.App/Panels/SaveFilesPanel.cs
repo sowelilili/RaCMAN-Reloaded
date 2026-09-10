@@ -192,10 +192,13 @@ public static class SaveFilesPanel
         {
             for (int i = 0; i < _files.Length; i++)
             {
-                if (!ImGui.Selectable(_files[i], _fileIndex == i)) continue;
+                // The row shows the name without the .sav every file in here ends in; the id after
+                // the ## is the file itself, so two files that only differ by their suffix are
+                // still two rows to ImGui.
+                if (!ImGui.Selectable($"{SaveFileLibrary.DisplayName(_files[i])}##{_files[i]}", _fileIndex == i)) continue;
 
                 _fileIndex = i;
-                _renameTo = _files[i];
+                _renameTo = SaveFileLibrary.DisplayName(_files[i]);
                 _confirmDelete = false;
             }
         }
@@ -227,8 +230,12 @@ public static class SaveFilesPanel
         {
             try
             {
-                state.SaveFiles.Rename(title, Category, SelectedFile!, _renameTo);
-                state.AddToast($"Renamed to {SaveFileLibrary.Sanitise(_renameTo, "savefile")}", ToastKind.Success);
+                // The box holds a name without a suffix, the library takes whole file names: the
+                // .sav goes back on here so the file on disk keeps it.
+                string renamed = SaveFileLibrary.EnsureExtension(_renameTo);
+                state.SaveFiles.Rename(title, Category, SelectedFile!, renamed);
+                state.AddToast($"Renamed to {SaveFileLibrary.DisplayName(SaveFileLibrary.Sanitise(renamed, "savefile"))}",
+                    ToastKind.Success);
                 RescanFiles(state, title);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -241,7 +248,7 @@ public static class SaveFilesPanel
         if (_confirmDelete)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
-            if (ImGui.Button($"Delete '{SelectedFile}'?"))
+            if (ImGui.Button($"Delete '{SaveFileLibrary.DisplayName(SelectedFile)}'?"))
             {
                 _confirmDelete = false;
                 try
@@ -314,7 +321,7 @@ public static class SaveFilesPanel
             {
                 state.Post(() => _busy = false);
             }
-        }, $"Saved '{SaveFileLibrary.Sanitise(name, "savefile")}'");
+        }, $"Saved '{SaveFileLibrary.DisplayName(SaveFileLibrary.Sanitise(name, "savefile"))}'");
     }
 
     private static void StartLoad(AppState state, string title, byte loadActionId)
@@ -323,9 +330,11 @@ public static class SaveFilesPanel
         string file = SelectedFile!;
         var library = state.SaveFiles;
 
+        string shown = SaveFileLibrary.DisplayName(file);
+
         _busy = true;
         _transferred = 0;
-        _status = $"Uploading {file}...";
+        _status = $"Uploading {shown}...";
 
         var status = new Progress<string>(text => state.Post(() => _status = text));
         var bytes = new Progress<long>(count => state.Post(() => _transferred = count));
@@ -352,7 +361,7 @@ public static class SaveFilesPanel
             {
                 state.Post(() => _busy = false);
             }
-        }, $"Loaded '{file}' onto the console");
+        }, $"Loaded '{shown}' onto the console");
     }
 
     private static void Rescan(AppState state, string title)

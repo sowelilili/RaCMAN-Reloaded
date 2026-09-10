@@ -27,6 +27,21 @@ public sealed class SaveFileLibrary
             : trimmed + Extension;
     }
 
+    /// <summary>
+    /// The other direction: what a saved file is called on screen. Every file in a category is a
+    /// savefile and so every one of them ends in <see cref="Extension"/>, which makes the suffix
+    /// four characters of noise on every row. Only the suffix goes: a name with dots of its own
+    /// keeps them, and a file that somehow has no suffix is shown as it is.
+    /// </summary>
+    public static string DisplayName(string? fileName)
+    {
+        var trimmed = (fileName ?? string.Empty).Trim();
+        return trimmed.Length > Extension.Length
+               && trimmed.EndsWith(Extension, StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^Extension.Length]
+            : trimmed;
+    }
+
     public SaveFileLibrary(string rootPath)
     {
         RootPath = rootPath;
