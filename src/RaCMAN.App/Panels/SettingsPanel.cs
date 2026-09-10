@@ -36,6 +36,14 @@ public static class SettingsPanel
         ImGui.SameLine();
         if (ImGui.RadioButton("Dark", !light) && light) SetTheme(state, "dark");
 
+        // Second, because it is the one thing on this panel that is done once, on the first run,
+        // and never looked at again: it belongs where somebody arriving from the old RaCMAN will
+        // see it rather than below the settings they have come to change.
+        ImGui.Spacing();
+        ImGui.Separator();
+        Ui.Heading("Import from RaCMAN");
+        DrawImport(state);
+
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Polling");
@@ -93,11 +101,6 @@ public static class SettingsPanel
         ImGui.Separator();
         Ui.Heading("Updates");
         DrawUpdates(state);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Import from RaCMAN");
-        DrawImport(state);
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -178,6 +181,9 @@ public static class SettingsPanel
     /// what is in the data folder is the user's and survives an update, and what is beside the
     /// executable is the release's and does not.
     /// </summary>
+    /// <summary>The gap between the longest label and the column the buttons share.</summary>
+    private const float FolderButtonGap = 16f;
+
     private static void DrawFiles(AppState state, Settings settings)
     {
         Ui.Hint("Everything you make or install lives in the data folder. The application folder holds what "
@@ -186,17 +192,37 @@ public static class SettingsPanel
         ImGui.Spacing();
 
         string settingsFile = string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path;
-        Folder(state, "Data folder", AppPaths.Root);
-        Folder(state, "Settings file", FolderOf(settingsFile), settingsFile);
-        Folder(state, "Mods you installed", state.Mods.RootPath);
-        Folder(state, "Save files", state.SaveFiles.RootPath);
-        Folder(state, "Colour presets", state.ColourPresets.Folder);
-        Folder(state, "Watchlists", state.Watchlists.Folder);
+
+        // The labels are one column and the buttons another, at a single offset measured from the
+        // longest label of the lot: a button per row at the end of its own label would leave the
+        // section a ragged edge of nine Open folder buttons, and there is nothing to read down.
+        var rows = new List<(string Label, string Folder, string? Tooltip)>
+        {
+            ("Data folder", AppPaths.Root, null),
+            ("Settings file", FolderOf(settingsFile), settingsFile),
+            ("Mods you installed", state.Mods.RootPath, null),
+            ("Save files", state.SaveFiles.RootPath, null),
+            ("Colour presets", state.ColourPresets.Folder, null),
+            ("Watchlists", state.Watchlists.Folder, null),
+        };
+
+        // The release's own files, kept apart because the difference is the point of the section.
+        var shippedRows = new List<(string Label, string Folder, string? Tooltip)>
+        {
+            ("Application folder (replaced on update)", AppPaths.Application, null),
+        };
+
+        if (state.Mods.ShippedRootPath is { } shipped) shippedRows.Add(("Mods that ship with it", shipped, null));
+
+        float column = 0;
+        foreach (var row in rows.Concat(shippedRows)) column = Math.Max(column, ImGui.CalcTextSize(row.Label).X);
+        column += FolderButtonGap;
+
+        foreach (var row in rows) Folder(state, row.Label, row.Folder, column, row.Tooltip);
 
         ImGui.Spacing();
 
-        Folder(state, "Application folder (replaced on update)", AppPaths.Application);
-        if (state.Mods.ShippedRootPath is { } shipped) Folder(state, "Mods that ship with it", shipped);
+        foreach (var row in shippedRows) Folder(state, row.Label, row.Folder, column, row.Tooltip);
     }
 
     // ---------------------------------------------------------------- ports
@@ -520,12 +546,14 @@ public static class SettingsPanel
 
     /// <summary>
     /// One of this client's own places on disk: what it is, and a button that opens it. The path
-    /// is on the button's tooltip, where a file has room to be named in full.
+    /// is on the button's tooltip, where a file has room to be named in full. The button goes at
+    /// <paramref name="column"/>, an offset from the start of the panel's content, so every row in
+    /// the section puts its button in the same place.
     /// </summary>
-    private static void Folder(AppState state, string label, string folder, string? tooltip = null)
+    private static void Folder(AppState state, string label, string folder, float column, string? tooltip = null)
     {
         ImGui.TextUnformatted(label);
-        ImGui.SameLine();
+        ImGui.SameLine(column);
         Ui.OpenFolderButton(state, folder, tooltip);
     }
 

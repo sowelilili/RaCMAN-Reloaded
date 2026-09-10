@@ -57,8 +57,7 @@ public static class ConnectionPanel
             {
                 state.Settings.LastHost = _host;
                 state.Settings.Save();
-                string host = _host.Trim();
-                state.Run(() => state.Client.ConnectAsync(host));
+                ConnectToPs3(state, _host);
             }
         }
 
@@ -110,54 +109,52 @@ public static class ConnectionPanel
             return;
         }
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Load qwark through webMAN");
-
-        // Two buttons is the whole of this for anybody who is not developing qwark: the SPRX ships
-        // beside the client and the slot is a number nobody has a reason to move. What the load
-        // does, which file it sends and which slot it goes into are details, so they only appear
-        // with debug information on, and the load itself names the path when the SPRX is missing.
-        if (Ui.Debug)
-        {
-            Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot.");
-
-            ImGui.SetNextItemWidth(360);
-            ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
-        }
-        else
+        // Nothing here for anybody who is not developing qwark: Connect does the whole of it by
+        // itself, asking webMAN and loading the module only when nothing answers on qwark's port.
+        // The buttons that do the two halves by hand, the file they send and the slot it goes into
+        // are all detail, so the section only exists with debug information on.
+        if (!Ui.Debug)
         {
             // The boxes that edit these two are hidden, so the stored values are the only ones
             // there are; taking them here also picks up an import that landed after this panel was
             // first drawn.
             _sprxPath = state.Settings.SprxPath;
             _slot = state.Settings.WebManSlot;
+
+            DrawConsoleSection(state);
+            return;
         }
+
+        ImGui.Spacing();
+        ImGui.Separator();
+        Ui.Heading("Load qwark through webMAN");
+
+        Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot. "
+                + "Connect does this on its own when nothing answers on qwark's port.");
+
+        ImGui.SetNextItemWidth(360);
+        ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
 
         // The default is qwark.sprx beside the executable, which is where the release layout puts it.
         string sprx = ResolveSprx(_sprxPath);
 
-        if (Ui.Debug)
-        {
-            // The resolved path is absolute and long, so both spellings of this line wrap.
-            if (File.Exists(sprx)) Ui.Hint(sprx);
-            else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
+        // The resolved path is absolute and long, so both spellings of this line wrap.
+        if (File.Exists(sprx)) Ui.Hint(sprx);
+        else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
 
-            ImGui.SetNextItemWidth(120);
-            if (ImGui.InputInt("VSH slot", ref _slot))
-            {
-                _slot = Math.Clamp(_slot, 0, 7);
-            }
+        ImGui.SetNextItemWidth(120);
+        if (ImGui.InputInt("VSH slot", ref _slot))
+        {
+            _slot = Math.Clamp(_slot, 0, 7);
         }
 
         if (ImGui.Button("Load qwark via webMAN"))
         {
             if (!File.Exists(sprx))
             {
-                // With the path box hidden this is the only place the path is named, and "it did
-                // not work" without a path is nothing anybody can act on.
-                state.AddToast($"No qwark.sprx at {sprx}. Build ../qwark, or turn on \"Show debug information\" "
-                               + "in Settings to point this at the SPRX.", ToastKind.Error);
+                // "It did not work" without a path is nothing anybody can act on.
+                state.AddToast($"No qwark.sprx at {sprx}. Build ../qwark, or point the box above at the SPRX.",
+                    ToastKind.Error);
             }
             else
             {
@@ -184,33 +181,68 @@ public static class ConnectionPanel
         }
 
         // A boot install is a change to how the console starts, and a bad one needs a recovery to
-        // undo, so it stays with the rest of the detail rather than sitting under the two buttons.
-        if (Ui.Debug)
+        // undo, so it keeps its own paragraph rather than sitting under the two buttons.
+        ImGui.Spacing();
+        Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
+        ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
+        ImGui.BeginDisabled(!_confirmBootInstall);
+        if (ImGui.Button("Install to boot_plugins.txt"))
         {
-            ImGui.Spacing();
-            Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
-            ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
-            ImGui.BeginDisabled(!_confirmBootInstall);
-            if (ImGui.Button("Install to boot_plugins.txt"))
-            {
-                string ip = _host.Trim();
-                string path = sprx;
-                state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                    changed => state.AddToast(changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it"));
-            }
-
-            ImGui.SameLine();
-            if (ImGui.Button("Remove from boot_plugins.txt"))
-            {
-                string ip = _host.Trim();
-                state.Run(() => state.WebMan.RemoveFromBootAsync(ip, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                    changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt did not list it"));
-            }
-
-            ImGui.EndDisabled();
+            string ip = _host.Trim();
+            string path = sprx;
+            state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
+                changed => state.AddToast(changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it"));
         }
 
+        ImGui.SameLine();
+        if (ImGui.Button("Remove from boot_plugins.txt"))
+        {
+            string ip = _host.Trim();
+            state.Run(() => state.WebMan.RemoveFromBootAsync(ip, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
+                changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt did not list it"));
+        }
+
+        ImGui.EndDisabled();
+
         DrawConsoleSection(state);
+    }
+
+    /// <summary>
+    /// The PS3 Connect button, and the same thing on start: qwark's own port first, and only when
+    /// nothing answers there the way round through webMAN. Every step says what it is doing, and a
+    /// failure names the step it stopped at, because "could not connect" covers four different
+    /// things here. What the load needs, the SPRX and the VSH slot, comes from the settings, which
+    /// is where the debug-only boxes on this panel put it.
+    /// </summary>
+    public static void ConnectToPs3(AppState state, string host)
+    {
+        string ip = host.Trim();
+        string sprx = ResolveSprx(state.Settings.SprxPath);
+        int slot = state.Settings.WebManSlot;
+
+        state.Run(async () =>
+        {
+            var outcome = await Ps3Connect.RunAsync(
+                ip,
+                connect: () => state.Connected ? Task.CompletedTask : state.Client.ConnectAsync(ip),
+                isLoaded: () => state.WebMan.IsLoadedAsync(ip),
+                load: () => File.Exists(sprx)
+                    ? state.WebMan.LoadAsync(ip, sprx, slot,
+                        new Progress<string>(message => state.Post(() => state.AddToast(message))))
+                    : throw new FileNotFoundException(
+                        $"no {WebManLoader.SprxName} at {sprx}; build ../qwark, or turn on \"Show debug "
+                        + "information\" in Settings to point this at the SPRX", sprx),
+                wait: delay => Task.Delay(delay),
+                say: (_, message) => state.Post(() => state.AddToast(message)));
+
+            state.Post(() =>
+            {
+                // A failure always says which step it was. A success only does when the sequence
+                // went the long way round, because the status line above says the short way did.
+                if (!outcome.Connected) state.AddToast(outcome.Message, ToastKind.Error);
+                else if (outcome.Step != Ps3ConnectStep.Connect) state.AddToast(outcome.Message, ToastKind.Success);
+            });
+        });
     }
 
     /// <summary>

@@ -119,7 +119,11 @@ if (fakeServer)
 else if (connectTo is not null)
 {
     settings.LastHost = connectTo;
-    state.Run(() => state.Client.ConnectAsync(connectTo));
+
+    // Exactly what the Connect button does: against a console that means qwark first and webMAN
+    // only if nothing answers, and against the RPCS3 helper there is nothing to load.
+    if (settings.Rpcs3Target) state.Run(() => state.Client.ConnectAsync(connectTo));
+    else ConnectionPanel.ConnectToPs3(state, connectTo);
 }
 else if (settings.Rpcs3Target)
 {

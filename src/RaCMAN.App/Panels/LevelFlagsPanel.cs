@@ -188,8 +188,9 @@ public static class LevelFlagsPanel
             ImGui.TableNextRow();
             ImGui.PushID(index);
 
+            // A row is a checkbox high, so the offset and the hex value sit on the checkboxes' line.
             ImGui.TableNextColumn();
-            ImGui.TextColored(Ui.Grey, $"0x{index:X4}");
+            Ui.TableLabel(Ui.Grey, $"0x{index:X4}");
 
             for (int bit = 7; bit >= 0; bit--)
             {
@@ -203,8 +204,8 @@ public static class LevelFlagsPanel
             }
 
             ImGui.TableNextColumn();
-            if (value != 0) ImGui.TextColored(Ui.Green, $"{value:X2}");
-            else ImGui.TextUnformatted($"{value:X2}");
+            if (value != 0) Ui.TableLabel(Ui.Green, $"{value:X2}");
+            else Ui.TableLabel($"{value:X2}");
 
             ImGui.PopID();
         }
