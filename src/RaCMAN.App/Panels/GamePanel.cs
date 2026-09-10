@@ -191,7 +191,7 @@ public static class GamePanel
             if (topValues.Any(f => f.Kind == FeatureKind.Value) || options.Count > 0)
             {
                 ImGui.PushID(GameLayout.ValuesSection);
-                if (ImGui.CollapsingHeader(GameLayout.ValuesSection, ImGuiTreeNodeFlags.DefaultOpen))
+                if (SectionHeader(state, GameLayout.ValuesSection))
                 {
                     DrawTopArea(state, describe, topValues, options);
                     ImGui.Spacing();
@@ -208,7 +208,7 @@ public static class GamePanel
                 if (!sections.TryGetValue(section, out var features) || features.Count == 0) continue;
 
                 ImGui.PushID(section);
-                if (ImGui.CollapsingHeader(section, ImGuiTreeNodeFlags.DefaultOpen))
+                if (SectionHeader(state, section))
                 {
                     DrawSectionBody(state, describe, features, section);
                     ImGui.Spacing();
@@ -220,6 +220,29 @@ public static class GamePanel
         }
 
         ImGui.EndDisabled();
+    }
+
+    /// <summary>
+    /// One section's collapsing header, open unless this game's settings say it was folded away.
+    /// Which sections are open is the user's rather than the layout's, so the state is pushed in
+    /// every frame instead of being left to DefaultOpen, and the click that changed it is written
+    /// back at once: the settings file is the only place it lives.
+    /// </summary>
+    private static bool SectionHeader(AppState state, string section)
+    {
+        var settings = state.Settings;
+        var game = state.DescribedGame;
+
+        bool was = settings.SectionOpen(game, section);
+        ImGui.SetNextItemOpen(was);
+
+        bool open = ImGui.CollapsingHeader(section);
+        if (open == was) return open;
+
+        settings.SetSectionOpen(game, section, open);
+        settings.Save();
+
+        return open;
     }
 
     /// <summary>

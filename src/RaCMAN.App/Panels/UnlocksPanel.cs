@@ -9,6 +9,8 @@ namespace RaCMAN.App.Panels;
 /// game describes and at least one entry in the tab declares. The console names the slots and says
 /// whether each is a flag or a number (revision 1.3), so the panel no longer assumes RaC1's
 /// Owned/Gold/Level/Ammo for every game. Every edit is one UNLOCK_SET; the list is then re-read.
+/// The name takes half the table and the value columns share the rest, so a game with four of them
+/// still shows the names; the id the requests are keyed by has no column of its own.
 ///
 /// Above the tabs sit the features the layout moved to <see cref="GameLayout.UnlocksSection"/>:
 /// console-side actions that rewrite the whole table (UYA's weapon-level pair), which belong with
@@ -21,10 +23,11 @@ namespace RaCMAN.App.Panels;
 /// </summary>
 public static class UnlocksPanel
 {
-    /// <summary>How wide the search box is, and how wide a flag and a number column are.</summary>
+    /// <summary>How wide the search box is.</summary>
     private const float SearchWidth = 200f;
-    private const float FlagColumnWidth = 70f;
-    private const float NumberColumnWidth = 110f;
+
+    /// <summary>How much of the table the name column takes, whatever else the game describes.</summary>
+    private const float NameWeight = 0.5f;
 
     private static bool _opened;
     private static float _sinceRefresh;
@@ -191,6 +194,23 @@ public static class UnlocksPanel
         ImGui.Spacing();
     }
 
+    /// <summary>
+    /// The table's stretch weights, the name column first. The name takes half the table and the
+    /// value columns share the other half evenly, because a fixed width per value column left UYA's
+    /// four (Owned, Level, XP, Ammo) crowding the names off the left-hand side of the window.
+    /// Proportions also mean the columns grow with the window rather than leaving it empty.
+    /// </summary>
+    public static float[] ColumnWeights(int valueColumns)
+    {
+        if (valueColumns <= 0) return new[] { 1f };
+
+        var weights = new float[valueColumns + 1];
+        weights[0] = NameWeight;
+        for (int i = 1; i < weights.Length; i++) weights[i] = (1f - NameWeight) / valueColumns;
+
+        return weights;
+    }
+
     private static void DrawCategory(AppState state, UnlockList list, Unlock[] rows, bool enabled)
     {
         // The filter is what the bulk buttons act on, so it is applied before they are drawn.
@@ -226,21 +246,18 @@ public static class UnlocksPanel
             .Where(slot => list.FieldAt(slot).IsNamed && rows.Any(r => r.HasField(slot)))
             .ToArray();
 
-        int columns = 2 + present.Length;
+        var weights = ColumnWeights(present.Length);
 
-        if (!ImGui.BeginTable("unlocks", columns,
+        if (!ImGui.BeginTable("unlocks", weights.Length,
                 ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
 
-        ImGui.TableSetupColumn("Id", ImGuiTableColumnFlags.WidthFixed, 36);
-        ImGui.TableSetupColumn("Name");
-        foreach (int slot in present)
+        ImGui.TableSetupColumn("Name", ImGuiTableColumnFlags.WidthStretch, weights[0]);
+        for (int i = 0; i < present.Length; i++)
         {
-            var field = list.FieldAt(slot);
-            float width = field.Kind == UnlockFieldKind.Flag ? FlagColumnWidth : NumberColumnWidth;
-            ImGui.TableSetupColumn(field.Name, ImGuiTableColumnFlags.WidthFixed, width);
+            ImGui.TableSetupColumn(list.FieldAt(present[i]).Name, ImGuiTableColumnFlags.WidthStretch, weights[i + 1]);
         }
 
         ImGui.TableHeadersRow();
@@ -253,10 +270,12 @@ public static class UnlocksPanel
             // The rows are a checkbox or a value box high, so the text columns are put on the same
             // line as the controls beside them rather than at the top of the row.
             ImGui.TableNextColumn();
-            Ui.TableLabel(unlock.Id.ToString());
-
-            ImGui.TableNextColumn();
             Ui.TableLabel(unlock.Name);
+
+            // The id is still what every UNLOCK_SET carries; it is only the column that is gone,
+            // because the names needed the width more. It is on the name's tooltip for anyone
+            // reading the wire, which is what the debug switch is for.
+            if (Ui.Debug && ImGui.IsItemHovered()) ImGui.SetTooltip($"id {unlock.Id}");
 
             foreach (int slot in present)
             {

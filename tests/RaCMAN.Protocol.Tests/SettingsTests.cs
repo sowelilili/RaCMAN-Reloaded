@@ -469,6 +469,171 @@ public class SettingsTests
         }
     }
 
+    // ---------------------------------------------------------------- the window
+
+    [Fact]
+    public void AFreshFileRemembersNoWindowAtAll()
+    {
+        var settings = new Settings();
+
+        Assert.Null(settings.WindowWidth);
+        Assert.Null(settings.WindowHeight);
+        Assert.Null(settings.WindowX);
+        Assert.Null(settings.WindowY);
+        Assert.Empty(settings.GameSections);
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripTheWindowSizeAndCorner()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.WindowWidth = 1180;
+            saved.WindowHeight = 742;
+            saved.WindowX = -1720;
+            saved.WindowY = 240;
+            saved.Save();
+
+            string written = File.ReadAllText(path);
+            Assert.Contains("\"windowWidth\"", written);
+            Assert.Contains("\"windowHeight\"", written);
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal(1180, loaded.WindowWidth);
+            Assert.Equal(742, loaded.WindowHeight);
+            Assert.Equal(-1720, loaded.WindowX);
+            Assert.Equal(240, loaded.WindowY);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>Every settings file written before this build is one of these.</summary>
+    [Fact]
+    public void AFileFromBeforeTheWindowWasRememberedOpensAtTheDefault()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "old.settings.json");
+            File.WriteAllText(path, """{ "lastHost": "192.168.1.50", "theme": "dark" }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.Null(loaded.WindowWidth);
+            Assert.Null(loaded.WindowHeight);
+            Assert.Null(loaded.WindowX);
+            Assert.Null(loaded.WindowY);
+            Assert.Empty(loaded.GameSections);
+
+            // Which is the default window, whatever the desktop looks like.
+            var (width, height, x, y) = WindowGeometry.Restore(
+                loaded.WindowWidth, loaded.WindowHeight, loaded.WindowX, loaded.WindowY,
+                new[] { new WindowGeometry.Area(0, 0, 1920, 1040) });
+
+            Assert.Equal(WindowGeometry.DefaultWidth, width);
+            Assert.Equal(WindowGeometry.DefaultHeight, height);
+            Assert.Null(x);
+            Assert.Null(y);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    // ---------------------------------------------------------------- the Game page's sections
+
+    [Fact]
+    public void ASectionNobodyHasTouchedIsOpen()
+    {
+        var settings = new Settings();
+
+        Assert.True(settings.SectionOpen(GameId.Rac3, "Cheats"));
+
+        settings.SetSectionOpen(GameId.Rac3, "Cheats", false);
+
+        Assert.False(settings.SectionOpen(GameId.Rac3, "Cheats"));
+        Assert.True(settings.SectionOpen(GameId.Rac3, "Player"));
+
+        // Another game's page is another page: closing one says nothing about the other.
+        Assert.True(settings.SectionOpen(GameId.Rac2, "Cheats"));
+    }
+
+    /// <summary>There is no Game page without a game, so there is nothing to remember for one.</summary>
+    [Fact]
+    public void AGameThatIsNotAGameKeepsNothing()
+    {
+        var settings = new Settings();
+
+        settings.SetSectionOpen(GameId.None, "Cheats", false);
+
+        Assert.Empty(settings.GameSections);
+        Assert.True(settings.SectionOpen(GameId.None, "Cheats"));
+    }
+
+    /// <summary>The map is hand-editable, so a game or a section typed in another case still matches.</summary>
+    [Fact]
+    public void AHandEditedSectionMapIsReadWhateverCaseItIsIn()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "hand-edited.settings.json");
+            File.WriteAllText(path, """{ "gameSections": { "RAC3": { "cheats": false } } }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.False(loaded.SectionOpen(GameId.Rac3, "Cheats"));
+
+            // And a second thought about it replaces the row rather than adding a second spelling.
+            loaded.SetSectionOpen(GameId.Rac3, "Cheats", true);
+
+            Assert.True(loaded.SectionOpen(GameId.Rac3, "Cheats"));
+            Assert.Single(loaded.GameSections);
+            Assert.Single(loaded.GameSections["RAC3"]);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripWhichSectionsWereFoldedAway()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.SetSectionOpen(GameId.Rac3, "Cheats", false);
+            saved.SetSectionOpen(GameId.Rac3, "Values", true);
+            saved.SetSectionOpen(GameId.Rac1, "Cheats", false);
+            saved.Save();
+
+            Assert.Contains("\"gameSections\"", File.ReadAllText(path));
+            Assert.Contains("\"rac3\"", File.ReadAllText(path));
+
+            var loaded = Settings.Load(path);
+
+            Assert.False(loaded.SectionOpen(GameId.Rac3, "Cheats"));
+            Assert.True(loaded.SectionOpen(GameId.Rac3, "Values"));
+            Assert.False(loaded.SectionOpen(GameId.Rac1, "Cheats"));
+            Assert.True(loaded.SectionOpen(GameId.Rac4, "Cheats"));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     private static string TempFolder()
     {
         var folder = Path.Combine(Path.GetTempPath(), "racman-settings-" + Guid.NewGuid().ToString("N"));

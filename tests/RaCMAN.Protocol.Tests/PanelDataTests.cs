@@ -951,3 +951,47 @@ public class PatchNameTests
         Assert.Equal("(this client)", MemoryPanel.PatchName(Patch(PatchKind.Client, string.Empty)));
     }
 }
+
+/// <summary>
+/// How wide the Unlocks table's columns are. The game says how many value columns there are, so
+/// the widths cannot be written down: the name keeps half the table however many of them arrive.
+/// </summary>
+public class UnlockColumnTests
+{
+    [Fact]
+    public void TheNameKeepsHalfTheTableAndTheValuesShareTheRest()
+    {
+        // UYA: Owned, Level, XP and Ammo, which used to leave the names nothing.
+        var weights = UnlocksPanel.ColumnWeights(4);
+
+        Assert.Equal(5, weights.Length);
+        Assert.Equal(0.5f, weights[0]);
+        Assert.Equal(0.125f, weights[1]);
+        Assert.Equal(0.125f, weights[4]);
+    }
+
+    [Fact]
+    public void OneValueColumnTakesTheOtherHalfOnItsOwn()
+    {
+        Assert.Equal(new[] { 0.5f, 0.5f }, UnlocksPanel.ColumnWeights(1));
+    }
+
+    /// <summary>A category whose entries declare nothing but their names is one column wide.</summary>
+    [Fact]
+    public void WithNoValueColumnsTheNameTakesTheWholeTable()
+    {
+        Assert.Equal(new[] { 1f }, UnlocksPanel.ColumnWeights(0));
+        Assert.Equal(new[] { 1f }, UnlocksPanel.ColumnWeights(-1));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    [InlineData(4)]
+    [InlineData(8)]
+    public void TheWeightsAlwaysAddUpToTheWholeTable(int columns)
+    {
+        Assert.Equal(1f, UnlocksPanel.ColumnWeights(columns).Sum(), 5);
+    }
+}

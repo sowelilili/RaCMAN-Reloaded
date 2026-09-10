@@ -186,6 +186,95 @@ public sealed class Settings
         }
     }
 
+    /// <summary>
+    /// The main window's client size and where its corner was, as the last run left them. Null
+    /// until a run has closed once, and never smaller than the default when they are applied:
+    /// <see cref="WindowGeometry"/> owns that rule and the one that keeps a size saved on a bigger
+    /// screen from opening off the edge of this one.
+    /// </summary>
+    [JsonPropertyName("windowWidth")]
+    public int? WindowWidth { get; set; }
+
+    [JsonPropertyName("windowHeight")]
+    public int? WindowHeight { get; set; }
+
+    [JsonPropertyName("windowX")]
+    public int? WindowX { get; set; }
+
+    [JsonPropertyName("windowY")]
+    public int? WindowY { get; set; }
+
+    /// <summary>
+    /// Which of the Game page's collapsible sections a game was last left with folded away, keyed
+    /// by game ("rac1".."rac4") and then by the section's own name. Only the closed ones have to be
+    /// in here for the page to look right, but both answers are written, because a section this
+    /// build has never seen is open and the file should say which of the two a section is.
+    /// </summary>
+    [JsonPropertyName("gameSections")]
+    public Dictionary<string, Dictionary<string, bool>> GameSections { get; set; } = new();
+
+    /// <summary>The key a game is stored under: the lower-case enum name, "rac1".."rac4".</summary>
+    public static string GameKey(GameId game) => game.ToString().ToLowerInvariant();
+
+    /// <summary>
+    /// Whether one Game page section is open. Unknown sections, unknown games and a file that has
+    /// never heard of any of this are open, which is how the page was drawn before it remembered
+    /// anything. The lookups are scans because deserialization hands back plain dictionaries with
+    /// comparers of their own and the file is hand-editable.
+    /// </summary>
+    public bool SectionOpen(GameId game, string section)
+    {
+        if (game == GameId.None || string.IsNullOrEmpty(section)) return true;
+
+        string key = GameKey(game);
+        foreach (var (existing, sections) in GameSections)
+        {
+            if (!string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)) continue;
+
+            foreach (var (name, open) in sections)
+            {
+                if (string.Equals(name, section, StringComparison.OrdinalIgnoreCase)) return open;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Records that a section was opened or closed, replacing whatever spelling of the game or the
+    /// section the file had. A game that is not a game keeps nothing: there is no page to remember.
+    /// </summary>
+    public void SetSectionOpen(GameId game, string section, bool open)
+    {
+        if (game == GameId.None || string.IsNullOrEmpty(section)) return;
+
+        string key = GameKey(game);
+        Dictionary<string, bool>? sections = null;
+        foreach (var (existing, value) in GameSections)
+        {
+            if (!string.Equals(existing, key, StringComparison.OrdinalIgnoreCase)) continue;
+
+            key = existing;
+            sections = value;
+            break;
+        }
+
+        if (sections is null)
+        {
+            sections = new Dictionary<string, bool>(StringComparer.Ordinal);
+            GameSections[key] = sections;
+        }
+
+        foreach (var name in sections.Keys)
+        {
+            if (!string.Equals(name, section, StringComparison.OrdinalIgnoreCase) || name == section) continue;
+            sections.Remove(name);
+            break;
+        }
+
+        sections[section] = open;
+    }
+
     /// <summary>Set once the first-run "allow through the firewall" offer has been shown, so it never nags again.</summary>
     [JsonPropertyName("firewallOffered")]
     public bool FirewallOffered { get; set; }

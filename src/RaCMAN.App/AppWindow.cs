@@ -35,20 +35,7 @@ public sealed class AppWindow : GameWindow
     private double _elapsed;
 
     public AppWindow(AppState state, double exitAfterSeconds = 0, int startPanel = 0)
-        : base(
-            new GameWindowSettings { UpdateFrequency = 60 },
-            new NativeWindowSettings
-            {
-                ClientSize = new OpenTK.Mathematics.Vector2i(940, 580),
-
-                // The version is in the title because it is the first thing anyone is asked for
-                // when they report something, and the Settings panel is two clicks away.
-                Title = $"RaCMAN Reloaded {AppVersion.Current}",
-                APIVersion = new Version(3, 3),
-                Profile = ContextProfile.Core,
-                Flags = ContextFlags.ForwardCompatible,
-                Vsync = VSyncMode.On,
-            })
+        : base(new GameWindowSettings { UpdateFrequency = 60 }, WindowSettings(state.Settings))
     {
         _state = state;
         _exitAfterSeconds = exitAfterSeconds;
@@ -62,6 +49,75 @@ public sealed class AppWindow : GameWindow
 
     /// <summary>Set when a frame threw, so the caller can report a non-zero exit code.</summary>
     public Exception? Failure { get; private set; }
+
+    /// <summary>
+    /// The window this run opens: the default size, or the size and corner the last run was left
+    /// at, brought back onto a monitor this desktop actually has. <see cref="WindowGeometry"/> has
+    /// the rules; this only asks GLFW what the desktop looks like.
+    /// </summary>
+    private static NativeWindowSettings WindowSettings(Settings settings)
+    {
+        var (width, height, x, y) = WindowGeometry.Restore(
+            settings.WindowWidth, settings.WindowHeight, settings.WindowX, settings.WindowY, MonitorAreas());
+
+        return new NativeWindowSettings
+        {
+            ClientSize = new OpenTK.Mathematics.Vector2i(width, height),
+
+            // Null is "wherever the platform puts it", which is what a first run and a saved corner
+            // on a monitor that has gone away both get.
+            Location = x is { } left && y is { } top ? new OpenTK.Mathematics.Vector2i(left, top) : null,
+
+            // The version is in the title because it is the first thing anyone is asked for
+            // when they report something, and the Settings panel is two clicks away.
+            Title = $"RaCMAN Reloaded {AppVersion.Current}",
+            APIVersion = new Version(3, 3),
+            Profile = ContextProfile.Core,
+            Flags = ContextFlags.ForwardCompatible,
+            Vsync = VSyncMode.On,
+        };
+    }
+
+    /// <summary>
+    /// The desktop's monitors, primary first, as their work areas: the part of each screen a window
+    /// can actually occupy, so a restored window does not open under the taskbar. An empty list is
+    /// a fine answer, and asks for the default size wherever the platform cares to put it.
+    /// </summary>
+    private static IReadOnlyList<WindowGeometry.Area> MonitorAreas()
+    {
+        var areas = new List<WindowGeometry.Area>();
+        try
+        {
+            // The base constructor would be the first thing to bring GLFW up, and this runs in
+            // front of it: nothing can be asked about monitors until it is initialised.
+            GLFWProvider.EnsureInitialized();
+
+            Add(areas, Monitors.GetPrimaryMonitor());
+            foreach (var monitor in Monitors.GetMonitors()) Add(areas, monitor);
+        }
+        catch (Exception ex) when (ex is GLFWException or PlatformNotSupportedException
+                                       or InvalidOperationException)
+        {
+            // Not knowing where the screens are is not a reason to fail to open a window.
+        }
+
+        return areas;
+    }
+
+    /// <summary>
+    /// One monitor's work area, or its whole area where the platform reports no work area at all.
+    /// The primary is asked for first and turns up in the full list as well, so a rectangle that is
+    /// already there is skipped.
+    /// </summary>
+    private static void Add(List<WindowGeometry.Area> areas, MonitorInfo monitor)
+    {
+        var box = monitor.WorkArea;
+        if (box.Size.X <= 0 || box.Size.Y <= 0) box = monitor.ClientArea;
+        if (box.Size.X <= 0 || box.Size.Y <= 0) return;
+
+        var area = new WindowGeometry.Area(box.Min.X, box.Min.Y, box.Size.X, box.Size.Y);
+        if (!areas.Contains(area)) areas.Add(area);
+    }
 
     protected override void OnLoad()
     {
@@ -417,8 +473,32 @@ public sealed class AppWindow : GameWindow
         ImGui.End();
     }
 
+    /// <summary>
+    /// The size and corner the window is being left at, so the next run opens where this one ended.
+    /// A minimised window is not a size anybody chose and neither is a collapsed one, so those are
+    /// left as the file already has them.
+    /// </summary>
+    private void RememberGeometry()
+    {
+        if (WindowState == WindowState.Minimized) return;
+
+        var client = ClientSize;
+        if (client.X <= 0 || client.Y <= 0) return;
+
+        var settings = _state.Settings;
+        settings.WindowWidth = client.X;
+        settings.WindowHeight = client.Y;
+        settings.WindowX = Location.X;
+        settings.WindowY = Location.Y;
+    }
+
     protected override void OnUnload()
     {
+        // While the window is still there to ask. Saving here rather than only leaving it to the
+        // caller means a run that ended on a thrown frame still remembers where it was.
+        RememberGeometry();
+        _state.Settings.Save();
+
         // The pad window owns GL objects in its own context, so it goes first and puts this
         // window's context back before the main controller deletes anything.
         ClosePadWindow();

@@ -17,7 +17,7 @@ public static class AutosplitterPanel
         Ui.Heading("Autosplitter");
 
         // No separator of its own before the game section: its heading draws one, and the panel
-        // has to hold a game with eight subsplits inside 940x580 without scrolling.
+        // has to hold a game with eight subsplits inside 822x564 without scrolling.
         DrawConnection(state, autosplit);
         DrawGameSection(state, autosplit);
         ImGui.Separator();
