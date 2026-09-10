@@ -1,0 +1,7 @@
+# The mod library's .bin files are PowerPC code caves. One converted byte in one
+# of them is a mod that crashes a console, so say they are binary rather than
+# leave it to git's content guess.
+*.bin binary
+
+# Keep the shell scripts in the library usable on POSIX systems.
+*.sh text eol=lf

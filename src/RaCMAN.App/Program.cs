@@ -155,7 +155,8 @@ if (exitAfter > 0)
                       $"unlocks={state.Unlocks.Unlocks.Length} flagbytes={LevelFlagsPanel.LoadedByteCount} " +
                       $"mobyrows={MemoryPanel.MobyRowCount} skins={SkinLibrary.List().Length} " +
                       $"mobylayouts={MobyLayouts.All.Count} skin='{InputDisplayPanel.Status}' " +
-                      $"savehelper={state.Describe.HasSaveFileHelper} savefiles={SaveFilesPanel.Summary} " +
+                      $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
+                      $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"tcpfallback={state.Client.TelemetryViaTcp} " +
                       $"autosplitevents={state.AutosplitEvents.Length} " +
