@@ -30,8 +30,6 @@ public static class SettingsPanel
         Ui.Heading("Settings");
 
         ImGui.TextUnformatted("Theme");
-        Ui.Hint("Applies straight away and is remembered.");
-        ImGui.Spacing();
 
         bool light = settings.LightTheme;
         if (ImGui.RadioButton("Light", light) && !light) SetTheme(state, "light");
@@ -40,12 +38,12 @@ public static class SettingsPanel
 
         ImGui.Spacing();
         ImGui.Separator();
-        Ui.Heading("Tables");
+        Ui.Heading("Polling");
 
         // The panels read this every frame, so a change here is live in the table you can see.
         float seconds = settings.TableRefreshSeconds;
         ImGui.SetNextItemWidth(160);
-        if (ImGui.InputFloat("Refresh tables every N seconds", ref seconds, 0.5f, 1f, "%.1f"))
+        if (ImGui.InputFloat("Refresh rate (Hz)", ref seconds, 0.1f, 1f, "%.1f"))
         {
             // The property clamps to 0..10, so a typed 99 or a typed -1 is still a period the
             // panels can use.
@@ -53,8 +51,7 @@ public static class SettingsPanel
             settings.Save();
         }
 
-        Ui.Hint("How often the Unlocks and Level flags tables re-read themselves from the console. "
-                + "0 means never, and those two panels then show a Refresh button instead.");
+        Ui.Hint("How often to refresh data tables. If you're using a slower connection, decrease this. Set to 0 for manual refresh.");
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -110,10 +107,8 @@ public static class SettingsPanel
             state.ThemeDirty = true;
         }
 
-        Ui.Hint("Shows the wire-level detail: qwark and protocol versions, the reboot and tick "
-                + "counters, request names in error messages, frame rate, raw readouts and internal addresses. "
-                + "It also brings back the settings behind the Connection panel's webMAN load and the "
-                + "autosplitter's manual split and reset.");
+        Ui.Hint("Shows debug information: qwark and protocol versions, reboot and tick "
+                + "counters, request names in error messages, frame rate, raw readouts and internal addresses");
     }
 
     // ---------------------------------------------------------------- ports
@@ -136,8 +131,7 @@ public static class SettingsPanel
             settings.Save();
         }
 
-        Ui.Hint("Where qwark-rpcs3.exe looks for the emulator. RPCS3's own default is "
-                + $"{Rpcs3Host.DefaultPinePort} (Settings, I/O, Enable IPC server).");
+        Ui.Hint($"Where to look for RPCS3 (default: {Rpcs3Host.DefaultPinePort})");
 
         ImGui.Spacing();
 
@@ -167,8 +161,7 @@ public static class SettingsPanel
                        || _liveSplitPort != autosplit.Port;
         if (changed && !editing) ApplyLiveSplit(state, autosplit);
 
-        Ui.Hint($"LiveSplit's TCP server, {LiveSplitClient.DefaultHost}:{LiveSplitClient.DefaultPort} unless you "
-                + "moved it. The Autosplitter panel connects to whatever is here.");
+        Ui.Hint($"Where to look for LiveSplit server (default: {LiveSplitClient.DefaultHost}:{LiveSplitClient.DefaultPort})");
     }
 
     /// <summary>Saves the LiveSplit endpoint and, while the autosplitter is on, points it at the new one.</summary>
@@ -198,9 +191,7 @@ public static class SettingsPanel
     /// </summary>
     private static void DrawImport(AppState state)
     {
-        Ui.Hint("Reads the old RaCMAN's config.txt (beside racman.exe): the console IP, the controller combos, "
-                + "the auto-apply mod list and the chargeboot colour picker's saved slots. Saved positions are not "
-                + "imported; the console owns those now.");
+        Ui.Hint("Import settings from previous versions of RaCMAN");
 
         ImGui.SetNextItemWidth(-110);
         Ui.InputTextWithHint("##legacy-config", "C:\\RaCMAN\\config.txt", ref _importPath, 512);

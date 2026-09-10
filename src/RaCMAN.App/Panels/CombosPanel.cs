@@ -92,9 +92,6 @@ public static class CombosPanel
     public static void Draw(AppState state)
     {
         Ui.Heading("Controller combos");
-        Ui.Hint("The console watches the pad and fires a combo when exactly those buttons are held, re-arming once they are released.");
-        Ui.Hint("Capture stores the most buttons you held at once, so let go of them however you like.");
-        Ui.Hint("The console holds every combo off while you are capturing, so recording one never fires another.");
 
         if (!state.Connected)
         {
@@ -103,9 +100,6 @@ public static class CombosPanel
         }
 
         var current = state.Combos.ToDictionary(c => c.Action, c => c.Mask);
-
-        if (ImGui.SmallButton("Refresh")) state.RefreshCombos();
-        ImGui.Spacing();
 
         if (!ImGui.BeginTable("combos", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp)) return;
 
@@ -161,6 +155,9 @@ public static class CombosPanel
         }
 
         ImGui.EndTable();
+
+        ImGui.Spacing();
+        if (ImGui.SmallButton("Refresh")) state.RefreshCombos();
 
         ImGui.Spacing();
         ImGui.TextColored(Ui.Grey, $"Live pad mask: 0x{state.Session.PadMask:X4}  {PadButtons.Describe(state.Session.PadMask)}");

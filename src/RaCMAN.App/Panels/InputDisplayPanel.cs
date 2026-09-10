@@ -173,6 +173,7 @@ public static class InputDisplayPanel
         }
 
         ImGui.BeginDisabled(chosen != InputDisplayMode.Window);
+        ImGui.SameLine();
         bool onTop = settings.InputWindowOnTop;
         if (ImGui.Checkbox("Always on top", ref onTop))
         {
@@ -181,11 +182,6 @@ public static class InputDisplayPanel
         }
 
         ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        Ui.Hint(chosen == InputDisplayMode.Window
-            ? "Its own OS window survives minimising RaCMAN and can sit over the game feed."
-            : "Give the pad its own window and a capture tool can take it as a source of its own.");
     }
 
     /// <summary>
