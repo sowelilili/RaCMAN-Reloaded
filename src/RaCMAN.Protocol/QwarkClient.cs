@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 11;
+    public const byte ExpectedQwarkBuild = 12;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -901,6 +901,26 @@ public sealed class QwarkClient : IDisposable
     public Task DirDeleteAsync(string path, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.DirDelete, Path(path), cancellationToken);
 
+    /// <summary>
+    /// FILE_RENAME, revision 1.10: <c>u16 from_len</c>, the old path, then the new one as the rest
+    /// of the payload. The console refuses a destination that already exists, so a caller that
+    /// means to replace a file deletes it first.
+    /// </summary>
+    public Task FileRenameAsync(string from, string to, CancellationToken cancellationToken = default)
+    {
+        var fromBytes = Encoding.UTF8.GetBytes(from);
+        var toBytes = Encoding.UTF8.GetBytes(to);
+        if (fromBytes.Length == 0 || fromBytes.Length > 511) throw new ArgumentOutOfRangeException(nameof(from));
+        if (toBytes.Length == 0 || toBytes.Length > 511) throw new ArgumentOutOfRangeException(nameof(to));
+
+        var payload = new byte[2 + fromBytes.Length + toBytes.Length];
+        var w = new SpanWriter(payload);
+        w.WriteU16((ushort)fromBytes.Length);
+        w.WriteBytes(fromBytes);
+        w.WriteBytes(toBytes);
+        return RequestAsync(Opcode.FileRename, payload, cancellationToken);
+    }
+
     public async Task<uint> UserIdAsync(CancellationToken cancellationToken = default)
     {
         var payload = await RequestAsync(Opcode.UserId, null, cancellationToken).ConfigureAwait(false);
@@ -1062,6 +1082,84 @@ public sealed class QwarkClient : IDisposable
                 .ConfigureAwait(false);
             progress?.Report(offset + length);
         }
+    }
+
+    // ------------------------------------------- 5.13 the library on the console
+
+    /// <summary>
+    /// Where the console keeps its savefile library. The client builds these paths itself for
+    /// FILE_OPEN, FILE_DELETE and FILE_RENAME; the layout is section 5.13's, not a guess.
+    /// </summary>
+    public const string SaveFileConsoleRoot = "/dev_hdd0/qwark/savefiles";
+
+    /// <summary>The suffix the console keeps a file's CRC32 in, beside the file.</summary>
+    public const string SaveFileSumExtension = ".sum";
+
+    public static string SaveFileConsoleFolder(string titleId, string category) =>
+        $"{SaveFileConsoleRoot}/{titleId}/{category}";
+
+    public static string SaveFileConsolePath(string titleId, string category, string name) =>
+        $"{SaveFileConsoleFolder(titleId, category)}/{name}";
+
+    /// <summary>SAVEFILE_CATEGORIES: the folders under the running game's title.</summary>
+    public async Task<string[]> SaveFileCategoriesAsync(CancellationToken cancellationToken = default) =>
+        ParseFixedStringList(
+            await RequestAsync(Opcode.SaveFileCategories, null, cancellationToken).ConfigureAwait(false),
+            ConsoleSaveFile.NameLength);
+
+    /// <summary>SAVEFILE_LIST: every <c>.sav</c> in a category, with its size and its CRC32.</summary>
+    public async Task<ConsoleSaveFile[]> SaveFileListAsync(string category, CancellationToken cancellationToken = default) =>
+        ConsoleSaveFile.ParseList(
+            await RequestAsync(Opcode.SaveFileList, FixedName(category), cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// SAVEFILE_STORE: the console raises the set-aside itself, waits for the helper and copies
+    /// the aside buffer into its own file. Poll SAVEFILE_INFO for the progress and the outcome.
+    /// </summary>
+    public Task SaveFileStoreAsync(string category, string name, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.SaveFileStore, FixedPair(category, name), cancellationToken);
+
+    /// <summary>
+    /// SAVEFILE_RESTORE: the console copies its own file into the aside buffer and only then asks
+    /// the game to take it. Poll SAVEFILE_INFO the same way.
+    /// </summary>
+    public Task SaveFileRestoreAsync(string category, string name, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.SaveFileRestore, FixedPair(category, name), cancellationToken);
+
+    public Task SaveFileCategoryAsync(SaveFileCategoryOp op, string name, CancellationToken cancellationToken = default)
+    {
+        var payload = new byte[1 + ConsoleSaveFile.NameLength];
+        var w = new SpanWriter(payload);
+        w.WriteU8((byte)op);
+        w.WriteFixedString(name, ConsoleSaveFile.NameLength);
+        return RequestAsync(Opcode.SaveFileCategory, payload, cancellationToken);
+    }
+
+    private static byte[] FixedName(string name) =>
+        Bytes(ConsoleSaveFile.NameLength,
+            (scoped ref SpanWriter w) => w.WriteFixedString(name, ConsoleSaveFile.NameLength));
+
+    private static byte[] FixedPair(string first, string second) =>
+        Bytes(2 * ConsoleSaveFile.NameLength, (scoped ref SpanWriter w) =>
+        {
+            w.WriteFixedString(first, ConsoleSaveFile.NameLength);
+            w.WriteFixedString(second, ConsoleSaveFile.NameLength);
+        });
+
+    /// <summary>A <c>u8 n</c> followed by n fixed-width names, the shape half of section 5 uses.</summary>
+    private static string[] ParseFixedStringList(ReadOnlySpan<byte> payload, int width)
+    {
+        if (payload.Length < 1) return Array.Empty<string>();
+
+        int count = payload[0];
+        var names = new List<string>(count);
+        var r = new SpanReader(payload[1..]);
+        for (int i = 0; i < count && payload.Length >= 1 + (i + 1) * width; i++)
+        {
+            names.Add(r.ReadFixedString(width));
+        }
+
+        return names.ToArray();
     }
 
     // ---------------------------------------------------------------- 5.9 combos

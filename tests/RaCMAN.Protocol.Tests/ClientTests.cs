@@ -845,18 +845,18 @@ public class ClientTests
 
         Assert.True(await PumpAsync(state, () => state.Hello is not null));
         Assert.Equal(QwarkClient.ClientProtocolVersion, state.Hello!.ProtocolVersion);
-        Assert.Equal(11, state.Hello.QwarkVersion);
+        Assert.Equal(12, state.Hello.QwarkVersion);
     }
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(9, true)]
-    [InlineData(10, true)]     // the build before the one this client ships with
-    [InlineData(11, false)]    // exactly the expected build: the helper that copies before it clears
-    [InlineData(12, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(10, true)]
+    [InlineData(11, true)]     // the build before the one this client ships with
+    [InlineData(12, false)]    // exactly the expected build: the savefile library on the console
+    [InlineData(13, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(11, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(12, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 

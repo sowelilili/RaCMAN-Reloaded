@@ -221,6 +221,20 @@ public static class SettingsPanel
         ImGui.Spacing();
 
         foreach (var row in shippedRows) Folder(state, row.Label, row.Folder, column, row.Tooltip);
+
+        ImGui.Spacing();
+
+        // The savefile library lives on the console since qwark build 12; this is the second copy.
+        bool mirror = settings.MirrorSaveFiles;
+        if (ImGui.Checkbox("Mirror saves to this PC", ref mirror))
+        {
+            settings.MirrorSaveFiles = mirror;
+            settings.Save();
+        }
+
+        Ui.Hint("Save files are kept on the console. With this on, every save you take is also copied "
+                + "into the data folder, so the library survives the console being wiped. Loading is "
+                + "unaffected: a file the console does not have is uploaded once, whatever this says.");
     }
 
     // ---------------------------------------------------------------- ports

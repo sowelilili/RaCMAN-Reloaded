@@ -9,8 +9,10 @@ namespace RaCMAN.Protocol.Testing;
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
 /// memory primitives, POS_LIST, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
-/// MOD_LIST, the file ops, COMBO_SET/LIST/SUSPEND, the two AUTOSPLIT ops with their UDP push and
-/// the three SAVEFILE ops over an in-memory aside buffer. Everything else answers UNKNOWN_OP.
+/// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND, the two AUTOSPLIT ops
+/// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
+/// ops of revision 1.10 over the same in-memory filesystem the file ops use. Everything else
+/// answers UNKNOWN_OP.
 /// </summary>
 public sealed class FakeQwarkServer : IDisposable
 {
@@ -32,7 +34,7 @@ public sealed class FakeQwarkServer : IDisposable
         _session = SessionInfo.Empty with
         {
             ProtocolVersion = 1,
-            QwarkVersion = 11,
+            QwarkVersion = 12,
             State = SessionState.Ingame,
             Game = GameId.Rac1,
             Generation = 1,
@@ -339,6 +341,145 @@ public sealed class FakeQwarkServer : IDisposable
 
     private int _setAsidePending;
     private int _loadPending;
+
+    // ------------------------------------------- 5.13, the library on the console
+
+    /// <summary>
+    /// How many SAVEFILE_INFO polls a STORE or a RESTORE copy takes. The console moves 128 KB a
+    /// tick; here it moves a fraction of the file per poll, which is enough for a client's
+    /// progress reporting and its wait loop to be exercised. Two means one poll of partway.
+    /// </summary>
+    public int SaveFileTransferPolls { get; set; } = 2;
+
+    /// <summary>
+    /// Forces the console's next transfer to end with this error instead of doing its work, which
+    /// is how the client's error surface is checked without breaking anything else.
+    /// </summary>
+    public SaveFileError SaveFileTransferError { get; set; } = SaveFileError.None;
+
+    /// <summary>Every STORE and RESTORE the console was asked for, in order.</summary>
+    public List<string> SaveFileLibraryOrder { get; } = new();
+
+    /// <summary>Where the console keeps the library for the running title.</summary>
+    public string SaveFileRoot => $"{QwarkClient.SaveFileConsoleRoot}/{Session.TitleId}";
+
+    private int _transferPolls;
+    private int _transferTotalPolls;
+    private uint _transferDone;
+    private uint _transferTotal;
+    private SaveFileError _transferError;
+    private Action? _transferEffect;
+
+    private bool TransferRunning => _transferPolls > 0 || _setAsidePendingForTransfer;
+
+    private bool _setAsidePendingForTransfer;
+
+    /// <summary>
+    /// The console's own copy, one poll at a time. A STORE waits for the game's helper first, so
+    /// the set-aside is counted down before a byte of the copy moves.
+    /// </summary>
+    private void AdvanceTransfer()
+    {
+        if (_setAsidePendingForTransfer)
+        {
+            if (_setAsidePending > 0) return;
+            _setAsidePendingForTransfer = false;
+        }
+
+        if (_transferPolls <= 0) return;
+
+        _transferPolls--;
+        _transferDone = _transferTotalPolls <= 0
+            ? _transferTotal
+            : (uint)((long)_transferTotal * (_transferTotalPolls - _transferPolls) / _transferTotalPolls);
+
+        if (_transferPolls > 0) return;
+
+        if (SaveFileTransferError != SaveFileError.None)
+        {
+            _transferError = SaveFileTransferError;
+            SaveFileTransferError = SaveFileError.None;
+            return;
+        }
+
+        _transferDone = _transferTotal;
+        _transferEffect?.Invoke();
+        _transferEffect = null;
+    }
+
+    private void BeginTransfer(uint total, bool waitForSetAside, Action effect)
+    {
+        _transferTotalPolls = Math.Max(1, SaveFileTransferPolls);
+        _transferPolls = _transferTotalPolls;
+        _transferDone = 0;
+        _transferTotal = total;
+        _transferError = SaveFileError.None;
+        _transferEffect = effect;
+        _setAsidePendingForTransfer = waitForSetAside;
+        if (waitForSetAside) _setAsidePending = Math.Max(1, SaveFilePendingPolls);
+    }
+
+    private string SaveFilePath(string category, string name) => $"{SaveFileRoot}/{category}/{name}";
+
+    /// <summary>The categories: every folder directly under the title, however it came to exist.</summary>
+    private string[] SaveFileCategories()
+    {
+        var prefix = SaveFileRoot + "/";
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var directory in Directories)
+        {
+            if (!directory.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            var rest = directory[prefix.Length..];
+            if (rest.Length == 0 || rest.Contains('/')) continue;
+            names.Add(rest);
+        }
+
+        foreach (var file in Files.Keys)
+        {
+            if (!file.StartsWith(prefix, StringComparison.Ordinal)) continue;
+            int slash = file[prefix.Length..].IndexOf('/');
+            if (slash > 0) names.Add(file[prefix.Length..][..slash]);
+        }
+
+        return names.ToArray();
+    }
+
+    /// <summary>
+    /// The saves in one category. Only <c>.sav</c> files are listed; the CRC comes from the
+    /// <c>.sum</c> sidecar when there is one and is computed and written out when there is not,
+    /// exactly as qwark does for a file the client uploaded.
+    /// </summary>
+    private ConsoleSaveFile[] SaveFileList(string category)
+    {
+        var prefix = $"{SaveFileRoot}/{category}/";
+        var rows = new List<ConsoleSaveFile>();
+
+        foreach (var (path, content) in Files.OrderBy(f => f.Key, StringComparer.OrdinalIgnoreCase).ToArray())
+        {
+            if (!path.StartsWith(prefix, StringComparison.Ordinal)) continue;
+
+            var name = path[prefix.Length..];
+            if (name.Contains('/') || !name.EndsWith(SaveFileLibrary.Extension, StringComparison.Ordinal)) continue;
+
+            uint crc;
+            if (Files.TryGetValue(path + QwarkClient.SaveFileSumExtension, out var sum)
+                && Crc32.TryParseSum(Encoding.ASCII.GetString(sum), out var parsed))
+            {
+                crc = parsed;
+            }
+            else
+            {
+                crc = Crc32.Compute(content);
+                Files[path + QwarkClient.SaveFileSumExtension] =
+                    Encoding.ASCII.GetBytes(Crc32.ToSumText(crc));
+            }
+
+            rows.Add(new ConsoleSaveFile(name, (uint)content.Length, crc));
+        }
+
+        return rows.ToArray();
+    }
 
     private static byte[] BuildSaveAsideContent(int size)
     {
@@ -1071,14 +1212,17 @@ public sealed class FakeQwarkServer : IDisposable
                     byte pending = 0;
                     if (_setAsidePending > 0) pending |= SaveFileInfo.PendingSetAside;
                     if (_loadPending > 0) pending |= SaveFileInfo.PendingLoad;
+                    if (TransferRunning) pending |= SaveFileInfo.PendingTransfer;
 
                     // The helper clears its own request byte a frame or two later; counting the
                     // polls down stands in for that, so a client's wait loop is exercised.
                     if (_setAsidePending > 0) _setAsidePending--;
                     if (_loadPending > 0) _loadPending--;
+                    AdvanceTransfer();
 
                     var info = new SaveFileInfo(true, true, SaveFileRunning, pending,
-                                                (uint)SaveFileBuffer.Length);
+                                                (uint)SaveFileBuffer.Length,
+                                                _transferDone, _transferTotal, _transferError);
                     return (Status.Ok, info.ToBytes());
                 }
 
@@ -1121,6 +1265,163 @@ public sealed class FakeQwarkServer : IDisposable
 
                     data.CopyTo(SaveFileBuffer.AsSpan((int)offset));
                     SaveFileOrder.Add($"write {offset}");
+                    return (Status.Ok, null);
+                }
+
+                // ------------------------------------ 5.13 the library, revision 1.10
+
+                case Opcode.SaveFileCategories:
+                {
+                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (TransferRunning) return (Status.Busy, null);
+
+                    var categories = SaveFileCategories();
+                    var buffer = new byte[1 + categories.Length * ConsoleSaveFile.NameLength];
+                    var w = new SpanWriter(buffer);
+                    w.WriteU8((byte)categories.Length);
+                    foreach (var category in categories) w.WriteFixedString(category, ConsoleSaveFile.NameLength);
+                    return (Status.Ok, buffer);
+                }
+
+                case Opcode.SaveFileList:
+                {
+                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (payload.Length < ConsoleSaveFile.NameLength) return (Status.BadArg, null);
+                    if (TransferRunning) return (Status.Busy, null);
+
+                    var category = new SpanReader(payload).ReadFixedString(ConsoleSaveFile.NameLength);
+                    if (!SaveFileCategories().Contains(category, StringComparer.OrdinalIgnoreCase))
+                    {
+                        return (Status.NotFound, null);
+                    }
+
+                    return (Status.Ok, ConsoleSaveFile.EncodeList(SaveFileList(category)));
+                }
+
+                case Opcode.SaveFileStore:
+                case Opcode.SaveFileRestore:
+                {
+                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (payload.Length < 2 * ConsoleSaveFile.NameLength) return (Status.BadArg, null);
+
+                    var r = new SpanReader(payload);
+                    var category = r.ReadFixedString(ConsoleSaveFile.NameLength);
+                    var name = r.ReadFixedString(ConsoleSaveFile.NameLength);
+
+                    if (!name.EndsWith(SaveFileLibrary.Extension, StringComparison.Ordinal))
+                    {
+                        return (Status.BadArg, null);
+                    }
+
+                    // One aside buffer, so one transfer: a second is refused, not queued.
+                    if (TransferRunning || _loadPending > 0 || _setAsidePending > 0)
+                    {
+                        _transferError = SaveFileError.BufferBusy;
+                        return (Status.Busy, null);
+                    }
+
+                    var path = SaveFilePath(category, name);
+
+                    if (opcode == Opcode.SaveFileStore)
+                    {
+                        SaveFileLibraryOrder.Add($"store {category}/{name}");
+
+                        // The game fills the buffer first, then the console copies it out.
+                        SaveFileBuffer = (byte[])SaveAsideContent.Clone();
+                        var stored = (byte[])SaveFileBuffer.Clone();
+                        BeginTransfer((uint)stored.Length, waitForSetAside: true, () =>
+                        {
+                            Files[path] = stored;
+                            Files[path + QwarkClient.SaveFileSumExtension] =
+                                Encoding.ASCII.GetBytes(Crc32.ToSumText(Crc32.Compute(stored)));
+                        });
+
+                        return (Status.Ok, null);
+                    }
+
+                    SaveFileLibraryOrder.Add($"restore {category}/{name}");
+
+                    if (!Files.TryGetValue(path, out var content))
+                    {
+                        _transferError = SaveFileError.FileMissing;
+                        return (Status.NotFound, null);
+                    }
+
+                    if (content.Length != SaveFileBuffer.Length)
+                    {
+                        _transferError = SaveFileError.ShortFile;
+                        return (Status.BadArg, null);
+                    }
+
+                    BeginTransfer((uint)content.Length, waitForSetAside: false, () =>
+                    {
+                        SaveFileBuffer = (byte[])content.Clone();
+                        LoadedSaveFile = (byte[])content.Clone();
+                        _loadPending = Math.Max(1, SaveFilePendingPolls);
+                    });
+
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.SaveFileCategory:
+                {
+                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (payload.Length < 1 + ConsoleSaveFile.NameLength) return (Status.BadArg, null);
+                    if (TransferRunning) return (Status.Busy, null);
+
+                    var op = (SaveFileCategoryOp)payload[0];
+                    var name = new SpanReader(payload[1..]).ReadFixedString(ConsoleSaveFile.NameLength);
+                    if (name.Length == 0 || name.Contains('/') || name.StartsWith('.'))
+                    {
+                        return (Status.BadArg, null);
+                    }
+
+                    var folder = $"{SaveFileRoot}/{name}";
+
+                    if (op == SaveFileCategoryOp.Create)
+                    {
+                        if (!Directories.Contains(folder, StringComparer.Ordinal)) Directories.Add(folder);
+                        return (Status.Ok, null);
+                    }
+
+                    if (op != SaveFileCategoryOp.Delete) return (Status.BadArg, null);
+                    if (!SaveFileCategories().Contains(name, StringComparer.OrdinalIgnoreCase))
+                    {
+                        return (Status.NotFound, null);
+                    }
+
+                    // The sidecars are swept up; a save that is still there refuses the delete.
+                    var prefix = folder + "/";
+                    var left = Files.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToArray();
+                    foreach (var key in left.Where(k => k.EndsWith(QwarkClient.SaveFileSumExtension, StringComparison.Ordinal)))
+                    {
+                        Files.Remove(key);
+                    }
+
+                    if (Files.Keys.Any(k => k.StartsWith(prefix, StringComparison.Ordinal)))
+                    {
+                        return (Status.IoError, null);
+                    }
+
+                    Directories.RemoveAll(d => d == folder);
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.FileRename:
+                {
+                    if (payload.Length < 3) return (Status.BadArg, null);
+
+                    int fromLength = (payload[0] << 8) | payload[1];
+                    if (fromLength <= 0 || payload.Length <= 2 + fromLength) return (Status.BadArg, null);
+
+                    string from = Encoding.UTF8.GetString(payload, 2, fromLength);
+                    string to = Encoding.UTF8.GetString(payload, 2 + fromLength, payload.Length - 2 - fromLength);
+
+                    if (!Files.TryGetValue(from, out var moving)) return (Status.NotFound, null);
+                    if (Files.ContainsKey(to)) return (Status.BadArg, null);
+
+                    Files.Remove(from);
+                    Files[to] = moving;
                     return (Status.Ok, null);
                 }
 

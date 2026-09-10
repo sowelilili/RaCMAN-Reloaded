@@ -180,25 +180,50 @@ public class SaveFileTests : IDisposable
     // ---------------------------------------------------- revision 1.9, the savefile block
 
     [Fact]
-    public void TheInfoReplyIsEightBytesAndRoundTrips()
+    public void TheInfoReplyIsTwentyBytesAndRoundTrips()
     {
-        var info = new SaveFileInfo(true, true, false, SaveFileInfo.PendingLoad, 0x200000);
+        var info = new SaveFileInfo(true, true, false, SaveFileInfo.PendingLoad, 0x200000,
+                                    Done: 0x40000, Total: 0x200000, Error: SaveFileError.ShortFile);
         var bytes = info.ToBytes();
 
         Assert.Equal(SaveFileInfo.WireSize, bytes.Length);
-        Assert.Equal(8, bytes.Length);
+        Assert.Equal(20, bytes.Length);
 
         var parsed = SaveFileInfo.Parse(bytes);
         Assert.Equal(info, parsed);
         Assert.True(parsed.LoadPending);
         Assert.False(parsed.SetAsidePending);
+        Assert.Equal(0.125f, parsed.Progress, 3);
     }
 
     [Fact]
-    public void ThePendingBitsAreBit0AndBit1()
+    public void AnInfoReplyFromARevision19ModuleStillParses()
+    {
+        // Eight bytes and no more: every field it does send is still right, and the three it
+        // knows nothing about read as zero rather than as garbage or an exception.
+        var old = new byte[SaveFileInfo.WireSize19];
+        old[0] = 1;
+        old[1] = 1;
+        old[2] = 1;
+        old[3] = SaveFileInfo.PendingSetAside;
+        old[7] = 0x10;   // size 0x10 in the low byte of the big-endian word
+
+        var parsed = SaveFileInfo.Parse(old);
+
+        Assert.True(parsed.Supported);
+        Assert.True(parsed.SetAsidePending);
+        Assert.Equal(0x10u, parsed.Size);
+        Assert.False(parsed.TransferPending);
+        Assert.Equal(0u, parsed.Total);
+        Assert.Equal(SaveFileError.None, parsed.Error);
+    }
+
+    [Fact]
+    public void ThePendingBitsAreBit0Bit1AndBit2()
     {
         Assert.Equal(1, SaveFileInfo.PendingSetAside);
         Assert.Equal(2, SaveFileInfo.PendingLoad);
+        Assert.Equal(4, SaveFileInfo.PendingTransfer);
     }
 
     [Fact]
@@ -603,7 +628,486 @@ public class SaveFileTests : IDisposable
         }
     }
 
+    // ------------------------------- revision 1.10, the library on the console
+    //
+    // The console keeps the files now and copies them into the aside buffer itself, so what the
+    // client has to get right is the merge view, the decision a load makes from it, the mirror a
+    // save leaves behind, and saying what went wrong when the console says something went wrong.
+
+    private const string Title = "NPEA00385";
+
+    private static SaveFileEntry Entry(string name, bool console, bool pc, uint consoleCrc = 0, uint pcCrc = 0) =>
+        new(name, console, pc, consoleCrc, pcCrc, console ? 16u : 0u, pc ? 16L : 0L);
+
+    [Fact]
+    public void TheMergeViewSaysWhichSideEachSaveIsOn()
+    {
+        var console = new[]
+        {
+            new ConsoleSaveFile("both.sav", 16, 0xAAAA),
+            new ConsoleSaveFile("differs.sav", 16, 0x1111),
+            new ConsoleSaveFile("console only.sav", 16, 0xBBBB),
+        };
+
+        var pc = new[]
+        {
+            new LocalSaveFile("both.sav", 16, 0xAAAA),
+            new LocalSaveFile("differs.sav", 32, 0x2222),
+            new LocalSaveFile("pc only.sav", 16, 0xCCCC),
+
+            // A mirror that was interrupted leaves one of these, and it is not a save.
+            new LocalSaveFile("both.sav.part", 8, 0xDDDD),
+        };
+
+        var rows = SaveFileMerge.Build(console, pc);
+
+        Assert.Equal(new[] { "both.sav", "console only.sav", "differs.sav", "pc only.sav" },
+                     rows.Select(r => r.Name).ToArray());
+
+        var both = rows.Single(r => r.Name == "both.sav");
+        Assert.Equal(SaveFileLocation.Both, both.Location);
+        Assert.True(both.Agrees);
+        Assert.False(both.Differs);
+        Assert.Equal("both", both.Where);
+
+        var differs = rows.Single(r => r.Name == "differs.sav");
+        Assert.Equal(SaveFileLocation.Both, differs.Location);
+        Assert.True(differs.Differs);
+        Assert.Equal("both, differ", differs.Where);
+
+        var consoleOnly = rows.Single(r => r.Name == "console only.sav");
+        Assert.Equal(SaveFileLocation.Console, consoleOnly.Location);
+        Assert.Equal("console", consoleOnly.Where);
+        Assert.False(consoleOnly.Agrees);
+
+        var pcOnly = rows.Single(r => r.Name == "pc only.sav");
+        Assert.Equal(SaveFileLocation.Pc, pcOnly.Location);
+        Assert.Equal("PC", pcOnly.Where);
+        Assert.Equal("pc only", pcOnly.DisplayName);
+    }
+
+    [Fact]
+    public void AnEmptySideIsStillAMergeView()
+    {
+        Assert.Empty(SaveFileMerge.Build(null, null));
+        Assert.Single(SaveFileMerge.Build(new[] { new ConsoleSaveFile("a.sav", 1, 2) }, null));
+        Assert.Single(SaveFileMerge.Build(null, new[] { new LocalSaveFile("a.sav", 1, 2) }));
+    }
+
+    [Theory]
+    [InlineData(true, false, 0u, 0u, SaveFileLoadPlan.Restore)]            // console only
+    [InlineData(true, true, 0xAAAAu, 0xAAAAu, SaveFileLoadPlan.Restore)]   // both, same bytes
+    [InlineData(true, true, 0xAAAAu, 0xBBBBu, SaveFileLoadPlan.UploadThenRestore)]
+    [InlineData(false, true, 0u, 0xBBBBu, SaveFileLoadPlan.UploadThenRestore)]
+    [InlineData(false, false, 0u, 0u, SaveFileLoadPlan.Nothing)]
+    public void LoadingSendsNothingUnlessTheConsoleLacksTheseBytes(
+        bool console, bool pc, uint consoleCrc, uint pcCrc, SaveFileLoadPlan expected)
+    {
+        Assert.Equal(expected, SaveFileMerge.PlanLoad(Entry("one.sav", console, pc, consoleCrc, pcCrc)));
+    }
+
+    [Fact]
+    public async Task TheConsoleListsItsCategoriesAndItsSaves()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            Assert.Equal(new[] { "any%" }, await client.SaveFileCategoriesAsync());
+
+            // A file uploaded with the file ops, with no sum beside it: the console works out the
+            // CRC itself the first time it lists the category, exactly as qwark does.
+            var data = Pattern(64);
+            await client.WriteFileAsync(QwarkClient.SaveFileConsolePath(Title, "any%", "veldin.sav"), data);
+
+            var files = await client.SaveFileListAsync("any%");
+            var row = Assert.Single(files);
+            Assert.Equal("veldin.sav", row.Name);
+            Assert.Equal(64u, row.Size);
+            Assert.Equal(Crc32.Compute(data), row.Crc);
+        }
+    }
+
+    [Fact]
+    public async Task SavingStoresOnTheConsoleAndMirrorsItHere()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            server.SaveAsideContent = Pattern(server.SaveFileBuffer.Length);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+
+            var progress = new List<long>();
+            var messages = new List<string>();
+            var path = await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav",
+                mirror: true, timeout: null,
+                status: new Progress<string>(messages.Add), bytes: new Progress<long>(progress.Add));
+
+            // The console holds the file, sum and all, and this PC holds the same bytes.
+            var console = Assert.Single(await client.SaveFileListAsync("any%"));
+            Assert.Equal("veldin.sav", console.Name);
+            Assert.Equal(Crc32.Compute(server.SaveAsideContent), console.Crc);
+
+            Assert.Equal(server.SaveAsideContent, library.Read(Title, "any%", "veldin.sav"));
+            Assert.Equal(library.FilePath(Title, "any%", "veldin.sav"), path);
+            Assert.Equal(new[] { "store any%/veldin.sav" }, server.SaveFileLibraryOrder);
+
+            // The progress moved and the last report is the whole file.
+            Assert.NotEmpty(progress);
+            Assert.Equal(server.SaveAsideContent.Length, progress[^1]);
+        }
+    }
+
+    [Fact]
+    public async Task SavingWithMirroringOffLeavesNothingOnThisPc()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+
+            var path = await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav",
+                mirror: false);
+
+            Assert.Equal(string.Empty, path);
+            Assert.Empty(library.Files(Title, "any%"));
+            Assert.Single(await client.SaveFileListAsync("any%"));
+        }
+    }
+
+    [Fact]
+    public async Task LoadingAFileTheConsoleAlreadyHasSendsNothing()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+            Assert.True(entry.Agrees);
+
+            server.SaveFileOrder.Clear();
+            bool uploaded = await SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry);
+
+            Assert.False(uploaded);
+            Assert.Equal(server.SaveAsideContent, server.LoadedSaveFile);
+
+            // Nothing went over the wire but the request: no SAVEFILE_WRITE, no FILE_WRITE.
+            Assert.Empty(server.SaveFileOrder);
+            Assert.Equal("restore any%/veldin.sav", server.SaveFileLibraryOrder[^1]);
+        }
+    }
+
+    [Fact]
+    public async Task LoadingAFileOnlyThisPcHasUploadsItOnceAndThenRestores()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            var data = Pattern(server.SaveFileBuffer.Length);
+            library.Write(Title, "any%", "veldin.sav", data);
+
+            var entry = Assert.Single(SaveFileMerge.Build(null, library.FilesWithCrc(Title, "any%")));
+            Assert.Equal(SaveFileLocation.Pc, entry.Location);
+
+            bool uploaded = await SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry);
+
+            Assert.True(uploaded);
+            Assert.Equal(data, server.LoadedSaveFile);
+
+            // And it lives on the console from now on, with the sum the client wrote beside it, so
+            // the next load of the same file sends nothing at all.
+            var console = Assert.Single(await client.SaveFileListAsync("any%"));
+            Assert.Equal(Crc32.Compute(data), console.Crc);
+            Assert.Equal(Crc32.ToSumText(Crc32.Compute(data)),
+                System.Text.Encoding.ASCII.GetString(
+                    server.Files[QwarkClient.SaveFileConsolePath(Title, "any%", "veldin.sav")
+                                 + QwarkClient.SaveFileSumExtension]));
+
+            var again = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+            Assert.Equal(SaveFileLoadPlan.Restore, SaveFileMerge.PlanLoad(again));
+        }
+    }
+
+    [Fact]
+    public async Task WhenTheTwoCopiesDifferThisPcsCopyIsTheOneThatLoads()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+
+            // The PC's copy is edited behind the console's back.
+            var edited = Pattern(server.SaveFileBuffer.Length).Select(b => (byte)(b ^ 0xFF)).ToArray();
+            library.Write(Title, "any%", "veldin.sav", edited);
+
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+            Assert.True(entry.Differs);
+
+            Assert.True(await SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.Equal(edited, server.LoadedSaveFile);
+
+            // And the console's copy is now the edited one, so they agree again.
+            var after = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+            Assert.True(after.Agrees);
+        }
+    }
+
+    [Fact]
+    public async Task ARestoreOfAFileTheConsoleLostSaysWhichFileItWas()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var status = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileRestoreAsync("any%", "gone.sav"));
+            Assert.Equal(Status.NotFound, status.Status);
+
+            // The error byte stays until the next transfer, which is what the panel reads.
+            var info = await client.SaveFileInfoAsync();
+            Assert.Equal(SaveFileError.FileMissing, info.Error);
+            Assert.False(info.TransferPending);
+            Assert.Contains("no longer has", info.Error.Describe(), StringComparison.Ordinal);
+        }
+    }
+
+    [Fact]
+    public async Task ATransferThatFailsOnTheConsoleIsReportedByName()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            server.SaveFileTransferError = SaveFileError.IoError;
+
+            var failed = await Assert.ThrowsAsync<SaveFileTransfer.TransferFailedException>(
+                () => SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true));
+
+            Assert.Equal(SaveFileError.IoError, failed.Error);
+            Assert.Contains("could not read or write", failed.Message, StringComparison.Ordinal);
+
+            // Nothing was written on either side.
+            Assert.Empty(await client.SaveFileListAsync("any%"));
+            Assert.Empty(library.Files(Title, "any%"));
+        }
+    }
+
+    [Fact]
+    public async Task ASecondTransferDuringOneIsRefused()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            // Long enough that the first is still running when the second goes out.
+            server.SaveFileTransferPolls = 50;
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await client.SaveFileStoreAsync("any%", "one.sav");
+
+            var busy = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileStoreAsync("any%", "two.sav"));
+            Assert.Equal(Status.Busy, busy.Status);
+
+            // And the listing steps aside for it rather than reporting half a file.
+            var listing = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileListAsync("any%"));
+            Assert.Equal(Status.Busy, listing.Status);
+        }
+    }
+
+    [Fact]
+    public async Task ATransferThatNeverFinishesGivesUpRatherThanHanging()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            server.SaveFilePendingPolls = int.MaxValue;
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+
+            await Assert.ThrowsAsync<SaveFileTransfer.NotAnsweredException>(
+                () => SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav",
+                    mirror: true, timeout: TimeSpan.FromMilliseconds(200)));
+        }
+    }
+
+    [Fact]
+    public async Task DeletingAndRenamingActOnBothCopies()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+
+            await SaveFileTransfer.RenameAsync(client, library, Title, "any%", entry, "kerwan.sav");
+
+            Assert.Equal(new[] { "kerwan.sav" }, library.Files(Title, "any%"));
+            Assert.Equal(new[] { "kerwan.sav" },
+                (await client.SaveFileListAsync("any%")).Select(f => f.Name).ToArray());
+
+            // The sum went with it, so the console did not have to sum the file again.
+            Assert.True(server.Files.ContainsKey(
+                QwarkClient.SaveFileConsolePath(Title, "any%", "kerwan.sav") + QwarkClient.SaveFileSumExtension));
+
+            var renamed = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+            await SaveFileTransfer.DeleteAsync(client, library, Title, "any%", renamed);
+
+            Assert.Empty(library.Files(Title, "any%"));
+            Assert.Empty(await client.SaveFileListAsync("any%"));
+            Assert.False(server.Files.ContainsKey(
+                QwarkClient.SaveFileConsolePath(Title, "any%", "kerwan.sav") + QwarkClient.SaveFileSumExtension));
+        }
+    }
+
+    [Fact]
+    public async Task DeletingAFileOnlyThisPcHasTouchesNothingOnTheConsole()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            library.Write(Title, "any%", "veldin.sav", new byte[] { 1, 2, 3 });
+
+            var entry = Assert.Single(SaveFileMerge.Build(null, library.FilesWithCrc(Title, "any%")));
+            await SaveFileTransfer.DeleteAsync(client, library, Title, "any%", entry);
+
+            Assert.Empty(library.Files(Title, "any%"));
+            Assert.Empty(server.Files);
+        }
+    }
+
+    [Fact]
+    public async Task FileRenameRefusesToOverwriteAndSaysWhenThereIsNothingToMove()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            await client.WriteFileAsync("/dev_hdd0/qwark/one.bin", new byte[] { 1 });
+            await client.WriteFileAsync("/dev_hdd0/qwark/two.bin", new byte[] { 2 });
+
+            var onto = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.FileRenameAsync("/dev_hdd0/qwark/one.bin", "/dev_hdd0/qwark/two.bin"));
+            Assert.Equal(Status.BadArg, onto.Status);
+
+            var missing = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.FileRenameAsync("/dev_hdd0/qwark/nothing.bin", "/dev_hdd0/qwark/three.bin"));
+            Assert.Equal(Status.NotFound, missing.Status);
+
+            await client.FileRenameAsync("/dev_hdd0/qwark/one.bin", "/dev_hdd0/qwark/three.bin");
+            Assert.False(server.Files.ContainsKey("/dev_hdd0/qwark/one.bin"));
+            Assert.Equal(new byte[] { 1 }, server.Files["/dev_hdd0/qwark/three.bin"]);
+        }
+    }
+
+    [Fact]
+    public async Task ACategoryIsMadeAndRemovedOnTheConsole()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await client.WriteFileAsync(QwarkClient.SaveFileConsolePath(Title, "any%", "veldin.sav"),
+                new byte[] { 1, 2 });
+
+            // A category with a save in it stays put.
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileCategoryAsync(SaveFileCategoryOp.Delete, "any%"));
+            Assert.Equal(Status.IoError, refused.Status);
+
+            await client.FileDeleteAsync(QwarkClient.SaveFileConsolePath(Title, "any%", "veldin.sav"));
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Delete, "any%");
+            Assert.Empty(await client.SaveFileCategoriesAsync());
+        }
+    }
+
+    [Fact]
+    public async Task TheLibraryOpsAreRefusedWhereCodeCannotBePatched()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.SaveFileUnsupported = true;
+
+            foreach (var call in new Func<Task>[]
+                     {
+                         () => client.SaveFileCategoriesAsync(),
+                         () => client.SaveFileListAsync("any%"),
+                         () => client.SaveFileStoreAsync("any%", "a.sav"),
+                         () => client.SaveFileRestoreAsync("any%", "a.sav"),
+                         () => client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%"),
+                     })
+            {
+                var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => call());
+                Assert.Equal(Status.Unsupported, refused.Status);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task AStoreUnderANameThatIsNotASaveIsRefused()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileStoreAsync("any%", "veldin.txt"));
+            Assert.Equal(Status.BadArg, refused.Status);
+        }
+    }
+
     // ---------------------------------------------------------------- the local library
+
+    [Fact]
+    public void TheLocalListingCarriesASizeAndACrcPerFile()
+    {
+        var library = new SaveFileLibrary(_root);
+        library.Write(Title, "misc", "one.sav", new byte[] { 1, 2, 3 });
+        library.Write(Title, "misc", "two.sav", new byte[] { 4 });
+
+        var files = library.FilesWithCrc(Title, "misc");
+
+        Assert.Equal(new[] { "one.sav", "two.sav" }, files.Select(f => f.Name).ToArray());
+        Assert.Equal(3, files[0].Size);
+        Assert.Equal(Crc32.Compute(new byte[] { 1, 2, 3 }), files[0].Crc);
+        Assert.Equal(files[0].Crc, library.Crc(Title, "misc", "one.sav"));
+
+        // The cache follows the file rather than the name: a rewrite changes the answer.
+        library.Write(Title, "misc", "one.sav", new byte[] { 9, 9, 9, 9 });
+        Assert.Equal(Crc32.Compute(new byte[] { 9, 9, 9, 9 }), library.Crc(Title, "misc", "one.sav"));
+    }
 
     [Theory]
     [InlineData("veldin", "veldin.sav")]
