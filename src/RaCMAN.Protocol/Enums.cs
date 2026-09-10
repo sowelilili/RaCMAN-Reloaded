@@ -75,6 +75,13 @@ public enum Opcode : ushort
     DirDelete = 0x0077,
     UserId = 0x0078,
 
+    /// <summary>
+    /// Revision 1.10. It sits at the end of the file block rather than at 0x0075, where a rename
+    /// would naturally have gone: that number has been DIR_LIST since revision 1, and an opcode is
+    /// never renumbered.
+    /// </summary>
+    FileRename = 0x0079,
+
     // 5.9 Combos
     ComboSet = 0x0080,
     ComboList = 0x0081,
@@ -92,6 +99,63 @@ public enum Opcode : ushort
     SaveFileInfo = 0x00B0,
     SaveFileRead = 0x00B1,
     SaveFileWrite = 0x00B2,
+
+    // 5.13 The savefile library on the console (revision 1.10)
+    SaveFileCategories = 0x00B3,
+    SaveFileList = 0x00B4,
+    SaveFileStore = 0x00B5,
+    SaveFileRestore = 0x00B6,
+    SaveFileCategory = 0x00B7,
+}
+
+/// <summary>
+/// SAVEFILE_CATEGORY's <c>op</c>, section 5.13. A delete removes the folder and any orphaned
+/// <c>.sum</c> sidecars in it, and is refused while a save is still there.
+/// </summary>
+public enum SaveFileCategoryOp : byte
+{
+    Create = 0,
+    Delete = 1,
+}
+
+/// <summary>
+/// SAVEFILE_INFO's <c>error</c>, section 5.13: why the console's last copy between a file and the
+/// aside buffer stopped. It survives until the next STORE or RESTORE, so a client that polls once
+/// more after the transfer bit clears still learns how it ended.
+/// </summary>
+public enum SaveFileError : byte
+{
+    None = 0,
+
+    /// <summary>A RESTORE named a file the console does not have.</summary>
+    FileMissing = 1,
+
+    /// <summary>A read, a write or an open failed on the console.</summary>
+    IoError = 2,
+
+    /// <summary>The file is not exactly the size of the aside buffer, so no game could take it.</summary>
+    ShortFile = 3,
+
+    /// <summary>The game went away underneath the copy, taking the helper with it.</summary>
+    HelperMissing = 4,
+
+    /// <summary>The aside buffer was already spoken for by another transfer or request.</summary>
+    BufferBusy = 5,
+}
+
+public static class SaveFileErrorExtensions
+{
+    /// <summary>What to put in a toast. Plain words: the user did not ask about aside buffers.</summary>
+    public static string Describe(this SaveFileError error) => error switch
+    {
+        SaveFileError.None => "no error",
+        SaveFileError.FileMissing => "the console no longer has that file",
+        SaveFileError.IoError => "the console could not read or write the file",
+        SaveFileError.ShortFile => "the file is not the size this game's save has to be",
+        SaveFileError.HelperMissing => "the game stopped while the console was copying",
+        SaveFileError.BufferBusy => "the console was already busy with another save",
+        _ => $"error {(byte)error}",
+    };
 }
 
 /// <summary>

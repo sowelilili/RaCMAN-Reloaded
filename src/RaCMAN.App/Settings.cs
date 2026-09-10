@@ -112,6 +112,16 @@ public sealed class Settings
     [JsonPropertyName("saveFilesPath")]
     public string SaveFilesPath { get; set; } = "savefiles";
 
+    /// <summary>
+    /// Whether a save taken on the console is also copied down to this PC. The library of record
+    /// is the console's since qwark build 12, and the PC's copy is a mirror: it costs a download
+    /// per save and it is what survives a console being wiped or reformatted, so it is on unless
+    /// somebody turns it off. Turning it off changes nothing about saving or loading, only about
+    /// whether a second copy exists.
+    /// </summary>
+    [JsonPropertyName("mirrorSaveFiles")]
+    public bool MirrorSaveFiles { get; set; } = true;
+
     [JsonPropertyName("lastZipPath")]
     public string LastZipPath { get; set; } = string.Empty;
 

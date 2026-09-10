@@ -759,17 +759,25 @@ public readonly record struct MobyTableInfo(uint TablePointerAddress, uint Table
 public readonly record struct PatchWord(uint Address, uint Word);
 
 /// <summary>
-/// SAVEFILE_INFO, section 5.12 of PROTOCOL.md (revision 1.9). Eight bytes describing the
-/// console's savefile helper for whichever game is running.
+/// SAVEFILE_INFO, sections 5.12 and 5.13 of PROTOCOL.md. Eight bytes of helper state, and since
+/// revision 1.10 twelve more describing the copy the console runs between one of its own savefiles
+/// and the aside buffer.
 /// </summary>
 public readonly record struct SaveFileInfo(
     bool Supported,
     bool Installed,
     bool Running,
     byte Pending,
-    uint Size)
+    uint Size,
+    uint Done = 0,
+    uint Total = 0,
+    SaveFileError Error = SaveFileError.None)
 {
-    public const int WireSize = 8;
+    /// <summary>Twenty bytes since revision 1.10; the first eight are unchanged.</summary>
+    public const int WireSize = 20;
+
+    /// <summary>What a module built against revision 1.9 answers with.</summary>
+    public const int WireSize19 = 8;
 
     /// <summary>bit0: the set-aside the client asked for has not been answered yet.</summary>
     public const byte PendingSetAside = 0x01;
@@ -777,13 +785,25 @@ public readonly record struct SaveFileInfo(
     /// <summary>bit1: the load the client asked for has not been answered yet.</summary>
     public const byte PendingLoad = 0x02;
 
+    /// <summary>bit2 (revision 1.10): the console is copying a savefile in or out right now.</summary>
+    public const byte PendingTransfer = 0x04;
+
     public bool SetAsidePending => (Pending & PendingSetAside) != 0;
 
     public bool LoadPending => (Pending & PendingLoad) != 0;
 
+    public bool TransferPending => (Pending & PendingTransfer) != 0;
+
+    /// <summary>0 to 1 through the running transfer, and 0 when there is nothing to show.</summary>
+    public float Progress => Total == 0 ? 0f : Math.Clamp((float)Done / Total, 0f, 1f);
+
     /// <summary>What a client shows before it has asked, and what an unsupported game means.</summary>
     public static readonly SaveFileInfo None = new(false, false, false, 0, 0);
 
+    /// <summary>
+    /// A short payload is a console built against revision 1.9: it knows nothing about transfers,
+    /// so the three fields it never sent read as zero and every field it did send is still right.
+    /// </summary>
     public static SaveFileInfo Parse(ReadOnlySpan<byte> payload)
     {
         var r = new SpanReader(payload);
@@ -792,7 +812,13 @@ public readonly record struct SaveFileInfo(
         bool running = r.ReadU8() != 0;
         byte pending = r.ReadU8();
         uint size = r.ReadU32();
-        return new SaveFileInfo(supported, installed, running, pending, size);
+
+        if (payload.Length < WireSize) return new SaveFileInfo(supported, installed, running, pending, size);
+
+        uint done = r.ReadU32();
+        uint total = r.ReadU32();
+        var error = (SaveFileError)r.ReadU8();
+        return new SaveFileInfo(supported, installed, running, pending, size, done, total, error);
     }
 
     public byte[] ToBytes()
@@ -804,6 +830,56 @@ public readonly record struct SaveFileInfo(
         w.WriteU8((byte)(Running ? 1 : 0));
         w.WriteU8(Pending);
         w.WriteU32(Size);
+        w.WriteU32(Done);
+        w.WriteU32(Total);
+        w.WriteU8((byte)Error);
+        w.WriteZeros(3);
+        return bytes;
+    }
+}
+
+/// <summary>
+/// One row of SAVEFILE_LIST, section 5.13: a save on the console, its size and the CRC32 the
+/// console keeps beside it. <see cref="Name"/> is the file name, <c>.sav</c> and all.
+/// </summary>
+public readonly record struct ConsoleSaveFile(string Name, uint Size, uint Crc)
+{
+    public const int WireSize = 40;
+
+    public const int NameLength = 32;
+
+    public static ConsoleSaveFile[] ParseList(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < 1) return Array.Empty<ConsoleSaveFile>();
+
+        int count = payload[0];
+        var rows = new List<ConsoleSaveFile>(count);
+        var r = new SpanReader(payload[1..]);
+
+        for (int i = 0; i < count && payload.Length >= 1 + (i + 1) * WireSize; i++)
+        {
+            string name = r.ReadFixedString(NameLength);
+            uint size = r.ReadU32();
+            uint crc = r.ReadU32();
+            rows.Add(new ConsoleSaveFile(name, size, crc));
+        }
+
+        return rows.ToArray();
+    }
+
+    /// <summary>The other direction, for the fake console the tests drive.</summary>
+    public static byte[] EncodeList(IReadOnlyList<ConsoleSaveFile> files)
+    {
+        var bytes = new byte[1 + files.Count * WireSize];
+        var w = new SpanWriter(bytes);
+        w.WriteU8((byte)files.Count);
+        foreach (var file in files)
+        {
+            w.WriteFixedString(file.Name, NameLength);
+            w.WriteU32(file.Size);
+            w.WriteU32(file.Crc);
+        }
+
         return bytes;
     }
 }

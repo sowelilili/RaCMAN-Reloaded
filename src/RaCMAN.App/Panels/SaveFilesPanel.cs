@@ -5,11 +5,16 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// The savefile manager. Two flagged ACTIONs and the savefile block (section 5.12) are the whole
-/// of it: the SAVE_ASIDE action asks the game to park its save in the console's aside buffer, the
-/// LOAD_ASIDE action asks it to take back whatever is in there, and this panel moves the bytes
-/// between that buffer and a local library. No address, no game knowledge and no savefile format
-/// ever reaches this client, and nothing is written to the console's filesystem.
+/// The savefile manager. The library of record is the console's, under
+/// <c>/dev_hdd0/qwark/savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c>, and this PC keeps a mirror of it:
+/// saving asks the console to write its own file and then copies it down, and loading asks the
+/// console to read its own file back, uploading it first only when this PC has bytes the console
+/// does not. A save is up to 2 MB, and until qwark build 12 every single load streamed one from
+/// here.
+/// <para>
+/// No address, no game knowledge and no savefile format ever reaches this client: what a save is
+/// is whatever the game put in the helper's aside buffer.
+/// </para>
 /// </summary>
 public static class SaveFilesPanel
 {
@@ -17,18 +22,19 @@ public static class SaveFilesPanel
     private static string[] _categories = { SaveFileLibrary.DefaultCategory };
     private static int _categoryIndex;
     private static string _newCategory = string.Empty;
-    private static string[] _files = Array.Empty<string>();
+    private static SaveFileEntry[] _entries = Array.Empty<SaveFileEntry>();
     private static int _fileIndex = -1;
     private static string _name = string.Empty;
     private static string _renameTo = string.Empty;
 
     private static bool _busy;
+    private static bool _listing;
     private static string _status = string.Empty;
     private static long _transferred;
     private static bool _confirmDelete;
 
     /// <summary>Category and file count, for the smoke-run summary.</summary>
-    public static string Summary => $"{_categories.Length}/{_files.Length}";
+    public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
     public static void Reset()
     {
@@ -36,7 +42,7 @@ public static class SaveFilesPanel
         _categories = new[] { SaveFileLibrary.DefaultCategory };
         _categoryIndex = 0;
         _newCategory = string.Empty;
-        _files = Array.Empty<string>();
+        _entries = Array.Empty<SaveFileEntry>();
         _fileIndex = -1;
         _name = string.Empty;
         _renameTo = string.Empty;
@@ -49,14 +55,16 @@ public static class SaveFilesPanel
         _status = string.Empty;
         _transferred = 0;
         _confirmDelete = false;
+        _busy = false;
+        _listing = false;
     }
 
     private static string Category =>
         _categories.Length == 0 ? SaveFileLibrary.DefaultCategory
         : _categories[Math.Clamp(_categoryIndex, 0, _categories.Length - 1)];
 
-    private static string? SelectedFile =>
-        _fileIndex >= 0 && _fileIndex < _files.Length ? _files[_fileIndex] : null;
+    private static SaveFileEntry? Selected =>
+        _fileIndex >= 0 && _fileIndex < _entries.Length ? _entries[_fileIndex] : null;
 
     public static void Draw(AppState state)
     {
@@ -109,14 +117,21 @@ public static class SaveFilesPanel
 
         ImGui.Spacing();
 
-        // The category's own folder, since that is the one a file lands in; its path is on the
-        // button's tooltip rather than printed, being absolute and long enough to wrap.
+        // The category's own folder on this PC, since that is where a mirrored file lands; its
+        // path is on the button's tooltip rather than printed, being absolute and long enough
+        // to wrap.
         Ui.OpenFolderButton(state, state.SaveFiles.CategoryFolder(title, Category));
+        ImGui.SameLine();
+        Ui.Text(Ui.Grey, state.Settings.MirrorSaveFiles
+            ? "Saves are kept on the console and mirrored here."
+            : "Saves are kept on the console. Mirroring to this PC is off.");
+
         if (hasHelper)
         {
             Ui.DebugHint($"Console: {info.Size} bytes in the helper's aside buffer, " +
                          $"installed={info.Installed} running={info.Running}");
             Ui.DebugHint($"Actions: '{save!.Label}' (id {save.Id}, SAVE_ASIDE), '{load!.Label}' (id {load.Id}, LOAD_ASIDE)");
+            Ui.DebugHint($"Console library: {QwarkClient.SaveFileConsoleFolder(title, Category)}");
         }
 
         ImGui.Spacing();
@@ -149,31 +164,53 @@ public static class SaveFilesPanel
         }
 
         ImGui.SameLine();
+        ImGui.BeginDisabled(_busy);
         if (ImGui.Button("Rescan")) Rescan(state, title);
+        ImGui.EndDisabled();
+
+        if (_listing)
+        {
+            ImGui.SameLine();
+            Ui.Text(Ui.Grey, "reading the console...");
+        }
 
         ImGui.SetNextItemWidth(220);
         Ui.InputTextWithHint("##newcategory", "New category", ref _newCategory, 64);
         ImGui.SameLine();
-        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_newCategory));
-        if (ImGui.Button("Create category"))
-        {
-            try
-            {
-                var folder = state.SaveFiles.EnsureCategory(title, _newCategory);
-                string created = Path.GetFileName(folder);
-                _newCategory = string.Empty;
-                Rescan(state, title);
-                _categoryIndex = Math.Max(0, Array.IndexOf(_categories, created));
-                RescanFiles(state, title);
-                state.AddToast($"Category '{created}' created", ToastKind.Success);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                state.AddToast($"Could not create the category: {ex.Message}", ToastKind.Error);
-            }
-        }
+        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_newCategory) || _busy);
+        if (ImGui.Button("Create category")) CreateCategory(state, title);
 
         ImGui.EndDisabled();
+    }
+
+    /// <summary>A category is made on both sides, so the next save has somewhere to go either way.</summary>
+    private static void CreateCategory(AppState state, string title)
+    {
+        string wanted = SaveFileLibrary.Sanitise(_newCategory, SaveFileLibrary.DefaultCategory);
+
+        try
+        {
+            state.SaveFiles.EnsureCategory(title, wanted);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            state.AddToast($"Could not create the category: {ex.Message}", ToastKind.Error);
+            return;
+        }
+
+        _newCategory = string.Empty;
+
+        state.Run(async () =>
+        {
+            await state.Client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, wanted).ConfigureAwait(false);
+            state.Post(() =>
+            {
+                Rescan(state, title);
+                _categoryIndex = Math.Max(0, Array.IndexOf(_categories, wanted));
+                RescanFiles(state, title);
+                state.AddToast($"Category '{wanted}' created", ToastKind.Success);
+            });
+        });
     }
 
     private static void DrawFileList(AppState state)
@@ -184,84 +221,104 @@ public static class SaveFilesPanel
             return;
         }
 
-        if (_files.Length == 0)
+        if (_entries.Length == 0)
         {
             Ui.Hint("No files in this category yet.");
         }
-        else
+        else if (ImGui.BeginTable("savefiles", 3,
+                     ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
-            for (int i = 0; i < _files.Length; i++)
+            ImGui.TableSetupColumn("Save");
+            ImGui.TableSetupColumn("Where", ImGuiTableColumnFlags.WidthFixed, 90);
+            ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
+            ImGui.TableHeadersRow();
+
+            for (int i = 0; i < _entries.Length; i++)
             {
+                var entry = _entries[i];
+
+                ImGui.TableNextRow();
+                ImGui.TableNextColumn();
+
                 // The row shows the name without the .sav every file in here ends in; the id after
                 // the ## is the file itself, so two files that only differ by their suffix are
                 // still two rows to ImGui.
-                if (!ImGui.Selectable($"{SaveFileLibrary.DisplayName(_files[i])}##{_files[i]}", _fileIndex == i)) continue;
+                if (ImGui.Selectable($"{entry.DisplayName}##{entry.Name}", _fileIndex == i,
+                        ImGuiSelectableFlags.SpanAllColumns))
+                {
+                    _fileIndex = i;
+                    _renameTo = entry.DisplayName;
+                    _confirmDelete = false;
+                }
 
-                _fileIndex = i;
-                _renameTo = SaveFileLibrary.DisplayName(_files[i]);
-                _confirmDelete = false;
+                ImGui.TableNextColumn();
+
+                // Where it lives, and whether the two copies are the same bytes. A row that says
+                // "both, differ" is the one case where loading sends the file: this PC's copy is
+                // the one the user picked, so it is the one that wins.
+                Ui.Text(entry.Differs ? Ui.Yellow : Ui.Grey, entry.Where);
+                if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextUnformatted(Tooltip(entry));
+                    ImGui.EndTooltip();
+                }
+
+                ImGui.TableNextColumn();
+                ImGui.TextUnformatted(entry.Size > 0 ? $"{entry.Size / 1024} KB" : "-");
             }
+
+            ImGui.EndTable();
         }
 
         ImGui.EndChild();
     }
 
+    private static string Tooltip(SaveFileEntry entry) => entry.Location switch
+    {
+        SaveFileLocation.Console =>
+            $"{entry.Name}\nOn the console only. Loading it sends nothing.",
+        SaveFileLocation.Pc =>
+            $"{entry.Name}\nOn this PC only. Loading it uploads it to the console once.",
+        _ when entry.Differs =>
+            $"{entry.Name}\nBoth copies exist and hold different bytes "
+            + $"(console {entry.ConsoleCrc:x8}, PC {entry.PcCrc:x8}).\n"
+            + "Loading it sends this PC's copy and replaces the console's.",
+        _ => $"{entry.Name}\nBoth copies exist and agree (CRC {entry.ConsoleCrc:x8}).",
+    };
+
     private static void DrawActions(AppState state, string title, Feature? save, Feature? load, bool enabled)
     {
+        var selected = Selected;
+
         ImGui.SetNextItemWidth(260);
         Ui.InputTextWithHint("##name", "File name to save as", ref _name, 64);
         ImGui.SameLine();
 
         ImGui.BeginDisabled(!enabled || save is null || string.IsNullOrWhiteSpace(_name));
-        if (ImGui.Button("Save from console")) StartSave(state, title, save!.Id);
+        if (ImGui.Button("Save on console")) StartSave(state, title);
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(!enabled || load is null || SelectedFile is null);
-        if (ImGui.Button("Load to console")) StartLoad(state, title, load!.Id);
+        ImGui.BeginDisabled(!enabled || load is null || selected is null);
+        if (ImGui.Button("Load into game")) StartLoad(state, title, selected!.Value);
         ImGui.EndDisabled();
 
-        ImGui.BeginDisabled(SelectedFile is null || _busy);
+        ImGui.BeginDisabled(selected is null || _busy);
 
         ImGui.SetNextItemWidth(260);
         Ui.InputTextWithHint("##rename", "Rename to", ref _renameTo, 64);
         ImGui.SameLine();
-        if (ImGui.Button("Rename"))
-        {
-            try
-            {
-                // The box holds a name without a suffix, the library takes whole file names: the
-                // .sav goes back on here so the file on disk keeps it.
-                string renamed = SaveFileLibrary.EnsureExtension(_renameTo);
-                state.SaveFiles.Rename(title, Category, SelectedFile!, renamed);
-                state.AddToast($"Renamed to {SaveFileLibrary.DisplayName(SaveFileLibrary.Sanitise(renamed, "savefile"))}",
-                    ToastKind.Success);
-                RescanFiles(state, title);
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                state.AddToast($"Rename failed: {ex.Message}", ToastKind.Error);
-            }
-        }
+        if (ImGui.Button("Rename")) StartRename(state, title, selected!.Value);
 
         ImGui.SameLine();
         if (_confirmDelete)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
-            if (ImGui.Button($"Delete '{SaveFileLibrary.DisplayName(SelectedFile)}'?"))
+            if (ImGui.Button($"Delete '{selected?.DisplayName}'?"))
             {
                 _confirmDelete = false;
-                try
-                {
-                    state.SaveFiles.Delete(title, Category, SelectedFile!);
-                    state.AddToast("Deleted", ToastKind.Success);
-                    _fileIndex = -1;
-                    RescanFiles(state, title);
-                }
-                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-                {
-                    state.AddToast($"Delete failed: {ex.Message}", ToastKind.Error);
-                }
+                StartDelete(state, title, selected!.Value);
             }
 
             ImGui.PopStyleColor();
@@ -276,15 +333,21 @@ public static class SaveFilesPanel
         ImGui.EndDisabled();
     }
 
-    private static void StartSave(AppState state, string title, byte saveActionId)
+    /// <summary>
+    /// SAVEFILE_STORE, poll SAVEFILE_INFO to completion, then mirror the file down when mirroring
+    /// is on. The console writes its own file whole before it says it is finished, so a save that
+    /// stops half way leaves the console's library exactly as it was.
+    /// </summary>
+    private static void StartSave(AppState state, string title)
     {
         string category = Category;
-        string name = SaveFileLibrary.EnsureExtension(_name);
+        string name = SaveFileLibrary.EnsureExtension(SaveFileLibrary.Sanitise(_name, "savefile"));
         var library = state.SaveFiles;
+        bool mirror = state.Settings.MirrorSaveFiles;
 
         _busy = true;
         _transferred = 0;
-        _status = "Triggering the set-aside action...";
+        _status = "Asking the console to save...";
 
         var status = new Progress<string>(text => state.Post(() => _status = text));
         var bytes = new Progress<long>(count => state.Post(() => _transferred = count));
@@ -293,36 +356,29 @@ public static class SaveFilesPanel
         {
             try
             {
-                // Every chunk first, then one file: a save that fails part way through leaves
-                // nothing in the library rather than a .sav with a torn tail, which is the file
-                // that crashes the game when it is loaded back.
-                var path = await SaveFileTransfer.SaveToLibraryAsync(
-                    state.Client, saveActionId, library, title, category, name,
+                var path = await SaveFileTransfer.StoreAsync(
+                    state.Client, library, title, category, name, mirror,
                     timeout: null, status: status, bytes: bytes)
                     .ConfigureAwait(false);
 
                 state.Post(() =>
                 {
-                    _status = $"Saved to {path}";
+                    _status = path.Length > 0 ? $"Saved on the console and mirrored to {path}"
+                                              : "Saved on the console";
                     _name = string.Empty;
                     Rescan(state, title);
-                    _categoryIndex = Math.Max(0, Array.IndexOf(_categories, SaveFileLibrary.Sanitise(category, SaveFileLibrary.DefaultCategory)));
-                    RescanFiles(state, title);
-                    _fileIndex = Array.IndexOf(_files, Path.GetFileName(path));
-                    state.AddToast($"Saved '{Path.GetFileName(path)}'", ToastKind.Success);
+                    state.AddToast($"Saved '{SaveFileLibrary.DisplayName(name)}'", ToastKind.Success);
                 });
             }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
+                                          or SaveFileTransfer.TransferFailedException
                                           or QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
-                // Whatever went wrong, no file was written: say so rather than leaving the user
-                // to wonder which half of the save is on disk.
                 state.Post(() =>
                 {
                     _status = ex.Message;
-                    state.AddToast($"The save did not finish, so nothing was written: {ex.Message}",
-                                   ToastKind.Error);
+                    state.AddToast($"The save did not finish: {ex.Message}", ToastKind.Error);
                 });
             }
             finally
@@ -332,17 +388,20 @@ public static class SaveFilesPanel
         });
     }
 
-    private static void StartLoad(AppState state, string title, byte loadActionId)
+    /// <summary>
+    /// SAVEFILE_RESTORE when the console already has these bytes, and an upload first when it does
+    /// not. Which of the two it is comes out of the merged row, so the panel never guesses.
+    /// </summary>
+    private static void StartLoad(AppState state, string title, SaveFileEntry entry)
     {
         string category = Category;
-        string file = SelectedFile!;
         var library = state.SaveFiles;
-
-        string shown = SaveFileLibrary.DisplayName(file);
 
         _busy = true;
         _transferred = 0;
-        _status = $"Uploading {shown}...";
+        _status = SaveFileMerge.PlanLoad(entry) == SaveFileLoadPlan.UploadThenRestore
+            ? $"Uploading {entry.DisplayName} to the console..."
+            : $"Asking the console to load {entry.DisplayName}...";
 
         var status = new Progress<string>(text => state.Post(() => _status = text));
         var bytes = new Progress<long>(count => state.Post(() => _transferred = count));
@@ -351,19 +410,22 @@ public static class SaveFilesPanel
         {
             try
             {
-                // The size check, the chunks in order and the action after the last of them are
-                // all UploadAsync's; it comes back once the console says the load bit has cleared.
-                var data = library.Read(title, category, file);
-                await SaveFileTransfer.UploadAsync(state.Client, loadActionId, data,
-                        timeout: null, status: status, bytes: bytes)
+                bool uploaded = await SaveFileTransfer.LoadAsync(
+                    state.Client, library, title, category, entry,
+                    timeout: null, status: status, bytes: bytes)
                     .ConfigureAwait(false);
+
                 state.Post(() =>
                 {
-                    _status = $"Sent {data.Length} bytes and the game took them";
-                    state.AddToast($"Loaded '{file}' onto the console", ToastKind.Success);
+                    _status = uploaded
+                        ? "Uploaded to the console and loaded into the game"
+                        : "Loaded into the game from the console";
+                    state.AddToast($"Loaded '{entry.DisplayName}'", ToastKind.Success);
+                    if (uploaded) Rescan(state, title);
                 });
             }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
+                                          or SaveFileTransfer.TransferFailedException
                                           or QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
@@ -380,6 +442,71 @@ public static class SaveFilesPanel
         });
     }
 
+    /// <summary>Both copies, and the CRC sidecar the console keeps beside its own.</summary>
+    private static void StartRename(AppState state, string title, SaveFileEntry entry)
+    {
+        // The box holds a name without a suffix, the library takes whole file names: the .sav
+        // goes back on here so the file on both sides keeps it.
+        string renamed = SaveFileLibrary.EnsureExtension(SaveFileLibrary.Sanitise(_renameTo, "savefile"));
+        string category = Category;
+        var library = state.SaveFiles;
+
+        _busy = true;
+        state.Run(async () =>
+        {
+            try
+            {
+                await SaveFileTransfer.RenameAsync(state.Client, library, title, category, entry, renamed)
+                    .ConfigureAwait(false);
+                state.Post(() =>
+                {
+                    state.AddToast($"Renamed to {SaveFileLibrary.DisplayName(renamed)}", ToastKind.Success);
+                    Rescan(state, title);
+                });
+            }
+            catch (Exception ex) when (ex is QwarkStatusException or ProtocolException
+                                          or IOException or UnauthorizedAccessException)
+            {
+                state.Post(() => state.AddToast($"Rename failed: {ex.Message}", ToastKind.Error));
+            }
+            finally
+            {
+                state.Post(() => _busy = false);
+            }
+        });
+    }
+
+    private static void StartDelete(AppState state, string title, SaveFileEntry entry)
+    {
+        string category = Category;
+        var library = state.SaveFiles;
+
+        _busy = true;
+        state.Run(async () =>
+        {
+            try
+            {
+                await SaveFileTransfer.DeleteAsync(state.Client, library, title, category, entry)
+                    .ConfigureAwait(false);
+                state.Post(() =>
+                {
+                    state.AddToast("Deleted", ToastKind.Success);
+                    _fileIndex = -1;
+                    Rescan(state, title);
+                });
+            }
+            catch (Exception ex) when (ex is QwarkStatusException or ProtocolException
+                                          or IOException or UnauthorizedAccessException)
+            {
+                state.Post(() => state.AddToast($"Delete failed: {ex.Message}", ToastKind.Error));
+            }
+            finally
+            {
+                state.Post(() => _busy = false);
+            }
+        });
+    }
+
     private static void Rescan(AppState state, string title)
     {
         // A new game means a new answer about the console's helper, and this panel is the only
@@ -387,32 +514,110 @@ public static class SaveFilesPanel
         if (!string.Equals(_title, title, StringComparison.Ordinal)) state.RefreshSaveFileInfo();
 
         _title = title;
+
+        string[] local;
         try
         {
-            _categories = state.SaveFiles.Categories(title);
+            local = state.SaveFiles.Categories(title);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _categories = new[] { SaveFileLibrary.DefaultCategory };
+            local = new[] { SaveFileLibrary.DefaultCategory };
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
+        _categories = local;
         _categoryIndex = Math.Clamp(_categoryIndex, 0, Math.Max(0, _categories.Length - 1));
         RescanFiles(state, title);
+
+        // The console's categories are read on its own time, and the two lists are merged when the
+        // answer comes back: the panel is drawn from whatever it has, never blocked on a request.
+        if (!state.Ingame || !state.SaveFile.Supported) return;
+
+        _listing = true;
+        state.RunQuiet(async () =>
+        {
+            try
+            {
+                var categories = await state.Client.SaveFileCategoriesAsync().ConfigureAwait(false);
+                state.Post(() =>
+                {
+                    string wanted = Category;
+                    _categories = Merge(_categories, categories);
+                    _categoryIndex = Math.Max(0, Array.IndexOf(_categories, wanted));
+                    RescanFiles(state, title);
+                });
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
+            {
+                // The console is copying a save right now and will not read its own library
+                // half way through writing it. The rescan after the transfer has the answer.
+            }
+            finally
+            {
+                state.Post(() => _listing = false);
+            }
+        });
+    }
+
+    /// <summary>The categories both sides know about, in one sorted list with no repeats.</summary>
+    private static string[] Merge(IEnumerable<string> local, IEnumerable<string> console)
+    {
+        var names = new SortedSet<string>(local, StringComparer.OrdinalIgnoreCase);
+        foreach (var name in console)
+        {
+            if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+        }
+
+        return names.Count == 0 ? new[] { SaveFileLibrary.DefaultCategory } : names.ToArray();
     }
 
     private static void RescanFiles(AppState state, string title)
     {
+        string category = Category;
+        LocalSaveFile[] pc;
+
         try
         {
-            _files = state.SaveFiles.Files(title, Category);
+            pc = state.SaveFiles.FilesWithCrc(title, category);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            _files = Array.Empty<string>();
+            pc = Array.Empty<LocalSaveFile>();
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
-        if (_fileIndex >= _files.Length) _fileIndex = -1;
+        _entries = SaveFileMerge.Build(null, pc);
+        if (_fileIndex >= _entries.Length) _fileIndex = -1;
+
+        if (!state.Ingame || !state.SaveFile.Supported) return;
+
+        _listing = true;
+        state.RunQuiet(async () =>
+        {
+            try
+            {
+                var console = await state.Client.SaveFileListAsync(category).ConfigureAwait(false);
+                state.Post(() =>
+                {
+                    // The category may have moved on while the console was answering.
+                    if (!string.Equals(category, Category, StringComparison.Ordinal)) return;
+
+                    string? keep = Selected?.Name;
+                    _entries = SaveFileMerge.Build(console, pc);
+                    _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
+                });
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.NotFound or Status.Busy)
+            {
+                // NOT_FOUND is a category this PC has and the console does not, which is a normal
+                // state of the world; BUSY is a listing asked for while a transfer is running,
+                // and the rescan after it will have the answer.
+            }
+            finally
+            {
+                state.Post(() => _listing = false);
+            }
+        });
     }
 }
