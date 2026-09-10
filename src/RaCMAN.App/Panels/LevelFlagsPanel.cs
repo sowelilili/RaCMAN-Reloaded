@@ -139,13 +139,12 @@ public static class LevelFlagsPanel
         if (_flags.Length == 0)
         {
             Ui.Hint(!state.Connected ? "Connect to read level flags."
-                : !state.Ingame ? $"Level flags are read out of game memory; the session is {session.State}, not INGAME."
+                : !state.Ingame ? $"Reading level flags needs INGAME (state is {session.State})."
                 : "This game has no level flags.");
             return;
         }
 
-        Ui.Hint($"{_flags.Length} bytes, planet {_loadedPlanet}. One byte per row, bit 7 to bit 0; "
-                + "ticking a bit writes the byte to the console.");
+        Ui.Hint($"Planet {_loadedPlanet}. Ticking a bit writes the byte to the console.");
         ImGui.Spacing();
 
         DrawBits(state);

@@ -75,7 +75,7 @@ public static class PositionsPanel
         if (positions.Slots.Length == 0)
         {
             Ui.Hint(!state.Connected ? "Connect to read the position slots."
-                : !state.Ingame ? $"Position slots are read out of game memory; the session is {session.State}, not INGAME."
+                : !state.Ingame ? $"Reading the position slots needs INGAME (state is {session.State})."
                 : "No positions saved for this planet.");
             return;
         }

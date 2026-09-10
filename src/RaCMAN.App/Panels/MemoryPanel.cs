@@ -159,12 +159,12 @@ public static class MemoryPanel
             Ui.Warning($"No moby layout for game {(byte)state.Session.Game} ({state.Session.Game}): "
                        + "index, address and position only.");
         }
-        else
-        {
-            Ui.Hint($"{layout.Name} layout, from {layout.Source}");
-        }
 
         foreach (var problem in MobyLayouts.Problems) Ui.Error(problem);
+
+        // Which layout file the columns came from, and where the table itself lives, are both
+        // wire-level detail: the columns are named in the header row either way.
+        if (layout is not null) Ui.DebugHint($"{layout.Name} layout, from {layout.Source}");
 
         if (_mobyInfo is { } info)
         {
@@ -177,7 +177,7 @@ public static class MemoryPanel
         {
             Ui.Hint(enabled
                 ? "Read the table to list the mobys the console is updating."
-                : $"The moby table is game memory; the session is {state.Session.State}, not INGAME.");
+                : $"Reading the moby table needs INGAME (state is {state.Session.State}).");
             return;
         }
 

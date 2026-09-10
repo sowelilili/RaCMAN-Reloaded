@@ -66,13 +66,13 @@ public static class SaveFilesPanel
 
         if (!state.Connected)
         {
-            Ui.Hint("Connect to a console: the save manager drives the game's own save and load actions.");
+            Ui.Hint("Connect to a console to manage save files.");
             return;
         }
 
         if (string.IsNullOrEmpty(title))
         {
-            Ui.Hint("No game is running, so there is no savefile library and no set-aside actions.");
+            Ui.Hint("No game is running, so there is no savefile library to show.");
             return;
         }
 
@@ -83,7 +83,7 @@ public static class SaveFilesPanel
 
         if (!hasHelper)
         {
-            Ui.Warning("This game has no savefile helper, so set-aside save and load are not available.");
+            Ui.Warning("This game has no savefile helper, so saving and loading are not available.");
         }
         else if (!state.Ingame)
         {
@@ -202,8 +202,7 @@ public static class SaveFilesPanel
         if (ImGui.Button("Load to console")) StartLoad(state, title, load!.Id);
         ImGui.EndDisabled();
 
-        Ui.Hint("Save triggers the game's set-aside action, waits two seconds and downloads tempsave. "
-                + "Load uploads the selected file over tempsave and triggers the load action.");
+        Ui.Hint("Save puts the game's current save in the library under that name; Load sends the selected file back.");
 
         ImGui.Spacing();
         ImGui.BeginDisabled(SelectedFile is null || _busy);

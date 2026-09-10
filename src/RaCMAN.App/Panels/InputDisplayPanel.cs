@@ -105,23 +105,11 @@ public static class InputDisplayPanel
             Wanted.Clear();
         }
 
-        // The pad's own window sizes the skin to itself, so the slider has nothing to say there.
-        ImGui.BeginDisabled(settings.InputMode == InputDisplayMode.Window);
-
-        float scale = settings.InputScale;
-        ImGui.SetNextItemWidth(260);
-        if (ImGui.SliderFloat("Scale", ref scale, 0.25f, 2f, "%.2fx"))
-        {
-            settings.InputScale = Math.Clamp(scale, 0.25f, 2f);
-        }
-
-        if (ImGui.IsItemDeactivatedAfterEdit()) settings.Save();
-
-        ImGui.EndDisabled();
-
         DrawModeChoice(settings);
 
-        ImGui.TextColored(Ui.Grey,
+        // The pad on the screen is the readout; the numbers behind it are only of use while
+        // looking at the wire.
+        Ui.DebugHint(
             $"mask 0x{session.PadMask:X4}   rx {Get(session.Analog, 0):0.00}  ry {Get(session.Analog, 1):0.00}  " +
             $"lx {Get(session.Analog, 2):0.00}  ly {Get(session.Analog, 3):0.00}");
 
@@ -141,16 +129,10 @@ public static class InputDisplayPanel
         }
         else
         {
-            float fit = FitScale(loaded, settings.InputScale);
-            if (fit < settings.InputScale - 0.005f)
-            {
-                Ui.Hint($"Shown at {fit:0.00}x so the whole pad fits here; give it its own window for the full size.");
-            }
-
-            DrawPad(state, loaded, fit);
+            DrawPad(state, loaded, FitScale(loaded));
         }
 
-        if (!state.Connected) Ui.Hint("Not connected: the pad shows the last telemetry packet, if any.");
+        if (!state.Connected) Ui.Hint("Not connected: the pad shows what the console last sent, if anything.");
     }
 
     /// <summary>
@@ -185,34 +167,40 @@ public static class InputDisplayPanel
     }
 
     /// <summary>
-    /// The largest scale the pad can be drawn at and still fit the panel. A skin is around 800 by
-    /// 730 pixels, wider than the panel at the default window size, and the pad is drawn straight
-    /// onto the window's draw list: anything past the right-hand edge is simply not reachable.
-    /// The slider still owns the scale; this only caps it, and only for the embedded pad, because
-    /// the pad's own window sizes the skin to itself.
+    /// The scale the embedded pad is drawn at: its own size, or less when the panel is too small
+    /// for that. A skin is around 800 by 730 pixels, wider than the panel at the default window
+    /// size, and the pad is drawn straight onto the window's draw list, so anything past the
+    /// right-hand edge is simply not reachable. The pad's own window sizes the skin to itself.
     /// </summary>
-    private static float FitScale(LoadedSkin? loaded, float scale)
+    private static float FitScale(LoadedSkin? loaded)
     {
         float width = loaded?.Skin.Base.Width ?? FallbackWidth;
         float height = loaded?.Skin.Base.Height ?? FallbackHeight;
-        if (width <= 0 || height <= 0) return scale;
 
         // Reserve the scrollbar and the spacing below the pad in both directions. Sized to exactly
         // what is left, the pad would overflow by that spacing, raise a scrollbar, lose the width
         // the scrollbar takes, shrink, drop the scrollbar, and flicker between the two every frame.
         var style = ImGui.GetStyle();
         var available = ImGui.GetContentRegionAvail();
-        float usableX = available.X - style.ScrollbarSize;
-        float usableY = available.Y - style.ItemSpacing.Y * 2;
-        if (usableX <= 0 || usableY <= 0) return scale;
+        return FitScale(width, height, available.X - style.ScrollbarSize, available.Y - style.ItemSpacing.Y * 2);
+    }
 
-        return Math.Min(scale, Math.Min(usableX / width, usableY / height));
+    /// <summary>
+    /// The fit itself, without ImGui in it: never larger than the skin was drawn at, and smaller
+    /// by whichever of the two axes runs out of room first. A size that makes no sense, from a
+    /// skin that failed to load or from a panel with nothing left in it, draws at 1x.
+    /// </summary>
+    public static float FitScale(float width, float height, float usableX, float usableY)
+    {
+        if (width <= 0 || height <= 0 || usableX <= 0 || usableY <= 0) return 1f;
+
+        return Math.Min(1f, Math.Min(usableX / width, usableY / height));
     }
 
     /// <summary>
     /// The whole content of the pad's own OS window: one borderless ImGui window filling the
-    /// client area, with the skin scaled to fit and centred. The scale slider does not apply
-    /// here - the window's own size is the scale.
+    /// client area, with the skin scaled to fit and centred. The window's own size is the scale,
+    /// so the pad grows and shrinks with it and opens at the size the skin was drawn at.
     /// </summary>
     public static void DrawOwnWindow(AppState state, ImGuiController controller, Vector2 clientSize)
     {

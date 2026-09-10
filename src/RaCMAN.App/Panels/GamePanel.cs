@@ -118,7 +118,7 @@ public static class GamePanel
         {
             Ui.Hint(state.Connected
                 ? "Start a supported game to see its controls."
-                : "Connect to see the game's descriptors.");
+                : "Connect to see the game's controls.");
             return;
         }
 

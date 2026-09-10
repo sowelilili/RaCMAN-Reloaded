@@ -255,7 +255,7 @@ public static class SettingsPanel
         {
             ImGui.TextUnformatted($"{slots.Count} chargeboot colour slot(s)");
             Ui.Hint("Saved as colour presets named \"RaCMAN slot N\" for both RaC2 and RaC3, since the old picker was "
-                    + "shared by the two games. This part is the PC's own and needs no console.");
+                    + "shared by the two games.");
         }
 
         if (!state.Connected)

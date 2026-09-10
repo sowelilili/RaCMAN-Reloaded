@@ -119,6 +119,12 @@ public sealed class Settings
     [JsonPropertyName("inputSkin")]
     public string InputSkin { get; set; } = "DS3 Black";
 
+    /// <summary>
+    /// The pad's scale, when there was a slider for it. Nothing reads it now: the embedded pad is
+    /// drawn at the skin's own size, or smaller when the panel is, and the pad's own window sizes
+    /// the skin to itself. The key is still read and written so an older file still loads.
+    /// </summary>
+    [Obsolete("The pad is sized by the panel or by its own window; nothing reads this.")]
     [JsonPropertyName("inputScale")]
     public float InputScale { get; set; } = 1f;
 

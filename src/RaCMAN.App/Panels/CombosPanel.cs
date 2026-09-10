@@ -159,7 +159,12 @@ public static class CombosPanel
         ImGui.Spacing();
         if (ImGui.SmallButton("Refresh")) state.RefreshCombos();
 
-        ImGui.Spacing();
-        ImGui.TextColored(Ui.Grey, $"Live pad mask: 0x{state.Session.PadMask:X4}  {PadButtons.Describe(state.Session.PadMask)}");
+        // The capture reads the pad out of telemetry either way; the mask itself is only of use
+        // while looking at the wire, so it goes with the rest of the debug detail.
+        if (Ui.Debug)
+        {
+            ImGui.Spacing();
+            Ui.DebugHint($"Live pad mask: 0x{state.Session.PadMask:X4}  {PadButtons.Describe(state.Session.PadMask)}");
+        }
     }
 }

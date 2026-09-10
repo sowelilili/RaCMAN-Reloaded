@@ -458,3 +458,40 @@ public class PanelNavTests
         }
     }
 }
+
+/// <summary>
+/// How big the input display draws the pad in the panel: the skin's own size, or as much of it as
+/// the room allows. There is no scale to set any more, so this rule is the whole of it.
+/// </summary>
+public class InputDisplayFitTests
+{
+    // About the size of a real skin sheet.
+    private const float Width = 800f;
+    private const float Height = 730f;
+
+    [Fact]
+    public void APanelWithRoomToSpareDrawsTheSkinAtItsOwnSize()
+    {
+        Assert.Equal(1f, InputDisplayPanel.FitScale(Width, Height, 1200f, 1000f));
+    }
+
+    [Fact]
+    public void TheTighterOfTheTwoAxesDecidesTheScale()
+    {
+        // Half the width it wants, all the height: the pad is drawn at half size.
+        Assert.Equal(0.5f, InputDisplayPanel.FitScale(Width, Height, 400f, 1000f), 4);
+
+        Assert.Equal(0.5f, InputDisplayPanel.FitScale(Width, Height, 1200f, 365f), 4);
+    }
+
+    [Fact]
+    public void ASizeThatMakesNoSenseDrawsAtOneToOneRatherThanVanishing()
+    {
+        Assert.Equal(1f, InputDisplayPanel.FitScale(0f, Height, 1200f, 1000f));
+        Assert.Equal(1f, InputDisplayPanel.FitScale(Width, 0f, 1200f, 1000f));
+
+        // A panel scrolled down to nothing, or one narrower than its own scrollbar.
+        Assert.Equal(1f, InputDisplayPanel.FitScale(Width, Height, -10f, 1000f));
+        Assert.Equal(1f, InputDisplayPanel.FitScale(Width, Height, 1200f, 0f));
+    }
+}
