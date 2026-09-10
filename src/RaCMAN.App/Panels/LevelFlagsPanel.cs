@@ -56,10 +56,14 @@ public static class LevelFlagsPanel
         ImGui.SetNextItemWidth(240);
         if (planets.Length > 0)
         {
-            int index = Math.Clamp(_planet, 0, planets.Length - 1);
-            if (ImGui.Combo("Planet", ref index, planets, planets.Length))
+            // The filler names in the console list ("(none)", "(infinite loop)") are not offered;
+            // _planet stays the real index the console expects.
+            var choices = PlanetChoices.For(planets);
+            int pick = Math.Max(0, choices.PositionOf(_planet));
+            _planet = choices.PlanetAt(pick);
+            if (ImGui.Combo("Planet", ref pick, choices.Labels, choices.Count))
             {
-                _planet = index;
+                _planet = choices.PlanetAt(pick);
                 Load(state);
             }
         }
