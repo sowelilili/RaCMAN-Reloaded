@@ -60,10 +60,26 @@ public sealed class LiveSplitClient : IDisposable
     /// <summary>
     /// Takes one time and adds it to the run's loading times, which is how game time is corrected:
     /// game time is real time less the loading times, so a positive number takes time off the
-    /// clock. It is the only game-time command this client uses — it never pauses game time and
-    /// never sets it outright, so nothing here can disagree with LiveSplit about the elapsed run.
+    /// clock and a negative one puts time back on it. The server parses the argument with its own
+    /// <c>TimeSpanParser</c>, which reads a leading minus, so both directions are one command.
     /// </summary>
     public const string AddLoadingTimes = "addloadingtimes";
+
+    /// <summary>
+    /// Stops and starts game time while real time keeps running, which is what LiveSplit does for
+    /// an ASL's <c>isLoading</c>. Neither moves the timer phase: a paused game time is still a
+    /// Running timer, unlike <see cref="Pause"/>.
+    /// </summary>
+    public const string PauseGameTime = "pausegametime";
+
+    public const string UnpauseGameTime = "unpausegametime";
+
+    /// <summary>
+    /// Sets game time outright, the way <c>timer.SetGameTime</c> did in the old scripts. Sent while
+    /// game time is paused it moves the clock LiveSplit froze, so the new value is what game time
+    /// carries on from at the unpause.
+    /// </summary>
+    public const string SetGameTime = "setgametime";
 
     // One line back.
     public const string GetCurrentSplitName = "getcurrentsplitname";
@@ -81,12 +97,21 @@ public sealed class LiveSplitClient : IDisposable
 
     public const string GetSplitIndex = "getsplitindex";
     public const string GetCurrentTimerPhase = "getcurrenttimerphase";
+
+    /// <summary>
+    /// The run's game time as the server's <c>PreciseTimeFormatter</c> writes it, which is a
+    /// <see cref="TimeSpan"/>'s own text: <c>00:01:14.8000000</c>, or <c>-</c> for no time at all.
+    /// Asked while game time is paused it answers the frozen value, so it is stable to read, add to
+    /// and write back. A build that does not know the command answers nothing at all.
+    /// </summary>
+    public const string GetCurrentGameTime = "getcurrentgametime";
+
     public const string Ping = "ping";
 
     private static readonly HashSet<string> QueryCommands = new(StringComparer.Ordinal)
     {
         GetCurrentSplitName, GetUpcomingSplitName, GetPreviousSplitName, GetLastSplitName,
-        GetSplitIndex, GetCurrentTimerPhase, Ping,
+        GetSplitIndex, GetCurrentTimerPhase, GetCurrentGameTime, Ping,
     };
 
     /// <summary>
@@ -291,18 +316,59 @@ public sealed class LiveSplitClient : IDisposable
 
     /// <summary>
     /// A duration as LiveSplit's time parser reads it: seconds with six decimal places, so a
-    /// microsecond survives the trip and nothing is rounded into the run. Never negative — the
-    /// caller decides there is time to take off before it asks for the string.
+    /// microsecond survives the trip and nothing is rounded into the run. A negative one keeps its
+    /// minus, which the server's parser reads and which is how time is added rather than taken off.
     /// </summary>
-    public static string FormatTime(long microseconds)
-    {
-        if (microseconds < 0) microseconds = 0;
-        return (microseconds / 1_000_000m).ToString("0.000000", CultureInfo.InvariantCulture);
-    }
+    public static string FormatTime(long microseconds) =>
+        (microseconds / 1_000_000m).ToString("0.000000", CultureInfo.InvariantCulture);
 
     /// <summary>The whole <c>addloadingtimes</c> line for a correction of this many microseconds.</summary>
     public static string AddLoadingTimesCommand(long microseconds) =>
         $"{AddLoadingTimes} {FormatTime(microseconds)}";
+
+    /// <summary>
+    /// A game time as LiveSplit's parser reads it: <c>h:mm:ss.fffffff</c>, hours counted straight
+    /// through rather than rolled into days, because the parser splits on colons and would choke on
+    /// a <c>d.hh</c> the way <see cref="TimeSpan"/>'s own text writes a run past midnight.
+    /// </summary>
+    public static string FormatGameTime(TimeSpan time)
+    {
+        string sign = time < TimeSpan.Zero ? "-" : string.Empty;
+        var size = time < TimeSpan.Zero ? time.Negate() : time;
+        return string.Format(
+            CultureInfo.InvariantCulture, "{0}{1}:{2:00}:{3:00}.{4:0000000}",
+            sign, (int)size.TotalHours, size.Minutes, size.Seconds, size.Ticks % TimeSpan.TicksPerSecond);
+    }
+
+    /// <summary>The whole <c>setgametime</c> line for the clock this run should be showing.</summary>
+    public static string SetGameTimeCommand(TimeSpan time) => $"{SetGameTime} {FormatGameTime(time)}";
+
+    /// <summary>
+    /// Reads back what <see cref="GetCurrentGameTime"/> answered. A colon means a clock and is read
+    /// as one; a bare number can only be seconds, so it is read as seconds rather than handed to
+    /// <see cref="TimeSpan.TryParse(string, out TimeSpan)"/>, which would call it days. Anything
+    /// else — LiveSplit's <c>-</c> for "no time", or the silence of a build without the command —
+    /// is false, and the caller corrects the run some other way rather than guessing.
+    /// </summary>
+    public static bool TryParseGameTime(string? reply, out TimeSpan time)
+    {
+        time = default;
+        string text = (reply ?? string.Empty).Trim();
+        if (text.Length == 0 || text == "-") return false;
+
+        if (text.Contains(':'))
+        {
+            return TimeSpan.TryParse(text, CultureInfo.InvariantCulture, out time);
+        }
+
+        if (!decimal.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out decimal seconds))
+        {
+            return false;
+        }
+
+        time = TimeSpan.FromTicks((long)(seconds * TimeSpan.TicksPerSecond));
+        return true;
+    }
 
     // ---------------------------------------------------------------- worker
 
