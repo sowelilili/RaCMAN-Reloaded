@@ -10,23 +10,9 @@ namespace RaCMAN.App.Panels;
 /// </summary>
 public static class AutosplitterPanel
 {
-    private static string _splitsFile = string.Empty;
-    private static bool _initialised;
-    private static bool _dialogOpen;
-
-    /// <summary>Drops the splits-file draft, so an import or a restart is picked up.</summary>
-    public static void Reset() => _initialised = false;
-
     public static void Draw(AppState state)
     {
-        var settings = state.Settings;
-        var autosplit = settings.Autosplit;
-
-        if (!_initialised)
-        {
-            _splitsFile = autosplit.SplitsFile;
-            _initialised = true;
-        }
+        var autosplit = state.Settings.Autosplit;
 
         Ui.Heading("Autosplitter");
 
@@ -68,18 +54,18 @@ public static class AutosplitterPanel
         {
             LiveSplitStatus.Connected => Ui.Green,
             LiveSplitStatus.Connecting => Ui.Yellow,
+            _ when state.LiveSplit.TooOld => Ui.Red,
             _ => Ui.Grey,
         };
 
-        ImGui.TextColored(colour, state.LiveSplit.StatusLine);
+        // Not TextColored: the version LiveSplit reports is its own text and printf would read it.
+        Ui.Text(colour, state.LiveSplit.StatusLine);
 
         // The endpoint is on the Settings panel: it is typed once, if ever, and the rest of this
         // panel is about the run.
-        Ui.Hint(state.LiveSplit.IsConnected
-            ? DescribeTimer(state.Autosplitter.View)
-            : $"Listening for LiveSplit at {autosplit.Host}:{autosplit.Port}...");
-
-        DrawSplitsFile(state, autosplit);
+        if (state.LiveSplit.TooOld) Ui.Hint(LiveSplitModal.TooOldBody);
+        else if (state.LiveSplit.IsConnected) Ui.Hint(DescribeTimer(state.Autosplitter.View));
+        else Ui.Hint($"Listening for LiveSplit at {autosplit.Host}:{autosplit.Port}...");
 
         // Sending a split by hand is a way of proving the wiring, not a way of running: during a
         // run the console decides, and a stray press here would put the timer out of step with it.
@@ -97,7 +83,7 @@ public static class AutosplitterPanel
 
     /// <summary>
     /// Points the client at LiveSplit, and says the attempt was the user's: a failure from here
-    /// earns the "LiveSplit not found" popup even if the reconnect loop has already had its one.
+    /// earns its popup, not found or too old, even if that one has already been shown once.
     /// </summary>
     private static void Connect(AppState state, AutosplitSettings autosplit)
     {
@@ -111,103 +97,6 @@ public static class AutosplitterPanel
         string upcoming = view.UpcomingSplit ?? "(none)";
         string index = view.SplitIndex >= 0 ? $"#{view.SplitIndex} " : string.Empty;
         return $"Timer {view.Phase} | this split {index}\"{current}\" | next split \"{upcoming}\"";
-    }
-
-    /// <summary>
-    /// Which run's split names the planet route counts from. LiveSplit's server cannot hand over a
-    /// split by index and most builds will not name the upcoming one at all, so the names come out
-    /// of the run's own .lss: found in LiveSplit's recent-splits list, or named here by hand.
-    /// </summary>
-    private static void DrawSplitsFile(AppState state, AutosplitSettings autosplit)
-    {
-        var runs = state.Autosplitter.Runs.State;
-
-        ImGui.SetNextItemWidth(-330);
-        Ui.InputTextWithHint("Splits file", "found from LiveSplit's recent splits", ref _splitsFile, 512);
-
-        ImGui.SameLine();
-        ImGui.BeginDisabled(!FileDialog.IsSupported || _dialogOpen);
-        if (ImGui.Button("Browse...")) Browse(state);
-        ImGui.EndDisabled();
-
-        ImGui.SameLine();
-        bool changed = !string.Equals(_splitsFile.Trim(), autosplit.SplitsFile, StringComparison.Ordinal);
-        if (ImGui.Button(changed ? "Use" : "Rescan")) ApplySplitsFile(state, autosplit);
-
-        if (runs.Run is not null)
-        {
-            // Not TextColored: a category is called "Any%" and printf would eat it.
-            Ui.Text(runs.Verified ? Ui.Green : Ui.Yellow, $"Splits: {runs.Summary}");
-            ImGui.SameLine();
-            Ui.Text(Ui.Grey, $"| upcoming name from: {state.Autosplitter.View.UpcomingSourceLabel}");
-        }
-        else
-        {
-            Ui.Hint(runs.Problem ?? "No splits file yet. Connect to LiveSplit with your run loaded, "
-                                    + "or pick the .lss file here.");
-        }
-    }
-
-    /// <summary>Saves what the box says and re-reads the run files off the render thread.</summary>
-    private static void ApplySplitsFile(AppState state, AutosplitSettings autosplit)
-    {
-        autosplit.SplitsFile = _splitsFile.Trim().Trim('"').Trim();
-        _splitsFile = autosplit.SplitsFile;
-        state.Settings.Save();
-
-        state.Run(async () =>
-        {
-            var runs = await state.Autosplitter.ReloadRunsAsync().ConfigureAwait(false);
-            state.Post(() =>
-            {
-                if (runs.Problem is { Length: > 0 } problem) state.AddToast(problem, ToastKind.Error);
-                else if (runs.Run is not null) state.AddToast($"Splits: {runs.Run.Summary}", ToastKind.Success);
-            });
-
-            // The names only line up once LiveSplit has been asked where the run is.
-            await state.Autosplitter.RefreshAsync().ConfigureAwait(false);
-        });
-    }
-
-    /// <summary>
-    /// The native picker, off the render thread, with its answer brought home through
-    /// <see cref="AppState.Post"/> the same way the mod installer's is.
-    /// </summary>
-    private static void Browse(AppState state)
-    {
-        if (!FileDialog.IsSupported)
-        {
-            state.AddToast("No file dialog available; paste the path", ToastKind.Error);
-            return;
-        }
-
-        _dialogOpen = true;
-        _ = Task.Run(async () =>
-        {
-            try
-            {
-                string? picked = await FileDialog
-                    .OpenAsync("The run's LiveSplit splits", LiveSplitRun.FilterDescription, LiveSplitRun.Extension)
-                    .ConfigureAwait(false);
-
-                state.Post(() =>
-                {
-                    _dialogOpen = false;
-                    if (picked is null) return;
-
-                    _splitsFile = picked;
-                    ApplySplitsFile(state, state.Settings.Autosplit);
-                });
-            }
-            catch (Exception ex)
-            {
-                state.Post(() =>
-                {
-                    _dialogOpen = false;
-                    state.AddToast($"File dialog failed: {ex.Message}", ToastKind.Error);
-                });
-            }
-        });
     }
 
     private static void DrawGameSection(AppState state, AutosplitSettings autosplit)
@@ -254,15 +143,6 @@ public static class AutosplitterPanel
         {
             Ui.Warning($"{Path.GetFileName(AutosplitRoutes.FileFor(game))} has no names for planet "
                        + $"{state.Session.CurrentPlanet}, so entering it will not split.");
-        }
-
-        // Neither LiveSplit nor a splits file will name the split after this one, so there is
-        // nothing for the route to compare and a planet event cannot split.
-        if (options.PlanetRoute && state.LiveSplit.IsConnected
-            && !state.LiveSplit.Answers(LiveSplitClient.GetUpcomingSplitName)
-            && !state.Autosplitter.Runs.State.HasNames)
-        {
-            Ui.Warning("Planet route needs the split names: load your splits in LiveSplit or pick the .lss file.");
         }
     }
 

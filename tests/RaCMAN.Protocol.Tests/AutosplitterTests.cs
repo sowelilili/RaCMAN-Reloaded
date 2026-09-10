@@ -5,20 +5,41 @@ using System.Text;
 using System.Text.Json;
 
 using RaCMAN.App;
+using RaCMAN.App.Panels;
 
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// Stands in for LiveSplit's built-in TCP server: it records the commands it is given, answers the
-/// get* queries out of a scripted split list, and moves its own phase and split index the way
-/// LiveSplit would, so the engine's "ask again after every command" behaviour is exercised.
+/// Stands in for the LiveSplit development build's TCP server: it records the commands it is given,
+/// answers the get* queries out of a scripted split list, and moves its own phase, split index and
+/// clocks the way LiveSplit would, so the engine's "ask again after every command" behaviour is
+/// exercised and its arithmetic is checked against a timer that behaves like the real one.
+/// <para>
+/// Two of LiveSplit's own habits are modelled on purpose, because the client is wrong without them:
+/// a run's game time is null until something sets it (see <see cref="GameTime"/>), and a command
+/// whose argument is missing throws inside the server and takes the server with it (see
+/// <see cref="Fault"/>).
+/// </para>
 /// </summary>
 internal sealed class FakeLiveSplitServer : IDisposable
 {
+    /// <summary>The commands whose argument the real server hands straight to a parser.</summary>
+    private static readonly HashSet<string> NeedArgument = new(StringComparer.Ordinal)
+    {
+        LiveSplitClient.SetGameTime, LiveSplitClient.AddLoadingTimes,
+        "setloadingtimes", "getsplitname",
+    };
+
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _cts = new();
     private readonly List<string> _commands = new();
     private readonly object _gate = new();
+
+    /// <summary>Real time less game time while game time runs; null while the run has no game time.</summary>
+    private TimeSpan? _gameOffset;
+
+    /// <summary>What the pause froze, when there was a game time to freeze.</summary>
+    private TimeSpan? _frozenGameTime;
 
     public FakeLiveSplitServer(params string[] splits)
     {
@@ -37,17 +58,53 @@ internal sealed class FakeLiveSplitServer : IDisposable
 
     public string Phase { get; set; } = "NotRunning";
 
+    /// <summary>What <c>getlivesplitversion</c> answers, as the development build words it.</summary>
+    public string Version { get; set; } = "1.8.37-57";
+
     /// <summary>
-    /// The run's game time, which <c>getcurrentgametime</c> answers and <c>setgametime</c> replaces.
-    /// It does not tick: a test says what the clock reads and then checks what was made of it.
+    /// The run's real time. It does not tick: a test says what the wall clock reads, and moving it
+    /// on is how a test spends time in the XMB.
     /// </summary>
-    public TimeSpan GameTime { get; set; }
+    public TimeSpan RealTime { get; set; }
+
+    /// <summary>
+    /// The run's game time, or null while the run has none — which is where LiveSplit starts, and
+    /// the whole reason the quit writes the clock back to itself before it stops it. Setting this
+    /// from a test is the same move <c>setgametime</c> makes.
+    /// </summary>
+    public TimeSpan? GameTime
+    {
+        get { lock (_gate) return CurrentGameTime(); }
+        set
+        {
+            lock (_gate)
+            {
+                if (value is null)
+                {
+                    _gameOffset = null;
+                    _frozenGameTime = null;
+                    return;
+                }
+
+                Write(value.Value);
+            }
+        }
+    }
 
     /// <summary>Whether <c>pausegametime</c> has stopped the clock, as LiveSplit would have it.</summary>
     public bool GameTimePaused { get; set; }
 
     /// <summary>Every <c>setgametime</c> line, argument included, in the order it arrived.</summary>
     public List<string> GameTimesSet { get; } = new();
+
+    /// <summary>
+    /// What killed this server, if anything. LiveSplit does not trim the line before it hands the
+    /// rest to its own parsers, so <c>setgametime</c> with nothing after it — or
+    /// <c>getsplitname</c> with no index — throws inside the server and takes LiveSplit down. This
+    /// does the same, so a client that ever builds one of those loses the connection in a test
+    /// rather than the timer on somebody's stream.
+    /// </summary>
+    public string? Fault { get; private set; }
 
     /// <summary>
     /// Commands this server ignores, the way the real one silently ignores everything outside its
@@ -149,7 +206,17 @@ internal sealed class FakeLiveSplitServer : IDisposable
             if (Ignored.Contains(command)) return null;
 
             // "addloadingtimes 1.440000" and friends: the verb decides, the argument rides along.
-            switch (command.Split(' ')[0])
+            string verb = command.Split(' ')[0];
+            int space = command.IndexOf(' ');
+            string argument = space < 0 ? string.Empty : command[(space + 1)..];
+
+            if (NeedArgument.Contains(verb) && argument.Trim().Length == 0)
+            {
+                Fault = $"\"{command}\" threw inside LiveSplit: no argument to parse";
+                throw new InvalidOperationException(Fault);
+            }
+
+            switch (verb)
             {
                 case LiveSplitClient.StartTimer:
                     Phase = "Running";
@@ -190,26 +257,37 @@ internal sealed class FakeLiveSplitServer : IDisposable
                     LoadingTimes.Add(command);
                     return null;
 
-                // Game time the way LiveSplit keeps it: stopped, set outright, and read back with
-                // the frozen value while it is stopped, which is what makes the read safe to use.
+                // Game time the way LiveSplitState keeps it. Stopping it freezes a clock that
+                // exists and does nothing at all to one that does not: while the run's game time
+                // is null the timer answers real time, pause or no pause.
                 case LiveSplitClient.PauseGameTime:
                     GameTimePaused = true;
+                    if (_gameOffset is { } running) _frozenGameTime = RealTime - running;
                     return null;
 
                 case LiveSplitClient.UnpauseGameTime:
                     GameTimePaused = false;
+                    if (_frozenGameTime is { } frozen)
+                    {
+                        _gameOffset = RealTime - frozen;
+                        _frozenGameTime = null;
+                    }
+
                     return null;
 
+                // The one command that brings game time into existence, whatever it is set to.
                 case LiveSplitClient.SetGameTime:
                     GameTimesSet.Add(command);
-                    GameTime = TimeSpan.Parse(command.Split(' ')[1],
-                        System.Globalization.CultureInfo.InvariantCulture);
+                    Write(TimeSpan.Parse(argument, System.Globalization.CultureInfo.InvariantCulture));
                     return null;
 
-                // The installed build formats this with its PreciseTimeFormatter, which is a
+                // The development build formats this with its PreciseTimeFormatter, which is a
                 // TimeSpan's own text.
                 case LiveSplitClient.GetCurrentGameTime:
-                    return GameTime.ToString();
+                    return CurrentGameTime().ToString();
+
+                case LiveSplitClient.GetLiveSplitVersion:
+                    return Version;
 
                 case LiveSplitClient.GetSplitIndex:
                     return SplitIndex.ToString();
@@ -219,14 +297,6 @@ internal sealed class FakeLiveSplitServer : IDisposable
 
                 case LiveSplitClient.GetUpcomingSplitName:
                     return NameAt(SplitIndex + 1);
-
-                case LiveSplitClient.GetPreviousSplitName:
-                    return NameAt(SplitIndex - 1);
-
-                // The final segment, but only once the run has started: before that the real server
-                // answers "-" here exactly as it does for the other two names.
-                case LiveSplitClient.GetLastSplitName:
-                    return SplitIndex >= 0 ? NameAt(Splits.Length - 1) : "-";
 
                 case LiveSplitClient.Ping:
                     return "pong";
@@ -238,6 +308,21 @@ internal sealed class FakeLiveSplitServer : IDisposable
     }
 
     private string NameAt(int index) => index >= 0 && index < Splits.Length ? Splits[index] : string.Empty;
+
+    /// <summary>Game time as the server would report it right now, real time while it has none.</summary>
+    private TimeSpan CurrentGameTime()
+    {
+        if (_frozenGameTime is { } frozen) return frozen;
+        if (_gameOffset is { } offset) return RealTime - offset;
+        return RealTime;
+    }
+
+    /// <summary>What <c>SetGameTime</c> does: the run has a game time from here on, at this value.</summary>
+    private void Write(TimeSpan value)
+    {
+        if (GameTimePaused) _frozenGameTime = value;
+        else _gameOffset = RealTime - value;
+    }
 
     public void Dispose()
     {
@@ -252,7 +337,7 @@ internal sealed class FakeLiveSplitServer : IDisposable
 /// half is not involved here — events are handed straight to the engine, which is exactly what
 /// QwarkClient does when a push or a poll turns one up.
 /// </summary>
-public class AutosplitterTests : IDisposable
+public class AutosplitterTests
 {
     private static readonly AutosplitEventDesc PlanetEntered = new(
         1, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute,
@@ -281,25 +366,6 @@ public class AutosplitterTests : IDisposable
     private static readonly AutosplitEventDesc FlatLoad = new(
         6, AutosplitKind.LoadStart, AutosplitEventFlags.Flat, 1_000_000, "Long load");
 
-    /// <summary>This test's own folder for the splits files it writes; dropped when it is over.</summary>
-    private readonly string _folder =
-        Directory.CreateDirectory(Path.Combine(Path.GetTempPath(),
-            "racman-splits-" + Guid.NewGuid().ToString("N"))).FullName;
-
-    public void Dispose()
-    {
-        try { Directory.Delete(_folder, recursive: true); } catch { /* the test is over */ }
-        GC.SuppressFinalize(this);
-    }
-
-    /// <summary>Writes a splits file with these segment names and answers where it went.</summary>
-    private string WriteSplits(string category, params string[] segments)
-    {
-        string path = Path.Combine(_folder, $"{category}.lss");
-        File.WriteAllText(path, LiveSplitRunTests.Lss("Ratchet &amp; Clank", category, segments));
-        return path;
-    }
-
     private static async Task<bool> WaitFor(Func<bool> condition, int timeoutMs = 5000)
     {
         var sw = Stopwatch.StartNew();
@@ -315,25 +381,10 @@ public class AutosplitterTests : IDisposable
     private sealed class Harness : IDisposable
     {
         public Harness(GameId game, string[] splits, params AutosplitEventDesc[] descriptors)
-            : this(game, splits, null, descriptors)
-        {
-        }
-
-        /// <param name="splitsFile">
-        /// A <c>.lss</c> the engine should read the run's names from, for the LiveSplit builds that
-        /// will not name the upcoming split. Null is the normal case: LiveSplit is asked.
-        /// </param>
-        public Harness(GameId game, string[] splits, string? splitsFile, AutosplitEventDesc[] descriptors)
         {
             Server = new FakeLiveSplitServer(splits);
             Settings = new Settings();
             Settings.Autosplit.Enabled = true;
-            Settings.Autosplit.SplitsFile = splitsFile ?? string.Empty;
-
-            // Discovery must never reach the machine's own LiveSplit: a test that read the
-            // developer's fifty recent runs would be both slow and different on every box. The
-            // test binaries' own folder exists and holds no settings.cfg, so nothing is found.
-            Settings.Autosplit.LiveSplitFolder = AppContext.BaseDirectory;
 
             LiveSplit = new LiveSplitClient();
 
@@ -500,130 +551,6 @@ public class AutosplitterTests : IDisposable
         // Every other reason still splits: the route only ever gates the planet code.
         h.Engine.Handle(Split(BossDefeated.Code, seq: 2));
         Assert.True(await h.Sent(LiveSplitClient.Split));
-    }
-
-    // ------------------------------------------------- the route without getupcomingsplitname
-
-    [Fact]
-    public async Task TheRunFileNamesTheNextSplitWhenLiveSplitWillNot()
-    {
-        // The user's own LiveSplit: it knows getsplitindex and the two names either side of the
-        // current split, and nothing at all about getupcomingsplitname. The run file is what turns
-        // "split 0 of three" into "the next one is called Oozla".
-        string splits = WriteSplits("GC NG+", "Aranos", "Oozla", "Maktar Resort");
-        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar Resort" }, splits,
-            new[] { PlanetEntered });
-        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
-        await h.ReadyAsync();
-        h.Options.PlanetRoute = true;
-
-        Assert.False(h.Engine.View.UpcomingSupported);
-        Assert.Equal(UpcomingNameSource.SplitsFile, h.Engine.View.UpcomingSource);
-        Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
-        Assert.Equal(0, h.Engine.View.SplitIndex);
-
-        // And the run file was confirmed against LiveSplit rather than assumed.
-        var runs = h.Engine.Runs.State;
-        Assert.True(runs.Verified);
-        Assert.Equal("GC NG+.lss, GC NG+, 3 segments, verified", runs.Summary);
-
-        // Maktar (planet 2) is not where the run goes next, so it does not split; Oozla is.
-        h.Engine.Handle(Split(PlanetEntered.Code, 2));
-        await Task.Delay(200);
-        Assert.Empty(h.Server.Actions);
-        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
-
-        h.Engine.Handle(Split(PlanetEntered.Code, 1, seq: 2));
-        Assert.True(await h.Sent(LiveSplitClient.Split));
-        Assert.Contains("Oozla", h.Engine.Log()[^1].Action);
-    }
-
-    [Fact]
-    public async Task OnTheLastSegmentOfARunFileAPlanetEventStillNeverSplits()
-    {
-        string splits = WriteSplits("GC NG+", "Aranos", "Oozla");
-        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, splits,
-            new[] { PlanetEntered, BossDefeated });
-        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
-        await h.ReadyAsync();
-        h.Options.PlanetRoute = true;
-
-        h.Server.SplitIndex = 1;
-        await h.RefreshAsync();
-        Assert.Null(h.Engine.View.UpcomingSplit);
-        Assert.True(h.Engine.View.NamesKnown);
-
-        h.Engine.Handle(Split(PlanetEntered.Code, 1));
-        await Task.Delay(200);
-        Assert.Empty(h.Server.Actions);
-        Assert.Contains("last segment", h.Engine.Log()[^1].Action);
-
-        // Every other reason still splits: the route only ever gates the planet code.
-        h.Engine.Handle(Split(BossDefeated.Code, seq: 2));
-        Assert.True(await h.Sent(LiveSplitClient.Split));
-    }
-
-    [Fact]
-    public async Task WithNeitherLiveSplitNorAFileNamingTheNextSplitTheRouteSaysSo()
-    {
-        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered);
-        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
-        await h.ReadyAsync();
-        h.Options.PlanetRoute = true;
-
-        Assert.False(h.Engine.View.UpcomingSupported);
-        Assert.False(h.Engine.View.NamesKnown);
-        Assert.Equal(UpcomingNameSource.None, h.Engine.View.UpcomingSource);
-
-        // Oozla is where the run goes next, but nothing here can know that, so nothing splits.
-        h.Engine.Handle(Split(PlanetEntered.Code, 1));
-        await Task.Delay(200);
-
-        Assert.Empty(h.Server.Actions);
-        Assert.Contains("split names are not known", h.Engine.Log()[^1].Action);
-    }
-
-    [Fact]
-    public async Task ANewerLiveSplitIsBelievedOverTheRunFile()
-    {
-        // A file that disagrees with the LiveSplit answering for itself: the live answer wins, and
-        // the file is not consulted behind its back.
-        string splits = WriteSplits("stale", "Aranos", "Endako", "Maktar Resort");
-        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar Resort" }, splits,
-            new[] { PlanetEntered });
-        await h.ReadyAsync();
-        h.Options.PlanetRoute = true;
-
-        Assert.True(h.Engine.View.UpcomingSupported);
-        Assert.Equal(UpcomingNameSource.LiveSplit, h.Engine.View.UpcomingSource);
-        Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
-
-        // The file said Endako (planet 3) came next; LiveSplit said Oozla, and Oozla splits.
-        h.Engine.Handle(Split(PlanetEntered.Code, 3));
-        await Task.Delay(200);
-        Assert.Empty(h.Server.Actions);
-
-        h.Engine.Handle(Split(PlanetEntered.Code, 1, seq: 2));
-        Assert.True(await h.Sent(LiveSplitClient.Split));
-    }
-
-    [Fact]
-    public async Task AFilePickedByHandThatDisagreesWithLiveSplitIsSaidToBeUnverified()
-    {
-        // The file names a run LiveSplit is not on. It was named by hand, so it is not thrown away
-        // — the user said it was theirs — but nothing claims it was confirmed, and the panel shows
-        // that in yellow rather than green.
-        string splits = WriteSplits("someone elses", "Veldin", "Novalis", "Aridia");
-        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar Resort" }, splits,
-            new[] { PlanetEntered });
-        h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
-        await h.ReadyAsync();
-
-        var runs = h.Engine.Runs.State;
-        Assert.True(runs.Manual);
-        Assert.False(runs.Verified);
-        Assert.Contains("unverified", runs.Summary);
-        Assert.Equal("Novalis", h.Engine.View.UpcomingSplit);
     }
 
     [Fact]
@@ -807,10 +734,15 @@ public class AutosplitterTests : IDisposable
     }
 
     /// <summary>
-    /// Starts a Deadlocked run on the fake timer with a game time already on the clock, so a quit
-    /// can be driven through it and what came back checked against the old script's arithmetic.
+    /// Starts a Deadlocked run on the fake timer, so a quit can be driven through it and what came
+    /// back checked against the old script's arithmetic. Real time and game time start together,
+    /// and a test moves real time on to spend time in the XMB.
     /// </summary>
-    private static async Task<Harness> RunningDeadlockedAsync(double gameTimeSeconds)
+    /// <param name="gameTimeSeconds">
+    /// What the run's game time reads, or null for a run that has none yet — which is where every
+    /// LiveSplit run starts, and where <c>getcurrentgametime</c> answers real time instead.
+    /// </param>
+    private static async Task<Harness> RunningDeadlockedAsync(double realTimeSeconds, double? gameTimeSeconds)
     {
         var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
         await h.ReadyAsync();
@@ -819,7 +751,8 @@ public class AutosplitterTests : IDisposable
         Assert.True(await h.Sent(LiveSplitClient.StartTimer));
         Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
 
-        h.Server.GameTime = TimeSpan.FromSeconds(gameTimeSeconds);
+        h.Server.RealTime = TimeSpan.FromSeconds(realTimeSeconds);
+        h.Server.GameTime = gameTimeSeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null;
         h.Server.ClearCommands();
         return h;
     }
@@ -831,32 +764,45 @@ public class AutosplitterTests : IDisposable
     [Fact]
     public async Task DeadlockedsQuitStopsGameTimeAndTheResumePaysTheFixedTime()
     {
-        using var h = await RunningDeadlockedAsync(600);
+        using var h = await RunningDeadlockedAsync(600, 600);
 
         h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
         await Task.Delay(200);
 
-        // The quit sends that and nothing else: the timer itself is not paused and no time moves.
-        Assert.Equal(new[] { LiveSplitClient.PauseGameTime }, h.Server.Actions);
+        // Read the clock, write it straight back, stop it. The write is what gives the run a game
+        // time to freeze; it changes nothing, and here it is a no-op twice over.
+        Assert.Equal(new[] { "setgametime 0:10:00.0000000", LiveSplitClient.PauseGameTime }, h.Server.Actions);
+
+        var quit = h.Server.Commands;
+        int asked = Array.IndexOf(quit, LiveSplitClient.GetCurrentGameTime);
+        int wrote = Array.FindIndex(quit, c => c.StartsWith(LiveSplitClient.SetGameTime, StringComparison.Ordinal));
+        int stopped = Array.IndexOf(quit, LiveSplitClient.PauseGameTime);
+        Assert.True(asked >= 0 && asked < wrote && wrote < stopped,
+            $"the quit has to read, set and only then pause, got {string.Join(", ", quit)}");
+
         Assert.True(h.Server.GameTimePaused);
+        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
         Assert.Empty(h.Server.LoadingTimes);
         Assert.Contains(LiveSplitClient.PauseGameTime, h.Engine.Log()[^1].Action);
 
+        // Five seconds in the XMB, which real time keeps and game time must not.
+        h.Server.RealTime = TimeSpan.FromSeconds(605);
         h.Engine.Handle(new AutosplitEvent(3, 6_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
 
         // Read the frozen clock, write it back 14.8 s later, then let it run: 10:00 becomes 10:14.8.
         var commands = h.Server.Commands;
-        int read = Array.IndexOf(commands, LiveSplitClient.GetCurrentGameTime);
-        int set = Array.FindIndex(commands, c => c.StartsWith(LiveSplitClient.SetGameTime, StringComparison.Ordinal));
+        int read = Array.LastIndexOf(commands, LiveSplitClient.GetCurrentGameTime);
+        int set = Array.FindLastIndex(commands, c => c.StartsWith(LiveSplitClient.SetGameTime, StringComparison.Ordinal));
         int unpause = Array.IndexOf(commands, LiveSplitClient.UnpauseGameTime);
         Assert.True(read >= 0 && read < set && set < unpause,
             $"the resume has to read, set and only then unpause, got {string.Join(", ", commands)}");
 
-        Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime);
+        Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
         Assert.False(h.Server.GameTimePaused);
-        Assert.Equal(new[] { "setgametime 0:10:14.8000000" }, h.Server.GameTimesSet.ToArray());
+        Assert.Equal(new[] { "setgametime 0:10:00.0000000", "setgametime 0:10:14.8000000" },
+            h.Server.GameTimesSet.ToArray());
 
         // Never the loading times, and never the timer's own pause: the phase stayed Running.
         Assert.Empty(h.Server.LoadingTimes);
@@ -864,6 +810,7 @@ public class AutosplitterTests : IDisposable
         Assert.DoesNotContain(LiveSplitClient.Resume, h.Server.Actions);
         Assert.Equal("Running", h.Server.Phase);
         Assert.Equal(LiveSplitPhase.Running, h.Engine.View.Phase);
+        Assert.Null(h.Server.Fault);
 
         Assert.Equal(1, h.Engine.Adjustments);
         Assert.Contains("then unpausegametime", h.Engine.Log()[^1].Action);
@@ -876,50 +823,79 @@ public class AutosplitterTests : IDisposable
     [Fact]
     public async Task ALongQuitCostsTheRunTheSameFixedTimeAsAShortOne()
     {
-        using var h = await RunningDeadlockedAsync(600);
+        using var h = await RunningDeadlockedAsync(600, 600);
 
         h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
 
         // Thirty seconds in the XMB, and the run still pays 14.8 s of game time for it.
+        h.Server.RealTime = TimeSpan.FromSeconds(630);
         h.Engine.Handle(new AutosplitEvent(3, 31_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
 
-        Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime);
+        Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
         Assert.Empty(h.Server.LoadingTimes);
+        Assert.Null(h.Server.Fault);
     }
 
     /// <summary>
-    /// A build that ignores <c>getcurrentgametime</c> cannot be asked what the clock reads, so the
-    /// same 14.8 s goes on the other way: a negative loading time, after the unpause, because the
-    /// unpause recomputes the loading times from the clock it froze.
+    /// The case the ordering exists for. A run that has not had its game time set yet has none at
+    /// all: LiveSplit answers real time and stopping game time freezes nothing. Writing the clock
+    /// back to itself before the pause is what makes the freeze real, so the resume reads where the
+    /// player left rather than where the wall clock has got to, and the quit still costs 14.8 s.
+    /// Skip that write and this test reads 30 s of XMB into the run.
     /// </summary>
     [Fact]
-    public async Task WithoutGetcurrentgametimeTheQuitIsPaidWithANegativeLoadingTime()
+    public async Task AQuitBeforeAnythingHasSetGameTimeStillCostsExactlyTheFixedTime()
     {
-        using var h = await RunningDeadlockedAsync(600);
+        using var h = await RunningDeadlockedAsync(600, gameTimeSeconds: null);
+
+        // Nothing has set game time, so the timer answers real time to anyone who asks.
+        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        Assert.Equal(new[] { "setgametime 0:10:00.0000000", LiveSplitClient.PauseGameTime }, h.Server.Actions);
+
+        // Half a minute in the XMB. Game time is a real value now and frozen, so it does not move.
+        h.Server.RealTime = TimeSpan.FromSeconds(630);
+        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
+
+        h.Engine.Handle(new AutosplitEvent(3, 31_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+
+        Assert.Equal(TimeSpan.FromSeconds(614.8), h.Server.GameTime!.Value);
+        Assert.Equal(new[] { "setgametime 0:10:00.0000000", "setgametime 0:10:14.8000000" },
+            h.Server.GameTimesSet.ToArray());
+        Assert.Empty(h.Server.LoadingTimes);
+        Assert.Null(h.Server.Fault);
+    }
+
+    /// <summary>
+    /// A build that will not say what the clock reads cannot be corrected — nothing here invents a
+    /// value, and <c>setgametime</c> with no argument would take LiveSplit down. Both halves say so
+    /// in the log, and game time is never left stopped.
+    /// </summary>
+    [Fact]
+    public async Task AQuitWhoseClockCannotBeReadIsLoggedAsAnErrorAndStillUnpaused()
+    {
+        using var h = await RunningDeadlockedAsync(600, 600);
         h.Server.Ignored.Add(LiveSplitClient.GetCurrentGameTime);
 
         h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        Assert.Contains("error", h.Engine.Log()[^1].Action);
 
         h.Engine.Handle(new AutosplitEvent(3, 6_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
-        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Contains("error", h.Engine.Log()[^1].Action);
 
-        Assert.Equal(new[] { -14.8 }, h.Server.LoadingTimeSeconds);
-        Assert.False(h.Server.GameTimePaused);
+        // Nothing was guessed at: no clock written, no loading time, and the timer runs again.
         Assert.Empty(h.Server.GameTimesSet);
-
-        // The unpause comes first, or the negative loading time would be thrown away by it.
-        var commands = h.Server.Commands;
-        int unpause = Array.IndexOf(commands, LiveSplitClient.UnpauseGameTime);
-        int add = Array.FindIndex(commands, c => c.StartsWith(LiveSplitClient.AddLoadingTimes, StringComparison.Ordinal));
-        Assert.True(unpause >= 0 && unpause < add,
-            $"the unpause has to come first, got {string.Join(", ", commands)}");
-
-        Assert.Equal(1, h.Engine.Adjustments);
-        Assert.Equal(LiveSplitPhase.Running, h.Engine.View.Phase);
+        Assert.Empty(h.Server.LoadingTimes);
+        Assert.False(h.Server.GameTimePaused);
+        Assert.Equal(0, h.Engine.Adjustments);
+        Assert.Null(h.Server.Fault);
         Assert.True(h.LiveSplit.IsConnected);
     }
 
@@ -930,13 +906,13 @@ public class AutosplitterTests : IDisposable
     [Fact]
     public async Task AResumeWithNoQuitBehindItSendsNothing()
     {
-        using var h = await RunningDeadlockedAsync(600);
+        using var h = await RunningDeadlockedAsync(600, 600);
 
         h.Engine.Handle(new AutosplitEvent(2, 6_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
         await Task.Delay(300);
 
         Assert.Empty(h.Server.Actions);
-        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime);
+        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
         Assert.Contains("nothing of that code had started", h.Engine.Log()[^1].Action);
     }
 
@@ -1084,23 +1060,68 @@ public class AutosplitterTests : IDisposable
     }
 
     [Fact]
-    public async Task ThePhaseAndBothSplitNamesComeBackFromLiveSplitOnConnect()
+    public async Task TheHandshakeAsksForTheVersionAndThenThePhase()
     {
         using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" });
         Assert.True(await WaitFor(() => h.LiveSplit.IsConnected));
 
-        // The handshake is one getcurrenttimerphase and nothing else: the real server answers no
-        // version query at all, and asking for one is what used to drop the connection.
-        Assert.True(await WaitFor(() => h.Server.Commands.Length > 0));
-        Assert.Equal(LiveSplitClient.GetCurrentTimerPhase, h.Server.Commands[0]);
-        Assert.DoesNotContain(h.Server.Commands, c => c.Contains("version", StringComparison.OrdinalIgnoreCase));
+        // The version first, because it is what decides whether this build is worth driving, and
+        // the phase straight after, so the engine knows whether a run is under way.
+        Assert.True(await WaitFor(() => h.Server.Commands.Length >= 2));
+        Assert.Equal(LiveSplitClient.GetLiveSplitVersion, h.Server.Commands[0]);
+        Assert.Equal(LiveSplitClient.GetCurrentTimerPhase, h.Server.Commands[1]);
 
         await h.RefreshAsync();
         Assert.Equal(LiveSplitStatus.Connected, h.LiveSplit.Status);
+        Assert.False(h.LiveSplit.TooOld);
+        Assert.Equal(h.Server.Version, h.LiveSplit.Version);
         Assert.Contains("Connected to LiveSplit", h.LiveSplit.StatusLine);
+        Assert.Contains(h.Server.Version, h.LiveSplit.StatusLine);
         Assert.Equal(LiveSplitPhase.NotRunning, h.Engine.View.Phase);
         Assert.Equal("Aranos", h.Engine.View.CurrentSplit);
         Assert.Equal("Oozla", h.Engine.View.UpcomingSplit);
+    }
+
+    /// <summary>
+    /// The build wall. Everything this client sends belongs to the development build, so a server
+    /// that will not name its version is one there is nothing to be done with: it is told apart
+    /// from "nothing was listening", said so in its own words, and not retried.
+    /// </summary>
+    [Fact]
+    public async Task ALiveSplitThatWillNotNameItsVersionIsTurnedAway()
+    {
+        using var server = new FakeLiveSplitServer("Aranos", "Oozla");
+        server.Ignored.Add(LiveSplitClient.GetLiveSplitVersion);
+
+        using var client = new LiveSplitClient();
+        client.Start(LiveSplitClient.DefaultHost, server.Port);
+
+        Assert.True(await WaitFor(() => client.TooOldFailures >= 1), "the old build was never turned away");
+        Assert.True(client.TooOld);
+        Assert.False(client.IsConnected);
+        Assert.False(client.Enabled);
+        Assert.Null(client.Version);
+        Assert.StartsWith(LiveSplitClient.TooOldStatus, client.StatusLine);
+
+        // Nothing was listening is a different failure with different words, and this is not it.
+        Assert.Equal(0, client.ConnectFailures);
+
+        // It asked the one question and stopped: no phase query, and no reconnect loop behind it.
+        await Task.Delay(1500);
+        Assert.Equal(new[] { LiveSplitClient.GetLiveSplitVersion }, server.Commands);
+        Assert.Equal(1, client.TooOldFailures);
+
+        client.Stop();
+    }
+
+    /// <summary>The two popups say different things, and the second one says which build to get.</summary>
+    [Fact]
+    public void TheTooOldPopupNamesTheDevelopmentBuild()
+    {
+        Assert.NotEqual(LiveSplitModal.Body, LiveSplitModal.TooOldBody);
+        Assert.Contains("development build", LiveSplitModal.TooOldBody);
+        Assert.Contains(LiveSplitClient.GetUpcomingSplitName, LiveSplitModal.TooOldBody);
+        Assert.Contains("livesplit.org", LiveSplitModal.TooOldBody);
     }
 
     // ---------------------------------------------------------------- the connection itself
@@ -1108,9 +1129,10 @@ public class AutosplitterTests : IDisposable
     [Fact]
     public async Task AQueryTheServerIgnoresIsUnknownRatherThanADroppedConnection()
     {
-        // LiveSplit's real server answers nothing at all to a command outside its list, which is
-        // most of them: getupcomingsplitname and getlivesplitversion included. Waiting a second
-        // and then tearing the socket down is what made the link drop seconds after it came up.
+        // LiveSplit's real server answers nothing at all to a command outside its list. The build
+        // this client supports answers everything it is asked, so nothing should ever land here —
+        // but waiting a second and then tearing the socket down is what made the link drop seconds
+        // after it came up, and the net that caught that stays.
         using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
         h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
         await h.ReadyAsync();
@@ -1121,7 +1143,7 @@ public class AutosplitterTests : IDisposable
         await h.RefreshAsync();
 
         Assert.True(h.LiveSplit.IsConnected);
-        Assert.False(h.Engine.View.UpcomingSupported);
+        Assert.Null(h.Engine.View.UpcomingSplit);
         Assert.Equal(LiveSplitPhase.NotRunning, h.Engine.View.Phase);
         Assert.Equal("Aranos", h.Engine.View.CurrentSplit);
 
@@ -1263,8 +1285,6 @@ public class AutosplitterTests : IDisposable
             saved.Autosplit.Enabled = true;
             saved.Autosplit.Host = "10.0.0.4";
             saved.Autosplit.Port = 16835;
-            saved.Autosplit.SplitsFile = @"C:\splits\GC NG+.lss";
-            saved.Autosplit.LiveSplitFolder = @"C:\LiveSplit";
 
             var rac2 = saved.Autosplit.For(GameId.Rac2);
             rac2.PlanetRoute = true;
@@ -1283,8 +1303,6 @@ public class AutosplitterTests : IDisposable
             Assert.True(loaded.Autosplit.Enabled);
             Assert.Equal("10.0.0.4", loaded.Autosplit.Host);
             Assert.Equal(16835, loaded.Autosplit.Port);
-            Assert.Equal(@"C:\splits\GC NG+.lss", loaded.Autosplit.SplitsFile);
-            Assert.Equal(@"C:\LiveSplit", loaded.Autosplit.LiveSplitFolder);
 
             var back = loaded.Autosplit.For(GameId.Rac2);
             Assert.True(back.PlanetRoute);
@@ -1325,10 +1343,43 @@ public class AutosplitterTests : IDisposable
             Assert.Equal(LiveSplitClient.DefaultHost, loaded.Autosplit.Host);
             Assert.Equal(LiveSplitClient.DefaultPort, loaded.Autosplit.Port);
             Assert.Empty(loaded.Autosplit.Games);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
 
-            // No splits file named is "find LiveSplit's own", which is what it does unconfigured.
-            Assert.Equal(string.Empty, loaded.Autosplit.SplitsFile);
-            Assert.Equal(string.Empty, loaded.Autosplit.LiveSplitFolder);
+    /// <summary>
+    /// The two settings the .lss route left behind. Nothing reads them, and a file that still names
+    /// them has to load exactly as it did rather than being refused for holding a retired key.
+    /// </summary>
+    [Fact]
+    public void ASettingsFileThatStillNamesASplitsFileLoads()
+    {
+        const string older = """
+        {
+          "autosplit": {
+            "enabled": true,
+            "host": "10.0.0.4",
+            "splitsFile": "C:\\splits\\GC NG+.lss",
+            "liveSplitFolder": "C:\\LiveSplit",
+            "games": { "rac4": { "planetRoute": true } }
+          }
+        }
+        """;
+
+        var folder = Path.Combine(Path.GetTempPath(), "racman-autosplit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            File.WriteAllText(path, older);
+
+            var loaded = Settings.Load(path);
+            Assert.True(loaded.Autosplit.Enabled);
+            Assert.Equal("10.0.0.4", loaded.Autosplit.Host);
+            Assert.True(loaded.Autosplit.For(GameId.Rac4).PlanetRoute);
         }
         finally
         {

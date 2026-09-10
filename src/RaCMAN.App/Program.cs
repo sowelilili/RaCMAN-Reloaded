@@ -161,18 +161,15 @@ if (exitAfter > 0)
                       $"autosplitevents={state.AutosplitEvents.Length} " +
                       $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}" +
                       $"+{state.Autosplitter.Adjustments}adj " +
-                      $"livesplit={state.LiveSplit.Status} sent={state.LiveSplit.CommandsSent} " +
+                      $"livesplit={state.LiveSplit.Status} version=\"{state.LiveSplit.Version ?? "(none)"}\" " +
+                      $"tooold={state.LiveSplit.TooOld} sent={state.LiveSplit.CommandsSent} " +
                       $"unanswered=[{string.Join(" ", state.LiveSplit.Unanswered)}]");
 
-    // Which run the split names were read from, and what LiveSplit itself said about the timer:
-    // the whole of the planet route's input, so a headless run can be checked against LiveSplit.
-    var runs = state.Autosplitter.Runs.State;
+    // What LiveSplit itself said about the timer, which is the whole of the planet route's input,
+    // so a headless run can be checked against LiveSplit.
     var view = state.Autosplitter.View;
-    Console.WriteLine($"livesplit-run: candidates={runs.Candidates} manual={runs.Manual} "
-                      + $"run={runs.Summary} problem={runs.Problem ?? "(none)"}");
     Console.WriteLine($"livesplit-timer: phase={view.Phase} index={view.SplitIndex} "
-                      + $"current=\"{view.CurrentSplit}\" upcoming=\"{view.UpcomingSplit}\" "
-                      + $"from={view.UpcomingSourceLabel}");
+                      + $"current=\"{view.CurrentSplit}\" upcoming=\"{view.UpcomingSplit}\"");
 
     // The run-event log, so a headless run says what it decided and not only how much of it.
     foreach (var entry in state.Autosplitter.Log())

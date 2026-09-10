@@ -30,11 +30,18 @@ public enum LiveSplitPhase
 /// replies one line at a time. Commands are fire and forget; the few queries are answered on the
 /// same connection, so everything is serialised through one worker.
 /// <para>
+/// The server this talks to is the one in the LiveSplit <b>development build</b>, and only that
+/// one. Its command set is what the autosplitter is written against — <c>getupcomingsplitname</c>
+/// and <c>getlivesplitversion</c> above all — so a build that will not name its own version is
+/// turned away at the handshake rather than half-driven: see <see cref="TooOld"/>.
+/// </para>
+/// <para>
 /// The one rule that matters here is that <b>only a socket error drops the connection</b>. A query
 /// that goes unanswered is not an error: LiveSplit's server silently ignores a command it does not
-/// know, and its command set differs between builds. Such a query is remembered as unanswered,
-/// never sent again on this connection, and reported as "unknown" to the caller. Treating that
-/// silence as a dead connection is what made the link drop a second after it came up.
+/// know. Such a query is remembered as unanswered, never sent again on this connection, and
+/// reported as "unknown" to the caller. Treating that silence as a dead connection is what made the
+/// link drop a second after it came up, and the safety net stays even though the build this client
+/// supports answers everything it is asked.
 /// </para>
 /// <para>
 /// Nothing here blocks the render thread: <see cref="Send"/> only enqueues, and
@@ -77,32 +84,46 @@ public sealed class LiveSplitClient : IDisposable
     /// <summary>
     /// Sets game time outright, the way <c>timer.SetGameTime</c> did in the old scripts. Sent while
     /// game time is paused it moves the clock LiveSplit froze, so the new value is what game time
-    /// carries on from at the unpause.
+    /// carries on from at the unpause. It is also what brings game time into existence at all: the
+    /// run carries no game time until this or a loading-times write puts one there.
+    /// <para>
+    /// It must never be sent without a real argument. The server does not trim the line before it
+    /// hands the rest to its time parser, so <c>setgametime</c> with nothing after it — a trailing
+    /// space included — throws inside LiveSplit and takes LiveSplit with it. Every one of these
+    /// goes out through <see cref="SetGameTimeCommand"/>, which cannot write an empty one.
+    /// </para>
     /// </summary>
     public const string SetGameTime = "setgametime";
 
     // One line back.
     public const string GetCurrentSplitName = "getcurrentsplitname";
-    public const string GetUpcomingSplitName = "getupcomingsplitname";
-    public const string GetPreviousSplitName = "getprevioussplitname";
 
     /// <summary>
-    /// The final segment's name — but only once the timer is running; before that the server
-    /// answers "-", the same as it answers the other two name queries at split index -1. It is the
-    /// one name that does not move as the run goes on, so it is what tells two routes through the
-    /// same game apart. What a build means by "last" is not guaranteed, so a run it does not match
-    /// is only set aside while some other run does match it.
+    /// The name of the split after the current one, which is the whole of the planet route's input
+    /// and the reason the development build is required: no other build answers it, and there is no
+    /// second way to the same name. An empty answer is the end of the run, not a missing name.
     /// </summary>
-    public const string GetLastSplitName = "getlastsplitname";
+    public const string GetUpcomingSplitName = "getupcomingsplitname";
 
     public const string GetSplitIndex = "getsplitindex";
     public const string GetCurrentTimerPhase = "getcurrenttimerphase";
 
     /// <summary>
+    /// What the build calls itself, e.g. "1.8.37-57". It is the handshake: the development build
+    /// answers it, and a build that does not is one this client cannot drive.
+    /// </summary>
+    public const string GetLiveSplitVersion = "getlivesplitversion";
+
+    /// <summary>
     /// The run's game time as the server's <c>PreciseTimeFormatter</c> writes it, which is a
     /// <see cref="TimeSpan"/>'s own text: <c>00:01:14.8000000</c>, or <c>-</c> for no time at all.
-    /// Asked while game time is paused it answers the frozen value, so it is stable to read, add to
-    /// and write back. A build that does not know the command answers nothing at all.
+    /// <para>
+    /// LiveSplit's game time is <b>null until something sets it</b>, and while it is null this
+    /// answers real time and <see cref="PauseGameTime"/> freezes nothing the query can see. That is
+    /// why the Deadlocked quit writes the clock back to itself before it pauses it: see
+    /// <see cref="Autosplitter"/>. Once game time exists and is paused this answers the frozen
+    /// value, so it is stable to read, add to and write back.
+    /// </para>
     /// </summary>
     public const string GetCurrentGameTime = "getcurrentgametime";
 
@@ -110,8 +131,8 @@ public sealed class LiveSplitClient : IDisposable
 
     private static readonly HashSet<string> QueryCommands = new(StringComparer.Ordinal)
     {
-        GetCurrentSplitName, GetUpcomingSplitName, GetPreviousSplitName, GetLastSplitName,
-        GetSplitIndex, GetCurrentTimerPhase, GetCurrentGameTime, Ping,
+        GetCurrentSplitName, GetUpcomingSplitName, GetSplitIndex, GetCurrentTimerPhase,
+        GetCurrentGameTime, GetLiveSplitVersion, Ping,
     };
 
     /// <summary>
@@ -119,6 +140,9 @@ public sealed class LiveSplitClient : IDisposable
     /// a connection failure, and the connection is left exactly as it was.
     /// </summary>
     public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>What the panel says about a build that would not name its version.</summary>
+    public const string TooOldStatus = "LiveSplit too old";
 
     private readonly object _gate = new();
     private readonly List<byte> _pendingBytes = new();
@@ -137,7 +161,10 @@ public sealed class LiveSplitClient : IDisposable
     private Task<int>? _pendingRead;
 
     private volatile LiveSplitStatus _status = LiveSplitStatus.Disconnected;
+    private volatile string? _version;
+    private volatile bool _tooOld;
     private int _connectFailures;
+    private int _tooOldFailures;
     private bool _disposed;
 
     private sealed class Operation
@@ -182,6 +209,26 @@ public sealed class LiveSplitClient : IDisposable
     /// </summary>
     public int ConnectFailures => Volatile.Read(ref _connectFailures);
 
+    /// <summary>
+    /// How many connections were turned away because the build would not answer
+    /// <see cref="GetLiveSplitVersion"/>. Counted apart from <see cref="ConnectFailures"/>, which
+    /// is "nothing was listening": this one is LiveSplit plainly running and simply too old, and
+    /// the two want different words on the screen.
+    /// </summary>
+    public int TooOldFailures => Volatile.Read(ref _tooOldFailures);
+
+    /// <summary>
+    /// True once a build was turned away for its version. It stays true until something points the
+    /// client at a server again, because it is what the panel is still explaining.
+    /// </summary>
+    public bool TooOld => _tooOld;
+
+    /// <summary>
+    /// What <see cref="GetLiveSplitVersion"/> answered on this connection, for the status line.
+    /// Null when nothing has connected yet.
+    /// </summary>
+    public string? Version => _version;
+
     /// <summary>Raised on the worker thread once a connection is up and the handshake is done.</summary>
     public event Action? Established;
 
@@ -200,8 +247,11 @@ public sealed class LiveSplitClient : IDisposable
     /// <summary>One line for the panel: the status, and the reason it is not connected.</summary>
     public string StatusLine => _status switch
     {
-        LiveSplitStatus.Connected => $"Connected to LiveSplit at {Host}:{Port}",
+        LiveSplitStatus.Connected => Version is { Length: > 0 } version
+            ? $"Connected to LiveSplit {version} at {Host}:{Port}"
+            : $"Connected to LiveSplit at {Host}:{Port}",
         LiveSplitStatus.Connecting => $"Connecting to {Host}:{Port}...",
+        _ when TooOld => $"{TooOldStatus}: RaCMAN needs the LiveSplit development build",
         _ when !Enabled => "Not connected",
         _ => $"Not connected to {Host}:{Port}{(LastError is null ? string.Empty : $" ({LastError})")}",
     };
@@ -233,6 +283,11 @@ public sealed class LiveSplitClient : IDisposable
             Host = host;
             Port = port;
             Enabled = true;
+
+            // A build turned away is only ever the build that was there last time: the user has
+            // been told, and this attempt gets to reach its own conclusion.
+            _tooOld = false;
+            _version = null;
             _queue = NewQueue();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
@@ -399,9 +454,22 @@ public sealed class LiveSplitClient : IDisposable
                 established = true;
                 _status = LiveSplitStatus.Connected;
 
-                // The whole handshake: one query every LiveSplit server has answered for as long
-                // as it has had one. Silence is not a failure — the phase is simply unknown until
-                // something asks again — so nothing here can decide the connection is dead.
+                // The handshake, and the one place a build is turned away. Every command this
+                // client goes on to send belongs to the development build, so the version query
+                // going unanswered means there is nothing here worth driving: the socket is closed
+                // by hand and the reconnect loop is not asked to try again, because the build on
+                // the other end will not have changed by the time it came round.
+                string? version = await AskAsync(stream, GetLiveSplitVersion, token).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(version))
+                {
+                    NoteTooOld();
+                    break;
+                }
+
+                _version = version.Trim();
+
+                // The phase is asked straight after, so the engine knows whether a run is under way
+                // before the first console event lands.
                 await AskAsync(stream, GetCurrentTimerPhase, token).ConfigureAwait(false);
                 Established?.Invoke();
 
@@ -558,6 +626,19 @@ public sealed class LiveSplitClient : IDisposable
             _pendingBytes.RemoveRange(0, newline + 1);
             return line;
         }
+    }
+
+    /// <summary>
+    /// This build cannot be driven. The connection is left for the worker's own <c>finally</c> to
+    /// close, and the client is switched off rather than left retrying a build that is what it is.
+    /// </summary>
+    private void NoteTooOld()
+    {
+        _tooOld = true;
+        LastError = TooOldStatus;
+        LastNote = $"LiveSplit did not answer \"{GetLiveSplitVersion}\"; this build is too old.";
+        Interlocked.Increment(ref _tooOldFailures);
+        lock (_gate) Enabled = false;
     }
 
     /// <summary>Remembers a command this server ignores, so it is asked once and never again.</summary>

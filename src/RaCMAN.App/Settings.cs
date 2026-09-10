@@ -333,18 +333,20 @@ public sealed class AutosplitSettings
     public int Port { get; set; } = LiveSplitClient.DefaultPort;
 
     /// <summary>
-    /// A <c>.lss</c> the user picked, which overrides discovery entirely. Empty is the normal case:
-    /// the run is found in LiveSplit's own recent-splits list and confirmed against what its server
-    /// says the current split is.
+    /// A <c>.lss</c> the user picked, from the builds where the client read the run's split names
+    /// out of the file itself. The development build names the upcoming split, so nothing reads
+    /// this; the key is kept so a settings file written by one of those builds still loads.
     /// </summary>
+    [Obsolete("The split names come from LiveSplit itself; kept only so older settings files load.")]
     [JsonPropertyName("splitsFile")]
     public string SplitsFile { get; set; } = string.Empty;
 
     /// <summary>
-    /// Where LiveSplit is installed, for the case where its folder cannot be found from the running
-    /// process (LiveSplit closed, or a platform with no process list). Empty means "ask the running
-    /// LiveSplit", which is what works without anyone configuring anything.
+    /// Where LiveSplit is installed, which is where its <c>settings.cfg</c> and the recent-splits
+    /// list in it were read from. Nothing reads it now; the key is kept for the same reason as
+    /// <see cref="SplitsFile"/>.
     /// </summary>
+    [Obsolete("Nothing looks in LiveSplit's folder any more; kept only so older settings files load.")]
     [JsonPropertyName("liveSplitFolder")]
     public string LiveSplitFolder { get; set; } = string.Empty;
 
