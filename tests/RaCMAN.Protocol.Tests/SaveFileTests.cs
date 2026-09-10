@@ -177,10 +177,142 @@ public class SaveFileTests : IDisposable
         }
     }
 
+    // ---------------------------------------------------- revision 1.9, the savefile block
+
+    [Fact]
+    public void TheInfoReplyIsEightBytesAndRoundTrips()
+    {
+        var info = new SaveFileInfo(true, true, false, SaveFileInfo.PendingLoad, 0x200000);
+        var bytes = info.ToBytes();
+
+        Assert.Equal(SaveFileInfo.WireSize, bytes.Length);
+        Assert.Equal(8, bytes.Length);
+
+        var parsed = SaveFileInfo.Parse(bytes);
+        Assert.Equal(info, parsed);
+        Assert.True(parsed.LoadPending);
+        Assert.False(parsed.SetAsidePending);
+    }
+
+    [Fact]
+    public void ThePendingBitsAreBit0AndBit1()
+    {
+        Assert.Equal(1, SaveFileInfo.PendingSetAside);
+        Assert.Equal(2, SaveFileInfo.PendingLoad);
+    }
+
+    [Fact]
+    public async Task InfoReportsTheConsolesHelper()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var info = await client.SaveFileInfoAsync();
+
+            Assert.True(info.Supported);
+            Assert.True(info.Installed);
+            Assert.Equal((uint)server.SaveFileBuffer.Length, info.Size);
+            Assert.Equal(0, info.Pending);
+        }
+    }
+
+    [Fact]
+    public async Task AGameWithNoHelperAnswersOkWithSupportedZero()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.SaveFileSupported = false;
+            var info = await client.SaveFileInfoAsync();
+
+            Assert.False(info.Supported);
+            Assert.Equal(0u, info.Size);
+        }
+    }
+
+    [Fact]
+    public async Task AConsoleThatCannotPatchCodeRefusesTheWholeBlock()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.SaveFileUnsupported = true;
+
+            var info = await Assert.ThrowsAsync<QwarkStatusException>(() => client.SaveFileInfoAsync());
+            Assert.Equal(Status.Unsupported, info.Status);
+
+            var read = await Assert.ThrowsAsync<QwarkStatusException>(() => client.SaveFileReadAsync(0, 16));
+            Assert.Equal(Status.Unsupported, read.Status);
+
+            var write = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileWriteAsync(0, new byte[] { 1, 2, 3, 4 }));
+            Assert.Equal(Status.Unsupported, write.Status);
+        }
+    }
+
+    [Fact]
+    public async Task TheAsideBufferRoundTripsInChunks()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var data = Pattern(server.SaveFileBuffer.Length);
+
+            var written = new List<long>();
+            await client.SaveFileUploadAsync(data, new Progress<long>(written.Add));
+            Assert.Equal(data, server.SaveFileBuffer);
+
+            var read = new List<long>();
+            var back = await client.SaveFileDownloadAsync((uint)data.Length, new Progress<long>(read.Add));
+            Assert.Equal(data, back);
+
+            // 200 KB is three full 64 KB chunks and an 8 KB tail, both ways.
+            int chunks = (int)Math.Ceiling(data.Length / (double)QwarkClient.SaveFileChunkSize);
+            Assert.Equal(4, chunks);
+        }
+    }
+
+    [Fact]
+    public async Task AReadPastTheEndIsTrimmedAndAWritePastItIsRefused()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            uint size = (uint)server.SaveFileBuffer.Length;
+
+            var tail = await client.SaveFileReadAsync(size - 16, 4096);
+            Assert.Equal(16, tail.Length);
+
+            var offEnd = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileReadAsync(size, 4));
+            Assert.Equal(Status.BadArg, offEnd.Status);
+
+            var overrun = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.SaveFileWriteAsync(size - 2, new byte[] { 1, 2, 3, 4 }));
+            Assert.Equal(Status.BadArg, overrun.Status);
+        }
+    }
+
+    [Fact]
+    public async Task AChunkLongerThanTheCapIsRefusedBeforeItIsSent()
+    {
+        var (_, client) = await ConnectAsync();
+        using (client)
+        {
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => client.SaveFileWriteAsync(0, new byte[QwarkClient.SaveFileChunkSize + 1]));
+        }
+    }
+
     // ---------------------------------------------------------------- the two sequences
 
     [Fact]
-    public async Task SaveTriggersTheSetAsideActionThenDownloadsTempsave()
+    public async Task SaveTriggersTheSetAsideActionThenReadsTheBuffer()
     {
         var (server, client) = await ConnectAsync();
         using (server)
@@ -190,68 +322,99 @@ public class SaveFileTests : IDisposable
             byte id = server.Describe.SaveAsideAction!.Id;
 
             var messages = new List<string>();
-            var data = await SaveFileTransfer.DownloadAsync(client, id, server.Session.TitleId,
-                settle: TimeSpan.Zero, status: new Progress<string>(messages.Add));
+            var data = await SaveFileTransfer.DownloadAsync(client, id,
+                status: new Progress<string>(messages.Add));
 
             Assert.Equal(server.SaveAsideContent, data);
             Assert.Equal(new[] { id }, server.Triggered);
-            Assert.Equal("/dev_hdd0/game/NPEA00385/USRDIR/tempsave", server.TempSavePath);
         }
     }
 
     [Fact]
-    public async Task SaveWaitsAndRetriesOnceWhenTempsaveIsNotThereYet()
+    public async Task SaveWaitsForThePendingBitToClear()
     {
         var (server, client) = await ConnectAsync();
         using (server)
         using (client)
         {
-            // The game has not finished writing when the first read lands, as on hardware.
-            server.SaveAsideMisses = 1;
+            // The helper takes a few frames to notice, as it does on hardware.
+            server.SaveFilePendingPolls = 3;
             byte id = server.Describe.SaveAsideAction!.Id;
 
             var messages = new List<string>();
-            var data = await SaveFileTransfer.DownloadAsync(client, id, server.Session.TitleId,
-                settle: TimeSpan.Zero, status: new Progress<string>(messages.Add));
+            var data = await SaveFileTransfer.DownloadAsync(client, id,
+                status: new Progress<string>(messages.Add));
 
             Assert.Equal(server.SaveAsideContent, data);
-            Assert.Contains(messages, m => m.Contains("retrying", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(messages, m => m.Contains("Waiting", StringComparison.OrdinalIgnoreCase));
         }
     }
 
     [Fact]
-    public async Task SaveGivesUpAfterTheSecondFailureRatherThanLooping()
+    public async Task SaveGivesUpWhenTheHelperNeverAnswers()
     {
         var (server, client) = await ConnectAsync();
         using (server)
         using (client)
         {
-            server.SaveAsideMisses = 2;
+            // A game sitting on a loading screen: the hook is in and never reached.
+            server.SaveFilePendingPolls = int.MaxValue;
             byte id = server.Describe.SaveAsideAction!.Id;
 
-            var ex = await Assert.ThrowsAsync<QwarkStatusException>(() => SaveFileTransfer.DownloadAsync(
-                client, id, server.Session.TitleId, settle: TimeSpan.Zero));
-            Assert.Equal(Status.NotFound, ex.Status);
+            await Assert.ThrowsAsync<SaveFileTransfer.NotAnsweredException>(
+                () => SaveFileTransfer.DownloadAsync(client, id, timeout: TimeSpan.FromMilliseconds(200)));
         }
     }
 
     [Fact]
-    public async Task LoadUploadsTheFileThenTriggersTheLoadAction()
+    public async Task SaveRefusesAGameTheConsoleHasNoHelperFor()
     {
         var (server, client) = await ConnectAsync();
         using (server)
         using (client)
         {
-            var data = Pattern(150 * 1024);
+            server.SaveFileSupported = false;
+            byte id = server.Describe.SaveAsideAction!.Id;
+
+            await Assert.ThrowsAsync<SaveFileTransfer.NotAnsweredException>(
+                () => SaveFileTransfer.DownloadAsync(client, id));
+            Assert.Empty(server.Triggered);
+        }
+    }
+
+    [Fact]
+    public async Task LoadWritesTheBufferThenTriggersTheLoadAction()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var data = Pattern(server.SaveFileBuffer.Length);
             byte id = server.Describe.LoadAsideAction!.Id;
 
-            await SaveFileTransfer.UploadAsync(client, id, server.Session.TitleId, data);
+            await SaveFileTransfer.UploadAsync(client, id, data);
 
-            Assert.Equal(data, server.Files[server.TempSavePath]);
+            Assert.Equal(data, server.SaveFileBuffer);
             Assert.Equal(new[] { id }, server.Triggered);
 
             // The action fired after the write, so the game saw the new bytes.
             Assert.Equal(data, server.LoadedSaveFile);
+        }
+    }
+
+    [Fact]
+    public async Task LoadRefusesAFileBiggerThanTheConsolesBuffer()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var data = Pattern(server.SaveFileBuffer.Length + 1);
+            byte id = server.Describe.LoadAsideAction!.Id;
+
+            await Assert.ThrowsAsync<SaveFileTransfer.NotAnsweredException>(
+                () => SaveFileTransfer.UploadAsync(client, id, data));
+            Assert.Empty(server.Triggered);
         }
     }
 
@@ -267,18 +430,18 @@ public class SaveFileTests : IDisposable
             server.SaveAsideContent = Pattern(200 * 1024);
 
             var downloaded = await SaveFileTransfer.DownloadAsync(
-                client, server.Describe.SaveAsideAction!.Id, title, settle: TimeSpan.Zero);
-            var path = library.Write(title, "any%", "start of veldin", downloaded);
+                client, server.Describe.SaveAsideAction!.Id);
+            var path = library.Write(title, "any%", "start of veldin.sav", downloaded);
 
             Assert.True(File.Exists(path));
             Assert.Contains("any%", library.Categories(title));
-            Assert.Contains("start of veldin", library.Files(title, "any%"));
+            Assert.Contains("start of veldin.sav", library.Files(title, "any%"));
 
-            // Something else overwrites tempsave, so the upload has to put the bytes back.
-            server.Files[server.TempSavePath] = new byte[] { 0 };
+            // Something else fills the buffer, so the upload has to put the bytes back.
+            Array.Clear(server.SaveFileBuffer);
 
-            await SaveFileTransfer.UploadAsync(client, server.Describe.LoadAsideAction!.Id, title,
-                library.Read(title, "any%", "start of veldin"));
+            await SaveFileTransfer.UploadAsync(client, server.Describe.LoadAsideAction!.Id,
+                library.Read(title, "any%", "start of veldin.sav"));
 
             Assert.Equal(server.SaveAsideContent, server.LoadedSaveFile);
         }
@@ -286,10 +449,15 @@ public class SaveFileTests : IDisposable
 
     // ---------------------------------------------------------------- the local library
 
-    [Fact]
-    public void TheTempsavePathIsTheDocumentedOne()
+    [Theory]
+    [InlineData("veldin", "veldin.sav")]
+    [InlineData("veldin.sav", "veldin.sav")]
+    [InlineData("veldin.SAV", "veldin.SAV")]
+    [InlineData("  veldin  ", "veldin.sav")]
+    [InlineData("", "")]
+    public void ATypedNameGetsTheSaveExtension(string typed, string expected)
     {
-        Assert.Equal("/dev_hdd0/game/NPEA00387/USRDIR/tempsave", SaveFileLibrary.TempSavePath("NPEA00387"));
+        Assert.Equal(expected, SaveFileLibrary.EnsureExtension(typed));
     }
 
     [Fact]

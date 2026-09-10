@@ -393,7 +393,11 @@ public sealed record DescribeResult(GameId Game, string[] Groups, string[] Reado
     /// <summary>The ACTION flagged LOAD_ASIDE, or null when this game has no savefile helper.</summary>
     public Feature? LoadAsideAction => Array.Find(Features, f => f.LoadsAside);
 
-    /// <summary>True when the game declares both halves of the savefile helper.</summary>
+    /// <summary>
+    /// True when the game declares both halves of the savefile helper. Whether the console
+    /// actually has a helper for it is SAVEFILE_INFO's <c>supported</c> byte (revision 1.9);
+    /// this only says the game asks for one.
+    /// </summary>
     public bool HasSaveFileHelper => SaveAsideAction is not null && LoadAsideAction is not null;
 
     public string GroupName(byte index) => index < Groups.Length ? Groups[index] : $"Group {index}";
@@ -753,3 +757,53 @@ public readonly record struct MobyTableInfo(uint TablePointerAddress, uint Table
 
 /// <summary>One word of a client patch.</summary>
 public readonly record struct PatchWord(uint Address, uint Word);
+
+/// <summary>
+/// SAVEFILE_INFO, section 5.12 of PROTOCOL.md (revision 1.9). Eight bytes describing the
+/// console's savefile helper for whichever game is running.
+/// </summary>
+public readonly record struct SaveFileInfo(
+    bool Supported,
+    bool Installed,
+    bool Running,
+    byte Pending,
+    uint Size)
+{
+    public const int WireSize = 8;
+
+    /// <summary>bit0: the set-aside the client asked for has not been answered yet.</summary>
+    public const byte PendingSetAside = 0x01;
+
+    /// <summary>bit1: the load the client asked for has not been answered yet.</summary>
+    public const byte PendingLoad = 0x02;
+
+    public bool SetAsidePending => (Pending & PendingSetAside) != 0;
+
+    public bool LoadPending => (Pending & PendingLoad) != 0;
+
+    /// <summary>What a client shows before it has asked, and what an unsupported game means.</summary>
+    public static readonly SaveFileInfo None = new(false, false, false, 0, 0);
+
+    public static SaveFileInfo Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        bool supported = r.ReadU8() != 0;
+        bool installed = r.ReadU8() != 0;
+        bool running = r.ReadU8() != 0;
+        byte pending = r.ReadU8();
+        uint size = r.ReadU32();
+        return new SaveFileInfo(supported, installed, running, pending, size);
+    }
+
+    public byte[] ToBytes()
+    {
+        var bytes = new byte[WireSize];
+        var w = new SpanWriter(bytes);
+        w.WriteU8((byte)(Supported ? 1 : 0));
+        w.WriteU8((byte)(Installed ? 1 : 0));
+        w.WriteU8((byte)(Running ? 1 : 0));
+        w.WriteU8(Pending);
+        w.WriteU32(Size);
+        return bytes;
+    }
+}

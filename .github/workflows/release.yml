@@ -2,9 +2,9 @@
 ## Cuts a release from a tag. Push "v1.2.0" and this builds the client for Windows and Linux,
 ## packages both with Velopack and attaches them to the GitHub release the tag names.
 ##
-## The payload comes from three places: this repository (the client, the skins, the layout and
-## autosplit data), sowelilili/qwark (the PS3 module and the RPCS3 helper, out of its committed
-## dist/ folder) and MichaelRelaxen/racman (the mod library the client ships with). The staging
+## The payload comes from two places: this repository (the client, the skins, the layout and
+## autosplit data, and the mod library in mods/) and sowelilili/qwark (the PS3 module and the
+## RPCS3 helper, out of its committed dist/ folder). The staging
 ## itself is publish.ps1's, run with switches rather than copied here, so the release layout has
 ## one description.
 ##
@@ -25,7 +25,6 @@ permissions:
 env:
   PACK_ID: RaCMANReloaded
   QWARK_REPO: sowelilili/qwark
-  MODS_REPO: MichaelRelaxen/racman
 
 jobs:
   windows:
@@ -62,12 +61,6 @@ jobs:
           ref: ${{ steps.qwark.outputs.ref }}
           path: qwark
 
-      - name: Check out the mod library
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.MODS_REPO }}
-          path: racman-official
-
       - name: Check qwark built what this release needs
         shell: bash
         run: |
@@ -102,8 +95,7 @@ jobs:
             -OutputRoot '${{ github.workspace }}/stage' `
             -StageName RaCMAN-Reloaded `
             -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx' `
-            -Rpcs3Path '${{ github.workspace }}/qwark/dist/qwark-rpcs3.exe' `
-            -ModsSource '${{ github.workspace }}/racman-official/mods'
+            -Rpcs3Path '${{ github.workspace }}/qwark/dist/qwark-rpcs3.exe'
 
       - name: Install vpk
         run: dotnet tool install -g vpk
@@ -176,12 +168,6 @@ jobs:
           ref: ${{ steps.qwark.outputs.ref }}
           path: qwark
 
-      - name: Check out the mod library
-        uses: actions/checkout@v4
-        with:
-          repository: ${{ env.MODS_REPO }}
-          path: racman-official
-
       # No qwark-rpcs3.exe here: the RPCS3 helper is a Windows executable, and publish.ps1 leaves
       # it out of a non-Windows payload anyway.
       - name: Check qwark built what this release needs
@@ -207,8 +193,7 @@ jobs:
             -NoZip `
             -OutputRoot '${{ github.workspace }}/stage' `
             -StageName RaCMAN-Reloaded `
-            -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx' `
-            -ModsSource '${{ github.workspace }}/racman-official/mods'
+            -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx'
 
       # The AppImage's entry point has to be executable, and a zip-free copy through PowerShell
       # does not carry the bit.

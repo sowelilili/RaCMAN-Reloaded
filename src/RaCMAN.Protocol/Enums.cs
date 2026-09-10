@@ -87,6 +87,11 @@ public enum Opcode : ushort
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
+
+    // 5.12 Save files (revision 1.9)
+    SaveFileInfo = 0x00B0,
+    SaveFileRead = 0x00B1,
+    SaveFileWrite = 0x00B2,
 }
 
 /// <summary>
@@ -268,10 +273,17 @@ public enum FeatureFlags : byte
     Auto = 1 << 0,
     WritesCode = 1 << 1,
 
-    /// <summary>This ACTION makes the game write its save to <c>USRDIR/tempsave</c>.</summary>
+    /// <summary>
+    /// This ACTION asks the game to copy its current save into the savefile helper's aside
+    /// buffer, which SAVEFILE_READ then streams (revision 1.9). Before that revision it wrote
+    /// a <c>USRDIR/tempsave</c> file the client pulled over the FILE ops.
+    /// </summary>
     SaveAside = 1 << 2,
 
-    /// <summary>This ACTION makes the game load <c>USRDIR/tempsave</c>.</summary>
+    /// <summary>
+    /// This ACTION asks the game to load whatever is in the aside buffer, which SAVEFILE_WRITE
+    /// has just filled (revision 1.9).
+    /// </summary>
     LoadAside = 1 << 3,
 
     /// <summary>

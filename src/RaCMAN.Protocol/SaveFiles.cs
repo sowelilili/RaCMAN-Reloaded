@@ -1,14 +1,31 @@
 namespace RaCMAN.Protocol;
 
 /// <summary>
-/// The PC-side savefile library: <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/&lt;name&gt;</c> beside the
-/// executable, the same layout the old client used. Nothing here knows anything about the game:
-/// a saved file is whatever bytes the console's tempsave held.
+/// The PC-side savefile library: <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/&lt;name&gt;.sav</c> beside
+/// the executable, the same layout the old client used. Nothing here knows anything about the
+/// game: a saved file is whatever bytes the console's aside buffer held.
 /// </summary>
 public sealed class SaveFileLibrary
 {
     /// <summary>The folder offered when a title has no categories yet.</summary>
     public const string DefaultCategory = "misc";
+
+    /// <summary>
+    /// What a saved file is called on disk. The library itself takes whole names, so that rename
+    /// and delete work on exactly what the listing shows; <see cref="EnsureExtension"/> is what
+    /// puts it on a name the user typed.
+    /// </summary>
+    public const string Extension = ".sav";
+
+    /// <summary>Adds <see cref="Extension"/> unless the name already ends in it.</summary>
+    public static string EnsureExtension(string name)
+    {
+        var trimmed = (name ?? string.Empty).Trim();
+        if (trimmed.Length == 0) return trimmed;
+        return trimmed.EndsWith(Extension, StringComparison.OrdinalIgnoreCase)
+            ? trimmed
+            : trimmed + Extension;
+    }
 
     public SaveFileLibrary(string rootPath)
     {
@@ -16,12 +33,6 @@ public sealed class SaveFileLibrary
     }
 
     public string RootPath { get; }
-
-    /// <summary>
-    /// Where the game writes its set-aside save. Fixed by the console side, section 5.3: the
-    /// SAVE_ASIDE action writes it and the LOAD_ASIDE action reads it back.
-    /// </summary>
-    public static string TempSavePath(string titleId) => $"/dev_hdd0/game/{titleId}/USRDIR/tempsave";
 
     public string TitleFolder(string titleId) => Path.Combine(RootPath, Sanitise(titleId, "unknown"));
 
@@ -112,71 +123,119 @@ public sealed class SaveFileLibrary
 }
 
 /// <summary>
-/// The two savefile sequences, written against nothing but the generic file ops and the two
-/// flagged ACTIONs: no addresses, no game knowledge. Kept out of the panel so it can be tested
-/// against the fake server without a window.
+/// The two savefile sequences, written against the savefile block (section 5.12) and the two
+/// flagged ACTIONs: no addresses, no game knowledge, no file on the console. Kept out of the
+/// panel so it can be tested against the fake server without a window.
 /// </summary>
 public static class SaveFileTransfer
 {
     /// <summary>
-    /// How long the game is given to finish writing tempsave after the action fires. The old
-    /// client slept two seconds and retried once after two more; this reproduces that.
+    /// How long the console is given to answer a request before the sequence gives up. The
+    /// helper runs once a frame, so a request that is still outstanding after this has not been
+    /// reached at all: the game is on a screen that does not call the hook, most likely a
+    /// loading screen or a menu.
     /// </summary>
-    public static readonly TimeSpan DefaultSettle = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>How often the pending bits are polled while a request is outstanding.</summary>
+    public static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(100);
 
     /// <summary>
-    /// FEATURE_TRIGGER the SAVE_ASIDE action, wait, then read the tempsave file. A NOT_FOUND or
-    /// IO_ERROR means the game had not finished writing, so it waits again and retries once.
+    /// Thrown when a request the helper should have answered is still outstanding after
+    /// <see cref="DefaultTimeout"/>, so the caller can say something better than "it hung".
+    /// </summary>
+    public sealed class NotAnsweredException : Exception
+    {
+        public NotAnsweredException(string message) : base(message) { }
+    }
+
+    /// <summary>
+    /// FEATURE_TRIGGER the SAVE_ASIDE action, poll SAVEFILE_INFO until the set-aside bit clears,
+    /// then read the whole aside buffer in 64 KB chunks.
     /// </summary>
     public static async Task<byte[]> DownloadAsync(
         QwarkClient client,
         byte saveActionId,
-        string titleId,
-        TimeSpan? settle = null,
+        TimeSpan? timeout = null,
         IProgress<string>? status = null,
         IProgress<long>? bytes = null,
         CancellationToken cancellationToken = default)
     {
-        var delay = settle ?? DefaultSettle;
-        string path = SaveFileLibrary.TempSavePath(titleId);
+        var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
+        if (!info.Supported)
+        {
+            throw new NotAnsweredException("this game has no savefile helper on the console");
+        }
 
         status?.Report($"FEATURE_TRIGGER {saveActionId} (set aside)");
         await client.FeatureTriggerAsync(saveActionId, cancellationToken).ConfigureAwait(false);
 
-        if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+        status?.Report("Waiting for the game to set the save aside...");
+        info = await WaitAsync(client, i => !i.SetAsidePending, timeout, cancellationToken)
+            .ConfigureAwait(false);
 
-        status?.Report($"Reading {path}");
-        try
-        {
-            return await client.ReadFileAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-        }
-        catch (QwarkStatusException ex) when (ex.Status is Status.NotFound or Status.IoError)
-        {
-            status?.Report($"{path} was not ready ({ex.Status}); waiting and retrying once");
-            if (delay > TimeSpan.Zero) await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
-            return await client.ReadFileAsync(path, bytes, cancellationToken).ConfigureAwait(false);
-        }
+        status?.Report($"Reading {info.Size} bytes from the console");
+        return await client.SaveFileDownloadAsync(info.Size, bytes, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
-    /// Write the local bytes over the console's tempsave, then FEATURE_TRIGGER the LOAD_ASIDE
-    /// action so the game picks the file up.
+    /// Write the local bytes into the aside buffer, then FEATURE_TRIGGER the LOAD_ASIDE action
+    /// and wait for the helper to take it.
     /// </summary>
     public static async Task UploadAsync(
         QwarkClient client,
         byte loadActionId,
-        string titleId,
         ReadOnlyMemory<byte> data,
+        TimeSpan? timeout = null,
         IProgress<string>? status = null,
         IProgress<long>? bytes = null,
         CancellationToken cancellationToken = default)
     {
-        string path = SaveFileLibrary.TempSavePath(titleId);
+        var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
+        if (!info.Supported)
+        {
+            throw new NotAnsweredException("this game has no savefile helper on the console");
+        }
 
-        status?.Report($"Writing {data.Length} bytes to {path}");
-        await client.WriteFileAsync(path, data, bytes, cancellationToken).ConfigureAwait(false);
+        if (data.Length > info.Size)
+        {
+            throw new NotAnsweredException(
+                $"the file is {data.Length} bytes and this game's buffer holds {info.Size}");
+        }
+
+        status?.Report($"Writing {data.Length} bytes to the console");
+        await client.SaveFileUploadAsync(data, bytes, cancellationToken).ConfigureAwait(false);
 
         status?.Report($"FEATURE_TRIGGER {loadActionId} (load set aside)");
         await client.FeatureTriggerAsync(loadActionId, cancellationToken).ConfigureAwait(false);
+
+        status?.Report("Waiting for the game to take it...");
+        await WaitAsync(client, i => !i.LoadPending, timeout, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Polls SAVEFILE_INFO until <paramref name="done"/> or the timeout runs out.</summary>
+    private static async Task<SaveFileInfo> WaitAsync(
+        QwarkClient client,
+        Func<SaveFileInfo, bool> done,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
+        var limit = timeout ?? DefaultTimeout;
+        var deadline = DateTime.UtcNow + limit;
+
+        while (true)
+        {
+            var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
+            if (done(info)) return info;
+
+            if (DateTime.UtcNow >= deadline)
+            {
+                throw new NotAnsweredException(
+                    $"the console did not answer within {limit.TotalSeconds:0.#} s. The helper only " +
+                    "runs while the game is running, so try again once the game is in play.");
+            }
+
+            await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
+        }
     }
 }

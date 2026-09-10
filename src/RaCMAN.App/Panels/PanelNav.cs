@@ -17,10 +17,10 @@ public static class PanelNav
 
     /// <summary>
     /// Why the nav greys a panel out, or null when the panel is usable. Every mod is patch words
-    /// or code caves, and the Save files panel moves files through the savefile helper, which is
-    /// itself a mod, so a console that refuses code patches (RPCS3) leaves both with nothing they
-    /// can do. They stay in the list, greyed out with this as their tooltip, because a panel that
-    /// vanished would read as a client that had lost a feature.
+    /// or code caves, and the savefile helper the Save files panel works through is a code cave
+    /// and a branch into it, so a console that refuses code patches (RPCS3) leaves both with
+    /// nothing they can do. They stay in the list, greyed out with this as their tooltip, because
+    /// a panel that vanished would read as a client that had lost a feature.
     /// </summary>
     public static string? DisabledReason(int panel, bool codePatchesUnsupported)
     {

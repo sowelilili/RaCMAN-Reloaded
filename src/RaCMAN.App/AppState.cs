@@ -207,6 +207,14 @@ public sealed class AppState : IDisposable
     /// </summary>
     public AutosplitEventDesc[] AutosplitEvents { get; private set; } = Array.Empty<AutosplitEventDesc>();
 
+    /// <summary>
+    /// SAVEFILE_INFO for the running game, revision 1.9: whether the console has a savefile
+    /// helper for it, whether that helper is in and running, and how big a save is.
+    /// <see cref="SaveFileInfo.None"/> until it has been asked, and again for a game with no
+    /// helper or a console that refuses code patches.
+    /// </summary>
+    public SaveFileInfo SaveFile { get; private set; } = SaveFileInfo.None;
+
     public string[] Planets { get; private set; } = Array.Empty<string>();
 
     public WatchEntry[] Watches { get; private set; } = Array.Empty<WatchEntry>();
@@ -479,6 +487,7 @@ public sealed class AppState : IDisposable
         DescribedTitle = string.Empty;
         Describe = DescribeResult.Empty;
         AutosplitEvents = Array.Empty<AutosplitEventDesc>();
+        SaveFile = SaveFileInfo.None;
         Autosplitter.Descriptors = AutosplitEvents;
         Autosplitter.Game = GameId.None;
         Planets = Array.Empty<string>();
@@ -603,6 +612,7 @@ public sealed class AppState : IDisposable
             }, quiet);
 
             RefreshAutosplitEvents();
+            RefreshSaveFileInfo();
             RefreshLevelFlagsSupport(quiet);
         }
 
@@ -682,6 +692,30 @@ public sealed class AppState : IDisposable
                     AutosplitEvents = Array.Empty<AutosplitEventDesc>();
                     Autosplitter.Descriptors = AutosplitEvents;
                 });
+            }
+        });
+    }
+
+    /// <summary>
+    /// Re-reads SAVEFILE_INFO, revision 1.9. UNSUPPORTED is the normal answer on a console that
+    /// refuses code patches, and for a module older than this revision the op is unknown; both
+    /// mean the Save files panel has nothing to drive, and neither is worth a toast.
+    /// </summary>
+    public void RefreshSaveFileInfo()
+    {
+        if (!Connected) return;
+
+        RunQuiet(async () =>
+        {
+            try
+            {
+                var info = await Client.SaveFileInfoAsync().ConfigureAwait(false);
+                Post(() => SaveFile = info);
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp
+                                                             or Status.NotIngame)
+            {
+                Post(() => SaveFile = SaveFileInfo.None);
             }
         });
     }

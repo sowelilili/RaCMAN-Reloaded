@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 9;
+    public const byte ExpectedQwarkBuild = 10;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -965,6 +965,87 @@ public sealed class QwarkClient : IDisposable
         finally
         {
             await FileCloseAsync(handle, CancellationToken.None).ConfigureAwait(false);
+        }
+    }
+
+    // ---------------------------------------------------------------- 5.12 save files
+
+    /// <summary>
+    /// The chunk the savefile helpers move. SAVEFILE_READ and SAVEFILE_WRITE cap at 65536 bytes,
+    /// the same cap the file ops have.
+    /// </summary>
+    public const int SaveFileChunkSize = 65536;
+
+    /// <summary>
+    /// SAVEFILE_INFO, revision 1.9. Answers UNSUPPORTED where code cannot be patched (RPCS3) and
+    /// NOT_INGAME outside a game; a game qwark simply has no helper for is an OK answer with
+    /// <see cref="SaveFileInfo.Supported"/> false.
+    /// </summary>
+    public async Task<SaveFileInfo> SaveFileInfoAsync(CancellationToken cancellationToken = default) =>
+        SaveFileInfo.Parse(await RequestAsync(Opcode.SaveFileInfo, null, cancellationToken).ConfigureAwait(false));
+
+    public Task<byte[]> SaveFileReadAsync(uint offset, uint length, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.SaveFileRead,
+            Bytes(8, (scoped ref SpanWriter w) => { w.WriteU32(offset); w.WriteU32(length); }),
+            cancellationToken);
+
+    public Task SaveFileWriteAsync(uint offset, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
+    {
+        if (data.Length == 0 || data.Length > SaveFileChunkSize)
+        {
+            throw new ArgumentOutOfRangeException(nameof(data),
+                $"SAVEFILE_WRITE takes 1 to {SaveFileChunkSize} bytes");
+        }
+
+        var payload = new byte[4 + data.Length];
+        var w = new SpanWriter(payload);
+        w.WriteU32(offset);
+        w.WriteBytes(data.Span);
+        return RequestAsync(Opcode.SaveFileWrite, payload, cancellationToken);
+    }
+
+    /// <summary>
+    /// Reads the whole aside buffer in 64 KB chunks. <paramref name="size"/> comes from
+    /// SAVEFILE_INFO; the console trims the last chunk itself, so the loop asks for a round
+    /// chunk every time and stops when it has the lot.
+    /// </summary>
+    public async Task<byte[]> SaveFileDownloadAsync(
+        uint size,
+        IProgress<long>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        var buffer = new byte[size];
+        uint offset = 0;
+
+        while (offset < size)
+        {
+            uint want = Math.Min((uint)SaveFileChunkSize, size - offset);
+            var chunk = await SaveFileReadAsync(offset, want, cancellationToken).ConfigureAwait(false);
+            if (chunk.Length == 0)
+            {
+                throw new ProtocolException($"SAVEFILE_READ returned nothing at offset {offset}");
+            }
+
+            chunk.CopyTo(buffer, (int)offset);
+            offset += (uint)chunk.Length;
+            progress?.Report(offset);
+        }
+
+        return buffer;
+    }
+
+    /// <summary>Writes a whole save into the aside buffer in 64 KB chunks, from offset 0.</summary>
+    public async Task SaveFileUploadAsync(
+        ReadOnlyMemory<byte> data,
+        IProgress<long>? progress = null,
+        CancellationToken cancellationToken = default)
+    {
+        for (int offset = 0; offset < data.Length; offset += SaveFileChunkSize)
+        {
+            int length = Math.Min(SaveFileChunkSize, data.Length - offset);
+            await SaveFileWriteAsync((uint)offset, data.Slice(offset, length), cancellationToken)
+                .ConfigureAwait(false);
+            progress?.Report(offset + length);
         }
     }
 

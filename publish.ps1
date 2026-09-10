@@ -5,9 +5,12 @@
 .DESCRIPTION
     Publishes src/RaCMAN.App framework-dependent for win-x64 (and, with -All, for linux-x64 and
     osx-x64 as well), then stages ..\build\RaCMAN-Reloaded\ with the published app, the
-    controller skins, the moby layout data, ..\qwark\qwark.sprx when it has been built,
-    ..\qwark\qwark-rpcs3.exe (the RPCS3 helper, win-* only) when it has been built, and the
-    mod library, and zips it to ..\build\RaCMAN-Reloaded.zip.
+    controller skins, the moby layout data, the mod library from this repo's mods\ folder,
+    ..\qwark\dist\qwark.sprx and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only),
+    and zips it to ..\build\RaCMAN-Reloaded.zip.
+
+    The console side comes from qwark's committed dist\ folder, which `make dist` fills after a
+    build, so a release can be cut without a PS3 SDK on the machine.
 
     Each runtime gets its own complete folder and zip: the app finds controllerskins\, data\,
     mods\ and qwark.sprx beside its own executable, so the payload cannot be shared between
@@ -67,13 +70,13 @@ function Combine {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Parts)
     return [System.IO.Path]::Combine([string[]]$Parts)
 }
-
 if (-not $OutputRoot) { $OutputRoot = Combine $repo '..' 'build' }
-if (-not $ModsSource) { $ModsSource = Combine $repo '..' '..' 'legacy' 'racman-official' 'mods' }
-if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'qwark.sprx' }
-if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'qwark-rpcs3.exe' }
+if (-not $ModsSource) { $ModsSource = Combine $repo 'mods' }
+if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.sprx' }
+if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 
-# The mod library the client ships with: one folder per title plus the shared Lua helpers.
+# The mod library the client ships with: one folder per title plus the shared Lua helpers. It
+# lives in this repo now, so a release carries whatever is committed and nothing else.
 $ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00387', 'NPEA00423', 'libs')
 
 # What the client reads to tell a shipped mod from one the user added, when it moves an older
@@ -111,42 +114,18 @@ function Publish-Rid([string]$rid) {
 }
 
 <#
-    Copies one mod folder out of racman-official. When it is missing from that repo's working
-    tree, which happens on branches that do not carry the whole library, it is recovered from
-    the repo's master branch instead. That is a read-only git operation on the sibling repo.
+    Copies one mod folder out of this repo's mods\ library.
 #>
 function Copy-ModFolder([string]$name, [string]$destinationRoot) {
     $source = Combine $ModsSource $name
-    if (Test-Path $source) {
-        Copy-Item -Recurse -Force $source (Join-Path $destinationRoot $name)
-        return "working tree"
-    }
-
-    $repoRoot = Split-Path -Parent $ModsSource
-    if (-not (Test-Path (Join-Path $repoRoot '.git'))) {
-        Write-Warning "mods: $name is missing from $ModsSource and there is no git repo to recover it from"
+    if (-not (Test-Path $source)) {
+        Write-Warning "mods: $name is missing from $ModsSource"
         return $null
     }
 
-    $temp = Combine ([System.IO.Path]::GetTempPath()) ("racman-mods-" + [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Force $temp | Out-Null
-    $archive = Join-Path $temp 'mods.zip'
-
-    try {
-        & git -C $repoRoot archive --format=zip -o $archive master ("mods/" + $name) 2>$null
-        if ($LASTEXITCODE -ne 0 -or -not (Test-Path $archive)) {
-            Write-Warning "mods: $name is missing from $ModsSource and is not on that repo's master branch either"
-            return $null
-        }
-
-        Expand-Archive -Path $archive -DestinationPath $temp -Force
-        Copy-Item -Recurse -Force (Combine $temp 'mods' $name) (Join-Path $destinationRoot $name)
-        Write-Warning "mods: $name is not in $ModsSource on the checked-out branch; took it from that repo's master"
-        return "master"
-    }
-    finally {
-        Remove-Item -Recurse -Force $temp -ErrorAction SilentlyContinue
-    }
+    Copy-Item -Recurse -Force $source (Join-Path $destinationRoot $name)
+    $count = (Get-ChildItem -Path $source -Recurse -File).Count
+    return "$count files"
 }
 
 function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
@@ -211,6 +190,9 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
     Drops any mod whose patch.txt has an "automation:" line. Those mods drive a Lua script, and
     Lua is not in this release, so they would not work: better to ship without them than to ship
     a checkbox that does nothing.
+
+    The in-repo library already leaves them out, so this normally finds nothing; it stays as the
+    catch for one being copied in later.
 #>
 function Remove-LuaMods([string]$modsDir) {
     Get-ChildItem -Path $modsDir -Recurse -Filter 'patch.txt' -File -ErrorAction SilentlyContinue | ForEach-Object {

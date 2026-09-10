@@ -9,8 +9,8 @@ namespace RaCMAN.Protocol.Testing;
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
 /// memory primitives, POS_LIST, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
-/// MOD_LIST, the file ops, COMBO_SET/LIST/SUSPEND and the two AUTOSPLIT ops with their UDP push.
-/// Everything else answers UNKNOWN_OP.
+/// MOD_LIST, the file ops, COMBO_SET/LIST/SUSPEND, the two AUTOSPLIT ops with their UDP push and
+/// the three SAVEFILE ops over an in-memory aside buffer. Everything else answers UNKNOWN_OP.
 /// </summary>
 public sealed class FakeQwarkServer : IDisposable
 {
@@ -32,7 +32,7 @@ public sealed class FakeQwarkServer : IDisposable
         _session = SessionInfo.Empty with
         {
             ProtocolVersion = 1,
-            QwarkVersion = 9,
+            QwarkVersion = 10,
             State = SessionState.Ingame,
             Game = GameId.Rac1,
             Generation = 1,
@@ -287,21 +287,44 @@ public sealed class FakeQwarkServer : IDisposable
     /// <summary>Every FEATURE_TRIGGER id, in order, so a test can see which action a flow fired.</summary>
     public List<byte> Triggered { get; } = new();
 
-    /// <summary>What the game "writes" to tempsave when the SAVE_ASIDE action fires.</summary>
-    public byte[] SaveAsideContent { get; set; } = BuildSaveAsideContent(4096);
+    /// <summary>
+    /// The savefile helper's aside buffer, revision 1.9. SAVEFILE_READ and SAVEFILE_WRITE move
+    /// bytes in and out of this; the SAVE_ASIDE action fills it with
+    /// <see cref="SaveAsideContent"/>, as the game's own helper would.
+    /// <para>
+    /// Small on purpose: a console's is one or two megabytes, and a test that moved that much
+    /// through a loopback socket for every case would be slow for no gain. It is more than one
+    /// 64 KB chunk, which is what the chunking needs to be exercised.
+    /// </para>
+    /// </summary>
+    public byte[] SaveFileBuffer { get; private set; } = new byte[200 * 1024];
+
+    /// <summary>What the game "sets aside" when the SAVE_ASIDE action fires.</summary>
+    public byte[] SaveAsideContent { get; set; } = BuildSaveAsideContent(200 * 1024);
+
+    /// <summary>False makes SAVEFILE_INFO answer OK with `supported` 0: a game with no helper.</summary>
+    public bool SaveFileSupported { get; set; } = true;
 
     /// <summary>
-    /// How many reads of the tempsave path answer NOT_FOUND after a SAVE_ASIDE trigger, standing
-    /// in for a game that has not finished writing yet. The client is expected to retry once.
+    /// True makes all three savefile ops answer UNSUPPORTED, which is what a platform that
+    /// cannot patch code does (section 5.12).
     /// </summary>
-    public int SaveAsideMisses { get; set; }
+    public bool SaveFileUnsupported { get; set; }
 
-    /// <summary>The bytes tempsave held when the LOAD_ASIDE action last fired.</summary>
+    /// <summary>What SAVEFILE_INFO reports for the helper's own byte.</summary>
+    public bool SaveFileRunning { get; set; } = true;
+
+    /// <summary>
+    /// How many SAVEFILE_INFO polls a request stays outstanding for, standing in for the frame
+    /// or two a console's helper takes to notice it. 1 is answered on the first poll.
+    /// </summary>
+    public int SaveFilePendingPolls { get; set; } = 1;
+
+    /// <summary>The bytes the aside buffer held when the LOAD_ASIDE action last fired.</summary>
     public byte[]? LoadedSaveFile { get; private set; }
 
-    public string TempSavePath => SaveFileLibrary.TempSavePath(Session.TitleId);
-
-    private int _saveAsideMissesLeft;
+    private int _setAsidePending;
+    private int _loadPending;
 
     private static byte[] BuildSaveAsideContent(int size)
     {
@@ -571,15 +594,19 @@ public sealed class FakeQwarkServer : IDisposable
                     Triggered.Add(id);
 
                     // The savefile helper's two halves are the only triggers with a side effect
-                    // the client can observe: one writes tempsave, the other consumes it.
+                    // the client can observe: one fills the aside buffer, the other consumes it.
+                    // Both stay "pending" for a poll or two, as the console's helper does.
                     if (action.SavesAside)
                     {
-                        Files[TempSavePath] = (byte[])SaveAsideContent.Clone();
-                        _saveAsideMissesLeft = SaveAsideMisses;
+                        if (SaveFileUnsupported) return (Status.Unsupported, null);
+                        SaveFileBuffer = (byte[])SaveAsideContent.Clone();
+                        _setAsidePending = SaveFilePendingPolls;
                     }
                     else if (action.LoadsAside)
                     {
-                        LoadedSaveFile = Files.TryGetValue(TempSavePath, out var bytes) ? bytes : null;
+                        if (SaveFileUnsupported) return (Status.Unsupported, null);
+                        LoadedSaveFile = (byte[])SaveFileBuffer.Clone();
+                        _loadPending = SaveFilePendingPolls;
                     }
 
                     return (Status.Ok, null);
@@ -910,14 +937,6 @@ public sealed class FakeQwarkServer : IDisposable
 
                     if (mode == FileMode.Read)
                     {
-                        // A game that has not finished writing tempsave yet, so the client's
-                        // wait-and-retry-once path gets exercised.
-                        if (path == TempSavePath && _saveAsideMissesLeft > 0)
-                        {
-                            _saveAsideMissesLeft--;
-                            return (Status.NotFound, null);
-                        }
-
                         if (!Files.ContainsKey(path)) return (Status.NotFound, null);
                     }
                     else
@@ -1022,6 +1041,66 @@ public sealed class FakeQwarkServer : IDisposable
                     }
 
                     return (Status.Ok, buffer);
+                }
+
+                // ------------------------------------------- 5.12 save files, revision 1.9
+
+                case Opcode.SaveFileInfo:
+                {
+                    // A platform that cannot patch code refuses the block outright; a game with
+                    // no helper is an OK answer with `supported` 0.
+                    if (SaveFileUnsupported) return (Status.Unsupported, null);
+                    if (!SaveFileSupported) return (Status.Ok, SaveFileInfo.None.ToBytes());
+
+                    byte pending = 0;
+                    if (_setAsidePending > 0) pending |= SaveFileInfo.PendingSetAside;
+                    if (_loadPending > 0) pending |= SaveFileInfo.PendingLoad;
+
+                    // The helper clears its own request byte a frame or two later; counting the
+                    // polls down stands in for that, so a client's wait loop is exercised.
+                    if (_setAsidePending > 0) _setAsidePending--;
+                    if (_loadPending > 0) _loadPending--;
+
+                    var info = new SaveFileInfo(true, true, SaveFileRunning, pending,
+                                                (uint)SaveFileBuffer.Length);
+                    return (Status.Ok, info.ToBytes());
+                }
+
+                case Opcode.SaveFileRead:
+                {
+                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (payload.Length < 8) return (Status.BadArg, null);
+
+                    var r = new SpanReader(payload);
+                    uint offset = r.ReadU32();
+                    uint length = r.ReadU32();
+
+                    if (length == 0 || length > QwarkClient.SaveFileChunkSize) return (Status.BadArg, null);
+                    if (offset >= (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
+
+                    // A read that runs off the end is trimmed, as section 5.12 has it.
+                    uint left = (uint)SaveFileBuffer.Length - offset;
+                    if (length > left) length = left;
+
+                    return (Status.Ok, SaveFileBuffer.AsSpan((int)offset, (int)length).ToArray());
+                }
+
+                case Opcode.SaveFileWrite:
+                {
+                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (payload.Length < 5) return (Status.BadArg, null);
+
+                    var r = new SpanReader(payload);
+                    uint offset = r.ReadU32();
+                    var data = r.ReadRest();
+
+                    if (data.Length > QwarkClient.SaveFileChunkSize) return (Status.BadArg, null);
+                    if (offset >= (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
+                    // Unlike a read, a write past the end is refused rather than trimmed.
+                    if (offset + (uint)data.Length > (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
+
+                    data.CopyTo(SaveFileBuffer.AsSpan((int)offset));
+                    return (Status.Ok, null);
                 }
 
                 default:

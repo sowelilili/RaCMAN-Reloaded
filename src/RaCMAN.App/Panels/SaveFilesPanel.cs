@@ -5,10 +5,11 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// The savefile manager. Two flagged ACTIONs and the generic file ops are the whole of it: the
-/// SAVE_ASIDE action makes the game write <c>USRDIR/tempsave</c>, the LOAD_ASIDE action makes it
-/// read that file back, and this panel moves the bytes between there and a local library. No
-/// address, no game knowledge and no savefile format ever reaches this client.
+/// The savefile manager. Two flagged ACTIONs and the savefile block (section 5.12) are the whole
+/// of it: the SAVE_ASIDE action asks the game to park its save in the console's aside buffer, the
+/// LOAD_ASIDE action asks it to take back whatever is in there, and this panel moves the bytes
+/// between that buffer and a local library. No address, no game knowledge and no savefile format
+/// ever reaches this client, and nothing is written to the console's filesystem.
 /// </summary>
 public static class SaveFilesPanel
 {
@@ -78,16 +79,30 @@ public static class SaveFilesPanel
 
         var save = state.Describe.SaveAsideAction;
         var load = state.Describe.LoadAsideAction;
-        bool hasHelper = save is not null && load is not null;
+        var info = state.SaveFile;
+
+        // The console is the authority on whether it has a helper for this game: the flagged
+        // ACTIONs say a game asks for one, SAVEFILE_INFO says whether there is one to ask.
+        bool hasHelper = info.Supported && save is not null && load is not null;
         bool enabled = state.Ingame && hasHelper && !_busy;
 
-        if (!hasHelper)
+        if (state.CodePatchesUnsupported)
+        {
+            Ui.Warning("The savefile helper is a code cave the console branches the game into, and " +
+                       "RPCS3 cannot apply one, so saving and loading are not available here.");
+        }
+        else if (!hasHelper)
         {
             Ui.Warning("This game has no savefile helper, so saving and loading are not available.");
         }
         else if (!state.Ingame)
         {
             Ui.Warning($"Saving and loading need INGAME (state is {session.State}).");
+        }
+        else if (!info.Running)
+        {
+            Ui.Hint("The helper is installed but has not run a frame yet. It runs while the game " +
+                    "is in play, so a save started on a loading screen or in a menu may wait.");
         }
 
         if (!string.Equals(_title, title, StringComparison.Ordinal)) Rescan(state, title);
@@ -97,9 +112,10 @@ public static class SaveFilesPanel
         // The category's own folder, since that is the one a file lands in; its path is on the
         // button's tooltip rather than printed, being absolute and long enough to wrap.
         Ui.OpenFolderButton(state, state.SaveFiles.CategoryFolder(title, Category));
-        Ui.DebugHint($"Console: {SaveFileLibrary.TempSavePath(title)}");
         if (hasHelper)
         {
+            Ui.DebugHint($"Console: {info.Size} bytes in the helper's aside buffer, " +
+                         $"installed={info.Installed} running={info.Running}");
             Ui.DebugHint($"Actions: '{save!.Label}' (id {save.Id}, SAVE_ASIDE), '{load!.Label}' (id {load.Id}, LOAD_ASIDE)");
         }
 
@@ -259,7 +275,7 @@ public static class SaveFilesPanel
     private static void StartSave(AppState state, string title, byte saveActionId)
     {
         string category = Category;
-        string name = _name;
+        string name = SaveFileLibrary.EnsureExtension(_name);
         var library = state.SaveFiles;
 
         _busy = true;
@@ -274,7 +290,8 @@ public static class SaveFilesPanel
             try
             {
                 var data = await SaveFileTransfer.DownloadAsync(
-                    state.Client, saveActionId, title, SaveFileTransfer.DefaultSettle, status, bytes).ConfigureAwait(false);
+                    state.Client, saveActionId, timeout: null, status: status, bytes: bytes)
+                    .ConfigureAwait(false);
 
                 var path = library.Write(title, category, name, data);
                 state.Post(() =>
@@ -286,6 +303,14 @@ public static class SaveFilesPanel
                     _categoryIndex = Math.Max(0, Array.IndexOf(_categories, SaveFileLibrary.Sanitise(category, SaveFileLibrary.DefaultCategory)));
                     RescanFiles(state, title);
                     _fileIndex = Array.IndexOf(_files, Path.GetFileName(path));
+                });
+            }
+            catch (SaveFileTransfer.NotAnsweredException ex)
+            {
+                state.Post(() =>
+                {
+                    _status = ex.Message;
+                    state.AddToast($"The save did not finish: {ex.Message}", ToastKind.Error);
                 });
             }
             finally
@@ -313,9 +338,18 @@ public static class SaveFilesPanel
             try
             {
                 var data = library.Read(title, category, file);
-                await SaveFileTransfer.UploadAsync(state.Client, loadActionId, title, data, status, bytes)
+                await SaveFileTransfer.UploadAsync(state.Client, loadActionId, data,
+                        timeout: null, status: status, bytes: bytes)
                     .ConfigureAwait(false);
-                state.Post(() => _status = $"Uploaded {data.Length} bytes and triggered the load action");
+                state.Post(() => _status = $"Sent {data.Length} bytes and triggered the load action");
+            }
+            catch (SaveFileTransfer.NotAnsweredException ex)
+            {
+                state.Post(() =>
+                {
+                    _status = ex.Message;
+                    state.AddToast($"The load did not finish: {ex.Message}", ToastKind.Error);
+                });
             }
             finally
             {
@@ -326,6 +360,10 @@ public static class SaveFilesPanel
 
     private static void Rescan(AppState state, string title)
     {
+        // A new game means a new answer about the console's helper, and this panel is the only
+        // thing that reads it, so a rescan is a good moment to make sure it is current.
+        if (!string.Equals(_title, title, StringComparison.Ordinal)) state.RefreshSaveFileInfo();
+
         _title = title;
         try
         {
