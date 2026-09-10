@@ -365,6 +365,10 @@ public class AutosplitterTests
     private static readonly AutosplitEventDesc BossDefeated = new(
         2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Protopet defeated");
 
+    /// <summary>Deadlocked's second split row, so its table is the one the console describes.</summary>
+    private static readonly AutosplitEventDesc VoxDefeated = new(
+        2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Vox defeated");
+
     private static readonly AutosplitEventDesc ArenaEntered = new(
         3, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Maktar arena");
 
@@ -572,6 +576,36 @@ public class AutosplitterTests
         Assert.True(await h.Sent(LiveSplitClient.Split));
     }
 
+    /// <summary>
+    /// Deadlocked with the route on, which is the case the user runs with. The run is on Catacrom
+    /// and going to Sarathos, so a planet event for Catacrom is off route and one for Sarathos is
+    /// the split. The descriptors are Deadlocked's own, straight off the wire.
+    /// </summary>
+    [Fact]
+    public async Task DeadlockedsRouteSplitsOnlyOnTheUpcomingPlanet()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom", "Sarathos" },
+            PlanetEntered, VoxDefeated);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        // Split 1 is running, so the split just ahead of it is Sarathos.
+        h.Server.SplitIndex = 1;
+        await h.RefreshAsync();
+        Assert.Equal("Sarathos", h.Engine.View.UpcomingSplit);
+
+        // Catacrom is planet 2, and the run is not going there.
+        h.Engine.Handle(Split(PlanetEntered.Code, 2));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
+
+        // Sarathos is planet 4, and rac4-planets.txt calls it "sara".
+        h.Engine.Handle(Split(PlanetEntered.Code, 4, seq: 2));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Contains("Sarathos", h.Engine.Log()[^1].Action);
+    }
+
     [Fact]
     public async Task APlanetTheRouteFileDoesNotCoverNeverSplits()
     {
@@ -584,6 +618,84 @@ public class AutosplitterTests
 
         Assert.Empty(h.Server.Actions);
         Assert.False(h.Engine.Log()[^1].Acted);
+    }
+
+    /// <summary>
+    /// A route line of <c>null</c> is "no names", so the index it covers never matches a split
+    /// name. Deadlocked's unused planets are those, and so is index 0, which is the main menu.
+    /// </summary>
+    [Fact]
+    public async Task ARouteLineOfNullNeverMatchesASplitName()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        Assert.True(AutosplitRoutes.Unused(GameId.Rac4, 3));
+        Assert.False(AutosplitRoutes.Knows(GameId.Rac4, 3));
+
+        h.Engine.Handle(Split(PlanetEntered.Code, 3));
+        await Task.Delay(200);
+
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
+    }
+
+    /// <summary>
+    /// The old script's one exception: "Always split on 0, this corresponds to Vox split". Index 0
+    /// is not a planet a run passes through, so the route has nothing to compare and the split
+    /// stands whatever the upcoming name is.
+    /// </summary>
+    [Fact]
+    public async Task WithTheRouteOnPlanetZeroStillSplits()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        // The upcoming split is Catacrom, which planet 0 is emphatically not.
+        Assert.Equal("Catacrom", h.Engine.View.UpcomingSplit);
+
+        h.Engine.Handle(Split(PlanetEntered.Code, 0));
+
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Contains("planet 0", h.Engine.Log()[^1].Action);
+    }
+
+    /// <summary>
+    /// The bug the user hit on hardware. The app hands the engine the game the console last
+    /// described, and that goes to None every time the description is re-read — a quit to the XMB,
+    /// a re-describe, the seconds after connecting. The engine used to follow it, read a per-game
+    /// settings entry for "none" that had never been ticked, find the planet route off in it and
+    /// split on every planet regardless of the route. It now keeps the last real game.
+    /// </summary>
+    [Fact]
+    public async Task AnUndescribedGameKeepsTheLastGamesRouteAndSettings()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom", "Sarathos" },
+            PlanetEntered, VoxDefeated);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        h.Server.SplitIndex = 1;
+        await h.RefreshAsync();
+        Assert.Equal("Sarathos", h.Engine.View.UpcomingSplit);
+
+        // What the app does around a re-describe: the game goes away and the rows with it.
+        h.Engine.Game = GameId.None;
+        h.Engine.Descriptors = Array.Empty<AutosplitEventDesc>();
+
+        Assert.Equal(GameId.Rac4, h.Engine.Game);
+        Assert.True(h.Engine.GameOptions.PlanetRoute);
+
+        h.Engine.Handle(Split(PlanetEntered.Code, 2));
+        await Task.Delay(200);
+
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
+
+        // And nothing invented a settings entry for a game that is not one.
+        Assert.DoesNotContain("none", h.Settings.Autosplit.Games.Keys);
     }
 
     // ---------------------------------------------------------------- start, reset, pause
@@ -658,8 +770,14 @@ public class AutosplitterTests
         Assert.Empty(h.Server.Actions);
         Assert.Contains("splitting is switched off", h.Engine.Log()[^1].Action);
 
-        // Four events in, and only the first reset ever reached LiveSplit.
-        Assert.Equal(4, h.Engine.Received);
+        h.Options.Pause = false;
+        h.Engine.Handle(new AutosplitEvent(5, 40, AutosplitKind.Pause, 0, 0));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("pausing is switched off", h.Engine.Log()[^1].Action);
+
+        // Five events in, and only the first reset ever reached LiveSplit.
+        Assert.Equal(5, h.Engine.Received);
         Assert.Equal(1, h.Engine.Acted);
     }
 
@@ -923,6 +1041,59 @@ public class AutosplitterTests
         Assert.Equal(0, h.Engine.Adjustments);
         Assert.Null(h.Server.Fault);
         Assert.True(h.LiveSplit.IsConnected);
+    }
+
+    /// <summary>
+    /// The Pause switch. A category that does not charge for a quit wants none of it: game time is
+    /// never frozen, the resume pays no penalty, and both halves say so in the log.
+    /// </summary>
+    [Fact]
+    public async Task WithPausingSwitchedOffAQuitCostsTheRunNothingAndSendsNothing()
+    {
+        using var h = await RunningDeadlockedAsync(600, 600);
+        h.Options.Pause = false;
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("ignored: pausing is switched off", h.Engine.Log()[^1].Action);
+        Assert.False(h.Server.GameTimePaused);
+
+        // Half a minute in the XMB, and the resume adds nothing to anything.
+        h.Server.RealTime = TimeSpan.FromSeconds(630);
+        h.Engine.Handle(new AutosplitEvent(3, 31_000, AutosplitKind.Resume, NormalisedPause.Code, 0));
+        await Task.Delay(200);
+
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("ignored: pausing is switched off", h.Engine.Log()[^1].Action);
+        Assert.Empty(h.Server.GameTimesSet);
+        Assert.Empty(h.Server.LoadingTimes);
+        Assert.False(h.Server.GameTimePaused);
+        Assert.Equal(0, h.Engine.Adjustments);
+
+        // The start that opened the run is the only event this engine has ever acted on.
+        Assert.Equal(1, h.Engine.Acted);
+        Assert.Null(h.Server.Fault);
+    }
+
+    /// <summary>
+    /// The switch is about the quit, not about the run: a start still gives the run a game time,
+    /// so turning pausing back on mid-run has something real to freeze.
+    /// </summary>
+    [Fact]
+    public async Task WithPausingSwitchedOffTheStartStillGivesTheRunAGameTime()
+    {
+        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
+        await h.ReadyAsync();
+        h.Options.Pause = false;
+        h.Server.RealTime = TimeSpan.FromSeconds(12);
+
+        h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.InitialiseGameTime));
+
+        Assert.Equal(new[] { LiveSplitClient.StartTimer, LiveSplitClient.InitialiseGameTime },
+            h.Server.Actions);
+        Assert.Equal(TimeSpan.FromSeconds(12), h.Server.GameTime!.Value);
     }
 
     /// <summary>
@@ -1440,6 +1611,7 @@ public class AutosplitterTests
             rac2.SetEvent("Protopet defeated", true);
 
             saved.Autosplit.For(GameId.Rac4).Reset = false;
+            saved.Autosplit.For(GameId.Rac4).Pause = false;
             saved.Save();
 
             // The two settings this build replaced are not written back out.
@@ -1457,11 +1629,13 @@ public class AutosplitterTests
             Assert.False(back.EventEnabled("Planet entered", byDefault: true));
             Assert.True(back.EventEnabled("Protopet defeated", byDefault: false));
 
-            // The three masters default on, and only the one that was changed is off.
+            // The four masters default on, and only the ones that were changed are off.
             Assert.True(back.Start);
             Assert.True(back.Split);
             Assert.True(back.Reset);
+            Assert.True(back.Pause);
             Assert.False(loaded.Autosplit.For(GameId.Rac4).Reset);
+            Assert.False(loaded.Autosplit.For(GameId.Rac4).Pause);
 
             // A label the file never mentioned takes the console's default, either way round.
             Assert.True(back.EventEnabled("Maktar arena", byDefault: true));
@@ -1565,6 +1739,9 @@ public class AutosplitterTests
             Assert.False(rac4.Reset);
             Assert.True(rac4.Start);
             Assert.True(rac4.Split);
+
+            // A file from before the Pause switch existed pauses, which is what it did.
+            Assert.True(rac4.Pause);
             Assert.True(rac4.PlanetRoute);
             Assert.True(rac4.EventEnabled("Planet entered", byDefault: false));
 

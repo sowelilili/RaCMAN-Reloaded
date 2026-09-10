@@ -99,6 +99,18 @@ public static class AutosplitRoutes
     }
 
     /// <summary>
+    /// True when the file covers this planet and says <c>null</c>: an index the game never enters,
+    /// or the main menu, which is index 0 in every game's list. Nothing is wrong with one of these
+    /// and nothing should be said about it — a planet the file does not cover <em>at all</em> is a
+    /// different thing, and <see cref="Knows"/> is false for both.
+    /// </summary>
+    public static bool Unused(GameId game, int planet)
+    {
+        var planets = For(game);
+        return planet >= 0 && planet < planets.Count && planets[planet].Length == 0;
+    }
+
+    /// <summary>
     /// The old scripts' test: does the split name contain one of this planet's aliases? False for
     /// a planet the file does not cover and for an empty split name, so an unknown planet or a
     /// run with no split loaded never splits by route.

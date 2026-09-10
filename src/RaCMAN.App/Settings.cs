@@ -264,6 +264,15 @@ public sealed class AutosplitGameSettings
     public bool Reset { get; set; } = true;
 
     /// <summary>
+    /// PAUSE and RESUME events stop and start the timer, and pay whatever penalty the console's row
+    /// names for the pair. Today that is only Deadlocked's quit to the XMB and its 14.8 s. Off is
+    /// for a run that quits for reasons the category does not charge for: neither half reaches
+    /// LiveSplit, so game time is never frozen and nothing is added to it.
+    /// </summary>
+    [JsonPropertyName("pause")]
+    public bool Pause { get; set; } = true;
+
+    /// <summary>
     /// Read from files this client wrote before the three masters existed, then dropped: "never
     /// reset" is the Reset master turned off. Never written back.
     /// </summary>
@@ -360,9 +369,18 @@ public sealed class AutosplitSettings
     /// One game's settings, created on first use so the panel can bind straight to it. Matching is
     /// case-insensitive because the file is hand-editable, but deserialization hands back a plain
     /// dictionary with its own comparer, so the scan does the work.
+    /// <para>
+    /// <see cref="GameId.None"/> is not a game and never gets an entry. Asking for one used to mint
+    /// a fresh row with every master on and the planet route off, which is the answer that made a
+    /// planet event land during a re-describe split whatever the route said; it also wrote a
+    /// meaningless "none" row into the settings file. It now hands back a throwaway default that
+    /// nothing can save and nobody can edit.
+    /// </para>
     /// </summary>
     public AutosplitGameSettings For(GameId game)
     {
+        if (game == GameId.None) return new AutosplitGameSettings();
+
         string key = KeyFor(game);
         foreach (var (existing, settings) in Games)
         {

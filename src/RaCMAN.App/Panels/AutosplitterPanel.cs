@@ -62,10 +62,11 @@ public static class AutosplitterPanel
         Ui.Text(colour, state.LiveSplit.StatusLine);
 
         // The endpoint is on the Settings panel: it is typed once, if ever, and the rest of this
-        // panel is about the run.
+        // panel is about the run. The phase and the two split names are wire detail — the coloured
+        // line above already says whether LiveSplit is there — so they wait for debug information.
         if (state.LiveSplit.TooOld) Ui.Hint(LiveSplitModal.TooOldBody);
-        else if (state.LiveSplit.IsConnected) Ui.Hint(DescribeTimer(state.Autosplitter.View));
-        else Ui.Hint($"Listening for LiveSplit at {autosplit.Host}:{autosplit.Port}...");
+        else if (!state.LiveSplit.IsConnected) Ui.Hint($"Listening for LiveSplit at {autosplit.Host}:{autosplit.Port}...");
+        else if (Ui.Debug) Ui.Hint(DescribeTimer(state.Autosplitter.View));
 
         // Sending a split by hand is a way of proving the wiring, not a way of running: during a
         // run the console decides, and a stray press here would put the timer out of step with it.
@@ -140,13 +141,28 @@ public static class AutosplitterPanel
             ImGui.EndTable();
         }
 
+        DrawRouteWarning(state, game, options);
+    }
+
+    /// <summary>
+    /// The one thing that can silently go wrong with a route: the file is out of step with the
+    /// planet list the console described, so a planet nobody wrote a line for would never split.
+    /// It is said about the destination, because that is what the route compares, and never about
+    /// a <c>null</c> line — index 0 is the main menu in every game and the rest are indices the
+    /// game never enters, so having no names for those is the file being right.
+    /// </summary>
+    private static void DrawRouteWarning(AppState state, GameId game, AutosplitGameSettings options)
+    {
         // Only while a game is running: the planet the session reports at the XMB is nobody's.
-        if (state.Ingame && options.PlanetRoute && state.Autosplitter.PlanetDescriptor is not null
-            && !AutosplitRoutes.Knows(game, state.Session.CurrentPlanet))
-        {
-            Ui.Warning($"{Path.GetFileName(AutosplitRoutes.FileFor(game))} has no names for planet "
-                       + $"{state.Session.CurrentPlanet}, so entering it will not split.");
-        }
+        if (!state.Ingame || !options.PlanetRoute || state.Autosplitter.PlanetDescriptor is null) return;
+
+        int planet = state.Session.CurrentPlanet;
+        if (AutosplitRoutes.Knows(game, planet) || AutosplitRoutes.Unused(game, planet)) return;
+
+        string name = planet < state.Planets.Length ? state.Planets[planet] : string.Empty;
+        string which = string.IsNullOrEmpty(name) ? $"planet {planet}" : $"{name} (planet {planet})";
+        Ui.Warning($"{Path.GetFileName(AutosplitRoutes.FileFor(game))} has no names for {which}, "
+                   + "so a load into it will not split.");
     }
 
     /// <summary>The left column: one checkbox per SPLIT row, with the route indented under its own.</summary>
@@ -203,7 +219,7 @@ public static class AutosplitterPanel
     }
 
     /// <summary>
-    /// The right column: what each kind of event is allowed to do to the timer. Three plain
+    /// The right column: what each kind of event is allowed to do to the timer. Four plain
     /// checkboxes under one label, because "Start" beside "Timer control" already says it.
     /// </summary>
     private static void DrawMasters(AutosplitGameSettings options, Settings settings)
@@ -229,6 +245,20 @@ public static class AutosplitterPanel
         {
             options.Reset = reset;
             settings.Save();
+        }
+
+        bool pause = options.Pause;
+        if (ImGui.Checkbox("Pause", ref pause))
+        {
+            options.Pause = pause;
+            settings.Save();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Stop game time while the game is away, and put the time the run is "
+                             + "charged for it back on when it returns. Only Deadlocked's quit to "
+                             + "the XMB reports one.");
         }
     }
 

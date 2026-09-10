@@ -121,20 +121,27 @@ public sealed class Autosplitter
     /// The game this engine is deciding for. The app feeds it the game the console last described
     /// rather than the one telemetry reports this instant, so a quit to the XMB does not turn it to
     /// None and take the game's settings and route with it.
+    /// <para>
+    /// <see cref="GameId.None"/> is therefore not a game to decide for and is ignored: the last one
+    /// stays until a real game replaces it. The app does hand None over — a re-describe drops what
+    /// the console said and puts it back a moment later, and every quit to the XMB is one — and
+    /// following it meant the engine read a per-game settings entry that did not exist. That entry
+    /// came back fresh, with the planet route off, so any planet event in that window split
+    /// whatever the user had ticked. Only a genuinely different game moves this.
+    /// </para>
     /// </summary>
     public GameId Game
     {
         get => _game;
         set
         {
-            if (_game == value) return;
+            if (value == GameId.None || _game == value) return;
             _game = value;
 
             // What is open belongs to the game that opened it, and a Deadlocked quit takes the
             // session to the XMB and back with a pause still open: the module's clock keeps
             // counting across the quit, so the pair still means what it meant. Only a genuinely
             // different game leaves nothing of the last one worth keeping.
-            if (value == GameId.None) return;
             lock (_gate)
             {
                 if (_pairsGame == GameId.None || _pairsGame == value) return;
@@ -223,6 +230,18 @@ public sealed class Autosplitter
         // A run that starts or resets is a run in which nothing of the last one is still open,
         // whatever the master switches say about the timer itself.
         if (ev.Kind is AutosplitKind.Start or AutosplitKind.Reset) ClearPairs();
+
+        // Pausing is one decision covering both halves of a pair, and it comes before the
+        // corrections rather than after: a run whose category does not charge for a quit wants no
+        // part of it at all, so nothing is frozen on the way out and no penalty is paid on the way
+        // back in. Whatever was open is dropped with it, so a switch flipped mid-quit leaves
+        // nothing half-done. START still gives the run a game time; that is not a pause.
+        if ((ev.Kind is AutosplitKind.Pause or AutosplitKind.Resume) && !game.Pause)
+        {
+            TakePair(ev);
+            Record(ev, what, "ignored: pausing is switched off", false);
+            return;
+        }
 
         // The game-time correction goes first: for a FLAT split row the old script took its
         // frames off before it split, and LiveSplit has to see the two in that order.
@@ -430,6 +449,12 @@ public sealed class Autosplitter
     /// entered has to be the one the <em>upcoming</em> split names, exactly as every old script
     /// compared <c>timer.Run[timer.CurrentSplitIndex + 1].Name</c>. That name is whatever
     /// <c>getupcomingsplitname</c> last answered, and no name means the run has none.
+    /// <para>
+    /// Planet 0 is the old script's one exception, written there as "Always split on 0, this
+    /// corresponds to Vox split": index 0 is not a planet a run passes through, so there is nothing
+    /// for the route to compare and the split stands. A route line of <c>null</c> is "no names" and
+    /// never matches, which is what the unused indices and the main menu are.
+    /// </para>
     /// </summary>
     private bool HandleSplit(AutosplitEvent ev, AutosplitEventDesc? desc, string what, AutosplitGameSettings game)
     {
@@ -450,6 +475,12 @@ public sealed class Autosplitter
                       && (desc?.PlanetRoute ?? true);
 
         if (!routed) return Act(ev, what, LiveSplitClient.Split);
+
+        // The old script's exception, verbatim: planet 0 always splits.
+        if (ev.Arg == 0)
+        {
+            return Act(ev, what, LiveSplitClient.Split, "planet 0 is not on any route and always splits");
+        }
 
         string? name = _view.UpcomingSplit;
         if (string.IsNullOrWhiteSpace(name))

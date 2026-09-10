@@ -32,7 +32,7 @@ public sealed class FakeQwarkServer : IDisposable
         _session = SessionInfo.Empty with
         {
             ProtocolVersion = 1,
-            QwarkVersion = 8,
+            QwarkVersion = 9,
             State = SessionState.Ingame,
             Game = GameId.Rac1,
             Generation = 1,
