@@ -47,13 +47,19 @@ public sealed record AutosplitLogEntry(uint Seq, uint TimeMs, AutosplitKind Kind
 /// <summary>
 /// The decision half of "qwark detects, the client decides": it takes the run events the console
 /// emits unconditionally, applies the user's settings and turns what survives into LiveSplit
-/// commands. It keeps no timer of its own and never sets game time — LiveSplit owns the clock.
+/// commands. It keeps no timer of its own — LiveSplit owns the clock, and every correction below
+/// is one of the old scripts' own moves, sent as a command rather than counted here.
 /// <para>
 /// Two things are not the user's decision. The game-time corrections the old LiveSplit scripts
 /// applied in their <c>update</c> and <c>isLoading</c> blocks are what make a run's final time the
 /// run's final time, so they are applied whenever the autosplitter is on and LiveSplit is
-/// connected, whatever any checkbox says. They only ever go out as <c>addloadingtimes</c>: game
-/// time is never paused and never set outright.
+/// connected, whatever any checkbox says. A load pair and a flat row go out as
+/// <c>addloadingtimes</c>. A normalised <em>pause</em> pair, which today is only Deadlocked's quit
+/// to the XMB, is the one place game time is stopped and set outright: <c>pausegametime</c> at the
+/// quit, then <c>setgametime</c> of the frozen clock plus the row's parameter and
+/// <c>unpausegametime</c> when the game is back. That is exactly what
+/// <c>rac4-LC-autosplitter.asl</c> did, and it is what makes a quit cost the run 14.8 s however
+/// long the player was really in the XMB.
 /// </para>
 /// <para>
 /// The timer phase, the split index and the split names are read back from LiveSplit on connect,
@@ -254,11 +260,14 @@ public sealed class Autosplitter
     /// <list type="bullet">
     /// <item>FLAT: the row's parameter comes off game time every time the event happens.</item>
     /// <item>
-    /// NORMALISE: the start of the pair is remembered, and at its end everything the pair lasted
-    /// beyond the parameter comes off. A pair shorter than its parameter is left alone — the old
-    /// scripts never gave a run time back, and neither does this.
+    /// NORMALISE on a load pair: the start of the pair is remembered, and at its end everything the
+    /// pair lasted beyond the parameter comes off. A pair shorter than its parameter is left alone
+    /// — the old scripts never gave a run time back, and neither does this.
     /// </item>
     /// </list>
+    /// A NORMALISE <em>pause</em> pair is not measured at all: game time stops for it and the
+    /// parameter is put on at the resume, so it is handled with the timer commands in
+    /// <see cref="HandlePauseResume"/> rather than here.
     /// </summary>
     /// <param name="logged">True when this wrote a line of its own, so the caller does not repeat it.</param>
     /// <returns>True when a command went out.</returns>
@@ -282,6 +291,10 @@ public sealed class Autosplitter
                     return SendAdjustment(ev, what, desc.ParamUs, $"a fixed {Seconds(desc.ParamUs)} off {desc.Label}");
                 }
 
+                // A normalised pause stops the clock instead of being measured, and that is the
+                // timer's business, not this method's.
+                if (ev.Kind == AutosplitKind.Pause) return false;
+
                 // The other half of the pair carries the same code, and the gap between the two
                 // stamps is the load. Only the newest start is kept: a start with no end is a load
                 // the console never finished reporting, and replacing it is what an ASL would do.
@@ -290,8 +303,10 @@ public sealed class Autosplitter
                 Record(ev, what, $"timing: started, {Seconds(desc.ParamUs)} of it is free", false);
                 return false;
 
-            case AutosplitKind.LoadEnd:
             case AutosplitKind.Resume:
+                return false;
+
+            case AutosplitKind.LoadEnd:
             {
                 uint start;
                 bool open;
@@ -317,9 +332,9 @@ public sealed class Autosplitter
     }
 
     /// <summary>
-    /// Takes time off the run's game time. Nothing else in this client touches the clock, and the
-    /// amount is never negative, so a correction can only ever shorten a run — the same direction
-    /// every one of the old scripts moved it.
+    /// Takes time off the run's game time for a flat row or a normalised load. The amount is never
+    /// negative here, so these corrections can only ever shorten a run, which is the direction
+    /// every one of the old scripts moved it in their <c>update</c> and <c>isLoading</c> blocks.
     /// </summary>
     private bool SendAdjustment(AutosplitEvent ev, string what, long microseconds, string because)
     {
@@ -412,9 +427,9 @@ public sealed class Autosplitter
 
     /// <summary>
     /// A pause that is not a normalised pair is still worth passing on, so a game that reports one
-    /// without a parameter stops the timer the way it always did. A normalised pause never does:
-    /// the run keeps counting and the excess comes off at the resume, which is what keeps the
-    /// final game time identical to the old script's.
+    /// without a parameter stops the timer the way it always did. A normalised pair is the old
+    /// Deadlocked script's <c>isLoading</c> instead: game time stops for the quit and the row's
+    /// parameter is put back on at the resume, so the run pays exactly that whatever the quit took.
     /// </summary>
     private bool HandlePauseResume(AutosplitEvent ev, AutosplitEventDesc? desc, string what, bool logged)
     {
@@ -422,11 +437,80 @@ public sealed class Autosplitter
 
         if (desc is { Normalise: true })
         {
+            return ev.Kind == AutosplitKind.Pause
+                ? StopGameTime(ev, desc, what)
+                : StartGameTime(ev, desc, what);
+        }
+
+        return Act(ev, what, ev.Kind == AutosplitKind.Pause ? LiveSplitClient.Pause : LiveSplitClient.Resume);
+    }
+
+    /// <summary>
+    /// The quit: game time stops while real time carries on, which is what an ASL's
+    /// <c>isLoading</c> returning true does. The timer phase does not move — LiveSplit is still
+    /// Running — so the optimistic phase this engine keeps is left exactly as it is.
+    /// </summary>
+    private bool StopGameTime(AutosplitEvent ev, AutosplitEventDesc desc, string what)
+    {
+        // The pair is remembered by code so the resume knows a quit of its own is open: a RESUME
+        // that arrives with no PAUSE, because the client connected in the middle of one, must not
+        // start a clock nobody here stopped.
+        lock (_gate) _openPairs[ev.Code] = ev.TimeMs;
+
+        _liveSplit.Send(LiveSplitClient.PauseGameTime);
+        Record(ev, what, $"{LiveSplitClient.PauseGameTime} (game time stops; the resume puts "
+                         + $"{Seconds(desc.ParamUs)} back on)", true);
+        return true;
+    }
+
+    /// <summary>
+    /// The game is back: the frozen clock is read, the row's parameter goes on it and game time
+    /// starts again from there. Reading it is a query and a query is answered on the connection's
+    /// own worker, so the rest of the pair runs off the thread that delivers console events — a
+    /// build that does not answer would otherwise hold that thread for the query timeout.
+    /// </summary>
+    private bool StartGameTime(AutosplitEvent ev, AutosplitEventDesc desc, string what)
+    {
+        bool open;
+        lock (_gate) open = _openPairs.Remove(ev.Code);
+        if (!open)
+        {
             Record(ev, what, NoTimingReason(desc), false);
             return false;
         }
 
-        return Act(ev, what, ev.Kind == AutosplitKind.Pause ? LiveSplitClient.Pause : LiveSplitClient.Resume);
+        _ = Task.Run(() => StartGameTimeAsync(ev, desc, what));
+        return true;
+    }
+
+    private async Task StartGameTimeAsync(AutosplitEvent ev, AutosplitEventDesc desc, string what)
+    {
+        long paramUs = desc.ParamUs;
+        var owed = TimeSpan.FromTicks(paramUs * TimeSpan.TicksPerMicrosecond);
+
+        string? reply = await _liveSplit.QueryAsync(LiveSplitClient.GetCurrentGameTime).ConfigureAwait(false);
+        if (LiveSplitClient.TryParseGameTime(reply, out var frozen))
+        {
+            // The old script's two lines, in its order: set the clock while it is still stopped, so
+            // the value cannot move under us, then let it run on from there.
+            string set = LiveSplitClient.SetGameTimeCommand(frozen + owed);
+            _liveSplit.Send(set);
+            _liveSplit.Send(LiveSplitClient.UnpauseGameTime);
+            Interlocked.Increment(ref _adjustments);
+            Record(ev, what, $"{set} (+{Seconds(paramUs)}) then {LiveSplitClient.UnpauseGameTime}", true);
+            return;
+        }
+
+        // This build will not say what game time is. The same amount goes on the other way round:
+        // game time is real time less the loading times, so a negative loading time is time added.
+        // It has to follow the unpause, which recomputes the loading times from the clock it froze
+        // and would throw away anything added before it.
+        _liveSplit.Send(LiveSplitClient.UnpauseGameTime);
+        string add = LiveSplitClient.AddLoadingTimesCommand(-paramUs);
+        _liveSplit.Send(add);
+        Interlocked.Increment(ref _adjustments);
+        Record(ev, what, $"{LiveSplitClient.UnpauseGameTime} then {add} (+{Seconds(paramUs)}; this "
+                         + $"LiveSplit does not answer {LiveSplitClient.GetCurrentGameTime})", true);
     }
 
     private bool Act(AutosplitEvent ev, string what, string command, string? because = null)
