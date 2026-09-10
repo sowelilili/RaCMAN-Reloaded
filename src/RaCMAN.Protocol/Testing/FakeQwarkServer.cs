@@ -32,7 +32,7 @@ public sealed class FakeQwarkServer : IDisposable
         _session = SessionInfo.Empty with
         {
             ProtocolVersion = 1,
-            QwarkVersion = 10,
+            QwarkVersion = 11,
             State = SessionState.Ingame,
             Game = GameId.Rac1,
             Generation = 1,
@@ -323,6 +323,20 @@ public sealed class FakeQwarkServer : IDisposable
     /// <summary>The bytes the aside buffer held when the LOAD_ASIDE action last fired.</summary>
     public byte[]? LoadedSaveFile { get; private set; }
 
+    /// <summary>
+    /// Every savefile step the client took, in the order it took them: <c>write &lt;offset&gt;</c>
+    /// for each SAVEFILE_WRITE and <c>set-aside</c> or <c>load</c> for each flagged ACTION. A test
+    /// reads this to check that a load fills the buffer front to back and only then asks the game
+    /// to take it.
+    /// </summary>
+    public List<string> SaveFileOrder { get; } = new();
+
+    /// <summary>
+    /// When set, SAVEFILE_READ answers BUSY from this offset on: the console that stops answering
+    /// part way through a save, which is what a torn .sav used to come from.
+    /// </summary>
+    public uint? SaveFileReadFailsFrom { get; set; }
+
     private int _setAsidePending;
     private int _loadPending;
 
@@ -601,12 +615,14 @@ public sealed class FakeQwarkServer : IDisposable
                         if (SaveFileUnsupported) return (Status.Unsupported, null);
                         SaveFileBuffer = (byte[])SaveAsideContent.Clone();
                         _setAsidePending = SaveFilePendingPolls;
+                        SaveFileOrder.Add("set-aside");
                     }
                     else if (action.LoadsAside)
                     {
                         if (SaveFileUnsupported) return (Status.Unsupported, null);
                         LoadedSaveFile = (byte[])SaveFileBuffer.Clone();
                         _loadPending = SaveFilePendingPolls;
+                        SaveFileOrder.Add("load");
                     }
 
                     return (Status.Ok, null);
@@ -1077,6 +1093,10 @@ public sealed class FakeQwarkServer : IDisposable
 
                     if (length == 0 || length > QwarkClient.SaveFileChunkSize) return (Status.BadArg, null);
                     if (offset >= (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
+                    if (SaveFileReadFailsFrom is uint fails && offset >= fails)
+                    {
+                        return (Status.Busy, null);
+                    }
 
                     // A read that runs off the end is trimmed, as section 5.12 has it.
                     uint left = (uint)SaveFileBuffer.Length - offset;
@@ -1100,6 +1120,7 @@ public sealed class FakeQwarkServer : IDisposable
                     if (offset + (uint)data.Length > (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
 
                     data.CopyTo(SaveFileBuffer.AsSpan((int)offset));
+                    SaveFileOrder.Add($"write {offset}");
                     return (Status.Ok, null);
                 }
 

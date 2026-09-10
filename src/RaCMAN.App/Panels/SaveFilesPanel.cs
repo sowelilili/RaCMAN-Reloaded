@@ -293,35 +293,43 @@ public static class SaveFilesPanel
         {
             try
             {
-                var data = await SaveFileTransfer.DownloadAsync(
-                    state.Client, saveActionId, timeout: null, status: status, bytes: bytes)
+                // Every chunk first, then one file: a save that fails part way through leaves
+                // nothing in the library rather than a .sav with a torn tail, which is the file
+                // that crashes the game when it is loaded back.
+                var path = await SaveFileTransfer.SaveToLibraryAsync(
+                    state.Client, saveActionId, library, title, category, name,
+                    timeout: null, status: status, bytes: bytes)
                     .ConfigureAwait(false);
 
-                var path = library.Write(title, category, name, data);
                 state.Post(() =>
                 {
-                    _status = $"Saved {data.Length} bytes to {path}";
-                    _transferred = data.Length;
+                    _status = $"Saved to {path}";
                     _name = string.Empty;
                     Rescan(state, title);
                     _categoryIndex = Math.Max(0, Array.IndexOf(_categories, SaveFileLibrary.Sanitise(category, SaveFileLibrary.DefaultCategory)));
                     RescanFiles(state, title);
                     _fileIndex = Array.IndexOf(_files, Path.GetFileName(path));
+                    state.AddToast($"Saved '{Path.GetFileName(path)}'", ToastKind.Success);
                 });
             }
-            catch (SaveFileTransfer.NotAnsweredException ex)
+            catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
+                                          or QwarkStatusException or ProtocolException
+                                          or IOException or UnauthorizedAccessException)
             {
+                // Whatever went wrong, no file was written: say so rather than leaving the user
+                // to wonder which half of the save is on disk.
                 state.Post(() =>
                 {
                     _status = ex.Message;
-                    state.AddToast($"The save did not finish: {ex.Message}", ToastKind.Error);
+                    state.AddToast($"The save did not finish, so nothing was written: {ex.Message}",
+                                   ToastKind.Error);
                 });
             }
             finally
             {
                 state.Post(() => _busy = false);
             }
-        }, $"Saved '{SaveFileLibrary.DisplayName(SaveFileLibrary.Sanitise(name, "savefile"))}'");
+        });
     }
 
     private static void StartLoad(AppState state, string title, byte loadActionId)
@@ -343,13 +351,21 @@ public static class SaveFilesPanel
         {
             try
             {
+                // The size check, the chunks in order and the action after the last of them are
+                // all UploadAsync's; it comes back once the console says the load bit has cleared.
                 var data = library.Read(title, category, file);
                 await SaveFileTransfer.UploadAsync(state.Client, loadActionId, data,
                         timeout: null, status: status, bytes: bytes)
                     .ConfigureAwait(false);
-                state.Post(() => _status = $"Sent {data.Length} bytes and triggered the load action");
+                state.Post(() =>
+                {
+                    _status = $"Sent {data.Length} bytes and the game took them";
+                    state.AddToast($"Loaded '{file}' onto the console", ToastKind.Success);
+                });
             }
-            catch (SaveFileTransfer.NotAnsweredException ex)
+            catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
+                                          or QwarkStatusException or ProtocolException
+                                          or IOException or UnauthorizedAccessException)
             {
                 state.Post(() =>
                 {
@@ -361,7 +377,7 @@ public static class SaveFilesPanel
             {
                 state.Post(() => _busy = false);
             }
-        }, $"Loaded '{shown}' onto the console");
+        });
     }
 
     private static void Rescan(AppState state, string title)

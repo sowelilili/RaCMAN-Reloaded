@@ -105,6 +105,44 @@ public sealed class SaveFileLibrary
         return path;
     }
 
+    /// <summary>The suffix the half-written file carries while <see cref="WriteAtomic"/> runs.</summary>
+    public const string PartialExtension = ".part";
+
+    /// <summary>
+    /// The same as <see cref="Write"/>, except that the target never exists half written: the
+    /// bytes go to a temporary name in the same folder and are moved over the target once every
+    /// one of them is there. A save that fails part way through leaves the library as it was,
+    /// which matters because a truncated .sav is exactly what crashes the game when it is loaded
+    /// back onto the console.
+    /// </summary>
+    public string WriteAtomic(string titleId, string category, string name, byte[] data)
+    {
+        EnsureCategory(titleId, category);
+        var path = FilePath(titleId, category, name);
+        var partial = path + PartialExtension;
+
+        try
+        {
+            File.WriteAllBytes(partial, data);
+            File.Move(partial, path, overwrite: true);
+        }
+        catch
+        {
+            try
+            {
+                if (File.Exists(partial)) File.Delete(partial);
+            }
+            catch (IOException)
+            {
+                // The failure that is being thrown is the one worth reporting.
+            }
+
+            throw;
+        }
+
+        return path;
+    }
+
     public void Delete(string titleId, string category, string name)
     {
         var path = FilePath(titleId, category, name);
@@ -167,6 +205,12 @@ public static class SaveFileTransfer
     /// <summary>
     /// FEATURE_TRIGGER the SAVE_ASIDE action, poll SAVEFILE_INFO until the set-aside bit clears,
     /// then read the whole aside buffer in 64 KB chunks.
+    /// <para>
+    /// Every chunk is read before this returns, and nothing is written to disk here at all: see
+    /// <see cref="SaveToLibraryAsync"/> for the reason. A chunk the console refuses throws
+    /// straight out of the loop, and a transfer that came back short of the size INFO reported is
+    /// refused here rather than handed on as a save file.
+    /// </para>
     /// </summary>
     public static async Task<byte[]> DownloadAsync(
         QwarkClient client,
@@ -190,12 +234,58 @@ public static class SaveFileTransfer
             .ConfigureAwait(false);
 
         status?.Report($"Reading {info.Size} bytes from the console");
-        return await client.SaveFileDownloadAsync(info.Size, bytes, cancellationToken).ConfigureAwait(false);
+        var data = await client.SaveFileDownloadAsync(info.Size, bytes, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (data.Length != info.Size)
+        {
+            throw new NotAnsweredException(
+                $"the console sent {data.Length} bytes of a {info.Size}-byte save");
+        }
+
+        return data;
+    }
+
+    /// <summary>
+    /// A save, end to end: read the whole buffer and only then put a file in the library, under a
+    /// temporary name that is moved over the target once the bytes are all there.
+    /// <para>
+    /// The order is the point. A file written chunk by chunk as they arrive is a whole save file
+    /// as far as the library is concerned the moment the first chunk lands, and a save that is cut
+    /// short - by a console that stops answering, by a game that quits mid-transfer - is the file
+    /// that crashes the game when it is loaded back weeks later. Nothing is left behind when this
+    /// throws.
+    /// </para>
+    /// </summary>
+    public static async Task<string> SaveToLibraryAsync(
+        QwarkClient client,
+        byte saveActionId,
+        SaveFileLibrary library,
+        string titleId,
+        string category,
+        string name,
+        TimeSpan? timeout = null,
+        IProgress<string>? status = null,
+        IProgress<long>? bytes = null,
+        CancellationToken cancellationToken = default)
+    {
+        var data = await DownloadAsync(client, saveActionId, timeout, status, bytes, cancellationToken)
+            .ConfigureAwait(false);
+
+        status?.Report($"Writing {data.Length} bytes to the library");
+        return library.WriteAtomic(titleId, category, name, data);
     }
 
     /// <summary>
     /// Write the local bytes into the aside buffer, then FEATURE_TRIGGER the LOAD_ASIDE action
     /// and wait for the helper to take it.
+    /// <para>
+    /// The file has to be exactly the size INFO reports. A save file for a game is one fixed
+    /// length, so anything else is either a file for another game or one that was truncated on
+    /// the way in; the console cannot tell, and the game would take the buffer either way. The
+    /// chunks then go out strictly in order, each one answered before the next is sent, and the
+    /// action fires only after the last of them, so the game never sees a half-written buffer.
+    /// </para>
     /// </summary>
     public static async Task UploadAsync(
         QwarkClient client,
@@ -212,10 +302,11 @@ public static class SaveFileTransfer
             throw new NotAnsweredException("this game has no savefile helper on the console");
         }
 
-        if (data.Length > info.Size)
+        if (data.Length != info.Size)
         {
             throw new NotAnsweredException(
-                $"the file is {data.Length} bytes and this game's buffer holds {info.Size}");
+                $"the file is {data.Length} bytes and this game's save is exactly {info.Size}, " +
+                "so it is not a save this game can take");
         }
 
         status?.Report($"Writing {data.Length} bytes to the console");

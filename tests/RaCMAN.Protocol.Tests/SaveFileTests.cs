@@ -418,6 +418,162 @@ public class SaveFileTests : IDisposable
         }
     }
 
+    /// <summary>
+    /// A save file for a game is one fixed length, so a short one is either a file for another
+    /// game or one that was cut short on the way in. Neither is a file the game can take, and the
+    /// console cannot tell: nothing is sent at all.
+    /// </summary>
+    [Fact]
+    public async Task LoadRefusesAFileShorterThanTheConsolesBuffer()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var data = Pattern(server.SaveFileBuffer.Length - 1);
+            byte id = server.Describe.LoadAsideAction!.Id;
+            var before = (byte[])server.SaveFileBuffer.Clone();
+
+            var ex = await Assert.ThrowsAsync<SaveFileTransfer.NotAnsweredException>(
+                () => SaveFileTransfer.UploadAsync(client, id, data));
+
+            Assert.Contains("exactly", ex.Message);
+            Assert.Empty(server.Triggered);
+            Assert.Empty(server.SaveFileOrder);
+            Assert.Equal(before, server.SaveFileBuffer);
+            Assert.Null(server.LoadedSaveFile);
+        }
+    }
+
+    /// <summary>
+    /// The chunks go out in order, one at a time, and the action that hands the buffer to the game
+    /// fires after the last of them: the game must never be given a half-written buffer.
+    /// </summary>
+    [Fact]
+    public async Task LoadWritesEveryChunkInOrderBeforeTheActionFires()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var data = Pattern(server.SaveFileBuffer.Length);
+            byte id = server.Describe.LoadAsideAction!.Id;
+
+            await SaveFileTransfer.UploadAsync(client, id, data);
+
+            int chunk = QwarkClient.SaveFileChunkSize;
+            Assert.Equal(
+                new[]
+                {
+                    "write 0",
+                    $"write {chunk}",
+                    $"write {chunk * 2}",
+                    $"write {chunk * 3}",
+                    "load",
+                },
+                server.SaveFileOrder);
+            Assert.Equal(data, server.LoadedSaveFile);
+        }
+    }
+
+    // ------------------------------------------------- the save writes one whole file or none
+
+    [Fact]
+    public async Task ASaveWritesTheWholeFileUnderItsOwnName()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            server.SaveAsideContent = Pattern(200 * 1024);
+
+            var path = await SaveFileTransfer.SaveToLibraryAsync(
+                client, server.Describe.SaveAsideAction!.Id, library,
+                server.Session.TitleId, "any%", "whole.sav");
+
+            Assert.Equal("whole.sav", Path.GetFileName(path));
+            Assert.Equal(server.SaveAsideContent, File.ReadAllBytes(path));
+            Assert.Equal(new[] { "whole.sav" }, library.Files(server.Session.TitleId, "any%"));
+        }
+    }
+
+    /// <summary>
+    /// The torn save. The console stops answering half way through the read, and what the library
+    /// must not end up holding is the half that arrived: loading that file back is what crashes
+    /// the game. Nothing is written, and the temporary the write would have used is not left
+    /// behind either.
+    /// </summary>
+    [Fact]
+    public async Task ASaveThatFailsPartWayThroughLeavesNoFile()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            string title = server.Session.TitleId;
+            server.SaveFileReadFailsFrom = QwarkClient.SaveFileChunkSize;
+
+            var ex = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => SaveFileTransfer.SaveToLibraryAsync(
+                    client, server.Describe.SaveAsideAction!.Id, library, title, "any%", "torn.sav"));
+
+            Assert.Equal(Status.Busy, ex.Status);
+            Assert.Empty(library.Files(title, "any%"));
+            Assert.False(File.Exists(library.FilePath(title, "any%", "torn.sav")));
+            Assert.False(File.Exists(
+                library.FilePath(title, "any%", "torn.sav") + SaveFileLibrary.PartialExtension));
+        }
+    }
+
+    /// <summary>
+    /// And the one that was already there is still the one that was already there: a failed save
+    /// over an existing name does not take the old file with it.
+    /// </summary>
+    [Fact]
+    public async Task AFailedSaveLeavesAnExistingFileAlone()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            string title = server.Session.TitleId;
+            var old = new byte[] { 1, 2, 3, 4 };
+            library.Write(title, "any%", "keep.sav", old);
+
+            server.SaveFileReadFailsFrom = 0;
+
+            await Assert.ThrowsAsync<QwarkStatusException>(
+                () => SaveFileTransfer.SaveToLibraryAsync(
+                    client, server.Describe.SaveAsideAction!.Id, library, title, "any%", "keep.sav"));
+
+            Assert.Equal(old, library.Read(title, "any%", "keep.sav"));
+        }
+    }
+
+    /// <summary>A save that does arrive whole replaces the file that was there.</summary>
+    [Fact]
+    public async Task ASaveOverAnExistingNameReplacesIt()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            string title = server.Session.TitleId;
+            library.Write(title, "any%", "over.sav", new byte[] { 9 });
+            server.SaveAsideContent = Pattern(200 * 1024);
+
+            await SaveFileTransfer.SaveToLibraryAsync(
+                client, server.Describe.SaveAsideAction!.Id, library, title, "any%", "over.sav");
+
+            Assert.Equal(server.SaveAsideContent, library.Read(title, "any%", "over.sav"));
+            Assert.Equal(new[] { "over.sav" }, library.Files(title, "any%"));
+        }
+    }
+
     [Fact]
     public async Task ASaveThenALoadRoundTripsThroughTheLocalLibrary()
     {
