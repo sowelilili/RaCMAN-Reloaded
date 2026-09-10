@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 10;
+    public const byte ExpectedQwarkBuild = 11;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -1008,6 +1008,11 @@ public sealed class QwarkClient : IDisposable
     /// Reads the whole aside buffer in 64 KB chunks. <paramref name="size"/> comes from
     /// SAVEFILE_INFO; the console trims the last chunk itself, so the loop asks for a round
     /// chunk every time and stops when it has the lot.
+    /// <para>
+    /// Every chunk is awaited before the next is asked for, and a reply that is empty or longer
+    /// than what was asked for throws rather than being pieced into the buffer: the caller gets
+    /// all of the save or an exception, never a partly filled array.
+    /// </para>
     /// </summary>
     public async Task<byte[]> SaveFileDownloadAsync(
         uint size,
@@ -1026,6 +1031,12 @@ public sealed class QwarkClient : IDisposable
                 throw new ProtocolException($"SAVEFILE_READ returned nothing at offset {offset}");
             }
 
+            if (chunk.Length > want)
+            {
+                throw new ProtocolException(
+                    $"SAVEFILE_READ returned {chunk.Length} bytes at offset {offset}, {want} were asked for");
+            }
+
             chunk.CopyTo(buffer, (int)offset);
             offset += (uint)chunk.Length;
             progress?.Report(offset);
@@ -1034,7 +1045,11 @@ public sealed class QwarkClient : IDisposable
         return buffer;
     }
 
-    /// <summary>Writes a whole save into the aside buffer in 64 KB chunks, from offset 0.</summary>
+    /// <summary>
+    /// Writes a whole save into the aside buffer in 64 KB chunks, from offset 0, strictly in
+    /// order: each write is answered before the next one is sent, so the console's buffer is
+    /// filled front to back and the caller knows the whole of it is there when this returns.
+    /// </summary>
     public async Task SaveFileUploadAsync(
         ReadOnlyMemory<byte> data,
         IProgress<long>? progress = null,
