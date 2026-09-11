@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Numerics;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
@@ -6,10 +7,6 @@ namespace RaCMAN.App.Panels;
 
 public static class PositionsPanel
 {
-    private static int _selectedPlanet;
-    private static bool _resetLevelFlags;
-    private static bool _resetSpecialBolts;
-
     /// <summary>
     /// How wide a coordinate is drawn, which is "-1234.56" and a digit of room. The client's font
     /// is fixed-width, so padding to this is what stops the row shuffling sideways as the player
@@ -61,10 +58,13 @@ public static class PositionsPanel
 
     /// <summary>
     /// The planet controls: the combo with the filler names left out, the reset boxes the running
-    /// game has, and Select and Load planet. The Game page's quick block is the only page that draws
-    /// them now, and this is where they live because the planet list and the slot table are the same
-    /// panel's subject. False when the game named no planets, which draws nothing at all: the quick
-    /// block leaves out what a game has not got.
+    /// game has, and Load planet across the rest of the row. The console owns the planet selection
+    /// the way it owns the slot (a combo's Load planet loads whatever it holds), so the combo and
+    /// the boxes show what telemetry reports and a change to either is sent as PLANET_SELECT the
+    /// moment it is made, which is why there is no Select button. The Game page's quick block is
+    /// the only page that draws them, and this is where they live because the planet list and the
+    /// slot table are the same panel's subject. False when the game named no planets, which draws
+    /// nothing at all: the quick block leaves out what a game has not got.
     /// </summary>
     public static bool PlanetLoadControls(AppState state)
     {
@@ -72,56 +72,52 @@ public static class PositionsPanel
 
         // The combo shows the planets the game has; the index behind the pick is the one the
         // console numbered it with, filler entries included, because that is what a request
-        // carries. A selection left on a hidden entry moves to the first real one.
+        // carries. A selection the console holds on a hidden entry shows as the first real one.
         var choices = PlanetChoices.For(state.Planets);
-        int pick = Math.Max(0, choices.PositionOf(_selectedPlanet));
-        _selectedPlanet = choices.PlanetAt(pick);
+        int pick = Math.Max(0, choices.PositionOf(state.Session.SelectedPlanet));
+        var flags = state.Session.PlanetFlags;
 
         ImGui.SetNextItemWidth(FittedComboWidth("Planet"));
         if (ImGui.Combo("Planet", ref pick, choices.Labels, choices.Count))
         {
-            _selectedPlanet = choices.PlanetAt(pick);
+            byte planet = (byte)choices.PlanetAt(pick);
+            state.Run(() => state.Client.PlanetSelectAsync(planet, flags));
         }
 
         // Only the games that do these two on the way into a planet are offered them.
         var boxes = PlanetResetOptions.For(state.DescribedGame, state.LevelFlagsUnsupported);
         if (boxes.LevelFlags)
         {
-            _resetLevelFlags = (state.Session.PlanetFlags & PlanetFlags.ResetLevelFlags) != 0 || _resetLevelFlags;
-            ImGui.Checkbox("Reset level flags", ref _resetLevelFlags);
-        }
-        else
-        {
-            _resetLevelFlags = false;
+            ResetBox(state, "Reset level flags", choices.PlanetAt(pick), flags, PlanetFlags.ResetLevelFlags);
         }
 
         if (boxes.SpecialBolts)
         {
             if (boxes.LevelFlags) ImGui.SameLine();
-            ImGui.Checkbox("Reset special bolts", ref _resetSpecialBolts);
-        }
-        else
-        {
-            _resetSpecialBolts = false;
+            ResetBox(state, "Reset special bolts", choices.PlanetAt(pick), flags, PlanetFlags.ResetSpecialBolts);
         }
 
-        if (ImGui.Button("Select"))
+        if (ImGui.Button("Load planet", new Vector2(-1, 0)))
         {
-            byte planet = (byte)_selectedPlanet;
-            var flags = (_resetLevelFlags ? PlanetFlags.ResetLevelFlags : 0)
-                        | (_resetSpecialBolts ? PlanetFlags.ResetSpecialBolts : 0);
-            state.Run(() => state.Client.PlanetSelectAsync(planet, flags));
-        }
-
-        ImGui.SameLine();
-        if (ImGui.Button("Load planet"))
-        {
-            byte planet = (byte)_selectedPlanet;
-            byte flags = (byte)((_resetLevelFlags ? 1 : 0) | (_resetSpecialBolts ? 2 : 0));
-            state.Run(() => state.Client.PlanetLoadAsync(planet, flags));
+            byte planet = (byte)choices.PlanetAt(pick);
+            state.Run(() => state.Client.PlanetLoadAsync(planet, (byte)flags));
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// One reset box: it shows the console's flag, and ticking it sends the selection back with
+    /// that flag turned, so the box follows telemetry like the combo beside it.
+    /// </summary>
+    private static void ResetBox(AppState state, string label, int planet, PlanetFlags flags, PlanetFlags bit)
+    {
+        bool on = (flags & bit) != 0;
+        if (!ImGui.Checkbox(label, ref on)) return;
+
+        byte selected = (byte)planet;
+        var turned = on ? flags | bit : flags & ~bit;
+        state.Run(() => state.Client.PlanetSelectAsync(selected, turned));
     }
 
     /// <summary>
