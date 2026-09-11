@@ -480,45 +480,89 @@ public class PanelNavTests
         Assert.Equal(
             new[]
             {
-                "Connection", "Game", "Unlocks", "Mods", "Save files", "Positions",
-                "Autosplitter", "Input display", "Level flags", "Memory", "Combos", "Settings",
+                "Connection", "Game", "Unlocks", "Positions", "Combos", "Mods",
+                "Save files", "Autosplitter", "Input display", "Level flags", "Memory", "Settings",
             },
             PanelNav.Names);
 
         Assert.Equal("Connection", PanelNav.Names[PanelNav.Connection]);
         Assert.Equal("Game", PanelNav.Names[PanelNav.Game]);
         Assert.Equal("Unlocks", PanelNav.Names[PanelNav.Unlocks]);
+        Assert.Equal("Positions", PanelNav.Names[PanelNav.Positions]);
+        Assert.Equal("Combos", PanelNav.Names[PanelNav.Combos]);
         Assert.Equal("Mods", PanelNav.Names[PanelNav.Mods]);
         Assert.Equal("Save files", PanelNav.Names[PanelNav.SaveFiles]);
-        Assert.Equal("Positions", PanelNav.Names[PanelNav.Positions]);
         Assert.Equal("Autosplitter", PanelNav.Names[PanelNav.Autosplitter]);
         Assert.Equal("Input display", PanelNav.Names[PanelNav.InputDisplay]);
         Assert.Equal("Level flags", PanelNav.Names[PanelNav.LevelFlags]);
         Assert.Equal("Memory", PanelNav.Names[PanelNav.Memory]);
-        Assert.Equal("Combos", PanelNav.Names[PanelNav.Combos]);
         Assert.Equal("Settings", PanelNav.Names[PanelNav.Settings]);
+
+        // The numbers --panel counts, spelled out once so a regroup cannot move one quietly.
+        Assert.Equal(0, PanelNav.Connection);
+        Assert.Equal(1, PanelNav.Game);
+        Assert.Equal(2, PanelNav.Unlocks);
+        Assert.Equal(3, PanelNav.Positions);
+        Assert.Equal(4, PanelNav.Combos);
+        Assert.Equal(5, PanelNav.Mods);
+        Assert.Equal(6, PanelNav.SaveFiles);
+        Assert.Equal(7, PanelNav.Autosplitter);
+        Assert.Equal(8, PanelNav.InputDisplay);
+        Assert.Equal(9, PanelNav.LevelFlags);
+        Assert.Equal(10, PanelNav.Memory);
+        Assert.Equal(11, PanelNav.Settings);
+        Assert.Equal(12, PanelNav.Count);
     }
 
     [Fact]
     public void ASeparatorOpensEveryGroupButTheFirst()
     {
-        // Connection alone, then the game, then the three libraries, the two that drive something
-        // else on this PC, the two raw-state panels, and the rest.
+        // Connection alone, then the game and its unlocks, the two a run fills in as it goes, the
+        // two libraries, the two that drive something else on this PC, the two raw-state panels,
+        // and the settings on their own.
         Assert.False(PanelNav.StartsGroup(PanelNav.Connection));
         Assert.True(PanelNav.StartsGroup(PanelNav.Game));
+        Assert.True(PanelNav.StartsGroup(PanelNav.Positions));
         Assert.True(PanelNav.StartsGroup(PanelNav.Mods));
         Assert.True(PanelNav.StartsGroup(PanelNav.Autosplitter));
         Assert.True(PanelNav.StartsGroup(PanelNav.LevelFlags));
-        Assert.True(PanelNav.StartsGroup(PanelNav.Combos));
+        Assert.True(PanelNav.StartsGroup(PanelNav.Settings));
 
         foreach (int inside in new[]
                  {
-                     PanelNav.Unlocks, PanelNav.SaveFiles, PanelNav.Positions,
-                     PanelNav.InputDisplay, PanelNav.Memory, PanelNav.Settings,
+                     PanelNav.Unlocks, PanelNav.Combos, PanelNav.SaveFiles,
+                     PanelNav.InputDisplay, PanelNav.Memory,
                  })
         {
             Assert.False(PanelNav.StartsGroup(inside));
         }
+    }
+
+    /// <summary>
+    /// Two entries hold sub-pages, and the names they are spelled with in the layout file are the
+    /// names the nav draws: that is what makes "subPages": { "Unlocks": [...] } mean the panel
+    /// anyone can see. Every other entry has no sub-pages at all.
+    /// </summary>
+    [Fact]
+    public void OnlyGameAndUnlocksHoldSubPagesAndTheyAreNamedAsTheNavListsThem()
+    {
+        Assert.Equal(GameLayout.GameHost, PanelNav.Names[PanelNav.Game]);
+        Assert.Equal(GameLayout.UnlocksHost, PanelNav.Names[PanelNav.Unlocks]);
+
+        Assert.Equal(GameLayout.GameHost, PanelNav.SubPageHost(PanelNav.Game));
+        Assert.Equal(GameLayout.UnlocksHost, PanelNav.SubPageHost(PanelNav.Unlocks));
+
+        for (int panel = 0; panel < PanelNav.Count; panel++)
+        {
+            if (panel == PanelNav.Game || panel == PanelNav.Unlocks) continue;
+            Assert.Null(PanelNav.SubPageHost(panel));
+        }
+
+        Assert.Equal(PanelNav.Game, PanelNav.PanelForHost(GameLayout.GameHost));
+        Assert.Equal(PanelNav.Unlocks, PanelNav.PanelForHost(GameLayout.UnlocksHost));
+
+        // Anything else is the Game page's, which is where a section the file hangs nowhere goes.
+        Assert.Equal(PanelNav.Game, PanelNav.PanelForHost("Mods"));
     }
 
     [Fact]

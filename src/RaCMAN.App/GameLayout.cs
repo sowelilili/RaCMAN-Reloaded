@@ -29,8 +29,16 @@ public sealed class TitleLayout
 public sealed class LayoutFile
 {
     /// <summary>
-    /// Sections that are their own sub-page under Game in the side nav rather than stacked on the
-    /// Game page. Everything else stays on the Game page, always visible.
+    /// Nav entry -> the sections that hang under it as sub-pages rather than stacking on its page.
+    /// The keys are panels (<see cref="GameLayout.Hosts"/>), the values are sections; a key naming
+    /// anything else is dropped, since the file cannot invent a nav entry of its own.
+    /// </summary>
+    [JsonPropertyName("subPages")]
+    public Dictionary<string, string[]>? SubPages { get; set; }
+
+    /// <summary>
+    /// The old spelling of <c>subPages.Game</c>, read when a file has no <c>subPages</c> at all so
+    /// that a copy of the file someone edited before the key existed keeps working.
     /// </summary>
     [JsonPropertyName("sideSections")]
     public string[]? SideSections { get; set; }
@@ -44,10 +52,10 @@ public sealed class LayoutFile
 }
 
 /// <summary>
-/// The Game panel's layout, owned by the client rather than qwark. qwark's DESCRIBE groups are the
+/// The feature layout, owned by the client rather than qwark. qwark's DESCRIBE groups are the
 /// default; <c>data/gamelayout.json</c> (shipped, and editable by the user) overrides where a feature
-/// goes and which sections become side sub-pages, so the layout can be tuned without touching the
-/// console module.
+/// goes, which sections become sub-pages and which nav entry each of those hangs under, so the
+/// layout can be tuned without touching the console module.
 /// <para>
 /// Entries are keyed by game ("rac1".."rac4") rather than by title id, because BCES01503 hosts RaC1,
 /// RaC2 and RaC3 under a single title id. An entry keyed by a title id still wins over the game key,
@@ -89,13 +97,37 @@ public static class GameLayout
 
     /// <summary>
     /// The section names the client owns. A panel decides where each of these is drawn, so none of
-    /// them may become a side sub-page or a stacked header however the layout file is written.
+    /// them may become a sub-page or a stacked header however the layout file is written.
     /// </summary>
     public static bool IsReserved(string section) =>
         section is QuickSection or ValuesSection or OptionsSection or UnlocksSection;
 
-    /// <summary>What counts as a side sub-page when the file does not say.</summary>
-    private static readonly string[] DefaultSideSections = { "Manips", "Collectables", "Cosmetics", "Debug" };
+    /// <summary>The nav entry a sub-page hangs under by default: the Game page.</summary>
+    public const string GameHost = "Game";
+
+    /// <summary>
+    /// The other nav entry that can hold sub-pages. It shares its name with
+    /// <see cref="UnlocksSection"/>, which is no clash: the <c>subPages</c> table's keys are panels
+    /// and its values are sections, so the two names never stand in the same place.
+    /// </summary>
+    public const string UnlocksHost = "Unlocks";
+
+    /// <summary>
+    /// The panels a sub-page can hang under, in nav order. These are the keys of the layout file's
+    /// <c>subPages</c> table, spelled exactly as the side nav lists them; a key naming anything else
+    /// is dropped, because the file arranges the pages that exist and cannot make a new nav entry.
+    /// </summary>
+    public static readonly string[] Hosts = { GameHost, UnlocksHost };
+
+    /// <summary>True for a name the <c>subPages</c> table may be keyed by.</summary>
+    public static bool IsHost(string host) => Array.IndexOf(Hosts, host) >= 0;
+
+    /// <summary>Which sections hang where when the file does not say.</summary>
+    private static readonly Dictionary<string, string[]> DefaultSubPages = new(StringComparer.Ordinal)
+    {
+        [GameHost] = new[] { "Manips", "Cosmetics", "Debug" },
+        [UnlocksHost] = new[] { "Collectables" },
+    };
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -129,8 +161,48 @@ public static class GameLayout
     /// <summary>Load a specific file into the cache (tests point this at the source tree's data/gamelayout.json).</summary>
     public static void LoadFrom(string path) => _cache = Load(path);
 
-    /// <summary>Sections that get their own sub-page under Game in the side nav.</summary>
-    public static IReadOnlyList<string> SideSections => Config.SideSections ?? DefaultSideSections;
+    private static Dictionary<string, string[]> Pages => Config.SubPages ?? DefaultSubPages;
+
+    /// <summary>
+    /// The sections that hang under one nav entry as sub-pages, in the order the file lists them.
+    /// Empty for a panel the file hangs nothing under, and for any name that is not a host.
+    /// </summary>
+    public static IReadOnlyList<string> SubPagesUnder(string host) =>
+        Pages.TryGetValue(host, out var sections) ? sections : Array.Empty<string>();
+
+    /// <summary>
+    /// The sub-pages one panel shows, with the fallback for a game that has no unlock table: the
+    /// Unlocks panel is not in the nav at all then, so what the file hung under it is shown under
+    /// Game rather than becoming unreachable.
+    /// </summary>
+    public static IReadOnlyList<string> SubPagesUnder(string host, bool unlocksHidden)
+    {
+        if (string.Equals(host, UnlocksHost, StringComparison.Ordinal))
+            return unlocksHidden ? Array.Empty<string>() : SubPagesUnder(UnlocksHost);
+
+        if (!string.Equals(host, GameHost, StringComparison.Ordinal)) return Array.Empty<string>();
+
+        return unlocksHidden
+            ? SubPagesUnder(GameHost).Concat(SubPagesUnder(UnlocksHost)).ToArray()
+            : SubPagesUnder(GameHost);
+    }
+
+    /// <summary>
+    /// Every section that is a sub-page of some panel. None of them stacks on the Game page,
+    /// wherever it hangs, so this is the list that page skips.
+    /// </summary>
+    public static IReadOnlyList<string> AllSubPages =>
+        Hosts.SelectMany(SubPagesUnder).ToArray();
+
+    /// <summary>
+    /// The panel that draws a section as a sub-page. The file's own answer, with the fallback
+    /// above, and the Game page for a section the file hangs nowhere: a sub-page opened by name
+    /// (<c>--game-section</c>) can be any section the running game has, not only a listed one.
+    /// </summary>
+    public static string HostFor(string section, bool unlocksHidden) =>
+        !unlocksHidden && SubPagesUnder(UnlocksHost).Contains(section, StringComparer.Ordinal)
+            ? UnlocksHost
+            : GameHost;
 
     /// <summary>The key a game is looked up under: the lower-case enum name, "rac1".."rac4".</summary>
     private static string GameKey(GameId game) => game.ToString().ToLowerInvariant();
@@ -165,11 +237,52 @@ public static class GameLayout
         foreach (var (key, layout) in file.Games) games[key] = layout;
         file.Games = games;
 
-        // A reserved name listed as a side section would otherwise turn a panel-owned section into
-        // a sub-page; drop it here so every reader of SideSections sees the same clean list.
-        if (file.SideSections is { } side) file.SideSections = side.Where(s => !IsReserved(s)).ToArray();
+        file.SubPages = NormaliseSubPages(file);
 
         return file;
+    }
+
+    /// <summary>
+    /// The sub-page table as every reader sees it: one entry per host, in nav order, with the
+    /// names that cannot be sub-pages already gone. A reserved name would otherwise turn a
+    /// panel-owned section into a page, a host nobody draws would hide a section altogether, and a
+    /// section named under both panels would be drawn twice, so the first host to claim one keeps
+    /// it. Null when the file says nothing about sub-pages at all, which is what leaves the
+    /// shipped defaults in force.
+    /// </summary>
+    private static Dictionary<string, string[]>? NormaliseSubPages(LayoutFile file)
+    {
+        // Host keys are hand-typed, so they match the way the property names do: without case.
+        var given = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+
+        if (file.SubPages is { } table)
+        {
+            foreach (var (host, sections) in table)
+            {
+                if (host is not null && sections is not null) given[host] = sections;
+            }
+        }
+        else if (file.SideSections is { } legacy)
+        {
+            // The old key is exactly what "subPages": { "Game": [...] } means now.
+            given[GameHost] = legacy;
+        }
+        else
+        {
+            return null;
+        }
+
+        var clean = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        var claimed = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var host in Hosts)
+        {
+            clean[host] = given.TryGetValue(host, out var sections)
+                ? sections.Where(s => !string.IsNullOrWhiteSpace(s) && !IsReserved(s) && claimed.Add(s)).ToArray()
+                : Array.Empty<string>();
+        }
+
+        return clean;
     }
 
     /// <summary>The layout for a title id if there is one, else the one for the game. Null when neither is configured.</summary>

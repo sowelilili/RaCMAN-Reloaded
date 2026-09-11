@@ -9,9 +9,16 @@ namespace RaCMAN.App.Panels;
 /// the very top (die, the position pair, the savefile ACTIONs, the slot and planet controls), then
 /// the player-value table with the per-file "Options" switches in a column beside it under a
 /// "Values" header, then the remaining sections stacked and always visible. The sections the layout
-/// marks as "side" (Manips, Collectables, Cosmetics, Debug by default) each get a sub-page, reached
-/// from the indented entries under Game in the side nav. Features moved to "Unlocks" are not drawn
-/// here at all; the Unlocks panel reads them through <see cref="FeaturesInSection"/>.
+/// hangs under a panel (Manips, Cosmetics and Debug under Game, Collectables under Unlocks by
+/// default) each get a sub-page, reached from the indented entries under that panel in the side
+/// nav. Features moved to "Unlocks" are not drawn here at all; the Unlocks panel reads them through
+/// <see cref="FeaturesInSection"/>.
+/// <para>
+/// The sub-page machinery is here for both panels: sorting features into sections is this page's
+/// job, so <see cref="SubPagesWithContent"/>, <see cref="ResolveSubPage(AppState, string)"/> and
+/// <see cref="DrawSubPage(AppState, string, string)"/> are what the Unlocks panel calls to draw
+/// the section hung under it exactly as this page draws its own.
+/// </para>
 /// </summary>
 public static class GamePanel
 {
@@ -24,17 +31,11 @@ public static class GamePanel
     /// </summary>
     private static readonly Dictionary<byte, uint> LastSet = new();
 
-    /// <summary>The side section being shown, or null for the Game page itself.</summary>
-    public static string? SubPage { get; set; }
-
-    /// <summary>A sub-page to open once the game's descriptors arrive (the --game-section flag).</summary>
-    public static string? RequestedSubPage { get; set; }
-
     public static void Reset()
     {
         Drafts.Clear();
         LastSet.Clear();
-        SubPage = null;
+        SubPageNav.Set(GameLayout.GameHost, null);
         ResetPresets();
     }
 
@@ -44,14 +45,19 @@ public static class GamePanel
             ? state.Session.ReadoutAt(mirror) ?? 0u
             : LastSet.GetValueOrDefault(feature.Id);
 
-    /// <summary>Side sections that have at least one feature for the running game, in layout order. Drives the nav.</summary>
-    public static IReadOnlyList<string> SideSectionsWithContent(AppState state)
+    /// <summary>
+    /// The sub-pages one panel shows: the sections the layout hangs under it that the running game
+    /// has something in, in layout order. Drives the indented entries in the side nav. A game with
+    /// no unlock table has no Unlocks entry to hang anything under, so what the file put there is
+    /// listed under Game instead (<see cref="GameLayout.SubPagesUnder(string, bool)"/>).
+    /// </summary>
+    public static IReadOnlyList<string> SubPagesWithContent(AppState state, string host)
     {
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<string>();
 
         var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
-        return GameLayout.SideSections
+        return GameLayout.SubPagesUnder(host, state.UnlocksUnsupported)
             .Where(s => !GameLayout.IsReserved(s) && sections.ContainsKey(s))
             .ToArray();
     }
@@ -68,6 +74,80 @@ public static class GamePanel
 
         var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
         return sections.TryGetValue(section, out var features) ? features : Array.Empty<Feature>();
+    }
+
+    /// <summary>
+    /// The sub-page a hosting panel draws this frame, or null for the panel's own page. Both hosts
+    /// go through this, so both follow one rule: a sub-page the running game no longer has a
+    /// section for (the game changed), one a panel places itself, and one that now belongs to the
+    /// other panel (the unlock table came or went) are all dropped, and the sub-page a headless run
+    /// asked for by name is taken up by whichever panel hosts it as soon as the descriptors are in.
+    /// </summary>
+    public static string? ResolveSubPage(AppState state, string host)
+    {
+        var describe = state.Describe;
+        var sections = describe.Features.Length > 0
+            ? Assign(state.DescribedTitle, state.DescribedGame, describe, out _)
+            : null;
+
+        return ResolveSubPage(state, host, sections);
+    }
+
+    /// <summary>
+    /// <see cref="ResolveSubPage(AppState, string)"/> for a caller that has already sorted the
+    /// features into their sections.
+    /// </summary>
+    public static string? ResolveSubPage(
+        AppState state, string host, IReadOnlyDictionary<string, List<Feature>>? sections)
+    {
+        string? open = SubPageNav.For(host);
+        if (open is not null && !HostShows(state, host, open, sections))
+        {
+            open = null;
+            SubPageNav.Set(host, null);
+        }
+
+        if (open is null && SubPageNav.Requested is { } wanted && HostShows(state, host, wanted, sections))
+        {
+            open = wanted;
+            SubPageNav.Requested = null;
+            SubPageNav.Set(host, open);
+        }
+
+        return open;
+    }
+
+    /// <summary>
+    /// Whether one panel would draw a section as its sub-page: the running game has to have
+    /// something in it, no panel may place it itself, and the layout has to hang it there. A
+    /// section the file hangs nowhere belongs to the Game page, which is what lets
+    /// <c>--game-section</c> open a stacked section as a page of its own.
+    /// </summary>
+    private static bool HostShows(
+        AppState state, string host, string section, IReadOnlyDictionary<string, List<Feature>>? sections) =>
+        sections is not null
+        && !string.IsNullOrWhiteSpace(section)
+        && !GameLayout.IsReserved(section)
+        && sections.ContainsKey(section)
+        && string.Equals(GameLayout.HostFor(section, state.UnlocksUnsupported), host, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The panel that would open a section as a sub-page right now, or null when the running game
+    /// has nothing in it. This is how the window routes a <c>--game-section</c> to the panel that
+    /// hosts the section before that panel is ever drawn.
+    /// </summary>
+    public static string? HostForOpenableSubPage(AppState state, string section)
+    {
+        var describe = state.Describe;
+        if (describe.Features.Length == 0) return null;
+
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
+        foreach (var host in GameLayout.Hosts)
+        {
+            if (HostShows(state, host, section, sections)) return host;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -143,22 +223,13 @@ public static class GamePanel
         var order = new List<string>();
         var sections = describe.Features.Length > 0 ? Assign(title, game, describe, out order) : null;
 
-        // A sub-page that the running game has nothing for (the game changed) falls back to the
-        // page, and a reserved section is never a sub-page however it was asked for.
-        if (SubPage is not null
-            && (sections is null || GameLayout.IsReserved(SubPage) || !sections.ContainsKey(SubPage)))
+        if (ResolveSubPage(state, GameLayout.GameHost, sections) is { } side)
         {
-            SubPage = null;
+            DrawSubPage(state, GameLayout.GameHost, side, sections![side]);
+            return;
         }
 
-        if (SubPage is null && RequestedSubPage is { } wanted
-            && sections is not null && !GameLayout.IsReserved(wanted) && sections.ContainsKey(wanted))
-        {
-            SubPage = wanted;
-            RequestedSubPage = null;
-        }
-
-        Ui.Heading(SubPage is null ? "Game" : $"Game / {SubPage}");
+        Ui.Heading("Game");
 
         if (sections is null)
         {
@@ -169,56 +240,76 @@ public static class GamePanel
         }
 
         bool enabled = state.Ingame;
-        if (!enabled) ImGui.TextColored(Ui.Yellow, $"Controls are disabled outside INGAME (state is {state.Session.State.DisplayName()}).");
+        if (!enabled) ImGui.TextColored(Ui.Yellow, OutsideIngame(state));
 
         ImGui.BeginDisabled(!enabled);
 
-        if (SubPage is { } side)
+        DrawQuickBlock(state, describe, sections.GetValueOrDefault(GameLayout.QuickSection));
+        ImGui.Spacing();
+
+        // The value table and the Options column beside it, under a header of their own so the
+        // whole of the page folds away the same way.
+        var topValues = sections.GetValueOrDefault(GameLayout.ValuesSection) ?? new List<Feature>();
+        var options = sections.GetValueOrDefault(GameLayout.OptionsSection) ?? new List<Feature>();
+        if (topValues.Any(f => f.Kind == FeatureKind.Value) || options.Count > 0)
         {
-            ImGui.PushID(side);
-            DrawSectionBody(state, describe, sections[side], side);
+            ImGui.PushID(GameLayout.ValuesSection);
+            if (SectionHeader(state, GameLayout.ValuesSection))
+            {
+                DrawTopArea(state, describe, topValues, options);
+                ImGui.Spacing();
+            }
             ImGui.PopID();
         }
-        else
+
+        // Everything not owned by a panel and not a sub-page of one, stacked in layout order. A
+        // section the quick block emptied is not in the dictionary at all, so it draws no header.
+        var used = order.Where(s => !GameLayout.IsReserved(s));
+        var subPages = GameLayout.AllSubPages;
+        foreach (var section in GameLayout.TabOrder(title, game, used))
         {
-            DrawQuickBlock(state, describe, sections.GetValueOrDefault(GameLayout.QuickSection));
-            ImGui.Spacing();
+            if (subPages.Contains(section)) continue;
+            if (!sections.TryGetValue(section, out var features) || features.Count == 0) continue;
 
-            // The value table and the Options column beside it, under a header of their own so the
-            // whole of the page folds away the same way.
-            var topValues = sections.GetValueOrDefault(GameLayout.ValuesSection) ?? new List<Feature>();
-            var options = sections.GetValueOrDefault(GameLayout.OptionsSection) ?? new List<Feature>();
-            if (topValues.Any(f => f.Kind == FeatureKind.Value) || options.Count > 0)
+            ImGui.PushID(section);
+            if (SectionHeader(state, section))
             {
-                ImGui.PushID(GameLayout.ValuesSection);
-                if (SectionHeader(state, GameLayout.ValuesSection))
-                {
-                    DrawTopArea(state, describe, topValues, options);
-                    ImGui.Spacing();
-                }
-                ImGui.PopID();
+                DrawSectionBody(state, describe, features, section);
+                ImGui.Spacing();
             }
-
-            // Everything not owned by a panel and not a side page, stacked in layout order. A
-            // section the quick block emptied is not in the dictionary at all, so it draws no header.
-            var used = order.Where(s => !GameLayout.IsReserved(s));
-            foreach (var section in GameLayout.TabOrder(title, game, used))
-            {
-                if (GameLayout.SideSections.Contains(section)) continue;
-                if (!sections.TryGetValue(section, out var features) || features.Count == 0) continue;
-
-                ImGui.PushID(section);
-                if (SectionHeader(state, section))
-                {
-                    DrawSectionBody(state, describe, features, section);
-                    ImGui.Spacing();
-                }
-                ImGui.PopID();
-            }
-
-            if (Ui.Debug) DrawRawReadouts(state, describe);
+            ImGui.PopID();
         }
 
+        if (Ui.Debug) DrawRawReadouts(state, describe);
+
+        ImGui.EndDisabled();
+    }
+
+    /// <summary>Why the controls on a page are greyed out, in the words every page uses.</summary>
+    private static string OutsideIngame(AppState state) =>
+        $"Controls are disabled outside INGAME (state is {state.Session.State.DisplayName()}).";
+
+    /// <summary>
+    /// One section as a page of its own, for whichever panel hosts it: the heading naming the panel
+    /// and the section, then the section's features in the blocks its headings make. This is the
+    /// whole of what a sub-page is, so the Unlocks panel draws the section hung under it by calling
+    /// this and nothing else.
+    /// </summary>
+    public static void DrawSubPage(AppState state, string host, string section) =>
+        DrawSubPage(state, host, section, FeaturesInSection(state, section));
+
+    private static void DrawSubPage(
+        AppState state, string host, string section, IReadOnlyList<Feature> features)
+    {
+        Ui.Heading($"{host} / {section}");
+
+        bool enabled = state.Ingame;
+        if (!enabled) ImGui.TextColored(Ui.Yellow, OutsideIngame(state));
+
+        ImGui.BeginDisabled(!enabled);
+        ImGui.PushID(section);
+        DrawSectionBody(state, state.Describe, features, section);
+        ImGui.PopID();
         ImGui.EndDisabled();
     }
 
@@ -433,7 +524,7 @@ public static class GamePanel
     private static void DrawSectionBody(
         AppState state,
         DescribeResult describe,
-        List<Feature> features,
+        IReadOnlyList<Feature> features,
         string? section = null,
         int toggleColumns = 2,
         bool leadingSpace = true)

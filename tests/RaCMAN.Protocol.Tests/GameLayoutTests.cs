@@ -5,15 +5,16 @@ using Xunit;
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// The client-owned Game panel layout. These load the shipped data/gamelayout.json from the source
+/// The client-owned feature layout. These load the shipped data/gamelayout.json from the source
 /// tree and check the regroup it encodes: the setup/manip controls to a Manips sub-page, collectable
 /// unlocks to Collectables, QE and debug controls to Debug, skins/armour to Cosmetics, and everything
 /// else left where qwark's DESCRIBE group put it. The file is keyed by game, not by title id, because
 /// BCES01503 hosts RaC1, RaC2 and RaC3 under one title id.
 /// <para>
 /// Four names are reserved for the panels that place them: "Quick", "Values" and "Options" on the
-/// Game page itself, "Unlocks" on the Unlocks panel. None of them may reach a side sub-page or the
-/// tab order.
+/// Game page itself, "Unlocks" on the Unlocks panel. None of them may reach a sub-page or the
+/// tab order. The sub-pages themselves hang under one of two panels, Game or Unlocks, which is what
+/// the "subPages" table says and the only part of the nav the file has any say over.
 /// </para>
 /// </summary>
 public class GameLayoutTests
@@ -299,14 +300,180 @@ public class GameLayoutTests
     }
 
     [Fact]
-    public void EverydaySectionsStayOnTheGamePageAndTheRestGoToTheSide()
+    public void EverydaySectionsStayOnTheGamePageAndTheRestHangUnderTheirPanel()
     {
-        // The Game page keeps the common controls; the rest are sub-pages under Game in the nav.
-        var side = GameLayout.SideSections;
-        Assert.Equal(new[] { "Manips", "Collectables", "Cosmetics", "Debug" }, side);
-        Assert.DoesNotContain("Cheats", side);
-        Assert.DoesNotContain("Player", side);
-        Assert.DoesNotContain("Savefile", side);
+        // The Game page keeps the common controls; the rest are sub-pages in the nav, three of them
+        // under Game and the collectables under Unlocks, where the table they edit is.
+        Assert.Equal(new[] { "Manips", "Cosmetics", "Debug" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
+        Assert.Equal(new[] { "Collectables" }, GameLayout.SubPagesUnder(GameLayout.UnlocksHost));
+
+        // Whichever panel holds one, a sub-page never stacks on the Game page as well.
+        var all = GameLayout.AllSubPages;
+        Assert.Equal(new[] { "Manips", "Cosmetics", "Debug", "Collectables" }, all);
+        Assert.DoesNotContain("Cheats", all);
+        Assert.DoesNotContain("Player", all);
+        Assert.DoesNotContain("Savefile", all);
+    }
+
+    /// <summary>
+    /// The one rule that is not simply what the file says: a game with no unlock table has no
+    /// Unlocks entry in the nav, so a section hung under it would have nowhere to be reached from.
+    /// It is listed under Game for that game instead.
+    /// </summary>
+    [Fact]
+    public void WithNoUnlockTableTheUnlocksSubPagesFallBackToGame()
+    {
+        Assert.Equal(
+            new[] { "Manips", "Cosmetics", "Debug" },
+            GameLayout.SubPagesUnder(GameLayout.GameHost, unlocksHidden: false));
+        Assert.Equal(
+            new[] { "Collectables" },
+            GameLayout.SubPagesUnder(GameLayout.UnlocksHost, unlocksHidden: false));
+
+        Assert.Equal(
+            new[] { "Manips", "Cosmetics", "Debug", "Collectables" },
+            GameLayout.SubPagesUnder(GameLayout.GameHost, unlocksHidden: true));
+        Assert.Empty(GameLayout.SubPagesUnder(GameLayout.UnlocksHost, unlocksHidden: true));
+
+        // Which is the same thing said the other way round: the panel that draws a section.
+        Assert.Equal(GameLayout.UnlocksHost, GameLayout.HostFor("Collectables", unlocksHidden: false));
+        Assert.Equal(GameLayout.GameHost, GameLayout.HostFor("Collectables", unlocksHidden: true));
+        Assert.Equal(GameLayout.GameHost, GameLayout.HostFor("Debug", unlocksHidden: false));
+
+        // A section the file hangs nowhere belongs to the Game page, which is what lets
+        // --game-section open a stacked section as a page of its own.
+        Assert.Equal(GameLayout.GameHost, GameLayout.HostFor("Cheats", unlocksHidden: false));
+
+        // A name that is not a panel holds nothing, however the file is written.
+        Assert.Empty(GameLayout.SubPagesUnder("Mods"));
+        Assert.Empty(GameLayout.SubPagesUnder("Mods", unlocksHidden: true));
+    }
+
+    /// <summary>
+    /// The older spelling: a copy of the file edited before sub-pages could hang anywhere but Game
+    /// still reads, and means exactly the list under Game.
+    /// </summary>
+    [Fact]
+    public void TheOldSideSectionsKeyIsReadAsTheGamesSubPages()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-legacy-side.json");
+        File.WriteAllText(path, """
+        {
+          "sideSections": ["Manips", "Collectables", "Unlocks", "Debug"],
+          "games": {}
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+
+            // Reserved names go the same way they always did, and nothing hangs under Unlocks.
+            Assert.Equal(new[] { "Manips", "Collectables", "Debug" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
+            Assert.Empty(GameLayout.SubPagesUnder(GameLayout.UnlocksHost));
+            Assert.Equal(GameLayout.GameHost, GameLayout.HostFor("Collectables", unlocksHidden: false));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
+    }
+
+    /// <summary>A file with both keys means what its new one says; the old key is only the fallback.</summary>
+    [Fact]
+    public void SubPagesWinsOverTheOldKey()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-both-keys.json");
+        File.WriteAllText(path, """
+        {
+          "sideSections": ["Manips", "Collectables", "Cosmetics", "Debug"],
+          "subPages": { "Game": ["Debug"], "Unlocks": ["Collectables"] },
+          "games": {}
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+            Assert.Equal(new[] { "Debug" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
+            Assert.Equal(new[] { "Collectables" }, GameLayout.SubPagesUnder(GameLayout.UnlocksHost));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
+    }
+
+    /// <summary>
+    /// The file arranges the pages the client has: it can say which panel a section hangs under,
+    /// but a key naming anything else cannot make a nav entry, and a reserved name cannot become a
+    /// page under either panel.
+    /// </summary>
+    [Fact]
+    public void OnlyThePanelsThatHoldSubPagesAreKeysAndReservedNamesAreDropped()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-hosts.json");
+        File.WriteAllText(path, """
+        {
+          "subPages": {
+            "game": ["Manips", "Values", "Quick"],
+            "Unlocks": ["Collectables", "Unlocks", "Options"],
+            "Mods": ["Nowhere"],
+            "Autosplitter": ["Nowhere either"]
+          },
+          "games": {}
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+
+            // A host key is matched the way the property names are, without caring about case.
+            Assert.Equal(new[] { "Manips" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
+            Assert.Equal(new[] { "Collectables" }, GameLayout.SubPagesUnder(GameLayout.UnlocksHost));
+
+            Assert.Equal(new[] { "Manips", "Collectables" }, GameLayout.AllSubPages);
+            Assert.DoesNotContain("Nowhere", GameLayout.AllSubPages);
+            Assert.DoesNotContain("Nowhere either", GameLayout.AllSubPages);
+
+            Assert.True(GameLayout.IsHost(GameLayout.GameHost));
+            Assert.True(GameLayout.IsHost(GameLayout.UnlocksHost));
+            Assert.False(GameLayout.IsHost("Mods"));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
+    }
+
+    /// <summary>One section, one page: the first panel to name it is the one that draws it.</summary>
+    [Fact]
+    public void ASectionNamedUnderBothPanelsHangsUnderTheFirstOfThem()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-twice.json");
+        File.WriteAllText(path, """
+        {
+          "subPages": { "Game": ["Debug", "Debug"], "Unlocks": ["Debug", "Collectables"] },
+          "games": {}
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+            Assert.Equal(new[] { "Debug" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
+            Assert.Equal(new[] { "Collectables" }, GameLayout.SubPagesUnder(GameLayout.UnlocksHost));
+            Assert.Equal(GameLayout.GameHost, GameLayout.HostFor("Debug", unlocksHidden: false));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
     }
 
     /// <summary>Every name a panel places itself, so a loop can check them all the same way.</summary>
@@ -323,7 +490,7 @@ public class GameLayoutTests
         foreach (var reserved in Reserved) Assert.True(GameLayout.IsReserved(reserved));
         Assert.False(GameLayout.IsReserved(GameLayout.PlayerSection));
 
-        foreach (var reserved in Reserved) Assert.DoesNotContain(reserved, GameLayout.SideSections);
+        foreach (var reserved in Reserved) Assert.DoesNotContain(reserved, GameLayout.AllSubPages);
 
         foreach (var game in new[] { GameId.Rac1, GameId.Rac2, GameId.Rac3, GameId.Rac4 })
         {
@@ -345,7 +512,7 @@ public class GameLayoutTests
         string path = Path.Combine(Path.GetTempPath(), "racman-layout-quick.json");
         File.WriteAllText(path, """
         {
-          "sideSections": ["Quick", "Debug"],
+          "subPages": { "Game": ["Quick", "Debug"] },
           "games": {
             "rac4": { "tabOrder": ["Quick", "Cheats"], "moves": { "Unlock all planets": "Quick" } }
           }
@@ -359,7 +526,7 @@ public class GameLayoutTests
             var d = Describe(GameId.Rac4, Rac4Groups, planets);
 
             Assert.Equal(GameLayout.QuickSection, GameLayout.SectionFor("NPEA00423", GameId.Rac4, planets, d));
-            Assert.Equal(new[] { "Debug" }, GameLayout.SideSections);
+            Assert.Equal(new[] { "Debug" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
             Assert.Equal(new[] { "Cheats" }, GameLayout.TabOrder("NPEA00423", GameId.Rac4, Array.Empty<string>()));
         }
         finally
@@ -370,12 +537,12 @@ public class GameLayoutTests
     }
 
     [Fact]
-    public void AFileThatListsAReservedSectionAsASidePageIsIgnored()
+    public void AFileThatListsAReservedSectionAsASubPageIsIgnored()
     {
         string path = Path.Combine(Path.GetTempPath(), "racman-layout-reserved-side.json");
         File.WriteAllText(path, """
         {
-          "sideSections": ["Options", "Unlocks", "Values", "Debug"],
+          "subPages": { "Game": ["Options", "Unlocks", "Values", "Debug"] },
           "games": {
             "rac2": { "tabOrder": ["Options", "Cheats", "Unlocks"], "moves": {} }
           }
@@ -385,7 +552,7 @@ public class GameLayoutTests
         try
         {
             GameLayout.LoadFrom(path);
-            Assert.Equal(new[] { "Debug" }, GameLayout.SideSections);
+            Assert.Equal(new[] { "Debug" }, GameLayout.SubPagesUnder(GameLayout.GameHost));
             Assert.Equal(new[] { "Cheats" }, GameLayout.TabOrder("NPEA00386", GameId.Rac2, Array.Empty<string>()));
         }
         finally
@@ -396,14 +563,15 @@ public class GameLayoutTests
     }
 
     [Fact]
-    public void MissingFileStillHasSideSectionDefaults()
+    public void MissingFileStillHasTheSubPageDefaults()
     {
         try
         {
             GameLayout.LoadFrom(Path.Combine(Path.GetTempPath(), "racman-no-such-layout.json"));
             Assert.Empty(GameLayout.Problems);
-            Assert.Contains("Manips", GameLayout.SideSections);
-            Assert.Contains("Debug", GameLayout.SideSections);
+            Assert.Contains("Manips", GameLayout.SubPagesUnder(GameLayout.GameHost));
+            Assert.Contains("Debug", GameLayout.SubPagesUnder(GameLayout.GameHost));
+            Assert.Contains("Collectables", GameLayout.SubPagesUnder(GameLayout.UnlocksHost));
         }
         finally
         {
