@@ -2,9 +2,11 @@ using System.Numerics;
 using ImGuiNET;
 using OpenTK.Graphics.OpenGL4;
 using OpenTK.Windowing.Common;
+using OpenTK.Windowing.Common.Input;
 using OpenTK.Windowing.Desktop;
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using RaCMAN.App.Panels;
+using StbImageSharp;
 
 namespace RaCMAN.App;
 
@@ -64,11 +66,36 @@ public sealed class AppWindow : GameWindow
             // The version is in the title because it is the first thing anyone is asked for
             // when they report something, and the Settings panel is two clicks away.
             Title = $"RaCMAN Reloaded {AppVersion.Current}",
+            Icon = LoadIcon(),
             APIVersion = new Version(3, 3),
             Profile = ContextProfile.Core,
             Flags = ContextFlags.ForwardCompatible,
             Vsync = VSyncMode.On,
         };
+    }
+
+    /// <summary>
+    /// The window icon, decoded out of the assembly. Windows takes the taskbar icon from the
+    /// executable itself, so this is what the title bar shows there and what every other platform
+    /// has to go on. An icon is decoration: if anything about it fails, the window opens without
+    /// one rather than not at all.
+    /// </summary>
+    private static WindowIcon? LoadIcon()
+    {
+        try
+        {
+            using var stream = typeof(AppWindow).Assembly.GetManifestResourceStream("RaCMAN.App.icon.png");
+            if (stream is null) return null;
+
+            var image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+            if (image.Width <= 0 || image.Height <= 0) return null;
+
+            return new WindowIcon(new OpenTK.Windowing.Common.Input.Image(image.Width, image.Height, image.Data));
+        }
+        catch (Exception ex) when (ex is IOException or InvalidOperationException or ArgumentException)
+        {
+            return null;
+        }
     }
 
     /// <summary>

@@ -24,21 +24,21 @@ public class WindowGeometryTests
     public void TheDefaultIsTheSizeTheNavAndTheGameSubPagesFitIn()
     {
         Assert.Equal(822, WindowGeometry.DefaultWidth);
-        Assert.Equal(564, WindowGeometry.DefaultHeight);
+        Assert.Equal(570, WindowGeometry.DefaultHeight);
     }
 
     [Fact]
     public void AFileWithNoSavedSizeOpensAtTheDefault()
     {
-        Assert.Equal((822, 564), WindowGeometry.Size(null, null, Primary));
+        Assert.Equal((822, 570), WindowGeometry.Size(null, null, Primary));
     }
 
     /// <summary>The default is the floor, so nothing can open a window too small for the side nav.</summary>
     [Theory]
-    [InlineData(700, 400, 822, 564)]
-    [InlineData(0, 0, 822, 564)]
-    [InlineData(-40, -40, 822, 564)]
-    [InlineData(821, 563, 822, 564)]
+    [InlineData(700, 400, 822, 570)]
+    [InlineData(0, 0, 822, 570)]
+    [InlineData(-40, -40, 822, 570)]
+    [InlineData(821, 569, 822, 570)]
     public void ASizeBelowTheFloorOpensAtTheFloor(int width, int height, int kept, int keptHeight)
     {
         Assert.Equal((kept, keptHeight), WindowGeometry.Size(width, height, Primary));
@@ -64,7 +64,7 @@ public class WindowGeometryTests
     [Fact]
     public void AScreenSmallerThanTheFloorStillGetsTheFloor()
     {
-        Assert.Equal((822, 564), WindowGeometry.Size(1200, 900, new Area(0, 0, 640, 480)));
+        Assert.Equal((822, 570), WindowGeometry.Size(1200, 900, new Area(0, 0, 640, 480)));
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class WindowGeometryTests
     {
         var restored = WindowGeometry.Restore(null, null, null, null, Desktop);
 
-        Assert.Equal((822, 564, (int?)null, (int?)null), restored);
+        Assert.Equal((822, 570, (int?)null, (int?)null), restored);
     }
 
     /// <summary>The size is measured against the screen the window is on, not against the primary.</summary>
@@ -134,6 +134,6 @@ public class WindowGeometryTests
     {
         var restored = WindowGeometry.Restore(1400, 900, 40, 40, Array.Empty<Area>());
 
-        Assert.Equal((822, 564, (int?)null, (int?)null), restored);
+        Assert.Equal((822, 570, (int?)null, (int?)null), restored);
     }
 }

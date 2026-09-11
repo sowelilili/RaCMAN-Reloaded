@@ -10,12 +10,13 @@ public static class WindowGeometry
 {
     /// <summary>
     /// The client size the window opens at, and the smallest one it is ever restored to. The height
-    /// is what the twelve side-nav entries and the Game page's sub-pages need before the nav starts
-    /// scrolling, which is why it is not a rounder number: 560 was one row short.
+    /// is what the side nav needs before it starts scrolling, which is why it is not a rounder
+    /// number. It is measured against the game with the most entries: UYA has an Unlocks entry that
+    /// Deadlocked has not, and 564 was one row short of it.
     /// </summary>
     public const int DefaultWidth = 822;
 
-    public const int DefaultHeight = 564;
+    public const int DefaultHeight = 570;
 
     /// <summary>
     /// One monitor as far as this file is concerned: where its usable area starts and how big it

@@ -10,6 +10,11 @@
 
     <!-- Autosplit planet routes: one line of accepted split names per planet, the user's to edit. -->
     <None Include="data\**\*.txt" CopyToOutputDirectory="PreserveNewest" />
+
+    <!-- The window's icon, which GLFW wants as pixels rather than as a file. Carried inside the
+         assembly so nothing about it can be moved, deleted or left behind by a release. The same
+         picture is the executable's icon below, and the AppImage's. -->
+    <EmbeddedResource Include="..\..\packaging\racman-reloaded.png" LogicalName="RaCMAN.App.icon.png" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,6 +28,11 @@
     <!-- A window application: double-clicking the exe opens no console behind the window. A run
          from a terminal still prints, because ParentConsole attaches to that terminal's console. -->
     <OutputType>WinExe</OutputType>
+
+    <!-- Windows reads this one out of the executable: Explorer, the taskbar, and the shortcuts
+         Setup.exe makes. Every other platform takes the window icon set in AppWindow instead. -->
+    <ApplicationIcon>..\..\packaging\racman-reloaded.ico</ApplicationIcon>
+
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

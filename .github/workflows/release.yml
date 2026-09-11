@@ -120,6 +120,7 @@ jobs:
           --packTitle "RaCMAN Reloaded"
           --packAuthors "sowelilili"
           --mainExe RaCMAN.App.exe
+          --icon "${{ github.workspace }}/client/packaging/racman-reloaded.ico"
           --channel win
           --outputDir "${{ github.workspace }}/releases"
 
