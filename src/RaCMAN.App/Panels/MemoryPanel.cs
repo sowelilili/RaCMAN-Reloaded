@@ -79,7 +79,7 @@ public static class MemoryPanel
         Ui.Heading("Memory");
 
         bool enabled = state.Ingame;
-        if (!enabled) Ui.Warning($"Memory commands need INGAME (state is {state.Session.State}).");
+        if (!enabled) Ui.Warning($"Memory commands need INGAME (state is {state.Session.State.DisplayName()}).");
 
         if (ImGui.BeginTabBar("memory-tabs"))
         {
@@ -167,7 +167,7 @@ public static class MemoryPanel
         if (layout is null)
         {
             Ui.Warning($"No moby layout for game {(byte)state.Session.Game} ({state.Session.Game}): "
-                       + "index, address and position only.");
+                       + "index and address only.");
         }
 
         foreach (var problem in MobyLayouts.Problems) Ui.Error(problem);
@@ -187,7 +187,7 @@ public static class MemoryPanel
         {
             Ui.Hint(enabled
                 ? "Read the table to list the mobys the console is updating."
-                : $"Reading the moby table needs INGAME (state is {state.Session.State}).");
+                : $"Reading the moby table needs INGAME (state is {state.Session.State.DisplayName()}).");
             return;
         }
 
@@ -198,7 +198,10 @@ public static class MemoryPanel
         bool hasClass = layout?.Has("oClass") == true;
         bool hasUid = layout?.Has("uid") == true;
         bool hasState = layout?.Has("state") == true;
-        int columns = 5 + (hasClass ? 1 : 0) + (hasUid ? 1 : 0) + (hasState ? 1 : 0);
+
+        // The row index and the address, then whatever the layout names. The coordinates are what
+        // the Positions panel is for, and three more columns of them did not fit the window.
+        int columns = 2 + (hasClass ? 1 : 0) + (hasUid ? 1 : 0) + (hasState ? 1 : 0);
 
         if (!ImGui.BeginChild("##mobys", new Vector2(-1, -1), ImGuiChildFlags.Borders)) { ImGui.EndChild(); return; }
 
@@ -208,9 +211,6 @@ public static class MemoryPanel
             ImGui.TableSetupScrollFreeze(0, 1);
             ImGui.TableSetupColumn("#", ImGuiTableColumnFlags.WidthFixed, 50);
             ImGui.TableSetupColumn("Address", ImGuiTableColumnFlags.WidthFixed, 90);
-            ImGui.TableSetupColumn("x", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableSetupColumn("y", ImGuiTableColumnFlags.WidthFixed, 80);
-            ImGui.TableSetupColumn("z", ImGuiTableColumnFlags.WidthFixed, 80);
             if (hasClass) ImGui.TableSetupColumn("oClass", ImGuiTableColumnFlags.WidthFixed, 90);
             if (hasUid) ImGui.TableSetupColumn("UID", ImGuiTableColumnFlags.WidthFixed, 70);
             if (hasState) ImGui.TableSetupColumn("State", ImGuiTableColumnFlags.WidthFixed, 60);
@@ -231,12 +231,6 @@ public static class MemoryPanel
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"0x{row.Address:X8}");
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(row.X.ToString("0.##", CultureInfo.InvariantCulture));
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(row.Y.ToString("0.##", CultureInfo.InvariantCulture));
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(row.Z.ToString("0.##", CultureInfo.InvariantCulture));
 
                 if (hasClass)
                 {

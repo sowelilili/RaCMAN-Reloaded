@@ -107,7 +107,7 @@ public static class SaveFilesPanel
         }
         else if (!state.Ingame)
         {
-            Ui.Warning($"Saving and loading need INGAME (state is {session.State}).");
+            Ui.Warning($"Saving and loading need INGAME (state is {session.State.DisplayName()}).");
             ImGui.Spacing();
         }
         else if (!info.Running)
@@ -230,12 +230,14 @@ public static class SaveFilesPanel
         {
             Ui.Hint("No files in this category yet.");
         }
-        else if (ImGui.BeginTable("savefiles", 3,
+        // Every save in here is one game's whole file, so the byte count says nothing about which
+        // one to load: it is wire detail, and only shown with debug information on.
+        else if (ImGui.BeginTable("savefiles", Ui.Debug ? 3 : 2,
                      ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             ImGui.TableSetupColumn("Save");
             ImGui.TableSetupColumn("Where", ImGuiTableColumnFlags.WidthFixed, 90);
-            ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
+            if (Ui.Debug) ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 80);
             ImGui.TableHeadersRow();
 
             for (int i = 0; i < _entries.Length; i++)
@@ -268,6 +270,8 @@ public static class SaveFilesPanel
                     ImGui.TextUnformatted(Tooltip(entry));
                     ImGui.EndTooltip();
                 }
+
+                if (!Ui.Debug) continue;
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted(entry.Size > 0 ? $"{entry.Size / 1024} KB" : "-");

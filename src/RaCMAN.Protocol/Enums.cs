@@ -235,6 +235,23 @@ public enum SessionState : byte
     Quitting = 3,
 }
 
+public static class SessionStateExtensions
+{
+    /// <summary>
+    /// The name to show a human: INGAME, XMB, BOOTING, QUITTING. The protocol and the panels have
+    /// always spelled these in upper case ("needs INGAME"), so the status line spells them the same
+    /// way rather than showing the C# "Ingame" beside a sentence about INGAME.
+    /// </summary>
+    public static string DisplayName(this SessionState state) => state switch
+    {
+        SessionState.Xmb => "XMB",
+        SessionState.Booting => "BOOTING",
+        SessionState.Ingame => "INGAME",
+        SessionState.Quitting => "QUITTING",
+        _ => state.ToString().ToUpperInvariant(),
+    };
+}
+
 public enum GameId : byte
 {
     None = 0,

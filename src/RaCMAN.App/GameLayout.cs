@@ -14,6 +14,15 @@ public sealed class TitleLayout
     /// <summary>Feature label -> section name. Overrides where a feature would otherwise sit.</summary>
     [JsonPropertyName("moves")]
     public Dictionary<string, string> Moves { get; set; } = new();
+
+    /// <summary>
+    /// Section name -> heading text -> the feature labels that heading is drawn in front of. A
+    /// section with more than one thing in it can be broken up this way (UYA's Cosmetics page has
+    /// the chargeboot colours under a "Chargeboots" header), without any of it being hard-coded in
+    /// a panel.
+    /// </summary>
+    [JsonPropertyName("headings")]
+    public Dictionary<string, Dictionary<string, string[]>> Headings { get; set; } = new();
 }
 
 /// <summary>The whole data/gamelayout.json file.</summary>
@@ -184,6 +193,80 @@ public static class GameLayout
         }
 
         return feature.Kind == FeatureKind.Value ? ValuesSection : describe.GroupName(feature.Group);
+    }
+
+    /// <summary>
+    /// The headings one section draws, as feature label -> heading text: every label the file lists
+    /// under a heading maps to it, and the page draws that heading once, in front of the first of
+    /// those labels it reaches. Empty for a section the file says nothing about, which is what makes
+    /// this cost nothing for the sections that are one list of controls.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> HeadingsFor(string titleId, GameId game, string section)
+    {
+        var headings = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (string.IsNullOrEmpty(section)) return headings;
+
+        if (LayoutFor(titleId, game) is not { } layout) return headings;
+        if (layout.Headings is not { } table || !table.TryGetValue(section, out var forSection)) return headings;
+        if (forSection is null) return headings;
+
+        foreach (var (heading, labels) in forSection)
+        {
+            if (string.IsNullOrWhiteSpace(heading) || labels is null) continue;
+
+            // First heading to name a label wins, so a label listed twice cannot draw two headers.
+            foreach (var label in labels)
+            {
+                if (!string.IsNullOrWhiteSpace(label)) headings.TryAdd(label, heading);
+            }
+        }
+
+        return headings;
+    }
+
+    /// <summary>
+    /// One run of a section's features, with the heading drawn above them or null for the ones no
+    /// heading names. See <see cref="Blocks"/>.
+    /// </summary>
+    public sealed record FeatureBlock(string? Heading, IReadOnlyList<Feature> Features);
+
+    /// <summary>
+    /// A section's features split into the blocks its headings make: the features a heading names
+    /// are collected under it, in their own order, and the blocks follow the order their first
+    /// feature appears in. A section with no headings is one block with no heading, which is what
+    /// every section was before the file could ask for one.
+    /// </summary>
+    public static IReadOnlyList<FeatureBlock> Blocks(
+        string titleId, GameId game, string section, IEnumerable<Feature> features)
+    {
+        var headings = HeadingsFor(titleId, game, section);
+        var order = new List<string?>();
+        var blocks = new Dictionary<string, List<Feature>>(StringComparer.Ordinal);
+        var unheaded = new List<Feature>();
+
+        foreach (var feature in features)
+        {
+            string? heading = headings.GetValueOrDefault(feature.Label);
+            if (heading is null)
+            {
+                if (unheaded.Count == 0) order.Add(null);
+                unheaded.Add(feature);
+                continue;
+            }
+
+            if (!blocks.TryGetValue(heading, out var list))
+            {
+                list = new List<Feature>();
+                blocks[heading] = list;
+                order.Add(heading);
+            }
+
+            list.Add(feature);
+        }
+
+        return order
+            .Select(heading => new FeatureBlock(heading, heading is null ? unheaded : blocks[heading]))
+            .ToArray();
     }
 
     /// <summary>

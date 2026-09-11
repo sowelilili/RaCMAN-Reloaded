@@ -10,21 +10,8 @@ namespace RaCMAN.App;
 
 public sealed class AppWindow : GameWindow
 {
-    private static readonly string[] PanelNames =
-    {
-        "Connection",
-        "Game",
-        "Positions",
-        "Unlocks",
-        "Level flags",
-        "Memory",
-        "Mods",
-        "Save files",
-        "Combos",
-        "Autosplitter",
-        "Input display",
-        "Settings",
-    };
+    /// <summary>The nav's own list, in its own order; see <see cref="PanelNav"/>.</summary>
+    private static string[] PanelNames => PanelNav.Names;
 
     private readonly AppState _state;
     private readonly double _exitAfterSeconds;
@@ -260,14 +247,17 @@ public sealed class AppWindow : GameWindow
                 // If the current panel is one the running game doesn't support, fall back to Game;
                 // if it is one this console cannot drive at all, to Connection, which is the panel
                 // that says which target is connected.
-                if (!PanelVisible(_panel)) _panel = 1;
-                if (DisabledReason(_panel) is not null) _panel = 0;
+                if (!PanelVisible(_panel)) _panel = PanelNav.Game;
+                if (DisabledReason(_panel) is not null) _panel = PanelNav.Connection;
 
                 for (int i = 0; i < PanelNames.Length; i++)
                 {
                     if (!PanelVisible(i)) continue;
 
-                    bool isGame = i == 1;
+                    // A thin line between the nav's groups, and none above the first of them.
+                    if (PanelNav.StartsGroup(i)) ImGui.Separator();
+
+                    bool isGame = i == PanelNav.Game;
                     bool selected = _panel == i && (!isGame || GamePanel.SubPage is null);
 
                     string? disabled = DisabledReason(i);
@@ -295,12 +285,12 @@ public sealed class AppWindow : GameWindow
                     // under Game, and only those the running game has something for.
                     foreach (var section in GamePanel.SideSectionsWithContent(_state))
                     {
-                        bool onSub = _panel == 1 && GamePanel.SubPage == section;
+                        bool onSub = _panel == PanelNav.Game && GamePanel.SubPage == section;
                         ImGui.PushID("game-sub");
                         ImGui.Indent(18);
                         if (ImGui.Selectable(section, onSub, ImGuiSelectableFlags.None, new Vector2(0, 24)))
                         {
-                            _panel = 1;
+                            _panel = PanelNav.Game;
                             GamePanel.SubPage = section;
                         }
                         ImGui.Unindent(18);
@@ -337,11 +327,11 @@ public sealed class AppWindow : GameWindow
         DrawToasts();
     }
 
-    /// <summary>Hide panels the running game has no data for: Unlocks (index 3) and Level flags (index 4).</summary>
+    /// <summary>Hide panels the running game has no data for: Unlocks and Level flags.</summary>
     private bool PanelVisible(int panel) => panel switch
     {
-        3 => !_state.UnlocksUnsupported,
-        4 => !_state.LevelFlagsUnsupported,
+        PanelNav.Unlocks => !_state.UnlocksUnsupported,
+        PanelNav.LevelFlags => !_state.LevelFlagsUnsupported,
         _ => true,
     };
 
@@ -422,18 +412,18 @@ public sealed class AppWindow : GameWindow
     {
         switch (_panel)
         {
-            case 0: ConnectionPanel.Draw(_state); break;
-            case 1: GamePanel.Draw(_state); break;
-            case 2: PositionsPanel.Draw(_state); break;
-            case 3: UnlocksPanel.Draw(_state); break;
-            case 4: LevelFlagsPanel.Draw(_state); break;
-            case 5: MemoryPanel.Draw(_state); break;
-            case 6: ModsPanel.Draw(_state); break;
-            case 7: SaveFilesPanel.Draw(_state); break;
-            case 8: CombosPanel.Draw(_state); break;
-            case 9: AutosplitterPanel.Draw(_state); break;
-            case 10: InputDisplayPanel.Draw(_state, controller); break;
-            case 11: SettingsPanel.Draw(_state); break;
+            case PanelNav.Connection: ConnectionPanel.Draw(_state); break;
+            case PanelNav.Game: GamePanel.Draw(_state); break;
+            case PanelNav.Unlocks: UnlocksPanel.Draw(_state); break;
+            case PanelNav.Mods: ModsPanel.Draw(_state); break;
+            case PanelNav.SaveFiles: SaveFilesPanel.Draw(_state); break;
+            case PanelNav.Positions: PositionsPanel.Draw(_state); break;
+            case PanelNav.Autosplitter: AutosplitterPanel.Draw(_state); break;
+            case PanelNav.InputDisplay: InputDisplayPanel.Draw(_state, controller); break;
+            case PanelNav.LevelFlags: LevelFlagsPanel.Draw(_state); break;
+            case PanelNav.Memory: MemoryPanel.Draw(_state); break;
+            case PanelNav.Combos: CombosPanel.Draw(_state); break;
+            case PanelNav.Settings: SettingsPanel.Draw(_state); break;
         }
     }
 

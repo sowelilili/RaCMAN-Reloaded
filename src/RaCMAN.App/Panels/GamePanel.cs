@@ -169,7 +169,7 @@ public static class GamePanel
         }
 
         bool enabled = state.Ingame;
-        if (!enabled) ImGui.TextColored(Ui.Yellow, $"Controls are disabled outside INGAME (state is {state.Session.State}).");
+        if (!enabled) ImGui.TextColored(Ui.Yellow, $"Controls are disabled outside INGAME (state is {state.Session.State.DisplayName()}).");
 
         ImGui.BeginDisabled(!enabled);
 
@@ -425,10 +425,10 @@ public static class GamePanel
     // ---------------------------------------------------------------- a section
 
     /// <summary>
-    /// One section's controls. <paramref name="section"/> is the section's name when it has one,
-    /// which is what keys its colour presets; <paramref name="toggleColumns"/> caps the toggle grid
-    /// (the narrow Options and Quick columns ask for one) and <paramref name="leadingSpace"/> is
-    /// off for a body that has to line up with the top of a table cell.
+    /// One section's controls, in the blocks the layout's headings make: a section the file says
+    /// nothing about is one block and draws exactly what it always did, and a section with headings
+    /// draws each run of features under its own header. <paramref name="section"/> is the section's
+    /// name when it has one, which is what keys both the headings and its colour presets.
     /// </summary>
     private static void DrawSectionBody(
         AppState state,
@@ -437,6 +437,48 @@ public static class GamePanel
         string? section = null,
         int toggleColumns = 2,
         bool leadingSpace = true)
+    {
+        var blocks = section is null
+            ? new[] { new GameLayout.FeatureBlock(null, features) }
+            : GameLayout.Blocks(state.DescribedTitle, state.DescribedGame, section, features);
+
+        for (int i = 0; i < blocks.Count; i++)
+        {
+            var block = blocks[i];
+
+            // Every block draws the same tables, so each needs an id of its own for ImGui to keep
+            // them apart.
+            ImGui.PushID(i);
+
+            if (block.Heading is { } heading)
+            {
+                if (i > 0) ImGui.Spacing();
+                Ui.Heading(heading);
+            }
+
+            // The gap before the first block is the caller's to ask for; a block under a heading
+            // has that heading's own spacing above it already.
+            DrawFeatureBlock(state, describe, block.Features, section, toggleColumns,
+                leadingSpace && i == 0 && block.Heading is null);
+
+            ImGui.PopID();
+        }
+    }
+
+    /// <summary>
+    /// One run of features: the value table, the toggle grid, the actions and then the choices,
+    /// with the colour presets in front of the first colour editor. <paramref name="toggleColumns"/>
+    /// caps the toggle grid (the narrow Options and Quick columns ask for one) and
+    /// <paramref name="leadingSpace"/> is off for a body that has to line up with the top of a
+    /// table cell.
+    /// </summary>
+    private static void DrawFeatureBlock(
+        AppState state,
+        DescribeResult describe,
+        IReadOnlyList<Feature> features,
+        string? section,
+        int toggleColumns,
+        bool leadingSpace)
     {
         var values = features.Where(f => f.Kind == FeatureKind.Value).ToArray();
         var toggles = features.Where(f => f.Kind == FeatureKind.Toggle).ToArray();
@@ -490,9 +532,10 @@ public static class GamePanel
     /// slot and the planet controls on the right, and nothing here is drawn anywhere else on the
     /// page: Die is the console's own opcode (an ACTION a game describes for it is claimed by
     /// <see cref="QuickClaims"/>), the position pair used to end the Player section, and the two
-    /// buttons after them are the flagged savefile ACTIONs the Savefile section used to hold. A
-    /// game with no savefile helper simply gets the buttons it has, and one that named no planets
-    /// gets no planet controls.
+    /// buttons after them are the flagged savefile ACTIONs the Savefile section used to hold. The
+    /// planet controls and the slot dropdown are this block's alone, so the Positions panel is the
+    /// slot table and nothing else. A game with no savefile helper simply gets the buttons it has,
+    /// and one that named no planets gets no planet controls.
     /// </summary>
     private static void DrawQuickBlock(AppState state, DescribeResult describe, List<Feature>? moved)
     {
@@ -641,11 +684,12 @@ public static class GamePanel
 
             ImGui.EndDisabled();
 
-            // AllowWhenDisabled: a greyed-out box is exactly the one whose tooltip is the point.
+            // AllowWhenDisabled: a greyed-out box is exactly the one whose tooltip is the point. A
+            // LIVE toggle gets none: that the console reads it back out of the game is how every
+            // toggle here behaves as far as the user is concerned, so saying so was noise.
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             {
                 if (blocked) ImGui.SetTooltip(Ui.NoCodePatches);
-                else if (feature.IsLive) ImGui.SetTooltip("Read from the game's memory");
                 else if (feature.WritesCode) ImGui.SetTooltip("Patches game code");
             }
 

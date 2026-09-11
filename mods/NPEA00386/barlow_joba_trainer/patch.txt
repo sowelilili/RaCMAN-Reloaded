@@ -1,0 +1,9 @@
+#- name: Barlow/Joba Trainer
+#- author: robo
+#- version: 2.0
+
+0x10c955c: rack.bin
+
+#### Hooks ####
+0x10c18ec: 0x48007d69
+0x10c3498: 0x4e800020

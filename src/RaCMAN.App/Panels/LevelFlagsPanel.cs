@@ -147,7 +147,7 @@ public static class LevelFlagsPanel
         if (_flags.Length == 0)
         {
             Ui.Hint(!state.Connected ? "Connect to read level flags."
-                : !state.Ingame ? $"Reading level flags needs INGAME (state is {session.State})."
+                : !state.Ingame ? $"Reading level flags needs INGAME (state is {session.State.DisplayName()})."
                 : "This game has no level flags.");
             return;
         }

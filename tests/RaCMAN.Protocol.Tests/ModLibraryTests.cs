@@ -251,3 +251,65 @@ public class ModLibraryTests : IDisposable
         }
     }
 }
+
+/// <summary>
+/// The library this repository ships. A mod's caves are read, hashed and uploaded from beside its
+/// patch.txt, so a cave line that names a folder of its own would upload nothing and hash to the
+/// patch file alone: that rule is what these check, on the files a release actually carries.
+/// </summary>
+public class ShippedModLibraryTests
+{
+    private static string LibraryPath()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            string candidate = Path.Combine(directory.FullName, "mods");
+            if (Directory.Exists(Path.Combine(candidate, "NPEA00385"))) return candidate;
+            directory = directory.Parent;
+        }
+
+        throw new DirectoryNotFoundException("the repository's mods/ library");
+    }
+
+    [Fact]
+    public void EveryShippedModsCavesSitBesideItsPatchFile()
+    {
+        foreach (var title in Directory.EnumerateDirectories(LibraryPath()))
+        {
+            foreach (var folder in Directory.EnumerateDirectories(title))
+            {
+                if (ModLibrary.Read(folder, shipped: true) is not { } mod) continue;
+
+                foreach (var bin in mod.BinFiles)
+                {
+                    Assert.True(File.Exists(Path.Combine(folder, bin)),
+                        $"{mod.DirName}: patch.txt names {bin}, which is not beside it");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void TheBarlowJobaTrainerIsInTheRac2Library()
+    {
+        string folder = Path.Combine(LibraryPath(), "NPEA00386", "barlow_joba_trainer");
+        var mod = ModLibrary.Read(folder, shipped: true);
+
+        Assert.NotNull(mod);
+        Assert.Equal("Barlow/Joba Trainer", mod!.Name);
+        Assert.Equal("robo", mod.Author);
+        Assert.Equal("2.0", mod.Version);
+        Assert.Equal(2, mod.PatchWordCount);
+
+        // The cave came out of the author's tree as bin/rack.bin and is beside patch.txt here.
+        Assert.Equal(new[] { "rack.bin" }, mod.BinFiles);
+        Assert.Equal(534, new FileInfo(Path.Combine(folder, "rack.bin")).Length);
+    }
+
+    [Fact]
+    public void TheFreecamIsNotShippedBecauseItFightsTheSavefileHelper()
+    {
+        Assert.False(Directory.Exists(Path.Combine(LibraryPath(), "NPEA00387", "coolcam")));
+    }
+}

@@ -48,7 +48,7 @@ public static class FakeScript
                 elapsed = at;
 
                 Apply(fake, step);
-                Console.WriteLine($"fake-script t={at:0.##}s {step}: state={fake.Session.State} game={fake.Session.Game} " +
+                Console.WriteLine($"fake-script t={at:0.##}s {step}: state={fake.Session.State.DisplayName()} game={fake.Session.Game} " +
                                   $"title={(fake.Session.TitleId.Length == 0 ? "-" : fake.Session.TitleId)} " +
                                   $"generation={fake.Session.Generation}");
             }
