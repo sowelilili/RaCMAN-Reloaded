@@ -48,11 +48,21 @@ public static class UnlocksPanel
     /// </summary>
     private static string _filter = string.Empty;
 
+    /// <summary>
+    /// True once a tab has been pushed to the front for this list. The tab bar is often drawn
+    /// before the unlock list has arrived, with only the layout's own tabs in it, and ImGui keeps
+    /// whichever tab it saw first as the selected one; without this the panel opened on
+    /// Collectables every time the categories came in a frame later. The first category tab
+    /// takes the front once when it appears, unless a section was asked for by name.
+    /// </summary>
+    private static bool _frontTabChosen;
+
     public static void Reset()
     {
         _opened = false;
         _sinceRefresh = 0;
         _filter = string.Empty;
+        _frontTabChosen = false;
         Drafts.Clear();
     }
 
@@ -64,6 +74,7 @@ public static class UnlocksPanel
     {
         _opened = false;
         _sinceRefresh = 0;
+        _frontTabChosen = false;
         Drafts.Clear();
     }
 
@@ -163,7 +174,16 @@ public static class UnlocksPanel
             if (rows.Length == 0) continue;
 
             string name = category < list.Categories.Length ? list.Categories[category] : $"Category {category}";
-            if (!ImGui.BeginTabItem($"{name}###category{category}")) continue;
+
+            // The leftmost category is the panel's default tab, whatever the tab bar showed
+            // before the list arrived.
+            bool front = !_frontTabChosen;
+            if (front) _frontTabChosen = true;
+
+            bool open = front
+                ? Ui.BeginTabItem($"{name}###category{category}", ImGuiTabItemFlags.SetSelected)
+                : ImGui.BeginTabItem($"{name}###category{category}");
+            if (!open) continue;
 
             ImGui.PushID(category);
             DrawCategory(state, list, rows, enabled);
@@ -187,6 +207,10 @@ public static class UnlocksPanel
             {
                 flags = ImGuiTabItemFlags.SetSelected;
                 SubPageNav.Requested = null;
+
+                // A tab asked for by name is the front tab; the categories must not take it
+                // back when they arrive.
+                _frontTabChosen = true;
             }
 
             if (!Ui.BeginTabItem($"{section}###section-{section}", flags)) continue;
