@@ -109,10 +109,10 @@ public static class ConnectionPanel
             return;
         }
 
-        // Nothing here for anybody who is not developing qwark: Connect does the whole of it by
-        // itself, asking webMAN and loading the module only when nothing answers on qwark's port.
-        // The buttons that do the two halves by hand, the file they send and the slot it goes into
-        // are all detail, so the section only exists with debug information on.
+        // Nothing here for anybody who is not developing qwark: in webMAN mode Connect does the
+        // whole of it by itself, asking webMAN and loading the module only when nothing answers on
+        // qwark's port. The buttons that do the two halves by hand, the file they send and the slot
+        // it goes into are all detail, so that much only exists with debug information on.
         if (!Ui.Debug)
         {
             // The boxes that edit these two are hidden, so the stored values are the only ones
@@ -120,6 +120,11 @@ public static class ConnectionPanel
             // first drawn.
             _sprxPath = state.Settings.SprxPath;
             _slot = state.Settings.WebManSlot;
+
+            // Standalone is the mode for a console that loads qwark itself, and the boot plugin is
+            // how it comes to: that install is the setup step, not a debug detail, so it is the one
+            // part of this section a standalone user sees.
+            if (state.Settings.StandaloneConnection) DrawBootInstall(state, withPathBox: true);
 
             DrawConsoleSection(state);
             return;
@@ -130,13 +135,13 @@ public static class ConnectionPanel
         Ui.Heading("Load qwark through webMAN");
 
         Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot. "
-                + "Connect does this on its own when nothing answers on qwark's port.");
+                + "In webMAN mode Connect does this on its own when nothing answers on qwark's port.");
 
         ImGui.SetNextItemWidth(360);
         ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
 
         // The default is qwark.sprx beside the executable, which is where the release layout puts it.
-        string sprx = ResolveSprx(_sprxPath);
+        string sprx = Ps3Connect.ResolveSprx(_sprxPath);
 
         // The resolved path is absolute and long, so both spellings of this line wrap.
         if (File.Exists(sprx)) Ui.Hint(sprx);
@@ -180,14 +185,57 @@ public static class ConnectionPanel
                     loaded ? ToastKind.Success : ToastKind.Info));
         }
 
-        // A boot install is a change to how the console starts, and a bad one needs a recovery to
-        // undo, so it keeps its own paragraph rather than sitting under the two buttons.
+        DrawBootInstall(state, withPathBox: false);
+
+        DrawConsoleSection(state);
+    }
+
+    /// <summary>
+    /// The boot plugin: the console loads qwark itself at every start and nothing has to send it
+    /// afterwards, which is the whole of what standalone mode expects of a console. A change to how
+    /// the console starts, and a bad one needs a recovery to undo, so it keeps its own paragraph
+    /// behind a checkbox rather than sitting under the buttons that only load for this session.
+    /// <paramref name="withPathBox"/> adds the file box the debug section above already draws, for
+    /// the standalone user who sees this block and nothing else of the webMAN section.
+    /// </summary>
+    private static void DrawBootInstall(AppState state, bool withPathBox)
+    {
         ImGui.Spacing();
-        Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
+
+        if (withPathBox)
+        {
+            ImGui.Separator();
+            Ui.Heading("Install qwark on the console");
+
+            Ui.Hint($"Puts qwark.sprx in {WebManLoader.PluginsDirectory} over FTP and adds it to "
+                    + $"{WebManLoader.BootPluginsPath}, so the console loads it at every boot and this client "
+                    + "only ever has to connect. Needs webMAN on the console for this one install.");
+
+            ImGui.SetNextItemWidth(360);
+            ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
+        }
+        else
+        {
+            Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
+        }
+
+        string sprx = Ps3Connect.ResolveSprx(_sprxPath);
+
+        // The debug section above has already said where the file is; this block says it only when
+        // it is the whole of what a standalone user sees of the SPRX.
+        if (withPathBox)
+        {
+            if (File.Exists(sprx)) Ui.Hint(sprx);
+            else Ui.Warning($"{sprx} (not found; the release puts qwark.sprx beside this client)");
+        }
+
         ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
         ImGui.BeginDisabled(!_confirmBootInstall);
         if (ImGui.Button("Install to boot_plugins.txt"))
         {
+            state.Settings.SprxPath = _sprxPath;
+            state.Settings.Save();
+
             string ip = _host.Trim();
             string path = sprx;
             state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
@@ -203,26 +251,27 @@ public static class ConnectionPanel
         }
 
         ImGui.EndDisabled();
-
-        DrawConsoleSection(state);
     }
 
     /// <summary>
-    /// The PS3 Connect button, and the same thing on start: qwark's own port first, and only when
-    /// nothing answers there the way round through webMAN. Every step says what it is doing, and a
-    /// failure names the step it stopped at, because "could not connect" covers four different
-    /// things here. What the load needs, the SPRX and the VSH slot, comes from the settings, which
-    /// is where the debug-only boxes on this panel put it.
+    /// The PS3 Connect button, and the same thing on start. In webMAN mode that is qwark's own port
+    /// first and only then the way round through webMAN; in standalone mode it is the port and
+    /// nothing else. Every step says what it is doing, and a failure names the step it stopped at,
+    /// because "could not connect" covers four different things on the long way round. What the
+    /// load needs, the SPRX and the VSH slot, comes from the settings, which is where the boxes on
+    /// this panel put it.
     /// </summary>
     public static void ConnectToPs3(AppState state, string host)
     {
         string ip = host.Trim();
-        string sprx = ResolveSprx(state.Settings.SprxPath);
+        string sprx = Ps3Connect.ResolveSprx(state.Settings.SprxPath);
         int slot = state.Settings.WebManSlot;
+        bool webMan = state.Settings.WebManConnection;
 
         state.Run(async () =>
         {
             var outcome = await Ps3Connect.RunAsync(
+                webMan,
                 ip,
                 connect: () => state.Connected ? Task.CompletedTask : state.Client.ConnectAsync(ip),
                 isLoaded: () => state.WebMan.IsLoadedAsync(ip),
@@ -233,7 +282,14 @@ public static class ConnectionPanel
                         $"no {WebManLoader.SprxName} at {sprx}; build ../qwark, or turn on \"Show debug "
                         + "information\" in Settings to point this at the SPRX", sprx),
                 wait: delay => Task.Delay(delay),
-                say: (_, message) => state.Post(() => state.AddToast(message)));
+                say: (step, message) =>
+                {
+                    // The reconnect loop's own detour is rate-limited, and a detour taken here
+                    // counts: the SPRX has just gone across, so the loop has no reason to send it
+                    // again a second later.
+                    if (step == Ps3ConnectStep.Ask) state.NoteWebManDetour();
+                    state.Post(() => state.AddToast(message));
+                });
 
             state.Post(() =>
             {
@@ -387,13 +443,6 @@ public static class ConnectionPanel
             Ui.DebugHint(host.Find(state.Settings.Rpcs3QwarkPath) ?? $"{Rpcs3Host.ExeName} not found");
             foreach (var line in host.Lines) Ui.DebugHint(line);
         }
-    }
-
-    private static string ResolveSprx(string path)
-    {
-        var trimmed = (path ?? string.Empty).Trim().Trim('"');
-        if (trimmed.Length == 0) trimmed = WebManLoader.SprxName;
-        return Path.IsPathRooted(trimmed) ? trimmed : Path.Combine(AppContext.BaseDirectory, trimmed);
     }
 
     private static void DrawFirewallButton(AppState state)

@@ -33,7 +33,10 @@ public class Ps3ConnectTests
 
         public int Connects { get; private set; }
 
-        public Task<Ps3ConnectOutcome> RunAsync() => Ps3Connect.RunAsync(
+        public Task<Ps3ConnectOutcome> RunAsync() => RunAsync(webMan: true);
+
+        public Task<Ps3ConnectOutcome> RunAsync(bool webMan) => Ps3Connect.RunAsync(
+            webMan,
             Ip,
             connect: () =>
             {
@@ -174,6 +177,92 @@ public class Ps3ConnectTests
 
         Assert.Same(failure, thrown);
         Assert.Equal(new[] { "connect" }, calls);
+    }
+
+    // ---------------------------------------------------------------- standalone mode
+
+    [Fact]
+    public async Task StandaloneConnectsAndNeverMentionsWebMan()
+    {
+        var console = new FakeConsole { RefuseConnects = 0 };
+
+        var outcome = await console.RunAsync(webMan: false);
+
+        Assert.True(outcome.Connected);
+        Assert.Equal(Ps3ConnectStep.Connect, outcome.Step);
+        Assert.Equal(new[] { "connect" }, console.Calls);
+    }
+
+    [Fact]
+    public async Task StandaloneStopsAtTheSilentPortRatherThanLoadingAnything()
+    {
+        // The console that would have sent the webMAN sequence round: in standalone mode one
+        // attempt is the whole of it, and webMAN is not asked even whether the module is there.
+        var console = new FakeConsole();
+
+        var outcome = await console.RunAsync(webMan: false);
+
+        Assert.False(outcome.Connected);
+        Assert.Equal(Ps3ConnectStep.Connect, outcome.Step);
+        Assert.Contains(Ip, outcome.Message, StringComparison.Ordinal);
+        Assert.Equal(new[] { "connect" }, console.Calls);
+        Assert.Empty(console.Waits);
+        Assert.Equal(new[] { Ps3ConnectStep.Connect }, console.Said);
+    }
+
+    [Fact]
+    public async Task StandaloneLeavesAModuleErrorToTheCaller()
+    {
+        // Same rule as the long way round: qwark answered, so what it said is the error to show.
+        var failure = new ProtocolException("HELLO was not understood");
+
+        var thrown = await Assert.ThrowsAsync<ProtocolException>(() => Ps3Connect.ConnectOnlyAsync(
+            Ip,
+            connect: () => throw failure,
+            say: (_, _) => { }));
+
+        Assert.Same(failure, thrown);
+    }
+
+    // ---------------------------------------------------------------- the reconnect rate limit
+
+    [Fact]
+    public void TheFirstReconnectAttemptTakesTheDetour()
+    {
+        Assert.True(Ps3Connect.ShouldDetour(null, 0));
+        Assert.True(Ps3Connect.ShouldDetour(null, 1_000_000));
+    }
+
+    [Fact]
+    public void OneDetourPerThirtySecondsAndPlainAttemptsInBetween()
+    {
+        Assert.Equal(TimeSpan.FromSeconds(30), Ps3Connect.DetourInterval);
+
+        long at = 10_000;
+
+        // The attempts the loop makes in the half-minute after a detour are plain reconnects.
+        Assert.False(Ps3Connect.ShouldDetour(at, at));
+        Assert.False(Ps3Connect.ShouldDetour(at, at + 1_000));
+        Assert.False(Ps3Connect.ShouldDetour(at, at + 29_999));
+
+        // Thirty seconds on, the console has had its chance and the detour is worth taking again.
+        Assert.True(Ps3Connect.ShouldDetour(at, at + 30_000));
+        Assert.True(Ps3Connect.ShouldDetour(at, at + 120_000));
+    }
+
+    [Fact]
+    public void TheResolvedSprxIsAbsoluteAndDefaultsToTheOneBesideTheClient()
+    {
+        string beside = Path.Combine(AppContext.BaseDirectory, "qwark.sprx");
+
+        Assert.Equal(beside, Ps3Connect.ResolveSprx(null));
+        Assert.Equal(beside, Ps3Connect.ResolveSprx("   "));
+        Assert.Equal(beside, Ps3Connect.ResolveSprx("qwark.sprx"));
+
+        // A path of the user's own is taken as it is, quotes from a paste-in included.
+        string rooted = Path.Combine(Path.GetTempPath(), "other.sprx");
+        Assert.Equal(rooted, Ps3Connect.ResolveSprx(rooted));
+        Assert.Equal(rooted, Ps3Connect.ResolveSprx($"\"{rooted}\""));
     }
 
     [Fact]

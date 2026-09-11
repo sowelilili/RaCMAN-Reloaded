@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
 
@@ -33,6 +34,34 @@ public static class Ps3Connect
     public static readonly TimeSpan LoadWait = TimeSpan.FromSeconds(3);
 
     /// <summary>
+    /// The shortest gap between two webMAN detours on the reconnect loop. The loop itself retries
+    /// every second or two, and an FTP upload at that rate against a console that is simply off
+    /// would be neither polite nor useful.
+    /// </summary>
+    public static readonly TimeSpan DetourInterval = TimeSpan.FromSeconds(30);
+
+    /// <summary>
+    /// Whether a reconnect attempt takes the webMAN detour or is a plain connect, given when the
+    /// last detour ran (null when none has) and the time now, both in milliseconds from any clock
+    /// that only goes forwards. A pure rule so the rate limit can be read without a console: one
+    /// detour, then plain attempts until <see cref="DetourInterval"/> has passed.
+    /// </summary>
+    public static bool ShouldDetour(long? lastDetourMs, long nowMs) =>
+        lastDetourMs is not { } last || nowMs - last >= (long)DetourInterval.TotalMilliseconds;
+
+    /// <summary>
+    /// The qwark.sprx a load sends: the settings' path, or the copy the release puts beside the
+    /// executable when that path is empty or relative. Not a file check, only a full path, so the
+    /// caller can say where it looked when there is nothing there.
+    /// </summary>
+    public static string ResolveSprx(string? path)
+    {
+        var trimmed = (path ?? string.Empty).Trim().Trim('"');
+        if (trimmed.Length == 0) trimmed = WebManLoader.SprxName;
+        return Path.IsPathRooted(trimmed) ? trimmed : Path.Combine(AppContext.BaseDirectory, trimmed);
+    }
+
+    /// <summary>
     /// True for the failures that mean nothing is listening on qwark's port: the console refused
     /// the connection, or never answered. A module that answered and then refused something (a
     /// handshake it did not like, a protocol mismatch) is not one of these, and loading a second
@@ -40,6 +69,47 @@ public static class Ps3Connect
     /// </summary>
     public static bool NothingListening(Exception error) =>
         error is SocketException or TimeoutException or OperationCanceledException;
+
+    /// <summary>
+    /// The connect the user's mode asks for: the webMAN sequence below, or the plain connect that
+    /// never mentions webMAN at all. The mode is the only difference between the two, so it is
+    /// decided here rather than at each of the places that connect.
+    /// </summary>
+    public static Task<Ps3ConnectOutcome> RunAsync(
+        bool webMan,
+        string ip,
+        Func<Task> connect,
+        Func<Task<bool>> isLoaded,
+        Func<Task> load,
+        Func<TimeSpan, Task> wait,
+        Action<Ps3ConnectStep, string> say) =>
+        webMan
+            ? RunAsync(ip, connect, isLoaded, load, wait, say)
+            : ConnectOnlyAsync(ip, connect, say);
+
+    /// <summary>
+    /// Standalone mode: one attempt at qwark's port and nothing else. Nothing is asked of webMAN,
+    /// not even whether the module is there, because a console that boots qwark itself has no
+    /// webMAN step to take and may have no webMAN at all. A port that does not answer is the whole
+    /// of the failure; anything the module itself threw is left to propagate, as it is above.
+    /// </summary>
+    public static async Task<Ps3ConnectOutcome> ConnectOnlyAsync(
+        string ip,
+        Func<Task> connect,
+        Action<Ps3ConnectStep, string> say)
+    {
+        say(Ps3ConnectStep.Connect, $"Connecting to qwark on {ip}");
+        try
+        {
+            await connect().ConfigureAwait(false);
+            return new Ps3ConnectOutcome(true, Ps3ConnectStep.Connect, $"Connected to {ip}");
+        }
+        catch (Exception error) when (NothingListening(error))
+        {
+            return new Ps3ConnectOutcome(false, Ps3ConnectStep.Connect,
+                $"Nothing answered on {ip}: {error.Message}");
+        }
+    }
 
     /// <summary>
     /// Runs the sequence. <paramref name="say"/> is called with each step as it begins, so the user

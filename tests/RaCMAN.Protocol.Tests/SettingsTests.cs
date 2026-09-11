@@ -469,6 +469,80 @@ public class SettingsTests
         }
     }
 
+    // ---------------------------------------------------------------- the connection mode
+
+    [Fact]
+    public void ConnectingGoesThroughWebManUntilSomethingSaysOtherwise()
+    {
+        var settings = new Settings();
+
+        Assert.Equal("webman", settings.ConnectionMode);
+        Assert.False(settings.StandaloneConnection);
+        Assert.True(settings.WebManConnection);
+    }
+
+    [Theory]
+    [InlineData("standalone", true)]
+    [InlineData("STANDALONE", true)]
+    [InlineData("webman", false)]
+    [InlineData("nonsense", false)]
+    public void OnlyStandaloneTurnsTheWebManDetourOff(string mode, bool standalone)
+    {
+        var settings = new Settings { ConnectionMode = mode };
+
+        Assert.Equal(standalone, settings.StandaloneConnection);
+        Assert.Equal(!standalone, settings.WebManConnection);
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripTheConnectionMode()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.StandaloneConnection = true;
+            saved.Save();
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal("standalone", loaded.ConnectionMode);
+            Assert.True(loaded.StandaloneConnection);
+
+            // And back again, so the radio button is not a one-way door.
+            loaded.StandaloneConnection = false;
+            loaded.Save();
+            Assert.Equal("webman", Settings.Load(path).ConnectionMode);
+            Assert.True(Settings.Load(path).WebManConnection);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AFileFromBeforeTheConnectionModeConnectsThroughWebMan()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "old.settings.json");
+            File.WriteAllText(path, """{ "lastHost": "192.168.1.50", "webManSlot": 3 }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal("webman", loaded.ConnectionMode);
+            Assert.False(loaded.StandaloneConnection);
+            Assert.Equal(3, loaded.WebManSlot);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     // ---------------------------------------------------------------- the window
 
     [Fact]

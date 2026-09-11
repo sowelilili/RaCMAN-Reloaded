@@ -575,6 +575,47 @@ public class ClientTests
     }
 
     [Fact]
+    public async Task TheHookRunsBeforeEveryReconnectAttemptAndAFailingOneChangesNothing()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+
+        using var client = new QwarkClient { AutoReconnect = true };
+        int hooks = 0;
+
+        // The client knows nothing about what the hook does, so one that throws must leave the
+        // attempt it precedes exactly as it would have been: this is where the app asks webMAN
+        // whether the module is still loaded, and a console that is away refuses that too.
+        client.BeforeReconnect = (_, _) =>
+        {
+            Interlocked.Increment(ref hooks);
+            throw new IOException("webMAN did not answer");
+        };
+
+        await client.ConnectAsync("127.0.0.1", server.Port);
+
+        // The console drops the link but is still there. The hook runs, throws, and the attempt
+        // behind it lands anyway: a hook that failed says nothing about whether qwark is up.
+        server.DropClients();
+        Assert.True(await WaitFor(() => !client.IsConnected));
+        Assert.True(await WaitFor(() => client.IsConnected, 15000));
+        Assert.True(Volatile.Read(ref hooks) >= 1);
+        Assert.Equal(2, server.HelloCount);
+
+        // Now the console goes away for good, and every attempt the loop makes is preceded by one
+        // hook of its own rather than by the first one only.
+        int before = Volatile.Read(ref hooks);
+        server.StopListening();
+        server.DropClients();
+
+        Assert.True(await WaitFor(() => !client.IsConnected));
+        Assert.True(await WaitFor(() => Volatile.Read(ref hooks) >= before + 3, 20000));
+        Assert.True(client.ReconnectAttempt >= 3);
+
+        await client.DisconnectAsync();
+    }
+
+    [Fact]
     public async Task ModLibraryUploadsAModAndWritesQwarkSum()
     {
         var (server, client) = await ConnectAsync();

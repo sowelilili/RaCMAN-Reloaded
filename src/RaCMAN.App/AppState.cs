@@ -66,6 +66,12 @@ public sealed class AppState : IDisposable
     private int _inFlight;
 
     /// <summary>
+    /// When the last check-and-load through webMAN ran, on <see cref="Environment.TickCount64"/>,
+    /// or 0 when none has. It is what rate-limits the reconnect loop's detour.
+    /// </summary>
+    private long _lastDetourMs;
+
+    /// <summary>
     /// <paramref name="updatesAllowed"/> is off by default so that nothing which merely constructs
     /// an AppState — a test, a tool — can reach GitHub; only Program turns it on, and only for a
     /// run none of the headless flags apply to.
@@ -90,6 +96,11 @@ public sealed class AppState : IDisposable
         // The console pushes run events whether or not anyone is listening; the decision about
         // what any of them means is the autosplitter's, and it is the only subscriber.
         Client.AutosplitEventReceived += ev => Autosplitter.Handle(ev);
+
+        // The reconnect loop knows nothing about webMAN and does not need to: it awaits whatever
+        // this hook is before each attempt, and in webMAN mode that is the check-and-load that
+        // brings a crashed module back.
+        Client.BeforeReconnect = (_, token) => BeforeReconnectAsync(token);
 
         if (settings.Autosplit.Enabled) LiveSplit.Start(settings.Autosplit.Host, settings.Autosplit.Port);
 
@@ -256,6 +267,54 @@ public sealed class AppState : IDisposable
     public int InFlight => Volatile.Read(ref _inFlight);
 
     public string? LastError { get; private set; }
+
+    // ---------------------------------------------------------------- the webMAN detour
+
+    /// <summary>
+    /// Records that a check-and-load through webMAN has just run, wherever it ran: the Connect
+    /// button's own sequence counts for the rate limit below, so pressing Connect and then losing
+    /// the console a second later does not send the SPRX twice.
+    /// </summary>
+    public void NoteWebManDetour() => Interlocked.Exchange(ref _lastDetourMs, Environment.TickCount64);
+
+    /// <summary>
+    /// What the reconnect loop does before an attempt. In webMAN mode it asks webMAN whether qwark
+    /// is still loaded and sends it when it is not, which is how a console whose module crashed
+    /// comes back without anybody pressing anything; in standalone mode, and for the RPCS3 helper
+    /// on this PC, there is nothing to ask and it returns at once. At most one detour per
+    /// <see cref="Ps3Connect.DetourInterval"/>: the attempts in between are plain reconnects.
+    /// </summary>
+    private Task BeforeReconnectAsync(CancellationToken token)
+    {
+        if (Settings.StandaloneConnection || Settings.Rpcs3Target) return Task.CompletedTask;
+        if (Client.Host is not { Length: > 0 } host) return Task.CompletedTask;
+
+        long now = Environment.TickCount64;
+        long last = Interlocked.Read(ref _lastDetourMs);
+        if (!Ps3Connect.ShouldDetour(last == 0 ? null : last, now)) return Task.CompletedTask;
+
+        Interlocked.Exchange(ref _lastDetourMs, now);
+        return ReloadThroughWebManAsync(host, token);
+    }
+
+    /// <summary>
+    /// The detour itself. Only the load is worth a toast: a module webMAN still lists, a webMAN
+    /// that cannot be reached and a load that fails are all the same thing from here, a console
+    /// that is not answering, and the reconnect countdown on the Connection panel already says so.
+    /// A failure is left to the caller to swallow, which is what the hook does with it.
+    /// </summary>
+    private async Task ReloadThroughWebManAsync(string host, CancellationToken token)
+    {
+        if (await WebMan.IsLoadedAsync(host, cancellationToken: token).ConfigureAwait(false)) return;
+
+        string sprx = Ps3Connect.ResolveSprx(Settings.SprxPath);
+        if (!File.Exists(sprx)) return;
+
+        Post(() => AddToast($"webMAN does not list {WebManLoader.SprxName}: loading it"));
+        await WebMan.LoadAsync(host, sprx, Settings.WebManSlot, cancellationToken: token).ConfigureAwait(false);
+        await Task.Delay(Ps3Connect.LoadWait, token).ConfigureAwait(false);
+        Post(() => AddToast($"{WebManLoader.SprxName} loaded through webMAN; reconnecting", ToastKind.Success));
+    }
 
     // ---------------------------------------------------------------- plumbing
 

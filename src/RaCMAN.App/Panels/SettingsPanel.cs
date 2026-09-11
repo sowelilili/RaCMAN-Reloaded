@@ -36,9 +36,14 @@ public static class SettingsPanel
         ImGui.SameLine();
         if (ImGui.RadioButton("Dark", !light) && light) SetTheme(state, "dark");
 
-        // Second, because it is the one thing on this panel that is done once, on the first run,
-        // and never looked at again: it belongs where somebody arriving from the old RaCMAN will
-        // see it rather than below the settings they have come to change.
+        ImGui.Spacing();
+        ImGui.Separator();
+        Ui.Heading("Updates");
+        DrawUpdates(state);
+
+        // Then the import, because it is the one thing on this panel that is done once, on the
+        // first run, and never looked at again: it belongs where somebody arriving from the old
+        // RaCMAN will see it rather than below the settings they have come to change.
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Import from RaCMAN");
@@ -47,19 +52,12 @@ public static class SettingsPanel
         ImGui.Spacing();
         ImGui.Separator();
         Ui.Heading("Connection");
+        DrawConnection(settings);
 
-        // The panels read this every frame, so a change here is live in the table you can see.
-        float seconds = settings.TableRefreshSeconds;
-        ImGui.SetNextItemWidth(160);
-        if (ImGui.InputFloat("Refresh rate (Hz)", ref seconds, 0.1f, 1f, "%.1f"))
-        {
-            // The property clamps to 0..10, so a typed 99 or a typed -1 is still a period the
-            // panels can use.
-            settings.TableRefreshSeconds = seconds;
-            settings.Save();
-        }
-
-        Ui.Hint("How often to refresh data tables. If you're using a slower connection, decrease this. Set to 0 for manual refresh.");
+        ImGui.Spacing();
+        ImGui.Separator();
+        Ui.Heading("Ports");
+        DrawPorts(state);
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -93,16 +91,6 @@ public static class SettingsPanel
 
         ImGui.Spacing();
         ImGui.Separator();
-        Ui.Heading("Ports");
-        DrawPorts(state);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Updates");
-        DrawUpdates(state);
-
-        ImGui.Spacing();
-        ImGui.Separator();
         Ui.Heading("Files");
         DrawFiles(state, settings);
 
@@ -122,6 +110,52 @@ public static class SettingsPanel
 
         Ui.Hint("Shows debug information: qwark and protocol versions, reboot and tick "
                 + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
+    }
+
+    // ---------------------------------------------------------------- connection
+
+    /// <summary>
+    /// How this client gets qwark onto a console, and how often the panels that watch live state
+    /// read it back. Two settings about the link, in the order they are met: the mode decides what
+    /// pressing Connect does at all, and the refresh rate is what a slow link is turned down for.
+    /// </summary>
+    private static void DrawConnection(Settings settings)
+    {
+        int mode = settings.StandaloneConnection ? 1 : 0;
+        int chosen = mode;
+
+        ImGui.TextUnformatted("Mode");
+        ImGui.SameLine();
+        ImGui.RadioButton("webMAN", ref chosen, 0);
+        ImGui.SameLine();
+        ImGui.RadioButton("Standalone", ref chosen, 1);
+
+        if (chosen != mode)
+        {
+            settings.StandaloneConnection = chosen == 1;
+            settings.Save();
+        }
+
+        Ui.Hint(chosen == 0
+            ? "webMAN: every connect, and every automatic reconnect, asks webMAN whether qwark is loaded and "
+              + "sends it when it is not, so a console whose module crashed comes back on its own."
+            : "Standalone: Connect only connects, and nothing here ever asks webMAN anything. For a console "
+              + "that loads qwark at boot; the Connection panel installs it to boot_plugins.txt.");
+
+        ImGui.Spacing();
+
+        // The panels read this every frame, so a change here is live in the table you can see.
+        float seconds = settings.TableRefreshSeconds;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.InputFloat("Refresh rate (Hz)", ref seconds, 0.1f, 1f, "%.1f"))
+        {
+            // The property clamps to 0..10, so a typed 99 or a typed -1 is still a period the
+            // panels can use.
+            settings.TableRefreshSeconds = seconds;
+            settings.Save();
+        }
+
+        Ui.Hint("How often to refresh data tables. If you're using a slower connection, decrease this. Set to 0 for manual refresh.");
     }
 
     // ---------------------------------------------------------------- updates

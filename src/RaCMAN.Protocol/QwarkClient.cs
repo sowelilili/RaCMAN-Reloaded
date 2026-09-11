@@ -96,6 +96,15 @@ public sealed class QwarkClient : IDisposable
 
     public bool AutoReconnect { get; set; } = true;
 
+    /// <summary>
+    /// Awaited once before each automatic reconnect attempt, with the attempt number. This library
+    /// has no idea what it does: whatever it throws is ignored and the attempt is made anyway, so a
+    /// caller can put a step of its own in front of a retry (asking the console's plugin manager
+    /// whether the module is still there, say) without this client knowing anything about it.
+    /// Nothing calls it for the first connect, which is the caller's own to sequence.
+    /// </summary>
+    public Func<int, CancellationToken, Task>? BeforeReconnect { get; set; }
+
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(5);
 
     public TelemetryPacket? LatestTelemetry => _latestTelemetry;
@@ -349,6 +358,25 @@ public sealed class QwarkClient : IDisposable
             }
 
             if (token.IsCancellationRequested || !_wantConnection) return;
+
+            if (BeforeReconnect is { } before)
+            {
+                try
+                {
+                    await before(attempt, token).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested)
+                {
+                    return;
+                }
+                catch
+                {
+                    // A hook that failed has nothing to say about whether the console is there;
+                    // the attempt below is what decides, exactly as it would without one.
+                }
+
+                if (token.IsCancellationRequested || !_wantConnection) return;
+            }
 
             try
             {

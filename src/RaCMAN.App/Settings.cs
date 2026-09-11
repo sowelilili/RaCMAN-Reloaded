@@ -41,6 +41,32 @@ public sealed class Settings
         set => Target = value ? Rpcs3TargetName : Ps3TargetName;
     }
 
+    /// <summary>
+    /// How a connection to a console is made: "webman" (the default) has every connect, the
+    /// automatic reconnects included, ask webMAN whether qwark is loaded and send it when it is
+    /// not, so a console whose module crashed comes back on its own; "standalone" only ever
+    /// connects, which is what a console that loads qwark at boot wants. Anything unrecognised
+    /// reads as "webman", so a file from before this key keeps the behaviour it had.
+    /// </summary>
+    [JsonPropertyName("connectionMode")]
+    public string ConnectionMode { get; set; } = WebManModeName;
+
+    public const string WebManModeName = "webman";
+
+    public const string StandaloneModeName = "standalone";
+
+    /// <summary>True only when <see cref="ConnectionMode"/> explicitly says "standalone".</summary>
+    [JsonIgnore]
+    public bool StandaloneConnection
+    {
+        get => string.Equals(ConnectionMode, StandaloneModeName, StringComparison.OrdinalIgnoreCase);
+        set => ConnectionMode = value ? StandaloneModeName : WebManModeName;
+    }
+
+    /// <summary>True while a connect is allowed to ask webMAN about the module and load it.</summary>
+    [JsonIgnore]
+    public bool WebManConnection => !StandaloneConnection;
+
     /// <summary>The port RPCS3's IPC server listens on, which qwark-rpcs3.exe is pointed at.</summary>
     [JsonPropertyName("rpcs3PinePort")]
     public int Rpcs3PinePort { get; set; } = Rpcs3Host.DefaultPinePort;
