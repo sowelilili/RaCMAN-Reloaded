@@ -231,7 +231,24 @@ else {
     # qwark's suites need a POSIX shell and Python, which this machine has and a fresh one may not.
     # A missing tool is a warning: the console side is unchanged by a client-only release, and the
     # workflow never builds it. A suite that runs and fails is a release that stops.
+    #
+    # Git for Windows ships a shell and does not put it on the PATH, so a PATH lookup alone finds
+    # nothing on a machine that has one. Git's comes first: qwark's build scripts are written for
+    # it, and Cygwin's would need its own toolchain on the PATH to get through them.
     $sh = Get-Command sh -ErrorAction SilentlyContinue
+    if (-not $sh) {
+        foreach ($candidate in @(
+            (Combine $env:ProgramFiles 'Git' 'bin' 'sh.exe'),
+            (Combine ${env:ProgramFiles(x86)} 'Git' 'bin' 'sh.exe'),
+            'C:\cygwin64\bin\sh.exe')) {
+
+            if ($candidate -and (Test-Path $candidate)) {
+                $sh = Get-Command $candidate
+                break
+            }
+        }
+    }
+
     $python = Get-Command python -ErrorAction SilentlyContinue
 
     # Both suites read paths relative to qwark's own root, so they run from there rather than from
