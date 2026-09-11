@@ -67,9 +67,20 @@ function Combine {
     return [System.IO.Path]::Combine([string[]]$Parts)
 }
 
-# Native git, with the exit code checked rather than the output parsed for errors. Nothing here
-# redirects stderr: under Windows PowerShell that turns a native command's ordinary chatter into
-# error records and makes a successful command look like a failed one.
+# Every external tool goes through here. Under Windows PowerShell, a native command that writes to
+# stderr raises an error record whenever the caller has redirected or piped the stream, and with
+# $ErrorActionPreference set to Stop that record ends the script. git writes its progress to stderr,
+# so a release piped into a log file would die on a push that had in fact worked. The preference
+# goes back to Continue for the length of the call and the exit code is the only thing believed.
+function Invoke-Native {
+    param([scriptblock]$Command)
+
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $Command }
+    finally { $ErrorActionPreference = $previous }
+}
+
 function Invoke-Git {
     param(
         [string]$Repo,
@@ -77,12 +88,22 @@ function Invoke-Git {
         [switch]$AllowFail
     )
 
-    $output = & git -C $Repo @GitArgs
+    $output = Invoke-Native { & git -C $Repo @GitArgs }
     if (-not $AllowFail -and $LASTEXITCODE -ne 0) {
         throw "git $($GitArgs -join ' ') failed in $Repo (exit $LASTEXITCODE)"
     }
 
     return $output
+}
+
+# A test suite: its output goes to the screen as it runs, and a non-zero exit stops the release.
+function Invoke-Suite {
+    param([string]$What, [scriptblock]$Command)
+
+    Write-Step "running $What"
+    Invoke-Native $Command
+    if ($LASTEXITCODE -ne 0) { throw "$What failed (exit $LASTEXITCODE)" }
+    Write-Good "$What passed"
 }
 
 function Write-Step([string]$text) { Write-Host $text -ForegroundColor Cyan }
@@ -223,10 +244,7 @@ if ($SkipTests) {
     Write-Step 'skipping the tests'
 }
 else {
-    Write-Step 'running the client tests'
-    & dotnet test $repo --nologo --verbosity quiet
-    if ($LASTEXITCODE -ne 0) { throw "dotnet test failed (exit $LASTEXITCODE)" }
-    Write-Good 'the client suite passed'
+    Invoke-Suite 'the client suite' { & dotnet test $repo --nologo --verbosity quiet }
 
     # qwark's suites need a POSIX shell and Python, which this machine has and a fresh one may not.
     # A missing tool is a warning: the console side is unchanged by a client-only release, and the
@@ -256,20 +274,14 @@ else {
     Push-Location $qwark
     try {
         if ($sh) {
-            Write-Step 'running the qwark unit tests'
-            & $sh.Source 'test/run.sh'
-            if ($LASTEXITCODE -ne 0) { throw "qwark's test/run.sh failed (exit $LASTEXITCODE)" }
-            Write-Good 'the qwark unit suite passed'
+            Invoke-Suite "qwark's unit suite" { & $sh.Source 'test/run.sh' }
         }
         else {
-            Write-Warning 'no sh on the PATH, so qwark test/run.sh did not run.'
+            Write-Warning 'no sh found, so qwark test/run.sh did not run.'
         }
 
         if ($python) {
-            Write-Step 'running the qwark smoke test'
-            & $python.Source 'test/smoke.py'
-            if ($LASTEXITCODE -ne 0) { throw "qwark's test/smoke.py failed (exit $LASTEXITCODE)" }
-            Write-Good 'the qwark smoke test passed'
+            Invoke-Suite "qwark's smoke test" { & $python.Source 'test/smoke.py' }
         }
         else {
             Write-Warning 'no python on the PATH, so qwark test/smoke.py did not run.'
