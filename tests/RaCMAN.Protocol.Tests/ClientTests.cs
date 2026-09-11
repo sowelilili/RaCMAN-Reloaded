@@ -892,12 +892,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(11, true)]     // the build before the one this client ships with
-    [InlineData(12, false)]    // exactly the expected build: the savefile library on the console
-    [InlineData(13, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(13, true)]     // the build before the one this client ships with
+    [InlineData(14, false)]    // exactly the expected build: the Deadlocked helper off the hook the display mods use
+    [InlineData(15, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(12, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(14, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
