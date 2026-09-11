@@ -56,8 +56,7 @@ public static class ModsPanel
 
         if (locals.Count == 0)
         {
-            Ui.Hint("Neither your mods folder nor the one that ships with RaCMAN Reloaded has a mod for this "
-                    + "title. Install one from a ZIP below.");
+            Ui.Hint("No mods found for this title. Install one from a ZIP below.");
         }
         else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
