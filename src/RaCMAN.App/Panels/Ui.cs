@@ -248,6 +248,26 @@ public static class Ui
         ImGui.InputTextWithHint(label, hint, ref value, maxLength);
 
     /// <summary>
+    /// A tab item with flags on it. The binding only offers those through the overload that also
+    /// takes the "still open" flag a close box writes back to, and none of these tabs has a close
+    /// box, so this is the call it does not generate: the same tab item with no such flag. What the
+    /// panels want it for is <see cref="ImGuiTabItemFlags.SetSelected"/>, which is how a tab named
+    /// on the command line is the one showing when the window opens.
+    /// </summary>
+    public static unsafe bool BeginTabItem(string label, ImGuiTabItemFlags flags)
+    {
+        int length = System.Text.Encoding.UTF8.GetByteCount(label);
+        Span<byte> utf8 = length < 256 ? stackalloc byte[length + 1] : new byte[length + 1];
+        System.Text.Encoding.UTF8.GetBytes(label, utf8);
+        utf8[length] = 0;
+
+        fixed (byte* text = utf8)
+        {
+            return ImGuiNative.igBeginTabItem(text, null, flags) != 0;
+        }
+    }
+
+    /// <summary>
     /// A decimal box that shows <paramref name="live"/> until the user types in it and only
     /// reports a value when Enter is pressed, so a half-typed number never reaches the console.
     /// The draft lives in <paramref name="drafts"/> while the box has focus and is dropped the

@@ -38,6 +38,12 @@ public sealed class AppWindow : GameWindow
     public Exception? Failure { get; private set; }
 
     /// <summary>
+    /// The panel the nav is on, by name. A headless run prints it on its way out, which is the only
+    /// way to see from outside the window where <c>--panel</c> and <c>--game-section</c> landed.
+    /// </summary>
+    public string PanelName => PanelNames[Math.Clamp(_panel, 0, PanelNames.Length - 1)];
+
+    /// <summary>
     /// The window this run opens: the default size, or the size and corner the last run was left
     /// at, brought back onto a monitor this desktop actually has. <see cref="WindowGeometry"/> has
     /// the rules; this only asks GLFW what the desktop looks like.
@@ -244,9 +250,9 @@ public sealed class AppWindow : GameWindow
 
             if (ImGui.BeginChild("##nav", new Vector2(190, -1), ImGuiChildFlags.Borders))
             {
-                // A sub-page asked for on the command line opens under whichever panel hosts it,
-                // as soon as the descriptors say the running game has that section at all.
-                RouteRequestedSubPage();
+                // A section asked for on the command line opens on whichever panel draws it, as
+                // soon as the descriptors say the running game has that section at all.
+                RouteRequestedSection();
 
                 // If the current panel is one the running game doesn't support, fall back to Game;
                 // if it is one this console cannot drive at all, to Connection, which is the panel
@@ -261,11 +267,10 @@ public sealed class AppWindow : GameWindow
                     // A thin line between the nav's groups, and none above the first of them.
                     if (PanelNav.StartsGroup(i)) ImGui.Separator();
 
-                    // Game and Unlocks are the two entries a layout can hang sub-pages under, and
-                    // both are drawn here the same way: the entry itself is selected only while its
-                    // own page is the one showing.
-                    string? host = PanelNav.SubPageHost(i);
-                    bool selected = _panel == i && (host is null || SubPageNav.For(host) is null);
+                    // Game is the one entry with sub-pages indented under it, and it is selected
+                    // only while its own page, rather than one of those, is the one showing.
+                    bool isGame = i == PanelNav.Game;
+                    bool selected = _panel == i && (!isGame || SubPageNav.Open is null);
 
                     string? disabled = DisabledReason(i);
                     ImGui.BeginDisabled(disabled is not null);
@@ -283,22 +288,22 @@ public sealed class AppWindow : GameWindow
                     if (clicked)
                     {
                         _panel = i;
-                        if (host is not null) SubPageNav.Set(host, null);
+                        if (isGame) SubPageNav.Open = null;
                     }
 
-                    if (host is null) continue;
+                    if (!isGame) continue;
 
-                    // The panel's sub-pages: the sections the layout hangs under it, indented, and
-                    // only those the running game has something for.
-                    foreach (var section in GamePanel.SubPagesWithContent(_state, host))
+                    // The Game page's sub-pages: the sections the layout makes pages of their own,
+                    // indented under it, and only those the running game has something for.
+                    foreach (var section in GamePanel.SubPagesWithContent(_state))
                     {
-                        bool onSub = _panel == i && SubPageNav.For(host) == section;
-                        ImGui.PushID(host);
+                        bool onSub = _panel == PanelNav.Game && SubPageNav.Open == section;
+                        ImGui.PushID("game-sub");
                         ImGui.Indent(18);
                         if (ImGui.Selectable(section, onSub, ImGuiSelectableFlags.None, new Vector2(0, 24)))
                         {
-                            _panel = i;
-                            SubPageNav.Set(host, section);
+                            _panel = PanelNav.Game;
+                            SubPageNav.Open = section;
                         }
                         ImGui.Unindent(18);
                         ImGui.PopID();
@@ -335,17 +340,16 @@ public sealed class AppWindow : GameWindow
     }
 
     /// <summary>
-    /// Opens the panel that hosts the sub-page <c>--game-section</c> named, so a headless run lands
-    /// on it wherever the layout hung it. Nothing happens while the running game has no such
-    /// section, or while that panel is hidden or greyed out; the panel itself takes the request up
-    /// (and clears it) the first time it draws.
+    /// Opens the panel that draws the section <c>--game-section</c> named, so a headless run lands
+    /// on it wherever the layout put it: the Game page for a sub-page, the Unlocks panel for one of
+    /// its tabs. Nothing happens while the running game has no such section, or while that panel is
+    /// hidden or greyed out; the panel itself takes the request up (and clears it) the first time
+    /// it draws.
     /// </summary>
-    private void RouteRequestedSubPage()
+    private void RouteRequestedSection()
     {
         if (SubPageNav.Requested is not { } wanted) return;
-        if (GamePanel.HostForOpenableSubPage(_state, wanted) is not { } host) return;
-
-        int panel = PanelNav.PanelForHost(host);
+        if (GamePanel.PanelForSection(_state, wanted) is not { } panel) return;
         if (PanelVisible(panel) && DisabledReason(panel) is null) _panel = panel;
     }
 

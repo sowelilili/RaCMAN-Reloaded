@@ -16,10 +16,11 @@ namespace RaCMAN.App.Panels;
 /// console-side actions that rewrite the whole table (UYA's weapon-level pair), which belong with
 /// the list they change rather than on the Game page.
 ///
-/// The panel also holds sub-pages of its own, for the sections the layout file hangs under
-/// "Unlocks" (Collectables, in the shipped file). They are listed indented under Unlocks in the
-/// side nav and drawn by <see cref="GamePanel.DrawSubPage(AppState, string, string)"/>, the same
-/// code the Game page's own sub-pages go through; clicking Unlocks itself comes back to the table.
+/// After the category tabs come the layout file's own, one per section it lists under
+/// "unlocksTabs" (Collectables, in the shipped file) that the running game has something in. Their
+/// bodies are <see cref="GamePanel.DrawSectionPage(AppState, string)"/>, the same code a sub-page of
+/// the Game page is drawn with, so a section reads the same wherever the file puts it. The bulk
+/// buttons, the search box and the table belong to a category tab and are not drawn in those.
 ///
 /// Refresh policy: the whole list is re-read on the Settings panel's table refresh interval while
 /// the panel is open, and again straight after any UNLOCK_SET. Re-reading everything is simpler
@@ -53,7 +54,6 @@ public static class UnlocksPanel
         _sinceRefresh = 0;
         _filter = string.Empty;
         Drafts.Clear();
-        SubPageNav.Set(GameLayout.UnlocksHost, null);
     }
 
     /// <summary>
@@ -69,14 +69,6 @@ public static class UnlocksPanel
 
     public static void Draw(AppState state)
     {
-        // A section the layout hangs under this panel is a page of its own, drawn the way the Game
-        // page draws the ones hung under it. The table is what the Unlocks entry itself shows.
-        if (GamePanel.ResolveSubPage(state, GameLayout.UnlocksHost) is { } section)
-        {
-            GamePanel.DrawSubPage(state, GameLayout.UnlocksHost, section);
-            return;
-        }
-
         Ui.Heading("Unlocks");
 
         DrawSectionActions(state);
@@ -135,17 +127,34 @@ public static class UnlocksPanel
         }
 
         var list = state.Unlocks;
+
+        // The layout's own tabs are features, not unlock rows, so they are there whatever the table
+        // itself has in it: an empty table says why it is empty and the tabs are still drawn.
+        var sections = GamePanel.UnlocksTabsWithContent(state);
+
         if (list.Unlocks.Length == 0)
         {
             Ui.Hint(!state.Connected ? "Connect to read the unlock list."
                 : !enabled ? $"No unlock list: the session is {state.Session.State.DisplayName()}, not INGAME."
                 : "The unlock list is empty.");
-            return;
+
+            if (sections.Count == 0) return;
         }
 
         ImGui.Spacing();
 
         if (!ImGui.BeginTabBar("unlock-categories")) return;
+
+        DrawCategoryTabs(state, list, enabled);
+        DrawSectionTabs(state, sections);
+
+        ImGui.EndTabBar();
+    }
+
+    /// <summary>One tab per unlock category the running game declares an entry in.</summary>
+    private static void DrawCategoryTabs(AppState state, UnlockList list, bool enabled)
+    {
+        if (list.Unlocks.Length == 0) return;
 
         int categories = Math.Max(list.Categories.Length, list.Unlocks.Max(u => u.Category) + 1);
         for (int category = 0; category < categories; category++)
@@ -161,8 +170,30 @@ public static class UnlocksPanel
             ImGui.PopID();
             ImGui.EndTabItem();
         }
+    }
 
-        ImGui.EndTabBar();
+    /// <summary>
+    /// The layout's own tabs, after the categories: one per section it lists under "unlocksTabs",
+    /// drawn exactly as the Game page draws a sub-page of its own. A section named on the command
+    /// line is selected for the one frame the request lives, which is how <c>--game-section</c>
+    /// opens the window on a tab.
+    /// </summary>
+    private static void DrawSectionTabs(AppState state, IReadOnlyList<string> sections)
+    {
+        foreach (var section in sections)
+        {
+            var flags = ImGuiTabItemFlags.None;
+            if (string.Equals(SubPageNav.Requested, section, StringComparison.Ordinal))
+            {
+                flags = ImGuiTabItemFlags.SetSelected;
+                SubPageNav.Requested = null;
+            }
+
+            if (!Ui.BeginTabItem($"{section}###section-{section}", flags)) continue;
+
+            GamePanel.DrawSectionPage(state, section);
+            ImGui.EndTabItem();
+        }
     }
 
     /// <summary>

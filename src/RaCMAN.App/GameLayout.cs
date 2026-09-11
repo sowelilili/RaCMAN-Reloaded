@@ -29,16 +29,24 @@ public sealed class TitleLayout
 public sealed class LayoutFile
 {
     /// <summary>
-    /// Nav entry -> the sections that hang under it as sub-pages rather than stacking on its page.
-    /// The keys are panels (<see cref="GameLayout.Hosts"/>), the values are sections; a key naming
-    /// anything else is dropped, since the file cannot invent a nav entry of its own.
+    /// The sections that become a sub-page of their own, indented under Game in the side nav,
+    /// rather than stacking on the Game page. A list of section names; this is the raw JSON rather
+    /// than <c>string[]</c> because the short-lived table keyed by panel is read as well, so an
+    /// override file written against that still loads.
     /// </summary>
     [JsonPropertyName("subPages")]
-    public Dictionary<string, string[]>? SubPages { get; set; }
+    public JsonElement SubPages { get; set; }
 
     /// <summary>
-    /// The old spelling of <c>subPages.Game</c>, read when a file has no <c>subPages</c> at all so
-    /// that a copy of the file someone edited before the key existed keeps working.
+    /// The sections the Unlocks panel draws as tabs of its own, beside the unlock categories, for
+    /// the controls that belong with the table they rewrite.
+    /// </summary>
+    [JsonPropertyName("unlocksTabs")]
+    public string[]? UnlocksTabs { get; set; }
+
+    /// <summary>
+    /// The old spelling of <c>subPages</c>, read when a file has no <c>subPages</c> at all so that
+    /// a copy of the file someone edited before the key was renamed keeps working.
     /// </summary>
     [JsonPropertyName("sideSections")]
     public string[]? SideSections { get; set; }
@@ -49,13 +57,24 @@ public sealed class LayoutFile
     /// </summary>
     [JsonPropertyName("games")]
     public Dictionary<string, TitleLayout> Games { get; set; } = new();
+
+    /// <summary>
+    /// The sub-page list as every reader sees it, filled in on load: the file's, the old key's or
+    /// the shipped default, with the names that cannot be a page of their own already gone.
+    /// </summary>
+    [JsonIgnore]
+    public string[] Pages { get; set; } = Array.Empty<string>();
+
+    /// <summary>The Unlocks panel's tab list, cleaned the same way and on the same pass.</summary>
+    [JsonIgnore]
+    public string[] Tabs { get; set; } = Array.Empty<string>();
 }
 
 /// <summary>
 /// The feature layout, owned by the client rather than qwark. qwark's DESCRIBE groups are the
 /// default; <c>data/gamelayout.json</c> (shipped, and editable by the user) overrides where a feature
-/// goes, which sections become sub-pages and which nav entry each of those hangs under, so the
-/// layout can be tuned without touching the console module.
+/// goes, which sections become sub-pages of the Game page and which become tabs on the Unlocks
+/// panel, so the layout can be tuned without touching the console module.
 /// <para>
 /// Entries are keyed by game ("rac1".."rac4") rather than by title id, because BCES01503 hosts RaC1,
 /// RaC2 and RaC3 under a single title id. An entry keyed by a title id still wins over the game key,
@@ -102,32 +121,21 @@ public static class GameLayout
     public static bool IsReserved(string section) =>
         section is QuickSection or ValuesSection or OptionsSection or UnlocksSection;
 
-    /// <summary>The nav entry a sub-page hangs under by default: the Game page.</summary>
-    public const string GameHost = "Game";
+    /// <summary>The sub-pages of the Game page when the file says nothing about them.</summary>
+    private static readonly string[] DefaultSubPages = { "Manips", "Cosmetics", "Debug" };
+
+    /// <summary>The Unlocks panel's own tabs when the file says nothing about them.</summary>
+    private static readonly string[] DefaultUnlocksTabs = { "Collectables" };
 
     /// <summary>
-    /// The other nav entry that can hold sub-pages. It shares its name with
-    /// <see cref="UnlocksSection"/>, which is no clash: the <c>subPages</c> table's keys are panels
-    /// and its values are sections, so the two names never stand in the same place.
+    /// The keys of the panel-keyed <c>subPages</c> table this file briefly used. It was never
+    /// released, so nothing writes it any more; it is read so that an override file written while
+    /// it existed still says what its author meant. The Game key is the sub-page list, the Unlocks
+    /// key is what <c>unlocksTabs</c> spells now.
     /// </summary>
-    public const string UnlocksHost = "Unlocks";
+    private const string OldGameKey = "Game";
 
-    /// <summary>
-    /// The panels a sub-page can hang under, in nav order. These are the keys of the layout file's
-    /// <c>subPages</c> table, spelled exactly as the side nav lists them; a key naming anything else
-    /// is dropped, because the file arranges the pages that exist and cannot make a new nav entry.
-    /// </summary>
-    public static readonly string[] Hosts = { GameHost, UnlocksHost };
-
-    /// <summary>True for a name the <c>subPages</c> table may be keyed by.</summary>
-    public static bool IsHost(string host) => Array.IndexOf(Hosts, host) >= 0;
-
-    /// <summary>Which sections hang where when the file does not say.</summary>
-    private static readonly Dictionary<string, string[]> DefaultSubPages = new(StringComparer.Ordinal)
-    {
-        [GameHost] = new[] { "Manips", "Cosmetics", "Debug" },
-        [UnlocksHost] = new[] { "Collectables" },
-    };
+    private const string OldUnlocksKey = "Unlocks";
 
     private static readonly JsonSerializerOptions Options = new()
     {
@@ -161,65 +169,51 @@ public static class GameLayout
     /// <summary>Load a specific file into the cache (tests point this at the source tree's data/gamelayout.json).</summary>
     public static void LoadFrom(string path) => _cache = Load(path);
 
-    private static Dictionary<string, string[]> Pages => Config.SubPages ?? DefaultSubPages;
+    /// <summary>
+    /// The sections drawn as sub-pages of the Game page, indented under it in the side nav, in the
+    /// order the file lists them.
+    /// </summary>
+    public static IReadOnlyList<string> SubPages => Config.Pages;
 
     /// <summary>
-    /// The sections that hang under one nav entry as sub-pages, in the order the file lists them.
-    /// Empty for a panel the file hangs nothing under, and for any name that is not a host.
+    /// The sections the Unlocks panel draws as tabs of its own, beside the unlock categories, in
+    /// the order the file lists them.
     /// </summary>
-    public static IReadOnlyList<string> SubPagesUnder(string host) =>
-        Pages.TryGetValue(host, out var sections) ? sections : Array.Empty<string>();
+    public static IReadOnlyList<string> UnlocksTabs => Config.Tabs;
 
     /// <summary>
-    /// The sub-pages one panel shows, with the fallback for a game that has no unlock table: the
-    /// Unlocks panel is not in the nav at all then, so what the file hung under it is shown under
-    /// Game rather than becoming unreachable.
+    /// The Game page's sub-pages, with the fallback for a game that has no unlock table: the
+    /// Unlocks panel is not in the nav at all then, so the sections it would have drawn as tabs are
+    /// listed under Game rather than becoming unreachable.
     /// </summary>
-    public static IReadOnlyList<string> SubPagesUnder(string host, bool unlocksHidden)
-    {
-        if (string.Equals(host, UnlocksHost, StringComparison.Ordinal))
-            return unlocksHidden ? Array.Empty<string>() : SubPagesUnder(UnlocksHost);
-
-        if (!string.Equals(host, GameHost, StringComparison.Ordinal)) return Array.Empty<string>();
-
-        return unlocksHidden
-            ? SubPagesUnder(GameHost).Concat(SubPagesUnder(UnlocksHost)).ToArray()
-            : SubPagesUnder(GameHost);
-    }
+    public static IReadOnlyList<string> SubPagesFor(bool unlocksHidden) =>
+        unlocksHidden ? Config.Pages.Concat(Config.Tabs).ToArray() : Config.Pages;
 
     /// <summary>
-    /// Every section that is a sub-page of some panel. None of them stacks on the Game page,
-    /// wherever it hangs, so this is the list that page skips.
+    /// True for a section the Unlocks panel draws as a tab of its own. False for every section
+    /// while that panel is hidden, since the tab would then be nowhere: those fall back to
+    /// <see cref="SubPagesFor"/> instead.
     /// </summary>
-    public static IReadOnlyList<string> AllSubPages =>
-        Hosts.SelectMany(SubPagesUnder).ToArray();
+    public static bool IsUnlocksTab(string section, bool unlocksHidden) =>
+        !unlocksHidden && Config.Tabs.Contains(section, StringComparer.Ordinal);
 
     /// <summary>
-    /// The panel that draws a section as a sub-page. The file's own answer, with the fallback
-    /// above, and the Game page for a section the file hangs nowhere: a sub-page opened by name
-    /// (<c>--game-section</c>) can be any section the running game has, not only a listed one.
+    /// Every section that is drawn somewhere of its own: a sub-page of the Game page, or a tab on
+    /// the Unlocks panel. None of them stacks on the Game page, so this is the list that page
+    /// skips, whichever of the two a section is in.
     /// </summary>
-    public static string HostFor(string section, bool unlocksHidden) =>
-        !unlocksHidden && SubPagesUnder(UnlocksHost).Contains(section, StringComparer.Ordinal)
-            ? UnlocksHost
-            : GameHost;
+    public static IReadOnlyList<string> SectionsDrawnElsewhere => Config.Pages.Concat(Config.Tabs).ToArray();
 
     /// <summary>The key a game is looked up under: the lower-case enum name, "rac1".."rac4".</summary>
     private static string GameKey(GameId game) => game.ToString().ToLowerInvariant();
 
     private static LayoutFile Load(string path)
     {
+        LayoutFile? loaded = null;
+
         try
         {
-            if (File.Exists(path))
-            {
-                var loaded = JsonSerializer.Deserialize<LayoutFile>(File.ReadAllText(path), Options);
-                if (loaded is not null)
-                {
-                    Problems = Array.Empty<string>();
-                    return Normalise(loaded);
-                }
-            }
+            if (File.Exists(path)) loaded = JsonSerializer.Deserialize<LayoutFile>(File.ReadAllText(path), Options);
             Problems = Array.Empty<string>();
         }
         catch (Exception ex) when (ex is IOException or JsonException)
@@ -227,7 +221,9 @@ public static class GameLayout
             Problems = new[] { $"gamelayout.json: {ex.Message}" };
         }
 
-        return new LayoutFile();
+        // A file that is missing or broken is the same as a file that says nothing: the shipped
+        // defaults, which is what keeps the client usable while the user fixes their own copy.
+        return Normalise(loaded ?? new LayoutFile());
     }
 
     /// <summary>Keys are title ids and game names, so match them without caring about case.</summary>
@@ -237,52 +233,72 @@ public static class GameLayout
         foreach (var (key, layout) in file.Games) games[key] = layout;
         file.Games = games;
 
-        file.SubPages = NormaliseSubPages(file);
+        ResolveLists(file);
 
         return file;
     }
 
     /// <summary>
-    /// The sub-page table as every reader sees it: one entry per host, in nav order, with the
-    /// names that cannot be sub-pages already gone. A reserved name would otherwise turn a
-    /// panel-owned section into a page, a host nobody draws would hide a section altogether, and a
-    /// section named under both panels would be drawn twice, so the first host to claim one keeps
-    /// it. Null when the file says nothing about sub-pages at all, which is what leaves the
-    /// shipped defaults in force.
+    /// The two lists as every reader sees them: what the file says, each key falling back to the
+    /// shipped default on its own, with the names that cannot be a page already gone. A reserved
+    /// name would otherwise turn a panel-owned section into a page, and a section in both lists
+    /// would be drawn twice, so the sub-page list keeps it and the tab list loses it.
     /// </summary>
-    private static Dictionary<string, string[]>? NormaliseSubPages(LayoutFile file)
+    private static void ResolveLists(LayoutFile file)
     {
-        // Host keys are hand-typed, so they match the way the property names do: without case.
-        var given = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
+        string[]? pages = null;
+        string[]? tabs = null;
 
-        if (file.SubPages is { } table)
+        switch (file.SubPages.ValueKind)
         {
-            foreach (var (host, sections) in table)
-            {
-                if (host is not null && sections is not null) given[host] = sections;
-            }
-        }
-        else if (file.SideSections is { } legacy)
-        {
-            // The old key is exactly what "subPages": { "Game": [...] } means now.
-            given[GameHost] = legacy;
-        }
-        else
-        {
-            return null;
+            case JsonValueKind.Array:
+                pages = Names(file.SubPages);
+                break;
+
+            // The panel-keyed table this file briefly used, so an override written against it says
+            // the same thing under the two keys that replaced it.
+            case JsonValueKind.Object:
+                pages = Names(Property(file.SubPages, OldGameKey));
+                tabs = Names(Property(file.SubPages, OldUnlocksKey));
+                break;
         }
 
-        var clean = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        pages ??= file.SideSections;       // the older spelling of the same list
+        tabs = file.UnlocksTabs ?? tabs;   // a file with both means what the current key says
+
         var claimed = new HashSet<string>(StringComparer.Ordinal);
+        file.Pages = Clean(pages ?? DefaultSubPages, claimed);
+        file.Tabs = Clean(tabs ?? DefaultUnlocksTabs, claimed);
+    }
 
-        foreach (var host in Hosts)
+    /// <summary>The names a list may keep: not blank, not a reserved section, and not already taken.</summary>
+    private static string[] Clean(IEnumerable<string?> sections, HashSet<string> claimed) =>
+        sections
+            .Where(section => !string.IsNullOrWhiteSpace(section) && !IsReserved(section) && claimed.Add(section))
+            .Select(section => section!)
+            .ToArray();
+
+    /// <summary>The strings in a JSON array, or null for anything that is not one.</summary>
+    private static string[]? Names(JsonElement? element) =>
+        element is { ValueKind: JsonValueKind.Array } array
+            ? array.EnumerateArray()
+                .Where(item => item.ValueKind == JsonValueKind.String)
+                .Select(item => item.GetString()!)
+                .ToArray()
+            : null;
+
+    /// <summary>
+    /// One property of a JSON object, matched the way the property names themselves are: without
+    /// caring about case, since these keys are hand-typed.
+    /// </summary>
+    private static JsonElement? Property(JsonElement table, string name)
+    {
+        foreach (var property in table.EnumerateObject())
         {
-            clean[host] = given.TryGetValue(host, out var sections)
-                ? sections.Where(s => !string.IsNullOrWhiteSpace(s) && !IsReserved(s) && claimed.Add(s)).ToArray()
-                : Array.Empty<string>();
+            if (string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase)) return property.Value;
         }
 
-        return clean;
+        return null;
     }
 
     /// <summary>The layout for a title id if there is one, else the one for the game. Null when neither is configured.</summary>

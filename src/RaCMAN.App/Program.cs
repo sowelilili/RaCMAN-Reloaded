@@ -72,8 +72,8 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine($"  --panel <n>            open on panel n: {panels[0]}");
             for (int line = 1; line < panels.Count; line++) Console.WriteLine($"                         {panels[line]}");
 
-            Console.WriteLine("  --game-section <name>  open that layout section as a sub-page, under whichever");
-            Console.WriteLine("                         panel hosts it (Debug, Cosmetics, Collectables, ...)");
+            Console.WriteLine("  --game-section <name>  open that layout section wherever it is drawn: a sub-page");
+            Console.WriteLine("                         of Game, or a tab on Unlocks (Debug, Collectables, ...)");
             Console.WriteLine("  --pad-window           show the input display in its own OS window");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
             Console.WriteLine("  --data-dir <path>      keep this run's settings, mods and savefiles there");
@@ -164,10 +164,12 @@ else if (fakeScript is not null)
 }
 
 int exitCode;
+string panelOnExit;
 using (var window = new AppWindow(state, exitAfter, startPanel))
 {
     window.Run();
     exitCode = window.Failure is null ? 0 : 1;
+    panelOnExit = window.PanelName;
     if (window.Failure is not null)
     {
         Console.Error.WriteLine($"RaCMAN Reloaded exited on {window.Failure.GetType().Name}: {window.Failure.Message}");
@@ -191,7 +193,7 @@ if (exitAfter > 0)
         : string.Empty;
 
     Console.WriteLine($"summary: version={AppVersion.Current} data=\"{AppPaths.Root}\" " +
-                      $"target={target}{helper} " +
+                      $"target={target}{helper} panel=\"{panelOnExit}\" " +
                       $"connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
                       $"emulator={sess?.IsEmulator ?? false} nocodepatches={sess?.CodePatchesUnsupported ?? false} " +
                       $"features={state.Describe.Features.Length} planets={state.Planets.Length} " +

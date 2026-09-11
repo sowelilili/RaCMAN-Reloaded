@@ -74,7 +74,7 @@ public static class SettingsPanel
 
             // Touching the layout re-reads the file now, so a broken edit is reported here
             // instead of on the next visit to the Game page.
-            _ = GameLayout.AllSubPages;
+            _ = GameLayout.SectionsDrawnElsewhere;
             state.AddToast(
                 GameLayout.Problems.Count == 0 ? "Game layout reloaded" : "Game layout reloaded with problems",
                 GameLayout.Problems.Count == 0 ? ToastKind.Success : ToastKind.Error);
