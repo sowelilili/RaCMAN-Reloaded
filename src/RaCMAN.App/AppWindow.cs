@@ -244,6 +244,10 @@ public sealed class AppWindow : GameWindow
 
             if (ImGui.BeginChild("##nav", new Vector2(190, -1), ImGuiChildFlags.Borders))
             {
+                // A sub-page asked for on the command line opens under whichever panel hosts it,
+                // as soon as the descriptors say the running game has that section at all.
+                RouteRequestedSubPage();
+
                 // If the current panel is one the running game doesn't support, fall back to Game;
                 // if it is one this console cannot drive at all, to Connection, which is the panel
                 // that says which target is connected.
@@ -257,8 +261,11 @@ public sealed class AppWindow : GameWindow
                     // A thin line between the nav's groups, and none above the first of them.
                     if (PanelNav.StartsGroup(i)) ImGui.Separator();
 
-                    bool isGame = i == PanelNav.Game;
-                    bool selected = _panel == i && (!isGame || GamePanel.SubPage is null);
+                    // Game and Unlocks are the two entries a layout can hang sub-pages under, and
+                    // both are drawn here the same way: the entry itself is selected only while its
+                    // own page is the one showing.
+                    string? host = PanelNav.SubPageHost(i);
+                    bool selected = _panel == i && (host is null || SubPageNav.For(host) is null);
 
                     string? disabled = DisabledReason(i);
                     ImGui.BeginDisabled(disabled is not null);
@@ -276,22 +283,22 @@ public sealed class AppWindow : GameWindow
                     if (clicked)
                     {
                         _panel = i;
-                        if (isGame) GamePanel.SubPage = null;
+                        if (host is not null) SubPageNav.Set(host, null);
                     }
 
-                    if (!isGame) continue;
+                    if (host is null) continue;
 
-                    // The Game page's sub-pages: the sections the layout marks as "side", indented
-                    // under Game, and only those the running game has something for.
-                    foreach (var section in GamePanel.SideSectionsWithContent(_state))
+                    // The panel's sub-pages: the sections the layout hangs under it, indented, and
+                    // only those the running game has something for.
+                    foreach (var section in GamePanel.SubPagesWithContent(_state, host))
                     {
-                        bool onSub = _panel == PanelNav.Game && GamePanel.SubPage == section;
-                        ImGui.PushID("game-sub");
+                        bool onSub = _panel == i && SubPageNav.For(host) == section;
+                        ImGui.PushID(host);
                         ImGui.Indent(18);
                         if (ImGui.Selectable(section, onSub, ImGuiSelectableFlags.None, new Vector2(0, 24)))
                         {
-                            _panel = PanelNav.Game;
-                            GamePanel.SubPage = section;
+                            _panel = i;
+                            SubPageNav.Set(host, section);
                         }
                         ImGui.Unindent(18);
                         ImGui.PopID();
@@ -325,6 +332,21 @@ public sealed class AppWindow : GameWindow
         FirewallModal.Draw(_state);
         LiveSplitModal.Draw(_state);
         DrawToasts();
+    }
+
+    /// <summary>
+    /// Opens the panel that hosts the sub-page <c>--game-section</c> named, so a headless run lands
+    /// on it wherever the layout hung it. Nothing happens while the running game has no such
+    /// section, or while that panel is hidden or greyed out; the panel itself takes the request up
+    /// (and clears it) the first time it draws.
+    /// </summary>
+    private void RouteRequestedSubPage()
+    {
+        if (SubPageNav.Requested is not { } wanted) return;
+        if (GamePanel.HostForOpenableSubPage(_state, wanted) is not { } host) return;
+
+        int panel = PanelNav.PanelForHost(host);
+        if (PanelVisible(panel) && DisabledReason(panel) is null) _panel = panel;
     }
 
     /// <summary>Hide panels the running game has no data for: Unlocks and Level flags.</summary>

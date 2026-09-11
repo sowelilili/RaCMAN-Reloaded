@@ -16,6 +16,11 @@ namespace RaCMAN.App.Panels;
 /// console-side actions that rewrite the whole table (UYA's weapon-level pair), which belong with
 /// the list they change rather than on the Game page.
 ///
+/// The panel also holds sub-pages of its own, for the sections the layout file hangs under
+/// "Unlocks" (Collectables, in the shipped file). They are listed indented under Unlocks in the
+/// side nav and drawn by <see cref="GamePanel.DrawSubPage(AppState, string, string)"/>, the same
+/// code the Game page's own sub-pages go through; clicking Unlocks itself comes back to the table.
+///
 /// Refresh policy: the whole list is re-read on the Settings panel's table refresh interval while
 /// the panel is open, and again straight after any UNLOCK_SET. Re-reading everything is simpler
 /// than patching one row back into the list and it keeps another client's edits visible. An
@@ -48,6 +53,7 @@ public static class UnlocksPanel
         _sinceRefresh = 0;
         _filter = string.Empty;
         Drafts.Clear();
+        SubPageNav.Set(GameLayout.UnlocksHost, null);
     }
 
     /// <summary>
@@ -63,6 +69,14 @@ public static class UnlocksPanel
 
     public static void Draw(AppState state)
     {
+        // A section the layout hangs under this panel is a page of its own, drawn the way the Game
+        // page draws the ones hung under it. The table is what the Unlocks entry itself shows.
+        if (GamePanel.ResolveSubPage(state, GameLayout.UnlocksHost) is { } section)
+        {
+            GamePanel.DrawSubPage(state, GameLayout.UnlocksHost, section);
+            return;
+        }
+
         Ui.Heading("Unlocks");
 
         DrawSectionActions(state);

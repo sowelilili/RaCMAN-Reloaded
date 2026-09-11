@@ -1,7 +1,14 @@
 // Game panel layout, owned by the client.
 //
-// "sideSections" lists the sections that become their own sub-page under Game in the side nav
-// (the less-used ones). Every other section stacks on the Game page, always visible.
+// "subPages" says which sections become a sub-page of their own in the side nav, and which nav
+// entry each of them hangs under. It is keyed by panel, and only two panels can hold sub-pages:
+//   "Game"    the Game page's own, indented under Game (the less-used controls).
+//   "Unlocks" indented under Unlocks, for the sections that belong with the unlock table.
+// Every section not listed here stacks on the Game page, always visible. A key that names anything
+// else is ignored: this file arranges the pages the client has, it cannot add a nav entry. A game
+// with no unlock table has no Unlocks entry either, and the sections hung under it are then listed
+// under Game instead, so nothing goes missing.
+// ("sideSections", the older spelling, still works and means "subPages": { "Game": [...] }.)
 //
 // "games" is keyed by game: "rac1", "rac2", "rac3", "rac4". An entry keyed by a title id is
 // honoured first, for a release that needs its own layout; the game key is what BCES01503 needs,
@@ -19,7 +26,7 @@
 // stay where they were. A section nothing lists is drawn exactly as before.
 //
 // Four section names are reserved, because a panel decides where each of them is drawn. None of
-// them can be a side sub-page, a stacked header or a tab-order entry:
+// them can be a sub-page, a stacked header or a tab-order entry:
 //   "Quick"   the block at the very top of the Game page: die, the position pair, the savefile
 //             actions, and the slot and planet controls. A feature moved here is drawn with them.
 //   "Values"  the editable table under the quick block (where a VALUE goes by default).
@@ -33,7 +40,10 @@
 //
 // Edit freely; the app reads this on start.
 {
-  "sideSections": ["Manips", "Collectables", "Cosmetics", "Debug"],
+  "subPages": {
+    "Game": ["Manips", "Cosmetics", "Debug"],
+    "Unlocks": ["Collectables"]
+  },
 
   "games": {
     "rac1": {

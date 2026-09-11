@@ -37,7 +37,7 @@ for (int i = 0; i < args.Length; i++)
             connectTo = args[++i];
             break;
         case "--game-section" when i + 1 < args.Length:
-            GamePanel.RequestedSubPage = args[++i];
+            SubPageNav.Requested = args[++i];
             break;
         case "--fake-server":
             fakeServer = true;
@@ -72,7 +72,8 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine($"  --panel <n>            open on panel n: {panels[0]}");
             for (int line = 1; line < panels.Count; line++) Console.WriteLine($"                         {panels[line]}");
 
-            Console.WriteLine("  --game-section <name>  open the Game panel on that side sub-page (Debug, Cosmetics, ...)");
+            Console.WriteLine("  --game-section <name>  open that layout section as a sub-page, under whichever");
+            Console.WriteLine("                         panel hosts it (Debug, Cosmetics, Collectables, ...)");
             Console.WriteLine("  --pad-window           show the input display in its own OS window");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
             Console.WriteLine("  --data-dir <path>      keep this run's settings, mods and savefiles there");

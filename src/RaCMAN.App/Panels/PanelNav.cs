@@ -2,39 +2,43 @@ namespace RaCMAN.App.Panels;
 
 /// <summary>
 /// The side nav's own rules: the panels it lists, the order it lists them in, where the thin
-/// separators between the groups go, and which panels the connected console cannot drive. They live
-/// here rather than in the window so they can be read, and tested, without a window on screen. The
-/// order is also what <c>--panel N</c> counts, so the help text is built from this list too.
+/// separators between the groups go, which panels can hold sub-pages, and which panels the
+/// connected console cannot drive. They live here rather than in the window so they can be read,
+/// and tested, without a window on screen. The order is also what <c>--panel N</c> counts, so the
+/// help text is built from this list too.
 /// </summary>
 public static class PanelNav
 {
     /// <summary>Where the nav sends someone whose panel has just become unusable.</summary>
     public const int Connection = 0;
 
-    /// <summary>The Game page, whose side sub-pages are drawn indented under it.</summary>
+    /// <summary>The Game page, whose sub-pages are drawn indented under it.</summary>
     public const int Game = 1;
 
-    /// <summary>The Unlocks panel's index, hidden for a game with no unlock table.</summary>
+    /// <summary>
+    /// The Unlocks panel's index, hidden for a game with no unlock table. It holds sub-pages of its
+    /// own, so a layout can hang a section (Collectables, in the shipped file) under it.
+    /// </summary>
     public const int Unlocks = 2;
 
+    public const int Positions = 3;
+
+    public const int Combos = 4;
+
     /// <summary>The Mods panel's index in the window's panel list.</summary>
-    public const int Mods = 3;
+    public const int Mods = 5;
 
     /// <summary>The Save files panel's index in the window's panel list.</summary>
-    public const int SaveFiles = 4;
+    public const int SaveFiles = 6;
 
-    public const int Positions = 5;
+    public const int Autosplitter = 7;
 
-    public const int Autosplitter = 6;
-
-    public const int InputDisplay = 7;
+    public const int InputDisplay = 8;
 
     /// <summary>The Level flags panel's index, hidden for a game whose flag layout is not known.</summary>
-    public const int LevelFlags = 8;
+    public const int LevelFlags = 9;
 
-    public const int Memory = 9;
-
-    public const int Combos = 10;
+    public const int Memory = 10;
 
     public const int Settings = 11;
 
@@ -47,14 +51,14 @@ public static class PanelNav
         "Connection",
         "Game",
         "Unlocks",
+        "Positions",
+        "Combos",
         "Mods",
         "Save files",
-        "Positions",
         "Autosplitter",
         "Input display",
         "Level flags",
         "Memory",
-        "Combos",
         "Settings",
     };
 
@@ -63,16 +67,34 @@ public static class PanelNav
 
     /// <summary>
     /// The panel each group of the nav starts at: the connection on its own, then the game and its
-    /// unlocks, then the three libraries a run saves things in, then the two that talk to something
-    /// else on this PC, then the two that read raw game state, then the two that are neither.
+    /// unlocks, then the two the run itself fills in as it goes, then the two libraries kept per
+    /// title, then the two that talk to something else on this PC, then the two that read raw game
+    /// state, and the settings on their own at the end.
     /// </summary>
-    private static readonly int[] GroupStarts = { Connection, Game, Mods, Autosplitter, LevelFlags, Combos };
+    private static readonly int[] GroupStarts =
+        { Connection, Game, Positions, Mods, Autosplitter, LevelFlags, Settings };
 
     /// <summary>
     /// True for a panel that opens a group, which is where the nav draws a thin separator. The
     /// first group opens the list, so nothing is drawn above it.
     /// </summary>
     public static bool StartsGroup(int panel) => panel != GroupStarts[0] && Array.IndexOf(GroupStarts, panel) >= 0;
+
+    /// <summary>
+    /// The name a layout file hangs sub-pages under for this panel, or null for a panel that has
+    /// none. The two are spelled exactly as the nav lists them, which is what the file's
+    /// <c>subPages</c> keys are; see <see cref="GameLayout.Hosts"/>.
+    /// </summary>
+    public static string? SubPageHost(int panel) => panel switch
+    {
+        Game => GameLayout.GameHost,
+        Unlocks => GameLayout.UnlocksHost,
+        _ => null,
+    };
+
+    /// <summary>The panel a layout host names, or <see cref="Game"/> for anything else.</summary>
+    public static int PanelForHost(string host) =>
+        string.Equals(host, GameLayout.UnlocksHost, StringComparison.Ordinal) ? Unlocks : Game;
 
     /// <summary>
     /// The <c>--panel</c> help's index list, wrapped so a line of it fits the rest of the help. Built
