@@ -463,11 +463,98 @@ public class PanelNavTests
     [Fact]
     public void EveryOtherPanelIsLeftAlone()
     {
-        for (int panel = 0; panel < 12; panel++)
+        for (int panel = 0; panel < PanelNav.Count; panel++)
         {
             if (panel == PanelNav.Mods || panel == PanelNav.SaveFiles) continue;
             Assert.Null(PanelNav.DisabledReason(panel, true));
         }
+    }
+
+    /// <summary>
+    /// The order the side nav draws, which is also the order --panel counts in. The constants are
+    /// what the window and the tests index by, so they have to name the right rows.
+    /// </summary>
+    [Fact]
+    public void TheNavIsInTheOrderTheNamesAreListedIn()
+    {
+        Assert.Equal(
+            new[]
+            {
+                "Connection", "Game", "Unlocks", "Mods", "Save files", "Positions",
+                "Autosplitter", "Input display", "Level flags", "Memory", "Combos", "Settings",
+            },
+            PanelNav.Names);
+
+        Assert.Equal("Connection", PanelNav.Names[PanelNav.Connection]);
+        Assert.Equal("Game", PanelNav.Names[PanelNav.Game]);
+        Assert.Equal("Unlocks", PanelNav.Names[PanelNav.Unlocks]);
+        Assert.Equal("Mods", PanelNav.Names[PanelNav.Mods]);
+        Assert.Equal("Save files", PanelNav.Names[PanelNav.SaveFiles]);
+        Assert.Equal("Positions", PanelNav.Names[PanelNav.Positions]);
+        Assert.Equal("Autosplitter", PanelNav.Names[PanelNav.Autosplitter]);
+        Assert.Equal("Input display", PanelNav.Names[PanelNav.InputDisplay]);
+        Assert.Equal("Level flags", PanelNav.Names[PanelNav.LevelFlags]);
+        Assert.Equal("Memory", PanelNav.Names[PanelNav.Memory]);
+        Assert.Equal("Combos", PanelNav.Names[PanelNav.Combos]);
+        Assert.Equal("Settings", PanelNav.Names[PanelNav.Settings]);
+    }
+
+    [Fact]
+    public void ASeparatorOpensEveryGroupButTheFirst()
+    {
+        // Connection alone, then the game, then the three libraries, the two that drive something
+        // else on this PC, the two raw-state panels, and the rest.
+        Assert.False(PanelNav.StartsGroup(PanelNav.Connection));
+        Assert.True(PanelNav.StartsGroup(PanelNav.Game));
+        Assert.True(PanelNav.StartsGroup(PanelNav.Mods));
+        Assert.True(PanelNav.StartsGroup(PanelNav.Autosplitter));
+        Assert.True(PanelNav.StartsGroup(PanelNav.LevelFlags));
+        Assert.True(PanelNav.StartsGroup(PanelNav.Combos));
+
+        foreach (int inside in new[]
+                 {
+                     PanelNav.Unlocks, PanelNav.SaveFiles, PanelNav.Positions,
+                     PanelNav.InputDisplay, PanelNav.Memory, PanelNav.Settings,
+                 })
+        {
+            Assert.False(PanelNav.StartsGroup(inside));
+        }
+    }
+
+    [Fact]
+    public void TheHelpNumbersEveryPanelInNavOrder()
+    {
+        string help = string.Join(" ", PanelNav.HelpLines());
+
+        for (int panel = 0; panel < PanelNav.Count; panel++)
+        {
+            Assert.Contains($"{panel} {PanelNav.Names[panel].ToLowerInvariant()}", help);
+        }
+
+        // The lines are joined with commas, so only the last one ends without one.
+        var lines = PanelNav.HelpLines();
+        for (int i = 0; i < lines.Count - 1; i++) Assert.EndsWith(",", lines[i]);
+        Assert.DoesNotContain(",", lines[^1][^1].ToString());
+    }
+}
+
+/// <summary>The session state as the client spells it: upper case, the way the panels do.</summary>
+public class SessionStateNameTests
+{
+    [Fact]
+    public void EveryStateIsSpeltInUpperCase()
+    {
+        Assert.Equal("INGAME", SessionState.Ingame.DisplayName());
+        Assert.Equal("XMB", SessionState.Xmb.DisplayName());
+        Assert.Equal("BOOTING", SessionState.Booting.DisplayName());
+        Assert.Equal("QUITTING", SessionState.Quitting.DisplayName());
+    }
+
+    [Fact]
+    public void AStateThisClientDoesNotKnowStillReadsAsAState()
+    {
+        // A newer module could name a fifth state; the status line still shows it the same way.
+        Assert.Equal("4", ((SessionState)4).DisplayName());
     }
 }
 

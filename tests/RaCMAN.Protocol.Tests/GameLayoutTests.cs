@@ -191,6 +191,113 @@ public class GameLayoutTests
         Assert.Equal(new[] { "Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug" }, order);
     }
 
+    /// <summary>
+    /// The shipped file gives UYA's Cosmetics page a "Chargeboots" header above the three colour
+    /// rows, which is what the headings table is for: the armour and the ship colour keep the top
+    /// of the page, and the colours are collected under the heading in their own order.
+    /// </summary>
+    [Fact]
+    public void Rac3CosmeticsPutsTheChargebootColoursUnderAHeading()
+    {
+        var armour = Make(11, FeatureKind.Enum, 1, "Armour");
+        var ship = Make(12, FeatureKind.Enum, 1, "Ship colour");
+        var front = Make(30, FeatureKind.Color, 4, "Chargeboots primary front");
+        var back = Make(31, FeatureKind.Color, 4, "Chargeboots primary back");
+        var tint = Make(32, FeatureKind.Color, 4, "Chargeboots tint");
+
+        var headings = GameLayout.HeadingsFor("NPEA00387", GameId.Rac3, "Cosmetics");
+        Assert.Equal("Chargeboots", headings["Chargeboots primary front"]);
+        Assert.Equal("Chargeboots", headings["Chargeboots primary back"]);
+        Assert.Equal("Chargeboots", headings["Chargeboots tint"]);
+        Assert.False(headings.ContainsKey("Armour"));
+
+        var blocks = GameLayout.Blocks("NPEA00387", GameId.Rac3, "Cosmetics",
+            new[] { armour, ship, front, back, tint });
+
+        Assert.Equal(2, blocks.Count);
+        Assert.Null(blocks[0].Heading);
+        Assert.Equal(new[] { "Armour", "Ship colour" }, blocks[0].Features.Select(f => f.Label));
+        Assert.Equal("Chargeboots", blocks[1].Heading);
+        Assert.Equal(
+            new[] { "Chargeboots primary front", "Chargeboots primary back", "Chargeboots tint" },
+            blocks[1].Features.Select(f => f.Label));
+    }
+
+    [Fact]
+    public void ASectionNoHeadingNamesIsStillOneBlock()
+    {
+        var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");
+        var trophy = Make(20, FeatureKind.Action, 2, "Refresh trophy state");
+
+        Assert.Empty(GameLayout.HeadingsFor("NPEA00387", GameId.Rac3, "Savefile"));
+
+        var blocks = GameLayout.Blocks("NPEA00387", GameId.Rac3, "Savefile", new[] { fastLoads, trophy });
+        Assert.Single(blocks);
+        Assert.Null(blocks[0].Heading);
+        Assert.Equal(2, blocks[0].Features.Count);
+
+        // And a game the file has no entry for at all asks for nothing.
+        Assert.Empty(GameLayout.HeadingsFor("ZZZZ99999", GameId.None, "Cosmetics"));
+        Assert.Empty(GameLayout.Blocks("ZZZZ99999", GameId.None, "Cosmetics", Array.Empty<Feature>()));
+    }
+
+    /// <summary>
+    /// The general rule, on a file of its own: a heading collects the features it names wherever
+    /// they are in the section, the unnamed ones stay together, and the blocks follow the order
+    /// their first feature turns up in.
+    /// </summary>
+    [Fact]
+    public void HeadingsCollectTheirFeaturesAndKeepFirstSeenOrder()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "racman-layout-headings.json");
+        File.WriteAllText(path, """
+        {
+          "sideSections": ["Debug"],
+          "games": {
+            "rac4": {
+              "headings": {
+                "Debug": {
+                  "Second": ["Beta", "Delta"],
+                  "First": ["Alpha"]
+                }
+              }
+            }
+          }
+        }
+        """);
+
+        try
+        {
+            GameLayout.LoadFrom(path);
+
+            var alpha = Make(1, FeatureKind.Action, 0, "Alpha");
+            var beta = Make(2, FeatureKind.Action, 0, "Beta");
+            var delta = Make(3, FeatureKind.Action, 0, "Delta");
+            var loose = Make(4, FeatureKind.Action, 0, "Loose");
+
+            // Beta first, then something with no heading, then Alpha and Delta: three blocks, in
+            // the order each of them starts, and Delta joins the block Beta opened.
+            var blocks = GameLayout.Blocks("NPEA00423", GameId.Rac4, "Debug",
+                new[] { beta, loose, alpha, delta });
+
+            Assert.Equal(3, blocks.Count);
+            Assert.Equal("Second", blocks[0].Heading);
+            Assert.Equal(new[] { "Beta", "Delta" }, blocks[0].Features.Select(f => f.Label));
+            Assert.Null(blocks[1].Heading);
+            Assert.Equal(new[] { "Loose" }, blocks[1].Features.Select(f => f.Label));
+            Assert.Equal("First", blocks[2].Heading);
+            Assert.Equal(new[] { "Alpha" }, blocks[2].Features.Select(f => f.Label));
+
+            // Another section of the same game is untouched by that one's headings.
+            Assert.Empty(GameLayout.HeadingsFor("NPEA00423", GameId.Rac4, "Cheats"));
+        }
+        finally
+        {
+            File.Delete(path);
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
+    }
+
     [Fact]
     public void EverydaySectionsStayOnTheGamePageAndTheRestGoToTheSide()
     {

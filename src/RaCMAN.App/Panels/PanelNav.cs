@@ -1,19 +1,100 @@
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// The side nav's rules about panels the connected console cannot drive. They live here rather
-/// than in the window so they can be read, and tested, without a window on screen.
+/// The side nav's own rules: the panels it lists, the order it lists them in, where the thin
+/// separators between the groups go, and which panels the connected console cannot drive. They live
+/// here rather than in the window so they can be read, and tested, without a window on screen. The
+/// order is also what <c>--panel N</c> counts, so the help text is built from this list too.
 /// </summary>
 public static class PanelNav
 {
-    /// <summary>The Mods panel's index in the window's panel list.</summary>
-    public const int Mods = 6;
-
-    /// <summary>The Save files panel's index in the window's panel list.</summary>
-    public const int SaveFiles = 7;
-
     /// <summary>Where the nav sends someone whose panel has just become unusable.</summary>
     public const int Connection = 0;
+
+    /// <summary>The Game page, whose side sub-pages are drawn indented under it.</summary>
+    public const int Game = 1;
+
+    /// <summary>The Unlocks panel's index, hidden for a game with no unlock table.</summary>
+    public const int Unlocks = 2;
+
+    /// <summary>The Mods panel's index in the window's panel list.</summary>
+    public const int Mods = 3;
+
+    /// <summary>The Save files panel's index in the window's panel list.</summary>
+    public const int SaveFiles = 4;
+
+    public const int Positions = 5;
+
+    public const int Autosplitter = 6;
+
+    public const int InputDisplay = 7;
+
+    /// <summary>The Level flags panel's index, hidden for a game whose flag layout is not known.</summary>
+    public const int LevelFlags = 8;
+
+    public const int Memory = 9;
+
+    public const int Combos = 10;
+
+    public const int Settings = 11;
+
+    /// <summary>
+    /// The nav in order, which is the order <c>--panel N</c> counts in. The groups below decide
+    /// where a separator is drawn between them.
+    /// </summary>
+    public static readonly string[] Names =
+    {
+        "Connection",
+        "Game",
+        "Unlocks",
+        "Mods",
+        "Save files",
+        "Positions",
+        "Autosplitter",
+        "Input display",
+        "Level flags",
+        "Memory",
+        "Combos",
+        "Settings",
+    };
+
+    /// <summary>How many panels there are, so a caller does not index past the list.</summary>
+    public static int Count => Names.Length;
+
+    /// <summary>
+    /// The panel each group of the nav starts at: the connection on its own, then the game and its
+    /// unlocks, then the three libraries a run saves things in, then the two that talk to something
+    /// else on this PC, then the two that read raw game state, then the two that are neither.
+    /// </summary>
+    private static readonly int[] GroupStarts = { Connection, Game, Mods, Autosplitter, LevelFlags, Combos };
+
+    /// <summary>
+    /// True for a panel that opens a group, which is where the nav draws a thin separator. The
+    /// first group opens the list, so nothing is drawn above it.
+    /// </summary>
+    public static bool StartsGroup(int panel) => panel != GroupStarts[0] && Array.IndexOf(GroupStarts, panel) >= 0;
+
+    /// <summary>
+    /// The <c>--panel</c> help's index list, wrapped so a line of it fits the rest of the help. Built
+    /// from <see cref="Names"/>, so the numbers in the help are the numbers the nav uses.
+    /// </summary>
+    public static IReadOnlyList<string> HelpLines(int perLine = 4)
+    {
+        var lines = new List<string>();
+        for (int start = 0; start < Names.Length; start += perLine)
+        {
+            var part = new List<string>();
+            for (int i = start; i < Math.Min(start + perLine, Names.Length); i++)
+            {
+                part.Add($"{i} {Names[i].ToLowerInvariant()}");
+            }
+
+            bool last = start + perLine >= Names.Length;
+            lines.Add(string.Join(", ", part) + (last ? string.Empty : ","));
+        }
+
+        return lines;
+    }
 
     /// <summary>
     /// Why the nav greys a panel out, or null when the panel is usable. Every mod is patch words

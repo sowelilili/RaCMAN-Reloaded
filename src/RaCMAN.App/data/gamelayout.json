@@ -13,6 +13,11 @@
 // simply stops appearing.
 // "tabOrder" sets the section order; sections used but not listed follow in first-seen order.
 //
+// "headings" breaks a section up: it is keyed by section name, then by the heading text, and each
+// heading lists the feature labels (again, the exact DESCRIBE ones) it is drawn in front of. The
+// features a heading names are collected under it in their own order, and the ones no heading names
+// stay where they were. A section nothing lists is drawn exactly as before.
+//
 // Four section names are reserved, because a panel decides where each of them is drawn. None of
 // them can be a side sub-page, a stacked header or a tab-order entry:
 //   "Quick"   the block at the very top of the Game page: die, the position pair, the savefile
@@ -95,6 +100,15 @@
 
         "QE offset": "Debug",
         "Enable vendor QE": "Debug"
+      },
+      "headings": {
+        "Cosmetics": {
+          "Chargeboots": [
+            "Chargeboots primary front",
+            "Chargeboots primary back",
+            "Chargeboots tint"
+          ]
+        }
       }
     },
 

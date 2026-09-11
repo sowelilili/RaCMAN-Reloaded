@@ -111,7 +111,7 @@ public static class UnlocksPanel
 
         if (!enabled)
         {
-            ImGui.TextColored(Ui.Yellow, $"Unlock edits need INGAME (state is {state.Session.State}).");
+            ImGui.TextColored(Ui.Yellow, $"Unlock edits need INGAME (state is {state.Session.State.DisplayName()}).");
         }
 
         if (state.UnlocksUnsupported)
@@ -124,7 +124,7 @@ public static class UnlocksPanel
         if (list.Unlocks.Length == 0)
         {
             Ui.Hint(!state.Connected ? "Connect to read the unlock list."
-                : !enabled ? $"No unlock list: the session is {state.Session.State}, not INGAME."
+                : !enabled ? $"No unlock list: the session is {state.Session.State.DisplayName()}, not INGAME."
                 : "The unlock list is empty.");
             return;
         }

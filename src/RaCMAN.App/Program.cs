@@ -4,6 +4,10 @@ using RaCMAN.App.Panels;
 using RaCMAN.Protocol.Testing;
 using Velopack;
 
+// Before anything writes a line: this is a GUI application, so a run started from a terminal has to
+// attach itself to that terminal's console to be read there. Does nothing off Windows.
+ParentConsole.Attach();
+
 // First, before anything reads a file or draws a pixel: this is where an install, an update and an
 // uninstall are carried out, and where a process started by the updater for one of those exits.
 VelopackApp.Build().Run();
@@ -61,10 +65,13 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --fake-server          run the in-process fake qwark and connect to it");
             Console.WriteLine("  --fake-rpcs3           as --fake-server, with the emulator and no-code-patches flags set");
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
-            Console.WriteLine("  --panel <n>            open on panel n: 0 connection, 1 game, 2 positions,");
-            Console.WriteLine("                         3 unlocks, 4 level flags, 5 memory, 6 mods,");
-            Console.WriteLine("                         7 save files, 8 combos, 9 autosplitter,");
-            Console.WriteLine("                         10 input display, 11 settings");
+
+            // The numbers come from the nav's own list, so the help cannot say one order while the
+            // side nav draws another.
+            var panels = PanelNav.HelpLines();
+            Console.WriteLine($"  --panel <n>            open on panel n: {panels[0]}");
+            for (int line = 1; line < panels.Count; line++) Console.WriteLine($"                         {panels[line]}");
+
             Console.WriteLine("  --game-section <name>  open the Game panel on that side sub-page (Debug, Cosmetics, ...)");
             Console.WriteLine("  --pad-window           show the input display in its own OS window");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");

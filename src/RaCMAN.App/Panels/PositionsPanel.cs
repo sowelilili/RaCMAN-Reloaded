@@ -32,13 +32,19 @@ public static class PositionsPanel
         (value is { } number ? number.ToString("0.00", CultureInfo.InvariantCulture) : "-")
         .PadLeft(CoordinateWidth);
 
+    /// <summary>
+    /// The slot table and the line the player is standing on. The planet controls and Die are the
+    /// Game page's quick block now, and the slot the quick block acts on is chosen there as well,
+    /// so this panel is the eight slots and nothing else; the planet is still named, because it is
+    /// the planet the slots below belong to.
+    /// </summary>
     public static void Draw(AppState state)
     {
-        Ui.Heading("Positions and planets");
+        Ui.Heading("Positions");
 
         var session = state.Session;
         bool enabled = state.Ingame;
-        if (!enabled) Ui.Warning($"Position and planet commands need INGAME (state is {session.State}).");
+        if (!enabled) Ui.Warning($"Position commands need INGAME (state is {session.State.DisplayName()}).");
 
         ImGui.TextUnformatted($"Current planet: {PlanetName(state, session.CurrentPlanet)} ({session.CurrentPlanet})");
         ImGui.TextUnformatted($"Position: {Coordinate(session.PosX)}, {Coordinate(session.PosY)}, {Coordinate(session.PosZ)}");
@@ -50,25 +56,15 @@ public static class PositionsPanel
 
         DrawSlots(state, session);
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Planets");
-
-        if (!PlanetLoadControls(state)) Ui.Hint("This game has no planet list.");
-
-        ImGui.Spacing();
-        if (ImGui.Button("Die")) state.Run(() => state.Client.DieAsync());
-
         ImGui.EndDisabled();
     }
 
     /// <summary>
     /// The planet controls: the combo with the filler names left out, the reset boxes the running
-    /// game has, and Select and Load planet. The Game page's quick block draws the same block, so
-    /// this is one helper both panels call rather than two copies that drift apart, and the planet
-    /// picked on one page is the planet the other one shows. False when the game named no planets,
-    /// which draws nothing at all: the quick block leaves out what a game has not got, and this
-    /// panel says so in its own words.
+    /// game has, and Select and Load planet. The Game page's quick block is the only page that draws
+    /// them now, and this is where they live because the planet list and the slot table are the same
+    /// panel's subject. False when the game named no planets, which draws nothing at all: the quick
+    /// block leaves out what a game has not got.
     /// </summary>
     public static bool PlanetLoadControls(AppState state)
     {
@@ -129,10 +125,11 @@ public static class PositionsPanel
     }
 
     /// <summary>
-    /// The console's selected position slot as a dropdown: picking one sends POS_SELECT, which is
-    /// exactly what the slot table's Select button does per row. The Game page's quick block draws
-    /// it beside the save and load buttons, so the slot those two act on is chosen in the same
-    /// place; the console owns the selection, so what the box shows is what telemetry reports.
+    /// The console's selected position slot as a dropdown: picking one sends POS_SELECT, and this is
+    /// the only control that does, which is why the slot table has no Select of its own. The Game
+    /// page's quick block draws it beside the save and load buttons, so the slot those two act on is
+    /// chosen where they are; the console owns the selection, so what the box shows is what
+    /// telemetry reports.
     /// </summary>
     public static void SlotPicker(AppState state)
     {
@@ -191,7 +188,7 @@ public static class PositionsPanel
         if (positions.Slots.Length == 0)
         {
             Ui.Hint(!state.Connected ? "Connect to read the position slots."
-                : !state.Ingame ? $"Reading the position slots needs INGAME (state is {session.State})."
+                : !state.Ingame ? $"Reading the position slots needs INGAME (state is {session.State.DisplayName()})."
                 : "No positions saved for this planet.");
             return;
         }
@@ -203,7 +200,7 @@ public static class PositionsPanel
         ImGui.TableSetupColumn("X");
         ImGui.TableSetupColumn("Y");
         ImGui.TableSetupColumn("Z");
-        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 240);
+        ImGui.TableSetupColumn("Actions", ImGuiTableColumnFlags.WidthFixed, 180);
         ImGui.TableHeadersRow();
 
         foreach (var slot in positions.Slots)
@@ -227,8 +224,9 @@ public static class PositionsPanel
 
             ImGui.TableNextColumn();
             byte index = slot.Slot;
-            if (ImGui.SmallButton("Select")) state.Run(() => state.Client.PosSelectAsync(index));
-            ImGui.SameLine();
+
+            // No Select of its own: the quick block's slot dropdown is where the console's selected
+            // slot is picked, and one place to do it is enough.
             if (ImGui.SmallButton("Save"))
             {
                 state.Run(async () =>

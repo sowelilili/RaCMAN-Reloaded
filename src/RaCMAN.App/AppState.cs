@@ -896,7 +896,7 @@ public sealed class AppState : IDisposable
 
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
-        string line = $"{session.State} | {title} | {session.Game.DisplayName()}";
+        string line = $"{session.State.DisplayName()} | {title} | {session.Game.DisplayName()}";
         if (!Panels.Ui.Debug) return line;
 
         string tick = session.Tick > 0 ? $"tick {session.Tick}" : "tick -";
