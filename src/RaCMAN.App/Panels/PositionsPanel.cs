@@ -97,7 +97,7 @@ public static class PositionsPanel
             ResetBox(state, "Reset special bolts", choices.PlanetAt(pick), flags, PlanetFlags.ResetSpecialBolts);
         }
 
-        if (ImGui.Button("Load planet", new Vector2(-1, 0)))
+        if (ImGui.Button("Load planet"))
         {
             byte planet = (byte)choices.PlanetAt(pick);
             state.Run(() => state.Client.PlanetLoadAsync(planet, (byte)flags));

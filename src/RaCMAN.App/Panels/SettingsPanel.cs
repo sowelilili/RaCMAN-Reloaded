@@ -137,10 +137,8 @@ public static class SettingsPanel
         }
 
         Ui.Hint(chosen == 0
-            ? "webMAN: every connect, and every automatic reconnect, asks webMAN whether qwark is loaded and "
-              + "sends it when it is not, so a console whose module crashed comes back on its own."
-            : "Standalone: Connect only connects, and nothing here ever asks webMAN anything. For a console "
-              + "that loads qwark at boot; the Connection panel installs it to boot_plugins.txt.");
+            ? "webMAN: automatically re-send and load the qwark SPRX using webMAN when connecting."
+            : "Standalone: load the qwark SPRX manually, or install it to run on boot.");
 
         ImGui.Spacing();
 
