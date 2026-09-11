@@ -180,9 +180,20 @@ public static class ConnectionPanel
         if (ImGui.Button("Check if loaded"))
         {
             string ip = _host.Trim();
-            state.Run(() => state.WebMan.IsLoadedAsync(ip),
-                loaded => state.AddToast(loaded ? "webMAN reports qwark.sprx loaded" : "webMAN does not list qwark.sprx",
-                    loaded ? ToastKind.Success : ToastKind.Info));
+            state.Run(() => state.WebMan.PluginStatusAsync(ip), status => state.AddToast(
+                status.State switch
+                {
+                    VshPluginState.Loaded => $"{WebManLoader.SprxName} is in VSH slot {status.SlotText}"
+                                             + (status.Path.Length > 0 ? $", loaded from {status.Path}" : string.Empty),
+                    VshPluginState.NotLoaded => $"No VSH slot holds {WebManLoader.SprxName}",
+                    _ => $"webMAN on {ip} did not answer with a plugin page",
+                },
+                status.State switch
+                {
+                    VshPluginState.Loaded => ToastKind.Success,
+                    VshPluginState.NotLoaded => ToastKind.Info,
+                    _ => ToastKind.Error,
+                }));
         }
 
         DrawBootInstall(state, withPathBox: false);
@@ -205,7 +216,7 @@ public static class ConnectionPanel
         if (withPathBox)
         {
             ImGui.Separator();
-            Ui.Heading("Install qwark on the console");
+            Ui.Heading("Installation");
 
             Ui.Hint($"Puts qwark.sprx in {WebManLoader.BootPluginsPath} to load it on console boot. "
                     + "Requires webMAN for installation.");
@@ -238,7 +249,9 @@ public static class ConnectionPanel
             string ip = _host.Trim();
             string path = sprx;
             state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                changed => state.AddToast(changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it"));
+                changed => state.AddToast(
+                    (changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it")
+                    + ". Restart the console; the module only loads at boot."));
         }
 
         ImGui.SameLine();
@@ -253,12 +266,11 @@ public static class ConnectionPanel
     }
 
     /// <summary>
-    /// The PS3 Connect button, and the same thing on start. In webMAN mode that is qwark's own port
-    /// first and only then the way round through webMAN; in standalone mode it is the port and
-    /// nothing else. Every step says what it is doing, and a failure names the step it stopped at,
-    /// because "could not connect" covers four different things on the long way round. What the
-    /// load needs, the SPRX and the VSH slot, comes from the settings, which is where the boxes on
-    /// this panel put it.
+    /// The PS3 Connect button, and the same thing on start. In webMAN mode that is the slot
+    /// question first and the port after it; in standalone mode it is the port and nothing else.
+    /// Every step says what it is doing, and a failure names the step it stopped at, because "could
+    /// not connect" covers four different things on the long way round. What the load needs, the
+    /// SPRX and the VSH slot, comes from the settings, which is where the boxes on this panel put it.
     /// </summary>
     public static void ConnectToPs3(AppState state, string host)
     {
@@ -273,7 +285,7 @@ public static class ConnectionPanel
                 webMan,
                 ip,
                 connect: () => state.Connected ? Task.CompletedTask : state.Client.ConnectAsync(ip),
-                isLoaded: () => state.WebMan.IsLoadedAsync(ip),
+                pluginStatus: () => state.WebMan.PluginStatusAsync(ip),
                 load: () => File.Exists(sprx)
                     ? state.WebMan.LoadAsync(ip, sprx, slot,
                         new Progress<string>(message => state.Post(() => state.AddToast(message))))

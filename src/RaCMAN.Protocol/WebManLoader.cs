@@ -39,21 +39,36 @@ public sealed class WebManLoader
 
     public static string BootPath => $"{PluginsDirectory}/{SprxName}";
 
-    /// <summary>True when webMAN's plugin page already lists a plugin with this file name.</summary>
-    public async Task<bool> IsLoadedAsync(string ip, string sprxName = SprxName, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// How long the plugin page gets to answer. webMAN on a console that is up answers in
+    /// milliseconds, and this probe now runs before the connect attempt, so a console that is off
+    /// must not hold the sequence up for the whole of <see cref="HttpClient"/>'s timeout.
+    /// </summary>
+    public static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(4);
+
+    /// <summary>
+    /// What webMAN's VSH plugin page says about a plugin file: whether it is in a slot, and which.
+    /// </summary>
+    public async Task<VshPluginStatus> PluginStatusAsync(
+        string ip, string sprxName = SprxName, CancellationToken cancellationToken = default)
     {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(ProbeTimeout);
+
         try
         {
-            var page = await _http.GetStringAsync($"http://{ip}/home.ps3mapi", cancellationToken).ConfigureAwait(false);
-            return page.Contains(sprxName, StringComparison.OrdinalIgnoreCase);
+            var page = await _http.GetStringAsync($"http://{ip}/vshplugin.ps3mapi", cts.Token).ConfigureAwait(false);
+            return VshPluginStatus.Parse(page, sprxName);
         }
         catch (HttpRequestException)
         {
-            return false;
+            return VshPluginStatus.Unknown;
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            return false;
+            // Our own probe deadline, not the caller giving up: a console that does not answer
+            // its web server in four seconds has told us nothing either way.
+            return VshPluginStatus.Unknown;
         }
     }
 

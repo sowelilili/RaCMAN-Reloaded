@@ -305,12 +305,16 @@ public sealed class AppState : IDisposable
     /// </summary>
     private async Task ReloadThroughWebManAsync(string host, CancellationToken token)
     {
-        if (await WebMan.IsLoadedAsync(host, cancellationToken: token).ConfigureAwait(false)) return;
+        // Only an answer that says no slot holds it sends the module across. A slot that holds one
+        // is a module to leave alone, and a webMAN that cannot be asked (the console is off, which
+        // is the usual reason a reconnect loop is running at all) is not an invitation to upload.
+        var status = await WebMan.PluginStatusAsync(host, cancellationToken: token).ConfigureAwait(false);
+        if (status.State != VshPluginState.NotLoaded) return;
 
         string sprx = Ps3Connect.ResolveSprx(Settings.SprxPath);
         if (!File.Exists(sprx)) return;
 
-        Post(() => AddToast($"webMAN does not list {WebManLoader.SprxName}: loading it"));
+        Post(() => AddToast($"No VSH slot holds {WebManLoader.SprxName}: loading it"));
         await WebMan.LoadAsync(host, sprx, Settings.WebManSlot, cancellationToken: token).ConfigureAwait(false);
         await Task.Delay(Ps3Connect.LoadWait, token).ConfigureAwait(false);
         Post(() => AddToast($"{WebManLoader.SprxName} loaded through webMAN; reconnecting", ToastKind.Success));

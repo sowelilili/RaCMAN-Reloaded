@@ -5,13 +5,16 @@ using RaCMAN.App;
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// The order the Connect button does things in against a console: qwark first, webMAN only when
-/// nothing answered, and a failure that names the step it stopped at. Every step is a delegate, so
-/// none of this reaches the network.
+/// The order the Connect button does things in against a console: ask webMAN which slot holds the
+/// module, load it only when no slot does, and a failure that names the step it stopped at. Every
+/// step is a delegate, so none of this reaches the network.
 /// </summary>
 public class Ps3ConnectTests
 {
     private const string Ip = "192.168.1.50";
+
+    private static VshPluginStatus InSlot(int slot, string path = "/dev_hdd0/plugins/qwark.sprx") =>
+        new(VshPluginState.Loaded, slot, path);
 
     /// <summary>Records what the sequence asked for, and fails whichever steps the test wants failed.</summary>
     private sealed class FakeConsole
@@ -25,7 +28,8 @@ public class Ps3ConnectTests
         /// <summary>How many connect attempts fail before one succeeds; the default never answers.</summary>
         public int RefuseConnects { get; set; } = int.MaxValue;
 
-        public bool Loaded { get; set; }
+        /// <summary>What webMAN says about the slots. Nothing loaded, unless a test says otherwise.</summary>
+        public VshPluginStatus Status { get; set; } = VshPluginStatus.NotLoaded;
 
         public Exception? AskThrows { get; set; }
 
@@ -44,11 +48,11 @@ public class Ps3ConnectTests
                 if (Connects++ < RefuseConnects) throw new SocketException((int)SocketError.ConnectionRefused);
                 return Task.CompletedTask;
             },
-            isLoaded: () =>
+            pluginStatus: () =>
             {
                 Calls.Add("ask");
                 if (AskThrows is { } error) throw error;
-                return Task.FromResult(Loaded);
+                return Task.FromResult(Status);
             },
             load: () =>
             {
@@ -65,47 +69,54 @@ public class Ps3ConnectTests
     }
 
     [Fact]
-    public async Task AConsoleThatAnswersIsNeverAskedAboutWebMan()
+    public async Task TheSlotQuestionComesBeforeTheConnectAttempt()
     {
-        var console = new FakeConsole { RefuseConnects = 0 };
+        // A console that is not running the module drops the connection rather than refusing it,
+        // so asking first is what keeps the sequence off the TCP timeout.
+        var console = new FakeConsole { Status = InSlot(5), RefuseConnects = 0 };
 
         var outcome = await console.RunAsync();
 
         Assert.True(outcome.Connected);
         Assert.Equal(Ps3ConnectStep.Connect, outcome.Step);
-        Assert.Equal(new[] { "connect" }, console.Calls);
+        Assert.Equal(new[] { "ask", "connect" }, console.Calls);
+        Assert.Equal(new[] { Ps3ConnectStep.Ask, Ps3ConnectStep.Connect }, console.Said);
         Assert.Empty(console.Waits);
     }
 
     [Fact]
-    public async Task NothingListeningLoadsThroughWebManAndConnectsAgain()
+    public async Task NoSlotHoldingItLoadsThroughWebManWithoutTryingThePortFirst()
     {
-        // Refused once, so the load happens; the attempt after it is the one that lands.
-        var console = new FakeConsole { RefuseConnects = 1, Loaded = false };
+        var console = new FakeConsole { Status = VshPluginStatus.NotLoaded, RefuseConnects = 0 };
 
         var outcome = await console.RunAsync();
 
         Assert.True(outcome.Connected);
         Assert.Equal(Ps3ConnectStep.Reconnect, outcome.Step);
-        Assert.Equal(new[] { "connect", "ask", "load", "connect" }, console.Calls);
+        Assert.Equal(new[] { "ask", "load", "connect" }, console.Calls);
         Assert.Equal(new[] { Ps3Connect.LoadWait }, console.Waits);
 
-        // Every step said what it was about to do, in the order it did it.
         Assert.Equal(
-            new[] { Ps3ConnectStep.Connect, Ps3ConnectStep.Ask, Ps3ConnectStep.Load, Ps3ConnectStep.Reconnect },
+            new[] { Ps3ConnectStep.Ask, Ps3ConnectStep.Load, Ps3ConnectStep.Reconnect },
             console.Said);
     }
 
     [Fact]
-    public async Task AModuleWebManAlreadyListsIsNotSentAgain()
+    public async Task AModuleInASlotIsNeverSentAgain()
     {
-        var console = new FakeConsole { RefuseConnects = 1, Loaded = true };
+        // The slot holds it and the port is shut: that is a module which loaded and did not come
+        // up. Another copy would land in another slot and fight this one for the port.
+        var console = new FakeConsole { Status = InSlot(5) };
 
         var outcome = await console.RunAsync();
 
-        Assert.True(outcome.Connected);
-        Assert.Equal(new[] { "connect", "ask", "connect" }, console.Calls);
-        Assert.Equal(new[] { Ps3Connect.LoadWait }, console.Waits);
+        Assert.False(outcome.Connected);
+        Assert.Equal(Ps3ConnectStep.Connect, outcome.Step);
+        Assert.Equal(new[] { "ask", "connect" }, console.Calls);
+        Assert.DoesNotContain("load", console.Calls);
+
+        Assert.Contains("slot 5", outcome.Message, StringComparison.Ordinal);
+        Assert.Contains("/dev_hdd0/plugins/qwark.sprx", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -118,20 +129,45 @@ public class Ps3ConnectTests
         Assert.False(outcome.Connected);
         Assert.Equal(Ps3ConnectStep.Load, outcome.Step);
         Assert.Contains("FTP login refused", outcome.Message, StringComparison.Ordinal);
-        Assert.Equal(new[] { "connect", "ask", "load" }, console.Calls);
+        Assert.Equal(new[] { "ask", "load" }, console.Calls);
     }
 
     [Fact]
-    public async Task AWebManThatCannotBeAskedStopsAtTheAskStep()
+    public async Task AWebManThatCannotBeAskedTriesThePortAndThenLoadsAnyway()
     {
+        // Nothing is known, so the port is worth a try before an upload; if that is silent too,
+        // loading it blind is the only thing left, which is what this did before it could ask.
         var console = new FakeConsole { AskThrows = new HttpRequestException("no route to host") };
 
         var outcome = await console.RunAsync();
 
         Assert.False(outcome.Connected);
-        Assert.Equal(Ps3ConnectStep.Ask, outcome.Step);
-        Assert.Contains("no route to host", outcome.Message, StringComparison.Ordinal);
-        Assert.Equal(new[] { "connect", "ask" }, console.Calls);
+        Assert.Equal(Ps3ConnectStep.Reconnect, outcome.Step);
+        Assert.Equal(new[] { "ask", "connect", "load", "connect" }, console.Calls);
+    }
+
+    [Fact]
+    public async Task APageThatIsNotUnderstoodIsAsGoodAsNoAnswer()
+    {
+        var console = new FakeConsole { Status = VshPluginStatus.Unknown, RefuseConnects = 1 };
+
+        var outcome = await console.RunAsync();
+
+        // The port answered on the attempt after the load, so the sequence still lands.
+        Assert.True(outcome.Connected);
+        Assert.Equal(new[] { "ask", "connect", "load", "connect" }, console.Calls);
+    }
+
+    [Fact]
+    public async Task AnUnknownAnswerThatConnectsNeverUploadsAnything()
+    {
+        var console = new FakeConsole { Status = VshPluginStatus.Unknown, RefuseConnects = 0 };
+
+        var outcome = await console.RunAsync();
+
+        Assert.True(outcome.Connected);
+        Assert.Equal(Ps3ConnectStep.Connect, outcome.Step);
+        Assert.Equal(new[] { "ask", "connect" }, console.Calls);
     }
 
     [Fact]
@@ -144,14 +180,14 @@ public class Ps3ConnectTests
         Assert.False(outcome.Connected);
         Assert.Equal(Ps3ConnectStep.Reconnect, outcome.Step);
         Assert.Contains(Ip, outcome.Message, StringComparison.Ordinal);
-        Assert.Equal(new[] { "connect", "ask", "load", "connect" }, console.Calls);
+        Assert.Equal(new[] { "ask", "load", "connect" }, console.Calls);
     }
 
     [Fact]
     public async Task AModuleThatAnsweredAndThenRefusedIsNotAWebManProblem()
     {
         // A protocol or status failure means qwark is there and talking, so the sequence has
-        // nothing to add: the error is the caller's to show, and webMAN is never asked.
+        // nothing to add: the error is the caller's to show, and nothing is loaded over it.
         var calls = new List<string>();
         var failure = new ProtocolException("HELLO was not understood");
 
@@ -162,10 +198,10 @@ public class Ps3ConnectTests
                 calls.Add("connect");
                 throw failure;
             },
-            isLoaded: () =>
+            pluginStatus: () =>
             {
                 calls.Add("ask");
-                return Task.FromResult(false);
+                return Task.FromResult(InSlot(5));
             },
             load: () =>
             {
@@ -176,7 +212,7 @@ public class Ps3ConnectTests
             say: (_, _) => { }));
 
         Assert.Same(failure, thrown);
-        Assert.Equal(new[] { "connect" }, calls);
+        Assert.Equal(new[] { "ask", "connect" }, calls);
     }
 
     // ---------------------------------------------------------------- standalone mode
@@ -197,7 +233,7 @@ public class Ps3ConnectTests
     public async Task StandaloneStopsAtTheSilentPortRatherThanLoadingAnything()
     {
         // The console that would have sent the webMAN sequence round: in standalone mode one
-        // attempt is the whole of it, and webMAN is not asked even whether the module is there.
+        // attempt is the whole of it, and webMAN is not asked even which slots it has.
         var console = new FakeConsole();
 
         var outcome = await console.RunAsync(webMan: false);
@@ -275,5 +311,13 @@ public class Ps3ConnectTests
 
         Assert.False(Ps3Connect.NothingListening(new ProtocolException("bad frame")));
         Assert.False(Ps3Connect.NothingListening(new IOException("connection reset")));
+    }
+
+    [Fact]
+    public void TheSlotProbeGivesUpLongBeforeAConnectWould()
+    {
+        // It runs before the connect attempt now, so a console that is off must not hold the
+        // sequence up for the HttpClient's own timeout.
+        Assert.True(WebManLoader.ProbeTimeout <= TimeSpan.FromSeconds(5));
     }
 }
