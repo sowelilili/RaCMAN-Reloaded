@@ -538,33 +538,6 @@ public class PanelNavTests
         }
     }
 
-    /// <summary>
-    /// Two entries hold sub-pages, and the names they are spelled with in the layout file are the
-    /// names the nav draws: that is what makes "subPages": { "Unlocks": [...] } mean the panel
-    /// anyone can see. Every other entry has no sub-pages at all.
-    /// </summary>
-    [Fact]
-    public void OnlyGameAndUnlocksHoldSubPagesAndTheyAreNamedAsTheNavListsThem()
-    {
-        Assert.Equal(GameLayout.GameHost, PanelNav.Names[PanelNav.Game]);
-        Assert.Equal(GameLayout.UnlocksHost, PanelNav.Names[PanelNav.Unlocks]);
-
-        Assert.Equal(GameLayout.GameHost, PanelNav.SubPageHost(PanelNav.Game));
-        Assert.Equal(GameLayout.UnlocksHost, PanelNav.SubPageHost(PanelNav.Unlocks));
-
-        for (int panel = 0; panel < PanelNav.Count; panel++)
-        {
-            if (panel == PanelNav.Game || panel == PanelNav.Unlocks) continue;
-            Assert.Null(PanelNav.SubPageHost(panel));
-        }
-
-        Assert.Equal(PanelNav.Game, PanelNav.PanelForHost(GameLayout.GameHost));
-        Assert.Equal(PanelNav.Unlocks, PanelNav.PanelForHost(GameLayout.UnlocksHost));
-
-        // Anything else is the Game page's, which is where a section the file hangs nowhere goes.
-        Assert.Equal(PanelNav.Game, PanelNav.PanelForHost("Mods"));
-    }
-
     [Fact]
     public void TheHelpNumbersEveryPanelInNavOrder()
     {

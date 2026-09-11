@@ -2,10 +2,9 @@ namespace RaCMAN.App.Panels;
 
 /// <summary>
 /// The side nav's own rules: the panels it lists, the order it lists them in, where the thin
-/// separators between the groups go, which panels can hold sub-pages, and which panels the
-/// connected console cannot drive. They live here rather than in the window so they can be read,
-/// and tested, without a window on screen. The order is also what <c>--panel N</c> counts, so the
-/// help text is built from this list too.
+/// separators between the groups go, and which panels the connected console cannot drive. They live
+/// here rather than in the window so they can be read, and tested, without a window on screen. The
+/// order is also what <c>--panel N</c> counts, so the help text is built from this list too.
 /// </summary>
 public static class PanelNav
 {
@@ -16,8 +15,8 @@ public static class PanelNav
     public const int Game = 1;
 
     /// <summary>
-    /// The Unlocks panel's index, hidden for a game with no unlock table. It holds sub-pages of its
-    /// own, so a layout can hang a section (Collectables, in the shipped file) under it.
+    /// The Unlocks panel's index, hidden for a game with no unlock table. A layout can give it tabs
+    /// of its own beside the unlock categories (Collectables, in the shipped file).
     /// </summary>
     public const int Unlocks = 2;
 
@@ -79,22 +78,6 @@ public static class PanelNav
     /// first group opens the list, so nothing is drawn above it.
     /// </summary>
     public static bool StartsGroup(int panel) => panel != GroupStarts[0] && Array.IndexOf(GroupStarts, panel) >= 0;
-
-    /// <summary>
-    /// The name a layout file hangs sub-pages under for this panel, or null for a panel that has
-    /// none. The two are spelled exactly as the nav lists them, which is what the file's
-    /// <c>subPages</c> keys are; see <see cref="GameLayout.Hosts"/>.
-    /// </summary>
-    public static string? SubPageHost(int panel) => panel switch
-    {
-        Game => GameLayout.GameHost,
-        Unlocks => GameLayout.UnlocksHost,
-        _ => null,
-    };
-
-    /// <summary>The panel a layout host names, or <see cref="Game"/> for anything else.</summary>
-    public static int PanelForHost(string host) =>
-        string.Equals(host, GameLayout.UnlocksHost, StringComparison.Ordinal) ? Unlocks : Game;
 
     /// <summary>
     /// The <c>--panel</c> help's index list, wrapped so a line of it fits the rest of the help. Built

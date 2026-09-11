@@ -1,14 +1,14 @@
 // Game panel layout, owned by the client.
 //
-// "subPages" says which sections become a sub-page of their own in the side nav, and which nav
-// entry each of them hangs under. It is keyed by panel, and only two panels can hold sub-pages:
-//   "Game"    the Game page's own, indented under Game (the less-used controls).
-//   "Unlocks" indented under Unlocks, for the sections that belong with the unlock table.
-// Every section not listed here stacks on the Game page, always visible. A key that names anything
-// else is ignored: this file arranges the pages the client has, it cannot add a nav entry. A game
-// with no unlock table has no Unlocks entry either, and the sections hung under it are then listed
-// under Game instead, so nothing goes missing.
-// ("sideSections", the older spelling, still works and means "subPages": { "Game": [...] }.)
+// Two lists say where a section is drawn:
+//   "subPages"    sections that become a page of their own, indented under Game in the side nav
+//                 (the less-used controls).
+//   "unlocksTabs" sections the Unlocks panel draws as tabs of its own, beside its Weapons/Gadgets
+//                 category tabs, for the ones that belong with the unlock table.
+// Every section in neither list stacks on the Game page, always visible. A section named in both
+// stays a sub-page, and a game with no unlock table has no Unlocks entry in the nav at all, so for
+// that game the tabs are listed under Game instead and nothing goes missing.
+// ("sideSections", the older spelling of "subPages", still works.)
 //
 // "games" is keyed by game: "rac1", "rac2", "rac3", "rac4". An entry keyed by a title id is
 // honoured first, for a release that needs its own layout; the game key is what BCES01503 needs,
@@ -40,10 +40,8 @@
 //
 // Edit freely; the app reads this on start.
 {
-  "subPages": {
-    "Game": ["Manips", "Cosmetics", "Debug"],
-    "Unlocks": ["Collectables"]
-  },
+  "subPages": ["Manips", "Cosmetics", "Debug"],
+  "unlocksTabs": ["Collectables"],
 
   "games": {
     "rac1": {

@@ -9,15 +9,14 @@ namespace RaCMAN.App.Panels;
 /// the very top (die, the position pair, the savefile ACTIONs, the slot and planet controls), then
 /// the player-value table with the per-file "Options" switches in a column beside it under a
 /// "Values" header, then the remaining sections stacked and always visible. The sections the layout
-/// hangs under a panel (Manips, Cosmetics and Debug under Game, Collectables under Unlocks by
-/// default) each get a sub-page, reached from the indented entries under that panel in the side
-/// nav. Features moved to "Unlocks" are not drawn here at all; the Unlocks panel reads them through
-/// <see cref="FeaturesInSection"/>.
+/// lists as sub-pages (Manips, Cosmetics and Debug by default) each get a page of their own, reached
+/// from the indented entries under Game in the side nav. Features moved to "Unlocks" are not drawn
+/// here at all; the Unlocks panel reads them through <see cref="FeaturesInSection"/>.
 /// <para>
-/// The sub-page machinery is here for both panels: sorting features into sections is this page's
-/// job, so <see cref="SubPagesWithContent"/>, <see cref="ResolveSubPage(AppState, string)"/> and
-/// <see cref="DrawSubPage(AppState, string, string)"/> are what the Unlocks panel calls to draw
-/// the section hung under it exactly as this page draws its own.
+/// Sorting features into sections is this page's job, so the Unlocks panel comes here for what it
+/// draws too: <see cref="UnlocksTabsWithContent(AppState)"/> for the tabs the layout gives it, and
+/// <see cref="DrawSectionPage(AppState, string)"/> to draw one of them exactly as this page draws a
+/// sub-page of its own.
 /// </para>
 /// </summary>
 public static class GamePanel
@@ -35,7 +34,7 @@ public static class GamePanel
     {
         Drafts.Clear();
         LastSet.Clear();
-        SubPageNav.Set(GameLayout.GameHost, null);
+        SubPageNav.Open = null;
         ResetPresets();
     }
 
@@ -46,20 +45,47 @@ public static class GamePanel
             : LastSet.GetValueOrDefault(feature.Id);
 
     /// <summary>
-    /// The sub-pages one panel shows: the sections the layout hangs under it that the running game
-    /// has something in, in layout order. Drives the indented entries in the side nav. A game with
-    /// no unlock table has no Unlocks entry to hang anything under, so what the file put there is
-    /// listed under Game instead (<see cref="GameLayout.SubPagesUnder(string, bool)"/>).
+    /// This page's sub-pages: the sections the layout lists as pages of their own that the running
+    /// game has something in, in layout order. Drives the indented entries in the side nav. A game
+    /// with no unlock table has no Unlocks entry in the nav, so the sections that panel would have
+    /// drawn as tabs are listed here instead (<see cref="GameLayout.SubPagesFor"/>).
     /// </summary>
-    public static IReadOnlyList<string> SubPagesWithContent(AppState state, string host)
+    public static IReadOnlyList<string> SubPagesWithContent(AppState state) =>
+        SubPagesWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.UnlocksUnsupported);
+
+    /// <summary>
+    /// <see cref="SubPagesWithContent(AppState)"/> from a description alone, so what the nav lists
+    /// can be read, and tested, without a window.
+    /// </summary>
+    public static IReadOnlyList<string> SubPagesWithContent(
+        string title, GameId game, DescribeResult describe, bool unlocksHidden) =>
+        WithContent(GameLayout.SubPagesFor(unlocksHidden), title, game, describe);
+
+    /// <summary>
+    /// The tabs the Unlocks panel draws beside its unlock categories: the sections the layout hands
+    /// it that the running game has something in, in layout order. That panel is hidden altogether
+    /// for a game with no unlock table, and those sections are then sub-pages of this page instead,
+    /// so this needs no flag of its own.
+    /// </summary>
+    public static IReadOnlyList<string> UnlocksTabsWithContent(AppState state) =>
+        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe);
+
+    /// <summary><see cref="UnlocksTabsWithContent(AppState)"/> from a description alone.</summary>
+    public static IReadOnlyList<string> UnlocksTabsWithContent(
+        string title, GameId game, DescribeResult describe) =>
+        WithContent(GameLayout.UnlocksTabs, title, game, describe);
+
+    /// <summary>
+    /// The listed sections a described game actually has something in, keeping the layout's order.
+    /// A section a panel places itself is never one of them, however the file lists it.
+    /// </summary>
+    private static IReadOnlyList<string> WithContent(
+        IEnumerable<string> listed, string title, GameId game, DescribeResult describe)
     {
-        var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<string>();
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
-        return GameLayout.SubPagesUnder(host, state.UnlocksUnsupported)
-            .Where(s => !GameLayout.IsReserved(s) && sections.ContainsKey(s))
-            .ToArray();
+        var sections = Assign(title, game, describe, out _);
+        return listed.Where(s => !GameLayout.IsReserved(s) && sections.ContainsKey(s)).ToArray();
     }
 
     /// <summary>
@@ -77,77 +103,60 @@ public static class GamePanel
     }
 
     /// <summary>
-    /// The sub-page a hosting panel draws this frame, or null for the panel's own page. Both hosts
-    /// go through this, so both follow one rule: a sub-page the running game no longer has a
-    /// section for (the game changed), one a panel places itself, and one that now belongs to the
-    /// other panel (the unlock table came or went) are all dropped, and the sub-page a headless run
-    /// asked for by name is taken up by whichever panel hosts it as soon as the descriptors are in.
+    /// The sub-page this page draws this frame, or null for the page itself. One rule covers every
+    /// way a sub-page can stop being one: the running game no longer has a section for it (the game
+    /// changed), a panel places it itself, or the Unlocks panel draws it as a tab now (its table
+    /// came back). The section a headless run asked for by name is taken up here as soon as the
+    /// descriptors are in, unless it is one of that panel's tabs.
     /// </summary>
-    public static string? ResolveSubPage(AppState state, string host)
+    private static string? ResolveSubPage(AppState state, IReadOnlyDictionary<string, List<Feature>>? sections)
     {
-        var describe = state.Describe;
-        var sections = describe.Features.Length > 0
-            ? Assign(state.DescribedTitle, state.DescribedGame, describe, out _)
-            : null;
-
-        return ResolveSubPage(state, host, sections);
-    }
-
-    /// <summary>
-    /// <see cref="ResolveSubPage(AppState, string)"/> for a caller that has already sorted the
-    /// features into their sections.
-    /// </summary>
-    public static string? ResolveSubPage(
-        AppState state, string host, IReadOnlyDictionary<string, List<Feature>>? sections)
-    {
-        string? open = SubPageNav.For(host);
-        if (open is not null && !HostShows(state, host, open, sections))
+        string? open = SubPageNav.Open;
+        if (open is not null && !ShowsAsSubPage(state, open, sections))
         {
             open = null;
-            SubPageNav.Set(host, null);
+            SubPageNav.Open = null;
         }
 
-        if (open is null && SubPageNav.Requested is { } wanted && HostShows(state, host, wanted, sections))
+        if (open is null && SubPageNav.Requested is { } wanted && ShowsAsSubPage(state, wanted, sections))
         {
             open = wanted;
             SubPageNav.Requested = null;
-            SubPageNav.Set(host, open);
+            SubPageNav.Open = open;
         }
 
         return open;
     }
 
     /// <summary>
-    /// Whether one panel would draw a section as its sub-page: the running game has to have
-    /// something in it, no panel may place it itself, and the layout has to hang it there. A
-    /// section the file hangs nowhere belongs to the Game page, which is what lets
-    /// <c>--game-section</c> open a stacked section as a page of its own.
+    /// Whether this page would draw a section as a sub-page: the running game has to have something
+    /// in it, no panel may place it itself, and the Unlocks panel must not be drawing it as a tab.
+    /// A section the layout lists nowhere belongs here, which is what lets <c>--game-section</c>
+    /// open a stacked section as a page of its own.
     /// </summary>
-    private static bool HostShows(
-        AppState state, string host, string section, IReadOnlyDictionary<string, List<Feature>>? sections) =>
+    private static bool ShowsAsSubPage(
+        AppState state, string section, IReadOnlyDictionary<string, List<Feature>>? sections) =>
         sections is not null
         && !string.IsNullOrWhiteSpace(section)
         && !GameLayout.IsReserved(section)
         && sections.ContainsKey(section)
-        && string.Equals(GameLayout.HostFor(section, state.UnlocksUnsupported), host, StringComparison.Ordinal);
+        && !GameLayout.IsUnlocksTab(section, state.UnlocksUnsupported);
 
     /// <summary>
-    /// The panel that would open a section as a sub-page right now, or null when the running game
-    /// has nothing in it. This is how the window routes a <c>--game-section</c> to the panel that
-    /// hosts the section before that panel is ever drawn.
+    /// The panel that would show a section right now: the Unlocks panel for one of its tabs, this
+    /// page for anything else, and null while the running game has nothing in that section at all.
+    /// This is how the window routes a <c>--game-section</c> before either panel is drawn.
     /// </summary>
-    public static string? HostForOpenableSubPage(AppState state, string section)
+    public static int? PanelForSection(AppState state, string section)
     {
         var describe = state.Describe;
-        if (describe.Features.Length == 0) return null;
+        if (describe.Features.Length == 0 || string.IsNullOrWhiteSpace(section)) return null;
+        if (GameLayout.IsReserved(section)) return null;
 
         var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
-        foreach (var host in GameLayout.Hosts)
-        {
-            if (HostShows(state, host, section, sections)) return host;
-        }
+        if (!sections.ContainsKey(section)) return null;
 
-        return null;
+        return GameLayout.IsUnlocksTab(section, state.UnlocksUnsupported) ? PanelNav.Unlocks : PanelNav.Game;
     }
 
     /// <summary>
@@ -223,9 +232,9 @@ public static class GamePanel
         var order = new List<string>();
         var sections = describe.Features.Length > 0 ? Assign(title, game, describe, out order) : null;
 
-        if (ResolveSubPage(state, GameLayout.GameHost, sections) is { } side)
+        if (ResolveSubPage(state, sections) is { } side)
         {
-            DrawSubPage(state, GameLayout.GameHost, side, sections![side]);
+            DrawSubPage(state, side, sections![side]);
             return;
         }
 
@@ -262,13 +271,14 @@ public static class GamePanel
             ImGui.PopID();
         }
 
-        // Everything not owned by a panel and not a sub-page of one, stacked in layout order. A
-        // section the quick block emptied is not in the dictionary at all, so it draws no header.
+        // Everything not owned by a panel and not drawn on a page or a tab of its own, stacked in
+        // layout order. A section the quick block emptied is not in the dictionary at all, so it
+        // draws no header.
         var used = order.Where(s => !GameLayout.IsReserved(s));
-        var subPages = GameLayout.AllSubPages;
+        var elsewhere = GameLayout.SectionsDrawnElsewhere;
         foreach (var section in GameLayout.TabOrder(title, game, used))
         {
-            if (subPages.Contains(section)) continue;
+            if (elsewhere.Contains(section)) continue;
             if (!sections.TryGetValue(section, out var features) || features.Count == 0) continue;
 
             ImGui.PushID(section);
@@ -290,19 +300,25 @@ public static class GamePanel
         $"Controls are disabled outside INGAME (state is {state.Session.State.DisplayName()}).";
 
     /// <summary>
-    /// One section as a page of its own, for whichever panel hosts it: the heading naming the panel
-    /// and the section, then the section's features in the blocks its headings make. This is the
-    /// whole of what a sub-page is, so the Unlocks panel draws the section hung under it by calling
-    /// this and nothing else.
+    /// One section as a sub-page of this page: the heading naming both, then the section itself.
     /// </summary>
-    public static void DrawSubPage(AppState state, string host, string section) =>
-        DrawSubPage(state, host, section, FeaturesInSection(state, section));
-
-    private static void DrawSubPage(
-        AppState state, string host, string section, IReadOnlyList<Feature> features)
+    private static void DrawSubPage(AppState state, string section, IReadOnlyList<Feature> features)
     {
-        Ui.Heading($"{host} / {section}");
+        Ui.Heading($"Game / {section}");
+        DrawSectionPage(state, section, features);
+    }
 
+    /// <summary>
+    /// A whole section drawn on its own: the note saying why its controls are greyed out, then its
+    /// features in the blocks the layout's headings make. This is the body of a sub-page, and it is
+    /// what the Unlocks panel draws inside one of its tabs, so the two are the same page under a
+    /// heading and under a tab.
+    /// </summary>
+    public static void DrawSectionPage(AppState state, string section) =>
+        DrawSectionPage(state, section, FeaturesInSection(state, section));
+
+    private static void DrawSectionPage(AppState state, string section, IReadOnlyList<Feature> features)
+    {
         bool enabled = state.Ingame;
         if (!enabled) ImGui.TextColored(Ui.Yellow, OutsideIngame(state));
 
