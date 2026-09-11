@@ -1,22 +1,61 @@
 # RaCMAN Reloaded
 
-RaCMAN Reloaded is the PC client for [qwark](../qwark/), the PS3-side trainer for the Ratchet & Clank PS3 games. It is a thin client: every panel renders what the console reports, and every control sends one request to the console and shows the answer. Game logic and addresses live in qwark, not here.
-
-Runs on Windows, Linux and macOS (.NET 8, Dear ImGui through ImGui.NET, OpenTK).
+A modding tool and trainer for the original Ratchet & Clank quadrilogy, on PS3 and RPCS3, tailored for speedrunners. It's
+- Standalone: Powered by the qwark server, which runs locally on your console for better performance, with an optional PC client.
+- Seamless: connection, reconnection and switching games is seamless and happens automatically.
+- Portable: supports Windows and Linux (macOS coming soon?), PS3 and RPCS3.
+- Customizable: and it even has a dark mode :)
 
 ## Installation
 
-Every release is on the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases), with `qwark.sprx` and the RPCS3 helper already inside it.
+Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx` and the RPCS3 helper.
 
-- **Windows, installed**: run `RaCMANReloaded-win-Setup.exe`. It installs for the current user only, needs no administrator, and puts a shortcut in the Start menu.
-- **Windows, portable**: unzip `RaCMANReloaded-win-Portable.zip` anywhere, including a stick, and run `RaCMAN.App.exe`.
-- **Linux**: download `RaCMANReloaded-linux.AppImage`, `chmod +x` it and run it.
+- **Windows, installer**: run `RaCMANReloaded-win-Setup.exe`. It installs for your user account only. It does not need administrator rights.
+- **Windows, portable**: unzip `RaCMANReloaded-win-Portable.zip` and run `RaCMAN.App.exe`.
+- **Linux**: download `RaCMANReloaded-linux.AppImage`, make it executable and run it.
 
-Both the installer and the portable build keep themselves up to date; a folder you assembled yourself (a `dotnet publish`, or `publish.ps1`) cannot, and the Settings panel says so instead of offering a button that would do nothing.
+## Connect to a PS3
 
-### Where your files are
+1. Start the console and make sure webMAN runs on it.
+2. Type the console's IP address into the client.
+3. Press **Connect**.
+4. Start one of the four games.
 
-Nothing you make lives beside the executable, because an update replaces that whole folder. Your settings file, colour presets, watchlists, savefile library, the mods you install and the RPCS3 helper's `/dev_hdd0` all go in the data folder:
+The client finds the module on the console, sends it if no plugin slot holds it, and connects. Each step shows a message. If a step fails, the message tells you which step failed.
+
+The panels fill with the controls for the game that runs. If the connection stops, the client connects again by itself. The console keeps the state, so nothing is lost.
+
+## Connection modes
+
+The mode is on the Settings panel, in the **Connection** section.
+
+**webMAN** is the default mode. The client asks webMAN which plugin slot holds the module. If no slot holds it, the client sends `qwark.sprx` to the console and loads it. Automatic reconnections do the same, so the client can recover a module that stopped.
+
+**Standalone** never uses webMAN. The client only connects to the module's port. Use this mode if the console loads the module at startup.
+
+Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
+
+## Connect to RPCS3
+
+1. In RPCS3, switch the IPC server on. It is in Manage, Network Services, IPC.
+2. Start the game.
+3. In the client, select **RPCS3** on the Connection panel.
+
+The client starts `qwark-rpcs3.exe` beside it and connects to it on this PC. The panels behave as they do on a console, with one difference: RPCS3 recompiles the game code, so it cannot accept code patches. The client therefore switches off the mods, the save file manager and the patch cheats. Everything that writes data continues to work.
+
+RPCS3 accepts one IPC client at a time. If another program holds the port, the client says so and waits for the port. RPCS3 support is for Windows at the moment.
+
+## Updates
+
+The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.
+
+The Settings panel holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
+
+A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one.
+
+## Your files
+
+Your settings, colour presets, watchlists, save files and mods are in the data folder. An update never touches it.
 
 | | |
 |---|---|
@@ -24,71 +63,17 @@ Nothing you make lives beside the executable, because an update replaces that wh
 | Linux | `$XDG_CONFIG_HOME/racman-reloaded`, or `~/.config/racman-reloaded` |
 | macOS | `~/Library/Application Support/RaCMAN Reloaded` |
 
-`--data-dir <path>` moves it for one run and `RACMAN_DATA_DIR` moves it for good, which is what a copy on a stick wants. The Settings panel's **Files** section has an **Open folder** button for each of them and says which folder is yours and which is the release's.
+The Settings panel has an **Open folder** button for it. To use a different folder, start the client with `--data-dir <path>`, or set the `RACMAN_DATA_DIR` variable. A copy on a memory stick needs one of the two.
 
-If you are coming from a build that kept everything beside the executable, the first start copies the settings, `colours/`, `watchlists/`, `savefiles/` and any mod the release did not ship into the data folder and says so. The originals are left exactly where they were.
+You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours replaces a shipped mod with the same folder name.
 
-The shipped mod library, `data/gamelayout.json` and the `data/autosplit/` planet routes stay in the application folder and are read from there. Anything of yours with the same name is read instead: a mod you install goes into your own `mods/` and hides a shipped mod with the same folder name, a `gamelayout.json` in the data folder is read instead of the shipped one, and so is an `autosplit/rac2-planets.txt` there. That is how an edit survives an update.
+## Windows firewall
 
-### Updates
-
-On start, at most once a day, the client asks GitHub whether there is a newer release. If there is, a line appears at the top of the window with a **Download** button, then **Restart to update** when it has finished; **Later** silences it until the next start. Nothing is downloaded until you press the button. The Settings panel's **Updates** section has the switch, a **Check now** button, the version you are running and when it last looked. `--no-update-check` turns it off for one run, and the check never runs under `--exit-after` or the fake-server flags.
-
-## Getting started
-
-1. Enter the console's IP and press **Connect**. That is the whole of it: the client asks webMAN which VSH slot holds the module, sends the `qwark.sprx` that ships beside the client to the slot the settings hold when no slot has it, and connects. The question comes first because a console that is not running qwark drops the connection rather than refusing it, so connecting first meant waiting out the TCP timeout before anything useful happened; webMAN answers in milliseconds, and its answer says what to do next. A module a slot already holds is never sent again: when its port is shut as well, the client says it is loaded and not running, and naming the slot is what makes that fixable. Each step says what it is doing, and a failure names the step it stopped at. The buttons that do the two halves by hand (**Load qwark via webMAN**, **Check if loaded**), the file and the slot are behind "Show debug information" in Settings.
-2. The status line shows the session state, the running game and the qwark version.
-3. Start a supported game. The panels fill in from the console's own description of the game.
-
-That is **webMAN** mode, the default, and it is also what every automatic reconnect does, so a console whose qwark crashed comes back on its own without anybody pressing anything: the reconnect loop asks webMAN and reloads the module only when no slot holds it, at most once every 30 seconds, with plain reconnect attempts in between. The other mode is **Standalone**, on the Settings panel's **Connection** section: Connect then only connects and nothing here ever asks webMAN anything, which is what a console that already loads qwark at boot wants. Standalone shows the install that gets it there on the Connection panel, without needing debug information: tick the box acknowledging that a bad boot plugin needs a plugin-disabling recovery, then **Install to boot_plugins.txt** puts `qwark.sprx` in `/dev_hdd0/plugins` and adds it to `/dev_hdd0/boot_plugins.txt`, and **Remove from boot_plugins.txt** takes it out again. The console has to be restarted for it to take effect, since that list is only read at boot. That one install needs webMAN's FTP server; nothing afterwards does.
-
-Every qwark release carries a build number, and the client knows the one it shipped with. If the console reports an older build (the SPRX beside the client was updated but the console still runs the previous one), the header says so and the Connection panel explains how to re-upload it. Until then the feature list you see is the old module's.
-
-If the connection drops, the client reconnects on its own; there is nothing to restore because the console keeps all the state. What the console said about the running game stays on screen while it is away, greyed out.
-
-The window opens the way you left it. Its client size and its corner are saved when it closes and applied on the next start, never smaller than the 822x564 the side nav and the Game sub-pages need to fit without scrolling, and never bigger than the monitor it opens on; a corner on a screen that has since gone away is dropped rather than opened off the edge of the desktop, and a settings file from before this build simply opens at the default.
-
-## Panels
-
-The side nav lists them in this order, in groups with a thin line between them: Connection; Game, with its sub-pages indented under it, and Unlocks; Positions, Combos; Mods, Save files; Autosplitter, Input display; Level flags, Memory; Settings. `--panel N` counts the same list from 0, so 0 is Connection, 1 Game, 2 Unlocks, 3 Positions, 4 Combos, 5 Mods, 6 Save files, 7 Autosplitter, 8 Input display, 9 Level flags, 10 Memory and 11 Settings. The sub-pages, and the Unlocks panel's own tabs, have no number of their own: `--game-section <name>` opens a section by name, wherever the layout file draws it.
-
-- **Game**: the everyday controls for the running game. At the very top, above everything else, is the quick block: the things a run reaches for every other minute, in two columns. On the left, one full-width button per row: **Die**, save and load the console's selected position slot, and the game's two savefile actions (set aside the current file, load the set-aside one). On the right, a dropdown for the console's selected slot, which is the one place that selection is made, and the planet controls, which live here and nowhere else: the planet combo, the reset boxes the game has, and **Load planet**. The combo and the boxes are the console's own planet selection, the one a combo's Load planet loads, so a change to them is sent as it is made and there is no Select button. The planet list is the console's, whose indices are the game's own planet ids, so the filler names that keep that numbering ("(none)" in UYA, "(infinite loop)" in Deadlocked) are left out of the combo while the ids behind the real planets stay what they were. The two reset boxes are only offered to the games that have them: RaC1 has special bolts and no level flags, Deadlocked has neither, RaC2 and UYA have both. A game that has no savefile helper, or named no planets, simply gets the controls it has. Under the quick block the player values are an editable table under a **Values** header, open by default like the other sections and remembered per game once you fold one away, with the per-file in-game options (UYA's quick-select pause, RaC1's goodies menu) in a column beside it, and then Cheats, Player and Savefile stacked below, each toggle with an "on boot" (auto-apply) box. Nothing is drawn twice: the two flagged savefile actions and an action the game itself calls "Die" are left out of the sections that would otherwise hold them, and a section left with nothing of its own (a Savefile group that was only those two) draws no header at all. A value box takes a number and sends it on Enter, clamped to whatever range the console named for that value; the fields the game itself reads as signed (the QE offsets in RaC2 and RaC3, health XP) read and take negative numbers, so -1 shows as -1 rather than as 65535, and their range comes from the width of the field. Toggles that are plain game-memory switches (the options, the debug bits) have no such box: the console reads their state back from the game, so the checkbox shows what the game says. The less-used sections are sub-pages, indented in the side nav under Game: Manips (category setup and manipulation helpers), Cosmetics (with a **Chargeboots** heading over the chargeboot colour rows and named presets for those colours, kept per game in `colours/`) and Debug. Collectables is not one of them: it is a tab on the Unlocks panel, beside the table it edits. Which section is drawn where is `gamelayout.json`'s to say.
-- **Unlocks**: the per-game unlock table, one tab per unlock category, with **Collectables** as a tab beside them (the layout file's doing, not the panel's: the gold bolts, skill points and titanium bolts are whole-table unlocks like the ones in the table itself, so they belong next to it rather than a page away). A category tab is the table, with the columns the console describes for that game (UYA: owned, level, XP, ammo; RaC1 adds gold), a search box, and the game's bulk unlock actions above the tabs (UYA's weapon level buttons live here). A tab the layout file adds is that section's own controls and nothing else: no search box, no table. The name takes half the table and the value columns share the other half, so four of them still leave the names readable; the console's id for a row has no column of its own and is on the name's tooltip with "show debug information" on. The table re-reads itself on the Settings panel's refresh interval; set that interval to 0 and a Refresh button appears here instead.
-- **Mods**: the mods that ship with the client (this repo's `mods/` folder, copied beside the executable by a release) and the ones in your own `mods/<TITLEID>/` listed together, a mod of yours used instead of a shipped one with the same folder name; uploaded to the console the first time a mod is used or when it changes; auto-apply flags; ZIP install with a native file picker, always into your own folder. An **Open folder** button beside the rescans opens that library in the file manager, with the path on its tooltip; which library a mod came out of is on its name's tooltip and in the details under the table. The table is the name, the version, what the console has and the buttons; the author is on the name's tooltip and in the details under the table, where there is room for it. Hashes and patch counts only show with debug information on. The library leaves out the mods that need a Lua runtime this release does not have, the four savefile helpers, which qwark now carries itself, the UYA freecam, which cannot be used with that helper, and four mods whose code lands on top of that helper's own (RaC1's State Display, Quartu Grinder and Hoven Health Display, and UYA's SUCKMAN), until a mod loader gives every mod a hook and a cave of its own.
-- **Save files**: a category library that lives on the console, at `/dev_hdd0/qwark/savefiles/<TITLEID>/<category>/<name>.sav`, with a mirror of it in the data folder's `savefiles/<TITLEID>/<category>/`. Saving asks the console to write its own file, shows the progress of the copy it makes between the game and that file, and then copies the file down here while the **Mirror saves to this PC** setting is on (it is by default). Loading asks the console to read its own file back into the game: nothing crosses the network at all unless this PC has bytes the console does not, in which case the file is uploaded once, the first time it is used, and lives over there from then on. A save is up to 2 MB, and until qwark build 12 every single load streamed one across. Each row says where the save lives - console, PC, or both - and whether the two copies are the same bytes, compared by CRC32; a row that says "both, differ" loads this PC's copy and replaces the console's. The size in bytes is a column only with "show debug information" on, since every save in here is one game's whole file. Renaming and deleting act on both copies, and a new category is made on both. No helper mod has to be loaded first: qwark installs its own on first use, and all four games have one. **Open folder** opens the current category's folder on this PC, with the path on its tooltip. The listing, the rename box and the delete confirmation show a save's name without the `.sav` every file in the library ends in; the file on both sides keeps it.
-- **Positions**: eight position slots per planet, with **Save**, **Load** and **Clear** on each row, the line the player is standing on and **Refresh slots**. Nothing else: the planet controls and **Die** are the Game page's quick block, and so is the slot dropdown, so a row has no **Select** of its own and the selected slot (the one the quick block's two buttons act on, and the one the console remembers) is picked in one place. The planet is still named above the table, because it is the planet those slots belong to. Coordinates are drawn to two decimals in a fixed width, so a row does not shuffle sideways while the player moves.
-- **Autosplitter**: drives LiveSplit through its built-in TCP server (right-click LiveSplit, Control, Start TCP Server; port 16834, changed in Settings). **The LiveSplit development build is required**, because its server is the only one that answers `getupcomingsplitname`, and that name is the whole of the planet route. On connect the client asks `getlivesplitversion` and then `getcurrenttimerphase`; a build that does not answer the version query is told so in a popup ("This LiveSplit is too old...") and the connection is dropped rather than half-driven. A connection attempt that finds nothing on the port gets the other popup, once per run of the client for the reconnect loop's own retries and every time for the panel's Connect button. The console reports run events (start, split candidates with a reason, reset, and for Deadlocked a pause and resume around a quit to the XMB); this panel decides what to do with them: which reasons split, Start/Split/Reset/Pause master switches, and a planet route that only splits when the planet you are travelling to matches the upcoming split's name (alias lists in `data/autosplit/`, or in the data folder's `autosplit/` if you have edited one, with one line per planet in PLANET_LIST order and `null` for a line with no names). The upcoming name comes from `getupcomingsplitname` and nowhere else; no splits file is read, and an empty answer is the run's last segment. Planet 0 is the old script's one exception and always splits: it is the main menu rather than a planet a run passes through, so there is nothing to compare. The route follows the game the console last described, and a game the client has not described is not a game to decide for: the last one's settings and route stay in force through a re-describe rather than falling back to a blank entry that would split on everything. The old scripts' load-time normalisation is applied automatically through LiveSplit's loading times. A Deadlocked quit to the XMB is the one thing that stops the clock, and the Pause switch is what gates it: with Pause off neither half reaches LiveSplit, so game time is never frozen and the 14.8 s is never added. The switch is only shown for a game whose run events include a pause, so it is Deadlocked's alone; the setting behind it is kept either way. The start still gives the run a game time either way. A LiveSplit run has no game time at all until something creates one, and until then the clock a pause would freeze is real time, so the run is given one first: at the start of a run the client sends `starttimer` and then `addloadingtimes 0`, which takes nothing off and leaves game time equal to real time but existing; at the quit it sends `addloadingtimes 0` again (harmless if the run already has a game time) and then `pausegametime`. Nothing is read back and the clock never jumps. When the game comes back it reads the frozen clock, sets it 14.8 s later and starts it again (`getcurrentgametime`, `setgametime`, `unpausegametime`). So a quit always costs the run exactly 14.8 s of game time however long it really took, which is what the old `rac4-LC-autosplitter.asl` did. The quit takes the whole console session to the XMB and back, so the client holds the open pause across it: the game turning to none and back to the same game changes nothing, and only a different game or a new run drops it. A resume that finds no pause of its own still sends `unpausegametime` and says so in the log, because a run whose game time never restarts is the one failure worth ruling out. Real time never stops. No timer of its own: LiveSplit is the clock.
-- **Input display**: the 21 controller skins from RaCMAN, drawn either in the panel or in a window of its own (with an always-on-top option) so a capture tool can pick it up as its own source. There is nothing to size by hand: in the panel the pad is drawn at the skin's own size, or smaller when the panel is; the window opens at the skin's size and the pad follows it as it is resized.
-- **Level flags**: the flag region of a planet as a bitfield, one byte per row with a checkbox per bit, re-read on the same interval as Unlocks (Settings), with the same Refresh button when that interval is 0. Hidden for games whose flag layout is not known yet (RaC1 for now).
-- **Memory**: viewer, watches (live in telemetry) with named watchlists per title, freezes, raw instruction patches, and the moby table, whose columns are the row index, the address and whatever the game's layout file names (oClass, UID, state); the coordinates are the Positions panel's job and three more columns of them did not fit the window. The address boxes start empty and carry the example address as grey hint text rather than as something to delete, and the patch table names what each patch came from: the mod, the feature behind it, or this client.
-- **Combos**: controller combos executed on the console. Capture stores the most buttons you held at once during the press, so the buttons can be let go of one at a time. The console holds every combo off for the length of a capture, so recording over "save position" no longer saves one while you press it; that hold expires on the console by itself, so a client that disappears mid-capture cannot leave the combos switched off.
-- **Settings**: local PC preferences, in the order somebody meets them. **Theme** is light (the default) or dark. **Updates** holds the once-a-day check, a **Check now** button, the version you are running and when it last looked. **Import from RaCMAN** reads the old client's `config.txt`: the console IP into this client, the five controller combos and the auto-apply mod list onto the console (the mod list per running title), and the old chargeboot colour slots as presets. **Connection** is the mode, **webMAN** (the default) or **Standalone**, described under Getting started, and how often the tables that watch live state (Unlocks, Level flags) re-read themselves, in seconds, with 0 for "only when you press Refresh", which is also the only time those two panels draw that button. **Ports** holds the two ports nobody should have to think about: RPCS3's IPC server and LiveSplit's TCP server, both named on the panels that use them and typed only here. **Layout** reloads `gamelayout.json` without a restart, saying whether it is reading the shipped copy or yours from the data folder, with an **Open folder** button beside it for the folder that file lives in. **Files** names the data folder, everything in it and the application folder the release replaces on an update, each with an **Open folder** button and the full path on its tooltip. Last comes the "show debug information" switch, which reveals the protocol-level detail (tick and generation counters, opcode hints, table addresses, the Connection panel's console utilities and its webMAN section, the autosplitter's manual split and reset) that is hidden otherwise. The one part of that webMAN section standalone mode shows without it is the boot install, because that is how a standalone console comes to have qwark at all.
-
-When the game reboots, the console keeps read-only watches and asks, through this client, whether to re-apply anything that writes memory (toggles, freezes, patches, mods). Nothing that writes is re-applied silently unless its auto flag is set.
-
-Everything the console *describes* about a game — its feature table, its planet list, its run-event rows, the shape of its unlock table, whether it has level flags — is kept per game and reused. A quit to the XMB, a reboot of the same game, a console that goes away for a minute: none of them empties a panel. The controls grey out while the session is not INGAME and come back with the game, and only the live values behind them (positions, unlocks, readouts) are read again, quietly. The description is replaced when a **different** game starts, when the console's qwark build changes, or when you ask for it: the Connection panel's **Re-read everything** or the Settings panel's **Reload gamelayout.json**. Nothing that runs on its own puts an error on screen, so the reads that land in the middle of a quit are silent.
+The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application. At the first start the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later.
 
 ## Customising the Game page
 
-The Game page's layout is owned by the client, not the console. qwark's DESCRIBE groups are the default; `data/gamelayout.json` overrides it. The shipped copy is in the application folder and is replaced on every update, so to change it put a copy called `gamelayout.json` in the data folder: that one is read instead whenever it is there, and the Settings panel says which of the two is in use. Two lists say where a section is drawn: `subPages` for the ones that become a page of their own, indented under Game in the side nav, and `unlocksTabs` for the ones the Unlocks panel draws as tabs beside its unlock categories (the shipped file: Manips, Cosmetics and Debug as sub-pages, Collectables as a tab). Everything in neither list stacks on the Game page. A section named in both stays a sub-page, since nothing is drawn twice, and a game with no unlock table has no Unlocks entry in the nav, so for that game the tabs are listed under Game instead of going missing. The older `sideSections` key still reads, and means `subPages`. The per-game entries are keyed by game (`rac1`, `rac2`, `rac3`, `rac4`), so the disc release BCES01503, which hosts three games under one title id, gets the right layout for whichever game is running; an entry keyed by a title id is honoured first if you want one. In each entry a `moves` table sends a feature (by its exact label) to a named section, creating it if needed, and `tabOrder` sets the order. A `headings` table breaks a section up: it is keyed by section name, then by the heading text, and each heading lists the feature labels it is drawn in front of, so UYA's Cosmetics sub-page reads
-
-```json
-"headings": {
-  "Cosmetics": {
-    "Chargeboots": ["Chargeboots primary front", "Chargeboots primary back", "Chargeboots tint"]
-  }
-}
-```
-
-and draws the armour and the ship colour first, then a **Chargeboots** header with those three rows under it. The features a heading names are collected under it in their own order, the ones no heading names stay where they were, and a section nothing lists is drawn exactly as before. VALUE features default to the editable table, but a move can pull one into a section (that's how QE ends up under Debug). Four section names are reserved, one for each place a panel decides for itself: `Quick` is the block at the very top of the page, so a move to it puts a feature in that column of buttons; `Values` is the value table under it; `Options` is the column beside that table; and `Unlocks` sends a feature to the Unlocks panel instead of the Game page. None of the four can be a sub-page or a tab-order entry, however the file is written, and neither can a section that is already a sub-page of the other panel: the first panel to name one keeps it. `Player` is an ordinary section: the position buttons it used to end with are in the quick block now, so a game with nothing else in Player gets no Player header. The quick block also claims the two ACTIONs the console flags SAVE_ASIDE and LOAD_ASIDE, and an ACTION a game labels "Die", wherever the layout would otherwise have put them; a section left with none of its own then draws nothing. Changing the layout never needs a qwark rebuild; the app reads the file on start, and the Settings panel can reload it.
-
-## RPCS3
-
-Pick **RPCS3** on the Connection panel and the client starts `qwark-rpcs3.exe` (bundled beside it) and connects to it on this PC. That is the same qwark core over RPCS3's PINE IPC server instead of the console's PS3MAPI, so every panel behaves the same. Turn the IPC server on in RPCS3 first (Settings, I/O, Enable IPC server; port 28012, and this client's copy of that port is on its own Settings panel) and boot the game. Code patches cannot be applied to RPCS3's recompiled code, so the console reports that and the client greys out what needs one: the patch cheats (fast loads, infinite ammo and health, crash patches), mods, and raw patches. The Mods and Save files entries in the side nav are greyed out too, with the reason on hover, since every mod is a code patch and so is the savefile helper the Save files panel works through; being on one of them when the session turns out to be RPCS3 moves you to Connection. Everything that is a data write keeps working. RPCS3 serves one IPC client at a time, so if another program is on the port the helper says so on the Connection panel (in orange) and picks the game up by itself once the port is free; pausing the emulator does not end the session. Windows only for now; the Linux and macOS PINE socket is a small addition on the qwark side.
-
-## Telemetry and the firewall (Windows)
-
-The console streams live state (readouts, toggle state, the pad for combos) to the PC over UDP. Windows Firewall blocks unsolicited inbound UDP for a freshly unzipped, unsigned app, often without showing a prompt. On first run the client offers to add the rule; if you decline it keeps working by falling back to slower TCP polling, and the Connection panel then shows a one-click **Allow inbound UDP through Windows Firewall** button. Either way it asks for administrator approval and only adds an inbound rule for RaCMAN. You can also double-click **Allow through Firewall.cmd**, or remove the rules later with `windows-firewall.ps1 -Remove`.
+The client, not the console, decides where each control is drawn. `data/gamelayout.json` holds that layout. You can move a feature to another section, and make a section into a sub-page or a tab. See [docs/gamelayout.md](docs/gamelayout.md).
 
 ## Building
 
@@ -98,31 +83,27 @@ dotnet test
 dotnet run --project src/RaCMAN.App
 ```
 
-The client is a window application, so double-clicking `RaCMAN.App.exe` opens no console behind the window. Started from a terminal it attaches to that terminal's console instead, so `--help` and the summary line a headless run ends with are still printed where they were typed.
+`publish.ps1` makes `../build/RaCMAN-Reloaded/` and a zip of it. It takes `qwark.sprx` and `qwark-rpcs3.exe` from `../qwark/dist/`, which qwark commits, so a release needs no PS3 SDK. `-All` adds linux-x64 and osx-x64.
 
-`publish.ps1` produces `../build/RaCMAN-Reloaded/` and `../build/RaCMAN-Reloaded.zip` with the app, the skins, the moby layout data, the mod library from this repo's `mods/` folder, and `qwark.sprx` and `qwark-rpcs3.exe` from `../qwark/dist/` (which qwark's `make dist` fills and commits, so no PS3 SDK is needed to cut a release). `-All` adds linux-x64 and osx-x64, each as its own complete folder and zip.
+To work without a console, build the qwark simulator with `../qwark/build-host.sh`. Run `qwark-host.exe`, type `boot NPEA00385`, and connect the client to `127.0.0.1`. `dotnet run --project src/RaCMAN.App -- --help` lists the flags for headless runs.
 
 ## Releasing
 
-Tag a commit `vX.Y.Z` and push the tag. `.github/workflows/release.yml` does the rest:
+1. Build `qwark.sprx` and `qwark-rpcs3.exe` in the qwark repository and commit them to its `dist/` folder. The release fails without them.
+2. Tag a commit here `vX.Y.Z` and push the tag.
 
-1. Checks out this repository, [sowelilili/qwark](https://github.com/sowelilili/qwark) at the same tag if it has one and `main` otherwise, and takes the mod library from this repository's `mods/`.
-2. Fails, naming the file, unless qwark's committed `dist/` holds `qwark.sprx` (both jobs) and `qwark-rpcs3.exe` (the Windows job). **Build and commit those in the qwark repository before tagging here.**
-3. Runs `publish.ps1` with `-Rid`, `-Version`, `-SelfContained` and `-NoZip`, so the release layout is the one this repository already describes rather than a second copy of it in YAML.
-4. Packs with [Velopack](https://docs.velopack.io) (`vpk pack`) and uploads to the release the tag names (`vpk upload github --publish --merge`). The Windows job runs first and makes the release; the Linux job merges its AppImage into it.
+`.github/workflows/release.yml` then builds the client, packs it with [Velopack](https://docs.velopack.io) and uploads it. The Windows job makes the release. The Linux job adds its AppImage to it. The version comes from the tag.
 
-The version comes from the tag with the `v` removed and is passed to `dotnet publish` as `-p:Version=`, which is what the client reads back out of its own assembly and shows in the title bar and in Settings. The release therefore carries `Setup.exe`, the portable zip, the AppImage, the `.nupkg` packages and the `releases.win.json` and `releases.linux.json` indexes the running client reads; do not delete those index files from a release, or clients stop seeing updates.
+A release carries `Setup.exe`, the portable zip, the AppImage, the `.nupkg` packages and the `releases.win.json` and `releases.linux.json` files. Do not delete those two files from a release. The client reads them to find updates.
 
-There is no macOS job. macOS needs its own signing and notarisation story before an update that replaces the app bundle is worth shipping.
+There is no macOS job yet. macOS needs signing and notarisation first.
 
-For development without a console, build the qwark host simulator (`../qwark/build-host.sh`), run `qwark-host.exe`, type `boot NPEA00385`, and connect the client to `127.0.0.1`. `dotnet run --project src/RaCMAN.App -- --help` lists the flags used for headless checks (`--fake-server`, `--fake-script`, `--connect`, `--panel`, `--exit-after`). `--fake-script "2:quit,3:xmb,4:boot"` drives the in-process fake console through a session change, which is how the "side panels never outlive the game" rule is checked without hardware; `"2:start,4:split:1:3,8:reset"` makes it emit run events for the autosplitter.
+## Repository layout
 
-## Layout
-
-- `src/RaCMAN.Protocol`: framing, opcodes, records and the client; no UI dependency.
+- `src/RaCMAN.Protocol`: framing, opcodes, records and the client. No UI code.
 - `src/RaCMAN.App`: the ImGui application and its panels.
-- `tests/RaCMAN.Protocol.Tests`: xUnit tests, including a fake qwark server.
+- `tests/RaCMAN.Protocol.Tests`: xUnit tests, with a fake qwark server.
 - `controllerskins/`: input display skins.
-- `packaging/`: the Windows firewall helper and the application icon the Linux AppImage is built with.
-- `.github/workflows/release.yml`: the tag-driven release, described under Releasing above.
-- `mods/`: the mod library the release ships, one folder per title plus the shared Lua helpers.
+- `mods/`: the mod library each release ships.
+- `packaging/`: the Windows firewall helper and the AppImage icon.
+- `docs/`: the game layout reference.
