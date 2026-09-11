@@ -33,6 +33,12 @@ public static class SaveFilesPanel
     private static long _transferred;
     private static bool _confirmDelete;
 
+    /// <summary>Seconds since SAVEFILE_INFO was last re-read while it said the helper had not run.</summary>
+    private static float _sinceInfo;
+
+    /// <summary>How often the panel asks again whether the helper has run a frame.</summary>
+    private const float NotRunningPollSeconds = 1f;
+
     /// <summary>Category and file count, for the smoke-run summary.</summary>
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
@@ -93,6 +99,25 @@ public static class SaveFilesPanel
         // ACTIONs say a game asks for one, SAVEFILE_INFO says whether there is one to ask.
         bool hasHelper = info.Supported && save is not null && load is not null;
         bool enabled = state.Ingame && hasHelper && !_busy;
+
+        // SAVEFILE_INFO is read once when the panel meets a title, which is also the request that
+        // installs the helper, so that first answer always says it has not run a frame yet. A
+        // transfer polls INFO on its own and never puts the answer here. Ask again every second
+        // while that is what the last answer said, so the hint below goes away by itself once the
+        // game has reached the hook.
+        if (hasHelper && state.Ingame && !info.Running && !_busy)
+        {
+            _sinceInfo += ImGui.GetIO().DeltaTime;
+            if (_sinceInfo >= NotRunningPollSeconds)
+            {
+                _sinceInfo = 0;
+                state.RefreshSaveFileInfo();
+            }
+        }
+        else
+        {
+            _sinceInfo = 0;
+        }
 
         if (state.CodePatchesUnsupported)
         {
