@@ -293,7 +293,7 @@ public static class GamePanel
     // ---------------------------------------------------------------- values
 
     /// <summary>How much of the top row the value table takes when the Options column is beside it.</summary>
-    private const float ValueColumnWeight = 0.58f;
+    private const float ValueColumnWeight = 0.42f;
 
     /// <summary>
     /// The "Values" header's body: the value table, and beside it the per-file switches the layout
@@ -507,7 +507,6 @@ public static class GamePanel
 
         ImGui.TableNextColumn();
         PositionsPanel.SlotPicker(state);
-        ImGui.Spacing();
         PositionsPanel.PlanetLoadControls(state);
 
         ImGui.EndTable();
@@ -526,7 +525,7 @@ public static class GamePanel
 
         if (ImGui.Button("Die", wide)) state.Run(() => state.Client.DieAsync());
 
-        if (ImGui.Button($"Save position (slot {slot})", wide))
+        if (ImGui.Button("Save position", wide))
         {
             state.Run(async () =>
             {
@@ -535,7 +534,7 @@ public static class GamePanel
             });
         }
 
-        if (ImGui.Button($"Load position (slot {slot})", wide))
+        if (ImGui.Button("Load position", wide))
         {
             state.Run(() => state.Client.PosLoadAsync());
         }

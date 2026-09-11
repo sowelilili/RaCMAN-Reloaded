@@ -65,7 +65,6 @@ public static class AutosplitterPanel
         // panel is about the run. The phase and the two split names are wire detail — the coloured
         // line above already says whether LiveSplit is there — so they wait for debug information.
         if (state.LiveSplit.TooOld) Ui.Hint(LiveSplitModal.TooOldBody);
-        else if (!state.LiveSplit.IsConnected) Ui.Hint($"Listening for LiveSplit at {autosplit.Host}:{autosplit.Port}...");
         else if (Ui.Debug) Ui.Hint(DescribeTimer(state.Autosplitter.View));
 
         // Sending a split by hand is a way of proving the wiring, not a way of running: during a
@@ -290,7 +289,7 @@ public static class AutosplitterPanel
         // shares this line once a game with eight subsplits has filled the panel above it.
         ImGui.TextUnformatted("Run events");
         ImGui.SameLine();
-        ImGui.TextColored(Ui.Grey, $"| {splitter.Received} received, {splitter.Acted} acted on, "
+        ImGui.TextColored(Ui.Grey, $"| {splitter.Received} received, {splitter.Acted} executed, "
                                    + $"{splitter.Adjustments} adjusted");
 
         if (!Ui.Debug)

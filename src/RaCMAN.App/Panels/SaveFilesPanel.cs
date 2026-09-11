@@ -98,33 +98,41 @@ public static class SaveFilesPanel
         {
             Ui.Warning("The savefile helper is a code cave the console branches the game into, and " +
                        "RPCS3 cannot apply one, so saving and loading are not available here.");
+                       ImGui.Spacing();
         }
         else if (!hasHelper)
         {
             Ui.Warning("This game has no savefile helper, so saving and loading are not available.");
+            ImGui.Spacing();
         }
         else if (!state.Ingame)
         {
             Ui.Warning($"Saving and loading need INGAME (state is {session.State}).");
+            ImGui.Spacing();
         }
         else if (!info.Running)
         {
             Ui.Hint("The helper is installed but has not run a frame yet. It runs while the game " +
                     "is in play, so a save started on a loading screen or in a menu may wait.");
+            ImGui.Spacing();
         }
 
         if (!string.Equals(_title, title, StringComparison.Ordinal)) Rescan(state, title);
 
-        ImGui.Spacing();
 
         // The category's own folder on this PC, since that is where a mirrored file lands; its
         // path is on the button's tooltip rather than printed, being absolute and long enough
         // to wrap.
         Ui.OpenFolderButton(state, state.SaveFiles.CategoryFolder(title, Category));
         ImGui.SameLine();
+
+        ImGui.BeginDisabled(_busy);
+        if (ImGui.SmallButton("Rescan")) Rescan(state, title);
+
+        ImGui.SameLine();
         Ui.Text(Ui.Grey, state.Settings.MirrorSaveFiles
-            ? "Saves are kept on the console and mirrored here."
-            : "Saves are kept on the console. Mirroring to this PC is off.");
+            ? "Saves are stored on the console and mirrored here."
+            : "Saves are stored on the console. Mirroring to this PC is off.");
 
         if (hasHelper)
         {
@@ -163,9 +171,6 @@ public static class SaveFilesPanel
             RescanFiles(state, title);
         }
 
-        ImGui.SameLine();
-        ImGui.BeginDisabled(_busy);
-        if (ImGui.Button("Rescan")) Rescan(state, title);
         ImGui.EndDisabled();
 
         if (_listing)
@@ -363,8 +368,8 @@ public static class SaveFilesPanel
 
                 state.Post(() =>
                 {
-                    _status = path.Length > 0 ? $"Saved on the console and mirrored to {path}"
-                                              : "Saved on the console";
+                    _status = path.Length > 0 ? $"Saved and uploaded successfully."
+                                              : "Saved successfully.";
                     _name = string.Empty;
                     Rescan(state, title);
                     state.AddToast($"Saved '{SaveFileLibrary.DisplayName(name)}'", ToastKind.Success);

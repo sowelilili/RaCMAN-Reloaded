@@ -400,7 +400,7 @@ public static class SaveFileTransfer
         status?.Report($"FEATURE_TRIGGER {saveActionId} (set aside)");
         await client.FeatureTriggerAsync(saveActionId, cancellationToken).ConfigureAwait(false);
 
-        status?.Report("Waiting for the game to set the save aside...");
+        status?.Report("Waiting for the save...");
         info = await WaitAsync(client, i => !i.SetAsidePending, timeout, cancellationToken)
             .ConfigureAwait(false);
 
@@ -486,7 +486,7 @@ public static class SaveFileTransfer
         status?.Report($"FEATURE_TRIGGER {loadActionId} (load set aside)");
         await client.FeatureTriggerAsync(loadActionId, cancellationToken).ConfigureAwait(false);
 
-        status?.Report("Waiting for the game to take it...");
+        status?.Report("Waiting for game...");
         await WaitAsync(client, i => !i.LoadPending, timeout, cancellationToken).ConfigureAwait(false);
     }
 
@@ -572,7 +572,7 @@ public static class SaveFileTransfer
         status?.Report($"Asking the console to save '{SaveFileLibrary.DisplayName(name)}'...");
         await client.SaveFileStoreAsync(category, name, cancellationToken).ConfigureAwait(false);
 
-        status?.Report("Waiting for the game to set the save aside...");
+        status?.Report("Waiting for save...");
         var info = await WaitForTransferAsync(client, timeout, bytes, cancellationToken).ConfigureAwait(false);
 
         if (!mirror) return string.Empty;
@@ -648,7 +648,7 @@ public static class SaveFileTransfer
         status?.Report($"Asking the console to load '{entry.DisplayName}'...");
         await client.SaveFileRestoreAsync(category, entry.Name, cancellationToken).ConfigureAwait(false);
 
-        status?.Report("Waiting for the game to take it...");
+        status?.Report("Waiting for game...");
         await WaitForTransferAsync(client, timeout, bytes, cancellationToken).ConfigureAwait(false);
 
         return uploaded;

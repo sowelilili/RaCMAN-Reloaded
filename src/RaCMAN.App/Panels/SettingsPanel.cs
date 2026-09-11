@@ -46,7 +46,7 @@ public static class SettingsPanel
 
         ImGui.Spacing();
         ImGui.Separator();
-        Ui.Heading("Polling");
+        Ui.Heading("Connection");
 
         // The panels read this every frame, so a change here is live in the table you can see.
         float seconds = settings.TableRefreshSeconds;
@@ -86,9 +86,8 @@ public static class SettingsPanel
         Ui.OpenFolderButton(state, FolderOf(GameLayout.DefaultPath), GameLayout.DefaultPath);
 
         Ui.Hint(GameLayout.UsingOverride
-            ? "Using your own gamelayout.json from the data folder."
-            : "Using the gamelayout.json that ships with RaCMAN Reloaded. Put a copy of it in the data folder "
-              + "to edit it: an update replaces the application folder, and yours is read instead when it is there.");
+            ? "Using a custom gamelayout.json override."
+            : "Using the default gamelayout.json. Copy to the data folder to edit it.");
 
         foreach (var problem in GameLayout.Problems) Ui.Warning(problem);
 
@@ -122,7 +121,7 @@ public static class SettingsPanel
         }
 
         Ui.Hint("Shows debug information: qwark and protocol versions, reboot and tick "
-                + "counters, request names in error messages, frame rate, raw readouts and internal addresses");
+                + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
     }
 
     // ---------------------------------------------------------------- updates
@@ -184,11 +183,6 @@ public static class SettingsPanel
 
     private static void DrawFiles(AppState state, Settings settings)
     {
-        Ui.Hint("Everything you make or install lives in the data folder. The application folder holds what "
-                + "RaCMAN Reloaded ships with, and an update replaces all of it.");
-
-        ImGui.Spacing();
-
         string settingsFile = string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path;
 
         // The labels are one column and the buttons another, at a single offset measured from the
@@ -204,23 +198,11 @@ public static class SettingsPanel
             ("Watchlists", state.Watchlists.Folder, null),
         };
 
-        // The release's own files, kept apart because the difference is the point of the section.
-        var shippedRows = new List<(string Label, string Folder, string? Tooltip)>
-        {
-            ("Application folder (replaced on update)", AppPaths.Application, null),
-        };
-
-        if (state.Mods.ShippedRootPath is { } shipped) shippedRows.Add(("Mods that ship with it", shipped, null));
-
         float column = 0;
-        foreach (var row in rows.Concat(shippedRows)) column = Math.Max(column, ImGui.CalcTextSize(row.Label).X);
+        foreach (var row in rows) column = Math.Max(column, ImGui.CalcTextSize(row.Label).X);
         column += FolderButtonGap;
 
         foreach (var row in rows) Folder(state, row.Label, row.Folder, column, row.Tooltip);
-
-        ImGui.Spacing();
-
-        foreach (var row in shippedRows) Folder(state, row.Label, row.Folder, column, row.Tooltip);
 
         ImGui.Spacing();
 
@@ -232,9 +214,8 @@ public static class SettingsPanel
             settings.Save();
         }
 
-        Ui.Hint("Save files are kept on the console. With this on, every save you take is also copied "
-                + "into the data folder, so the library survives the console being wiped. Loading is "
-                + "unaffected: a file the console does not have is uploaded once, whatever this says.");
+        Ui.Hint("Save files are kept on your console. With this on, every save you take is also copied "
+                + "to this PC");
     }
 
     // ---------------------------------------------------------------- ports

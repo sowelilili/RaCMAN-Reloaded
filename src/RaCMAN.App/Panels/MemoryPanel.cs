@@ -738,7 +738,7 @@ public static class MemoryPanel
         ImGui.SameLine();
         ImGui.SetNextItemWidth(80);
         ImGui.Combo("Size##freeze", ref _freezeSizeIndex, SizeLabels, SizeLabels.Length);
-        ImGui.SameLine();
+        
         ImGui.SetNextItemWidth(160);
         ImGui.InputText("Value##freeze", ref _freezeValue, 32);
         ImGui.SameLine();
@@ -824,8 +824,6 @@ public static class MemoryPanel
 
         // The example moved out of the box and into the sentence above it: a multiline box takes no
         // hint text, and a default sitting in it was something to delete before every real patch.
-        Ui.Hint($"One 'address: word' per line, at most 64 words, like '{PatchAddressHint}: 0x60000000'. "
-                + "The first address is the patch's key.");
         ImGui.InputTextMultiline("##patch", ref _patchText, 8192, new Vector2(-1, 120));
 
         ImGui.BeginDisabled(!enabled || blocked);
