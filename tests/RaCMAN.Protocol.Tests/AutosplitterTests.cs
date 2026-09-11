@@ -598,7 +598,7 @@ public class AutosplitterTests
     [Fact]
     public async Task DeadlockedsRouteSplitsOnlyOnTheUpcomingPlanet()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom", "Sarathos" },
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom", "Sarathos" },
             PlanetEntered, VoxDefeated);
         await h.ReadyAsync();
         h.Options.PlanetRoute = true;
@@ -641,7 +641,7 @@ public class AutosplitterTests
     [Fact]
     public async Task ARouteLineOfNullNeverMatchesASplitName()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered);
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" }, PlanetEntered);
         await h.ReadyAsync();
         h.Options.PlanetRoute = true;
 
@@ -663,7 +663,7 @@ public class AutosplitterTests
     [Fact]
     public async Task WithTheRouteOnPlanetZeroStillSplits()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered);
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" }, PlanetEntered);
         await h.ReadyAsync();
         h.Options.PlanetRoute = true;
 
@@ -686,7 +686,7 @@ public class AutosplitterTests
     [Fact]
     public async Task AnUndescribedGameKeepsTheLastGamesRouteAndSettings()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom", "Sarathos" },
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom", "Sarathos" },
             PlanetEntered, VoxDefeated);
         await h.ReadyAsync();
         h.Options.PlanetRoute = true;
@@ -758,7 +758,7 @@ public class AutosplitterTests
     [Fact]
     public async Task EachMasterSwitchStopsItsOwnKindOfEvent()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, BossDefeated);
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" }, PlanetEntered, BossDefeated);
         await h.ReadyAsync();
 
         h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Reset, 0, 0));
@@ -800,7 +800,7 @@ public class AutosplitterTests
     {
         // A pause with no normalised row behind it is the timer's own pause, not a game-time one:
         // no game has such a row today, but the path is the one a game without a parameter takes.
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" });
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" });
         await h.ReadyAsync();
 
         h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Pause, 0, 0));
@@ -895,7 +895,7 @@ public class AutosplitterTests
     /// </param>
     private static async Task<Harness> RunningDeadlockedAsync(double realTimeSeconds, double? gameTimeSeconds)
     {
-        var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
+        var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" }, PlanetEntered, NormalisedPause);
         await h.ReadyAsync();
 
         h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
@@ -1097,7 +1097,7 @@ public class AutosplitterTests
     [Fact]
     public async Task WithPausingSwitchedOffTheStartStillGivesTheRunAGameTime()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" }, PlanetEntered, NormalisedPause);
         await h.ReadyAsync();
         h.Options.Pause = false;
         h.Server.RealTime = TimeSpan.FromSeconds(12);
@@ -1227,7 +1227,7 @@ public class AutosplitterTests
     [Fact]
     public async Task TheStartGivesTheRunAGameTime()
     {
-        using var h = new Harness(GameId.Rac4, new[] { "Dread Zone", "Catacrom" }, PlanetEntered, NormalisedPause);
+        using var h = new Harness(GameId.Rac4, new[] { "DreadZone", "Catacrom" }, PlanetEntered, NormalisedPause);
         await h.ReadyAsync();
         h.Server.RealTime = TimeSpan.FromSeconds(12);
 
@@ -1576,7 +1576,7 @@ public class AutosplitterTests
         Assert.False(AutosplitRoutes.Knows(GameId.Rac3, 0));
         Assert.False(AutosplitRoutes.Knows(GameId.Rac3, 15));
 
-        Assert.False(AutosplitRoutes.Matches(GameId.Rac4, 0, "Dread Zone"));
+        Assert.False(AutosplitRoutes.Matches(GameId.Rac4, 0, "DreadZone"));
         Assert.False(AutosplitRoutes.Matches(GameId.Rac2, 1, null));
         Assert.False(AutosplitRoutes.Matches(GameId.Rac2, 99, "Oozla"));
     }
@@ -1597,7 +1597,7 @@ public class AutosplitterTests
         Assert.True(AutosplitRoutes.Matches(GameId.Rac3, 3, "Starship Phoenix"));
         Assert.True(AutosplitRoutes.Matches(GameId.Rac3, 26, "Metropolis Rangers"));
         // Deadlocked's list is the old dlplanets.txt verbatim, spellings and all: "dreadzone" has
-        // no space in it, so a split called "Dread Zone" is matched by "marauder" and friends.
+        // no space in it, so a split called "Dread Zone" (with the space) is not matched, while "DreadZone" is, like by "marauder" and friends.
         Assert.True(AutosplitRoutes.Matches(GameId.Rac4, 1, "DreadZone"));
         Assert.True(AutosplitRoutes.Matches(GameId.Rac4, 1, "Marauder"));
         Assert.False(AutosplitRoutes.Matches(GameId.Rac4, 1, "Dread Zone"));

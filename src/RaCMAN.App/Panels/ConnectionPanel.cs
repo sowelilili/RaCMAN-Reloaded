@@ -207,9 +207,8 @@ public static class ConnectionPanel
             ImGui.Separator();
             Ui.Heading("Install qwark on the console");
 
-            Ui.Hint($"Puts qwark.sprx in {WebManLoader.PluginsDirectory} over FTP and adds it to "
-                    + $"{WebManLoader.BootPluginsPath}, so the console loads it at every boot and this client "
-                    + "only ever has to connect. Needs webMAN on the console for this one install.");
+            Ui.Hint($"Puts qwark.sprx in {WebManLoader.BootPluginsPath} to load it on console boot. "
+                    + "Requires webMAN for installation.");
 
             ImGui.SetNextItemWidth(360);
             ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);

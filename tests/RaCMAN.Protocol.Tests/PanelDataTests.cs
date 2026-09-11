@@ -608,7 +608,7 @@ public class PlanetChoiceTests
     // Deadlocked's, which has filler in the middle as well as at the front.
     private static string[] Deadlocked() => new[]
     {
-        "(unused)", "Dread Zone", "Catacrom", "(infinite loop)", "Sarathos",
+        "(unused)", "DreadZone", "Catacrom", "(infinite loop)", "Sarathos",
     };
 
     [Theory]
@@ -646,7 +646,7 @@ public class PlanetChoiceTests
     {
         var choices = PlanetChoices.For(Deadlocked());
 
-        Assert.Equal(new[] { "Dread Zone", "Catacrom", "Sarathos" }, choices.Labels);
+        Assert.Equal(new[] { "DreadZone", "Catacrom", "Sarathos" }, choices.Labels);
         Assert.Equal(new[] { 1, 2, 4 }, choices.Indices);
         Assert.Equal(4, choices.PlanetAt(2));
     }
