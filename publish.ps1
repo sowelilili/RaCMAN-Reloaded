@@ -76,8 +76,10 @@ if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.s
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 
 # The mod library the client ships with: one folder per title plus the shared Lua helpers. It
-# lives in this repo now, so a release carries whatever is committed and nothing else.
-$ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00387', 'NPEA00423', 'libs')
+# lives in this repo now, so a release carries whatever is committed and nothing else. UYA
+# (NPEA00387) is not listed: its one shipped mod, SUCKMAN, sat on the savefile helper and was
+# retired, and git keeps no empty folder to copy.
+$ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00423', 'libs')
 
 # What the client reads to tell a shipped mod from one the user added, when it moves an older
 # installation's files into the data folder. See DataFolderMigration.
