@@ -205,7 +205,7 @@ if (exitAfter > 0)
                       $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
                       $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
-                      $"tcpfallback={state.Client.TelemetryViaTcp} " +
+                      $"tcpfallback={state.Client.TelemetryViaTcp} quiet={state.Client.TelemetryQuiet} " +
                       $"autosplitevents={state.AutosplitEvents.Length} " +
                       $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}" +
                       $"+{state.Autosplitter.Adjustments}adj " +

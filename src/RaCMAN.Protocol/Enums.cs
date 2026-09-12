@@ -340,6 +340,16 @@ public enum SessionFlags : byte
     /// PATCH_ADD. Everything that only reads and writes data still works.
     /// </summary>
     NoCodePatches = 1 << 2,
+
+    /// <summary>
+    /// qwark is about to stop sending (revision 1.11). It is set for as long as the session is
+    /// BOOTING: the console is handing over to a game, and everything the module does while that
+    /// happens is a chance to crash it, so it sends a handful of packets with this bit and
+    /// <c>quiet_ms</c> set and then says nothing until the game is up. A client that sees it is
+    /// being told to stop asking as well, which is what
+    /// <see cref="SessionInfo.QuietMs"/> gives it a deadline for.
+    /// </summary>
+    TelemetryQuiet = 1 << 3,
 }
 
 /// <summary>

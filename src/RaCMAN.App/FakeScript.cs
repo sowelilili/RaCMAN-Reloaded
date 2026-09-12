@@ -17,6 +17,7 @@ namespace RaCMAN.App;
 public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, rac4, drop, "
+                                + "quiet[:ms], loud, "
                                 + "start, split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
@@ -91,6 +92,21 @@ public static class FakeScript
             var emitted = fake.EmitAutosplitEvent(kind, code, timed ? 0u : third, timeMs);
             Console.WriteLine($"fake-script emit seq={emitted.Seq} kind={kind} code={code} " +
                               $"arg={emitted.Arg} time={emitted.TimeMs}ms");
+            return;
+        }
+
+        // The boot silence of revision 1.11: the console announces a window in milliseconds and
+        // then stops sending until "loud" puts the game up, so the whole of it can be watched.
+        if (parts[0] == "quiet")
+        {
+            ushort window = parts.Length > 1 && ushort.TryParse(parts[1], out var ms) ? ms : (ushort)3000;
+            fake.GoQuiet(window);
+            return;
+        }
+
+        if (parts[0] == "loud")
+        {
+            fake.GoLoud();
             return;
         }
 
