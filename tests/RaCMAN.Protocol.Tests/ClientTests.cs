@@ -892,12 +892,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(20, true)]     // the build before the one this client ships with
-    [InlineData(21, false)]    // exactly the expected build: both ends of the op trace
-    [InlineData(22, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(21, true)]     // the build before the one this client ships with
+    [InlineData(22, false)]    // exactly the expected build: silence from the first sighting
+    [InlineData(23, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(21, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(22, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
@@ -1162,6 +1162,31 @@ public class ClientTests
     /// The other half of that inference: silence while a game is running is UDP going missing, not
     /// a console protecting itself, and that is exactly what the TCP fallback is for.
     /// </summary>
+    /// <summary>
+    /// An idle XMB with packets arriving is not a silence. The first version of the inference
+    /// read it as one and held the heartbeat back there, so a client sitting in the XMB sent
+    /// nothing at all; the console aged its subscription out after five seconds, stopped
+    /// sending, and the silence that caused was then taken for a game starting.
+    /// </summary>
+    [Fact]
+    public async Task AnIdleXmbStillHeartbeatsSoTheSubscriptionStaysAlive()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.GoLoud(SessionState.Xmb);
+            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Xmb }));
+
+            int beats = server.HeartbeatCount;
+
+            // Past the two seconds of idle the heartbeat waits for.
+            await Task.Delay(2700);
+
+            Assert.True(server.HeartbeatCount > beats);
+        }
+    }
+
     [Fact]
     public async Task SilenceWhileAGameIsRunningStillFallsBackToPolling()
     {

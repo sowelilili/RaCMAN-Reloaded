@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 21;
+    public const byte ExpectedQwarkBuild = 22;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -679,11 +679,21 @@ public sealed class QwarkClient : IDisposable
     {
         if (TelemetryQuiet) return true;
 
+        // Packets still arriving are not a silence of any kind. Without this the rule read an idle
+        // XMB with telemetry flowing as a game starting, so the heartbeat never went out there; the
+        // console then aged the subscription out after five seconds of nothing from this client and
+        // stopped sending, and the silence it caused was taken for a boot. Same threshold the
+        // state poll uses, so the two agree about what "stopped" means.
+        if (ageMs <= StaleTelemetryMs) return false;
+
         var state = _latestSession?.State;
         if (state is null || state == SessionState.Ingame) return false;
 
         return ageMs < QuietGraceMs;
     }
+
+    /// <summary>How old the last snapshot must be before telemetry counts as having stopped.</summary>
+    private const long StaleTelemetryMs = 400;
 
     private static uint ParseU32(ReadOnlySpan<byte> payload) => new SpanReader(payload).ReadU32();
 
