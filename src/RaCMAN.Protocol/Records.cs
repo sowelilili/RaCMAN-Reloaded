@@ -2,11 +2,7 @@ using System.Text;
 
 namespace RaCMAN.Protocol;
 
-/// <summary>
-/// The 164-byte session info block, section 3 of PROTOCOL.md (revision 1.1). Revision 1.11 spent
-/// two of the three pad bytes after <c>current_planet</c> on <see cref="QuietMs"/>; the block is
-/// still 164 bytes and every other offset is where it always was.
-/// </summary>
+/// <summary>The 164-byte session info block, section 3 of PROTOCOL.md (revision 1.1).</summary>
 public sealed record SessionInfo(
     byte ProtocolVersion,
     byte QwarkVersion,
@@ -20,7 +16,6 @@ public sealed record SessionInfo(
     byte SelectedPlanet,
     PlanetFlags PlanetFlags,
     byte CurrentPlanet,
-    ushort QuietMs,
     float PosX,
     float PosY,
     float PosZ,
@@ -54,14 +49,6 @@ public sealed record SessionInfo(
     /// </summary>
     public bool CodePatchesUnsupported => (Flags & SessionFlags.NoCodePatches) != 0;
 
-    /// <summary>
-    /// qwark is going quiet while the console starts a game (revision 1.11). It sends about five
-    /// packets carrying this and then nothing at all until the game is up, so a client that keeps
-    /// asking is putting work on the module at the one moment it has none to spare.
-    /// <see cref="QuietMs"/> says how long the silence has left to run.
-    /// </summary>
-    public bool IsQuiet => (Flags & SessionFlags.TelemetryQuiet) != 0;
-
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>The readout at <paramref name="index"/>, or null when the index names none.</summary>
@@ -70,7 +57,7 @@ public sealed record SessionInfo(
 
     public static SessionInfo Empty { get; } = new(
         1, 0, SessionState.Xmb, GameId.None, 0, 0, string.Empty, SessionFlags.None, 0, 0,
-        Protocol.PlanetFlags.None, 0, 0, 0, 0, 0, 0, new float[4], new uint[ReadoutCount], 0, 0, 0, 0, 0, 0);
+        Protocol.PlanetFlags.None, 0, 0, 0, 0, 0, new float[4], new uint[ReadoutCount], 0, 0, 0, 0, 0, 0);
 
     public static SessionInfo Parse(ReadOnlySpan<byte> payload)
     {
@@ -92,8 +79,7 @@ public sealed record SessionInfo(
         byte selectedPlanet = r.ReadU8();
         var planetFlags = (PlanetFlags)r.ReadU8();
         byte currentPlanet = r.ReadU8();
-        ushort quietMs = r.ReadU16();
-        r.Skip(1);
+        r.Skip(3);
         float x = r.ReadF32();
         float y = r.ReadF32();
         float z = r.ReadF32();
@@ -110,7 +96,7 @@ public sealed record SessionInfo(
         uint modPrevious = r.ReadU32();
 
         return new SessionInfo(protocolVersion, qwarkVersion, state, game, generation, tick, titleId, flags,
-            selectedSlot, selectedPlanet, planetFlags, currentPlanet, quietMs, x, y, z, padMask, analog, readout,
+            selectedSlot, selectedPlanet, planetFlags, currentPlanet, x, y, z, padMask, analog, readout,
             toggleState, toggleAuto, freezeActive, modLoaded, modAuto, modPrevious);
     }
 
@@ -136,8 +122,7 @@ public sealed record SessionInfo(
         w.WriteU8(SelectedPlanet);
         w.WriteU8((byte)PlanetFlags);
         w.WriteU8(CurrentPlanet);
-        w.WriteU16(QuietMs);
-        w.WriteZeros(1);
+        w.WriteZeros(3);
         w.WriteF32(PosX);
         w.WriteF32(PosY);
         w.WriteF32(PosZ);

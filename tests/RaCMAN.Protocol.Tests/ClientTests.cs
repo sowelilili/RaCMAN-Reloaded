@@ -514,6 +514,32 @@ public class ClientTests
         }
     }
 
+    /// <summary>
+    /// Telemetry going missing in the XMB is packets going missing, the same as in a game: the client
+    /// asks for the snapshot over TCP at once, which also keeps the console counting it as a
+    /// subscriber, and goes back to UDP as soon as packets arrive again. A build that read this
+    /// silence as a game starting asked for nothing for twenty seconds, the console stopped sending
+    /// to it, and the client polled over TCP for the rest of the connection.
+    /// </summary>
+    [Fact]
+    public async Task TelemetryLostInTheXmbFallsBackAndRecovers()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.Session = server.Session with { State = SessionState.Xmb };
+            Assert.True(await WaitFor(() => client.LatestSession?.State == SessionState.Xmb));
+
+            server.TelemetryMuted = true;
+            int polls = server.GetStateCount;
+            Assert.True(await WaitFor(() => client.TelemetryViaTcp && server.GetStateCount >= polls + 5, 3000));
+
+            server.TelemetryMuted = false;
+            Assert.True(await WaitFor(() => !client.TelemetryViaTcp, 3000));
+        }
+    }
+
     [Fact]
     public async Task DroppedConnectionFailsPendingRequestsAndRaisesDisconnected()
     {
@@ -892,12 +918,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(23, true)]     // the build before the one this client ships with
-    [InlineData(24, false)]    // exactly the expected build: patches go in without an RSX pause
-    [InlineData(25, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(24, true)]     // the build before the one this client ships with
+    [InlineData(25, false)]    // exactly the expected build: a boot waits a second and never goes quiet
+    [InlineData(26, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(24, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(25, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
@@ -1066,283 +1092,6 @@ public class ClientTests
 
             await client.FeatureSetAsync(patcher.Id, 1);
             Assert.True((server.Session.ToggleState & (1ul << patcher.Id)) != 0);
-        }
-    }
-
-    // ------------------------------------------------------------ the quiet window (revision 1.11)
-    //
-    // While the console hands over to a game qwark announces a silence and then keeps it. The TCP
-    // GET_STATE fallback exists to fill a silence, so it is exactly the thing that must not fill
-    // this one: ten requests a second at that moment is what crashed consoles.
-
-    [Fact]
-    public async Task NoStatePollGoesOutWhileQwarkHasAskedForSilence()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            Assert.True(await WaitFor(() => client.LatestTelemetry is not null));
-            Assert.False(client.TelemetryQuiet);
-
-            // An older module announced the window before going silent. Build 18 does not,
-            // but a client still has to honour one that does.
-            server.QuietWarningPackets = 5;
-            server.GoQuiet(1500);
-            Assert.True(await WaitFor(() => client.TelemetryQuiet));
-            Assert.True(client.LatestSession!.IsQuiet);
-            Assert.Equal(1500, client.LatestSession.QuietMs);
-
-            int before = server.GetStateCount;
-
-            // Twice as long as the 400 ms of silence the fallback normally starts filling at.
-            await Task.Delay(800);
-            Assert.Equal(before, server.GetStateCount);
-            Assert.True(client.TelemetryQuiet);
-
-            // And the silence is not a disconnect: the connection is up and nothing reconnected.
-            Assert.True(client.IsConnected);
-            Assert.Equal(0, client.ReconnectAttempt);
-
-            // Past the announced window the client is still quiet, because the last state it
-            // saw was not INGAME: a console that is starting a game says nothing for as long as it
-            // takes, and the window it named was only ever part of that.
-            await Task.Delay(1200);
-            Assert.False(client.TelemetryQuiet);
-            Assert.Equal(before, server.GetStateCount);
-
-            // The game coming up is what ends it.
-            server.GoLoud();
-            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
-        }
-    }
-
-    /// <summary>
-    /// The case that actually ships. qwark build 18 announces nothing at all before a boot: the
-    /// announcement would be one of the packets the silence is there to avoid. What the client has
-    /// to go on is the last state it saw, and telemetry stopping while the console was in the XMB
-    /// is a game being started.
-    /// </summary>
-    [Fact]
-    public async Task SilenceAfterTheXmbIsReadAsAGameStartingWithNothingAnnounced()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            // The console leaves the game it was running, which the client does hear about.
-            server.GoLoud(SessionState.Xmb);
-            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Xmb }));
-
-            // Then a game starts and everything stops. Nothing carries the flag: this module
-            // never sends one.
-            server.QuietWarningPackets = 0;
-            server.GoQuiet(8300);
-
-            int polls = server.GetStateCount;
-            int beats = server.HeartbeatCount;
-
-            // Four times the 400 ms the fallback normally starts filling silence at, and more
-            // than the two seconds the heartbeat waits.
-            await Task.Delay(2500);
-
-            Assert.False(client.TelemetryQuiet);   // nothing ever announced a window
-            Assert.Equal(polls, server.GetStateCount);
-            Assert.Equal(beats, server.HeartbeatCount);
-            Assert.True(client.IsConnected);
-            Assert.Equal(0, client.ReconnectAttempt);
-
-            // And the game coming up starts everything again.
-            server.GoLoud();
-            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
-        }
-    }
-
-    /// <summary>
-    /// The other half of that inference: silence while a game is running is UDP going missing, not
-    /// a console protecting itself, and that is exactly what the TCP fallback is for.
-    /// </summary>
-    /// <summary>
-    /// An idle XMB with packets arriving is not a silence. The first version of the inference
-    /// read it as one and held the heartbeat back there, so a client sitting in the XMB sent
-    /// nothing at all; the console aged its subscription out after five seconds, stopped
-    /// sending, and the silence that caused was then taken for a game starting.
-    /// </summary>
-    [Fact]
-    public async Task AnIdleXmbStillHeartbeatsSoTheSubscriptionStaysAlive()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            server.GoLoud(SessionState.Xmb);
-            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Xmb }));
-
-            int beats = server.HeartbeatCount;
-
-            // Past the two seconds of idle the heartbeat waits for.
-            await Task.Delay(2700);
-
-            Assert.True(server.HeartbeatCount > beats);
-        }
-    }
-
-    [Fact]
-    public async Task SilenceWhileAGameIsRunningStillFallsBackToPolling()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
-
-            int polls = server.GetStateCount;
-            await client.UnsubscribeAsync();
-
-            Assert.True(await WaitFor(() => server.GetStateCount > polls));
-        }
-    }
-
-    [Fact]
-    public async Task TheGameComingUpEndsTheWindowBeforeItsDeadline()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            server.QuietWarningPackets = 5;
-            server.GoQuiet(10000);
-            Assert.True(await WaitFor(() => client.TelemetryQuiet));
-
-            // A snapshot without the flag says the game is up, whatever the window had left.
-            server.GoLoud();
-            Assert.True(await WaitFor(() => !client.TelemetryQuiet));
-            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
-            Assert.Equal(TimeSpan.Zero, client.QuietRemaining);
-        }
-    }
-
-    /// <summary>
-    /// A GET_STATE reply is the same bytes as a telemetry packet, so a client that is already on
-    /// the TCP fallback - a firewall eating the console's UDP - learns about the window from its
-    /// own poll and stops polling.
-    /// </summary>
-    [Fact]
-    public async Task AStatePollThatLandsInsideTheWindowStopsTheClientPollingToo()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            // No more UDP, so the only thing keeping the client's state current is the fallback.
-            await client.UnsubscribeAsync();
-            Assert.True(await WaitFor(() => server.GetStateCount >= 3));
-
-            server.QuietWarningPackets = 5;
-            server.GoQuiet(1500);
-            Assert.True(await WaitFor(() => client.TelemetryQuiet));
-
-            int before = server.GetStateCount;
-            await Task.Delay(800);
-            Assert.Equal(before, server.GetStateCount);
-        }
-    }
-
-    [Fact]
-    public async Task TheQuietWindowSaysTheGameIsStartingRatherThanFreezingTheStatusLine()
-    {
-        using var server = new FakeQwarkServer();
-        server.Start();
-        using var state = await ConnectedStateAsync(server);
-
-        Assert.True(await PumpAsync(state, () => state.Telemetry is not null));
-        Assert.DoesNotContain("starting", state.StatusLine());
-
-        server.GoQuiet(1500);
-        Assert.True(await PumpAsync(state, () => state.Client.TelemetryQuiet));
-        Assert.Contains("waiting", state.StatusLine());
-
-        server.GoLoud();
-        Assert.True(await PumpAsync(state, () => !state.Client.TelemetryQuiet));
-        Assert.DoesNotContain("starting", state.StatusLine());
-    }
-
-    // ------------------------------------------------------- BUSY while the helper is not in yet
-
-    /// <summary>
-    /// Since revision 1.11 qwark waits for a starting game to finish loading its modules before it
-    /// writes the savefile helper into it, and answers BUSY meanwhile. It lasts a second or two
-    /// after a game appears and it is normal, so nothing about it may reach the user as an error.
-    /// </summary>
-    [Fact]
-    public async Task ABusySaveFileInfoIsNotReportedAsAnError()
-    {
-        using var server = new FakeQwarkServer();
-        server.SaveFileHelperPending = true;
-        server.Start();
-        using var state = await ConnectedStateAsync(server);
-
-        // Connecting reads SAVEFILE_INFO by itself, so the refused answer has already been through
-        // the whole path by the time the describe has landed.
-        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0));
-        state.RefreshSaveFileInfo();
-        Assert.True(await PumpAsync(state, () => state.InFlight == 0));
-
-        Assert.DoesNotContain(state.Toasts, t => t.Kind == ToastKind.Error);
-        Assert.Equal(SaveFileInfo.None, state.SaveFile);
-
-        // "not yet", which the panel keeps asking through, rather than "this game has none".
-        Assert.True(state.SaveFileNotReady);
-
-        // And once the helper is in, the same re-read the panel makes every second has the answer.
-        server.SaveFileHelperPending = false;
-        state.RefreshSaveFileInfo();
-        Assert.True(await PumpAsync(state, () => state.SaveFile.Supported));
-        Assert.False(state.SaveFileNotReady);
-        Assert.DoesNotContain(state.Toasts, t => t.Kind == ToastKind.Error);
-    }
-
-    /// <summary>
-    /// A game with no helper at all is still told apart from one whose helper is not in yet: the
-    /// panel warns about the first and waits through the second.
-    /// </summary>
-    [Fact]
-    public async Task AGameWithNoHelperIsNotMistakenForOneThatIsStillStarting()
-    {
-        using var server = new FakeQwarkServer();
-        server.SaveFileSupported = false;
-        server.Start();
-        using var state = await ConnectedStateAsync(server);
-
-        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0));
-        state.RefreshSaveFileInfo();
-        Assert.True(await PumpAsync(state, () => state.InFlight == 0));
-
-        Assert.False(state.SaveFile.Supported);
-        Assert.False(state.SaveFileNotReady);
-    }
-
-    /// <summary>
-    /// The same for the ops the helper drives: a BUSY leaves the transfer waiting rather than
-    /// failing it, so a save asked for a moment too early finishes once the helper is in.
-    /// </summary>
-    [Fact]
-    public async Task ABusyDuringATransferIsWaitedOutRatherThanFailed()
-    {
-        var (server, client) = await ConnectAsync();
-        using (server)
-        using (client)
-        {
-            server.SaveFileHelperPending = true;
-            var waiting = SaveFileTransfer.WaitForTransferAsync(client, TimeSpan.FromSeconds(5));
-
-            await Task.Delay(300);
-            Assert.False(waiting.IsCompleted);
-
-            server.SaveFileHelperPending = false;
-            var info = await waiting;
-            Assert.True(info.Supported);
-            Assert.False(info.TransferPending);
         }
     }
 }

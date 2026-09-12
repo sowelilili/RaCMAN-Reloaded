@@ -527,16 +527,13 @@ public static class SaveFileTransfer
 
         while (true)
         {
-            var info = await PollAsync(client, cancellationToken).ConfigureAwait(false);
-            if (info is { } answered)
-            {
-                bytes?.Report(answered.Done);
+            var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
+            bytes?.Report(info.Done);
 
-                if (!answered.TransferPending)
-                {
-                    if (answered.Error != SaveFileError.None) throw new TransferFailedException(answered.Error);
-                    return answered;
-                }
+            if (!info.TransferPending)
+            {
+                if (info.Error != SaveFileError.None) throw new TransferFailedException(info.Error);
+                return info;
             }
 
             if (DateTime.UtcNow >= deadline)
@@ -714,25 +711,6 @@ public static class SaveFileTransfer
         }
     }
 
-    /// <summary>
-    /// One SAVEFILE_INFO poll, or null when the console answered BUSY. Since revision 1.11 qwark
-    /// waits for a starting game to finish loading its modules before it writes the helper into
-    /// it, and until then the block is refused rather than reported. That is "not ready yet", not
-    /// a failure: the wait loops treat it as another poll that said nothing and keep waiting,
-    /// which is what they would do for a helper that has not reached the hook either.
-    /// </summary>
-    private static async Task<SaveFileInfo?> PollAsync(QwarkClient client, CancellationToken cancellationToken)
-    {
-        try
-        {
-            return await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
-        }
-        catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-        {
-            return null;
-        }
-    }
-
     /// <summary>Polls SAVEFILE_INFO until <paramref name="done"/> or the timeout runs out.</summary>
     private static async Task<SaveFileInfo> WaitAsync(
         QwarkClient client,
@@ -745,8 +723,8 @@ public static class SaveFileTransfer
 
         while (true)
         {
-            var info = await PollAsync(client, cancellationToken).ConfigureAwait(false);
-            if (info is { } answered && done(answered)) return answered;
+            var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
+            if (done(info)) return info;
 
             if (DateTime.UtcNow >= deadline)
             {

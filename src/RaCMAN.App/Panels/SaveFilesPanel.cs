@@ -39,21 +39,6 @@ public static class SaveFilesPanel
     /// <summary>How often the panel asks again whether the helper has run a frame.</summary>
     private const float NotRunningPollSeconds = 1f;
 
-    /// <summary>
-    /// What BUSY means on a savefile op since revision 1.11. qwark waits for a starting game to
-    /// finish loading its modules before it writes the helper into it - a 600-byte code cave, and
-    /// writing one into a game that is still starting is what crashed the console - so until the
-    /// helper is in, every op that needs it is refused. It lasts a second or two after a game
-    /// appears, which makes it a "not yet", not a failure: the INFO poll above picks the helper up
-    /// by itself and the same button works on the next press.
-    /// </summary>
-    private const string NotReady = "The console is still getting the game ready. Try again in a moment.";
-
-    /// <summary>The same thing standing on the panel rather than answering a button.</summary>
-    private const string NotReadyHint =
-        "The game is still loading its own modules, so the console has not put the savefile helper " +
-        "into it yet. It takes a second or two after a game starts, and this goes away by itself.";
-
     /// <summary>Category and file count, for the smoke-run summary.</summary>
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
@@ -115,17 +100,12 @@ public static class SaveFilesPanel
         bool hasHelper = info.Supported && save is not null && load is not null;
         bool enabled = state.Ingame && hasHelper && !_busy;
 
-        // A BUSY is neither of those: the game asks for a helper and the console has not written
-        // it in yet, so there is an answer coming and the panel waits for it rather than saying
-        // this game has none.
-        bool notReady = state.SaveFileNotReady && save is not null && load is not null;
-
         // SAVEFILE_INFO is read once when the panel meets a title, which is also the request that
         // installs the helper, so that first answer always says it has not run a frame yet. A
         // transfer polls INFO on its own and never puts the answer here. Ask again every second
         // while that is what the last answer said, so the hint below goes away by itself once the
-        // game has reached the hook - or, for a BUSY, once the helper is in at all.
-        if ((hasHelper || notReady) && state.Ingame && !info.Running && !_busy)
+        // game has reached the hook.
+        if (hasHelper && state.Ingame && !info.Running && !_busy)
         {
             _sinceInfo += ImGui.GetIO().DeltaTime;
             if (_sinceInfo >= NotRunningPollSeconds)
@@ -144,11 +124,6 @@ public static class SaveFilesPanel
             Ui.Warning("The savefile helper is a code cave the console branches the game into, and " +
                        "RPCS3 cannot apply one, so saving and loading are not available here.");
                        ImGui.Spacing();
-        }
-        else if (notReady)
-        {
-            Ui.Hint(NotReadyHint);
-            ImGui.Spacing();
         }
         else if (!hasHelper)
         {
@@ -257,26 +232,13 @@ public static class SaveFilesPanel
 
         state.Run(async () =>
         {
-            bool onConsole = true;
-            try
-            {
-                await state.Client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, wanted).ConfigureAwait(false);
-            }
-            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-            {
-                // The console will not touch its library while it is still getting the game ready.
-                // The folder is already there on this PC, so the category exists as far as the
-                // user is concerned, and a save that goes into it makes one over there.
-                onConsole = false;
-            }
-
+            await state.Client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, wanted).ConfigureAwait(false);
             state.Post(() =>
             {
                 Rescan(state, title);
                 _categoryIndex = Math.Max(0, Array.IndexOf(_categories, wanted));
                 RescanFiles(state, title);
-                state.AddToast(onConsole ? $"Category '{wanted}' created" : NotReady,
-                               onConsole ? ToastKind.Success : ToastKind.Info);
+                state.AddToast($"Category '{wanted}' created", ToastKind.Success);
             });
         });
     }
@@ -442,10 +404,6 @@ public static class SaveFilesPanel
                     state.AddToast($"Saved '{SaveFileLibrary.DisplayName(name)}'", ToastKind.Success);
                 });
             }
-            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-            {
-                state.Post(() => _status = NotReady);
-            }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
                                           or SaveFileTransfer.TransferFailedException
                                           or QwarkStatusException or ProtocolException
@@ -500,10 +458,6 @@ public static class SaveFilesPanel
                     if (uploaded) Rescan(state, title);
                 });
             }
-            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-            {
-                state.Post(() => _status = NotReady);
-            }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
                                           or SaveFileTransfer.TransferFailedException
                                           or QwarkStatusException or ProtocolException
@@ -544,10 +498,6 @@ public static class SaveFilesPanel
                     Rescan(state, title);
                 });
             }
-            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-            {
-                state.Post(() => state.AddToast(NotReady, ToastKind.Info));
-            }
             catch (Exception ex) when (ex is QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
@@ -578,10 +528,6 @@ public static class SaveFilesPanel
                     _fileIndex = -1;
                     Rescan(state, title);
                 });
-            }
-            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-            {
-                state.Post(() => state.AddToast(NotReady, ToastKind.Info));
             }
             catch (Exception ex) when (ex is QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)

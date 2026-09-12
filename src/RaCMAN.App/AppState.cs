@@ -226,15 +226,6 @@ public sealed class AppState : IDisposable
     /// </summary>
     public SaveFileInfo SaveFile { get; private set; } = SaveFileInfo.None;
 
-    /// <summary>
-    /// The console answered BUSY to SAVEFILE_INFO: since revision 1.11 it waits for a starting
-    /// game to finish loading its modules before it writes the helper into it, and refuses the
-    /// block until then. It lasts a second or two after a game appears, so it is what separates
-    /// "not yet" from <see cref="SaveFileInfo.None"/>'s "this game has none at all", and the Save
-    /// files panel keeps asking while it holds.
-    /// </summary>
-    public bool SaveFileNotReady { get; private set; }
-
     public string[] Planets { get; private set; } = Array.Empty<string>();
 
     public WatchEntry[] Watches { get; private set; } = Array.Empty<WatchEntry>();
@@ -560,7 +551,6 @@ public sealed class AppState : IDisposable
         Describe = DescribeResult.Empty;
         AutosplitEvents = Array.Empty<AutosplitEventDesc>();
         SaveFile = SaveFileInfo.None;
-        SaveFileNotReady = false;
         Autosplitter.Descriptors = AutosplitEvents;
         Autosplitter.Game = GameId.None;
         Planets = Array.Empty<string>();
@@ -772,10 +762,7 @@ public sealed class AppState : IDisposable
     /// <summary>
     /// Re-reads SAVEFILE_INFO, revision 1.9. UNSUPPORTED is the normal answer on a console that
     /// refuses code patches, and for a module older than this revision the op is unknown; both
-    /// mean the Save files panel has nothing to drive, and neither is worth a toast. BUSY is the
-    /// answer while the game is still loading its modules and qwark has not written the helper
-    /// into it yet (revision 1.11): a second or two after a game appears, and the panel asks
-    /// again every second until it is in.
+    /// mean the Save files panel has nothing to drive, and neither is worth a toast.
     /// </summary>
     public void RefreshSaveFileInfo()
     {
@@ -786,28 +773,12 @@ public sealed class AppState : IDisposable
             try
             {
                 var info = await Client.SaveFileInfoAsync().ConfigureAwait(false);
-                Post(() =>
-                {
-                    SaveFile = info;
-                    SaveFileNotReady = false;
-                });
-            }
-            catch (QwarkStatusException ex) when (ex.Status is Status.Busy)
-            {
-                Post(() =>
-                {
-                    SaveFile = SaveFileInfo.None;
-                    SaveFileNotReady = true;
-                });
+                Post(() => SaveFile = info);
             }
             catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp
                                                              or Status.NotIngame)
             {
-                Post(() =>
-                {
-                    SaveFile = SaveFileInfo.None;
-                    SaveFileNotReady = false;
-                });
+                Post(() => SaveFile = SaveFileInfo.None);
             }
         });
     }
@@ -930,12 +901,6 @@ public sealed class AppState : IDisposable
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
         string line = $"{session.State.DisplayName()} | {title} | {session.Game.DisplayName()}";
-
-        // qwark stops sending while the console hands over to a game, and this client stops asking
-        // with it. Nothing is updating and nothing is wrong, so the line says which of the two it
-        // is rather than leaving a frozen readout to speak for itself.
-        if (Client.TelemetryQuiet) line += " | waiting...";
-
         if (!Panels.Ui.Debug) return line;
 
         string tick = session.Tick > 0 ? $"tick {session.Tick}" : "tick -";
