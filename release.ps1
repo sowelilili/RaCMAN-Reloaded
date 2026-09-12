@@ -216,6 +216,29 @@ if ($newest -and $newest.LastWriteTime -gt $sprx.LastWriteTime) {
 
 Write-Good "dist\qwark.sprx is newer than every source ($('{0:yyyy-MM-dd HH:mm}' -f $sprx.LastWriteTime))"
 
+# A timestamp says the binary is not older than the source. It does not say the source still
+# compiles: a failed build leaves the previous qwark.sprx in place, and `make dist` copies it over
+# without a word, so a release can carry the module before the fix it is named after. Building it
+# here is the only thing that can tell the difference. It needs the SDK's Cygwin shell, which
+# _Make.bat knows how to find; a machine without one is warned rather than stopped, since the
+# workflow takes the committed binary either way.
+$makeBat = Combine $qwark '_Make.bat'
+if (-not $SkipTests -and (Test-Path $makeBat)) {
+    Invoke-Suite "qwark's SPRX build" { & cmd /c "`"$makeBat`"" }
+
+    $rebuilt = Get-Item (Combine $qwark 'dist' 'qwark.sprx')
+    $built = Get-Item (Combine $qwark 'qwark.sprx')
+    if ($built.Length -ne $rebuilt.Length) {
+        throw ("qwark builds an SPRX of $($built.Length) bytes and dist\qwark.sprx is " +
+               "$($rebuilt.Length). Run `make dist` in qwark and commit it: the release takes dist\.")
+    }
+
+    Write-Good "the SPRX builds, and dist\ is the same size as what it built"
+}
+elseif (-not $SkipTests) {
+    Write-Warning "no $makeBat, so the committed SPRX was not rebuilt to prove it still compiles."
+}
+
 # The client reads the console's build number and warns when it is older than the one it shipped
 # against. A client that expects a build qwark has not got would warn about every console.
 $protoText = Get-Content (Combine $qwark 'src' 'core' 'proto.h') -Raw
