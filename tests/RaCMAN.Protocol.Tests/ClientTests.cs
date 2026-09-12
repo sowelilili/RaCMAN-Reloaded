@@ -892,12 +892,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(21, true)]     // the build before the one this client ships with
-    [InlineData(22, false)]    // exactly the expected build: silence from the first sighting
-    [InlineData(23, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(22, true)]     // the build before the one this client ships with
+    [InlineData(23, false)]    // exactly the expected build: no memory held between requests
+    [InlineData(24, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(22, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(23, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
