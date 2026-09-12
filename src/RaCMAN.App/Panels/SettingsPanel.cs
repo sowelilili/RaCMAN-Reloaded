@@ -247,7 +247,7 @@ public static class SettingsPanel
         }
 
         Ui.Hint("Save files are kept on your console. With this on, every save you take is also copied "
-                + "to this PC");
+                + "to this PC.");
     }
 
     // ---------------------------------------------------------------- ports
