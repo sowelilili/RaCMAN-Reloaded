@@ -934,7 +934,7 @@ public sealed class AppState : IDisposable
         // qwark stops sending while the console hands over to a game, and this client stops asking
         // with it. Nothing is updating and nothing is wrong, so the line says which of the two it
         // is rather than leaving a frozen readout to speak for itself.
-        if (Client.TelemetryQuiet) line += " | the game is starting";
+        if (Client.TelemetryQuiet) line += " | waiting...";
 
         if (!Panels.Ui.Debug) return line;
 

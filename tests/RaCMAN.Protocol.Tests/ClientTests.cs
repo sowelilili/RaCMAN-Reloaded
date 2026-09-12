@@ -892,12 +892,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(16, true)]     // the build before the one this client ships with
-    [InlineData(17, false)]    // exactly the expected build: the module goes quiet while a game starts
-    [InlineData(18, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(17, true)]     // the build before the one this client ships with
+    [InlineData(18, false)]    // exactly the expected build: the module goes quiet while a game starts
+    [InlineData(19, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(17, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(18, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
@@ -1085,7 +1085,9 @@ public class ClientTests
             Assert.True(await WaitFor(() => client.LatestTelemetry is not null));
             Assert.False(client.TelemetryQuiet);
 
-            // The announcement, then nothing: a game is starting.
+            // An older module announced the window before going silent. Build 18 does not,
+            // but a client still has to honour one that does.
+            server.QuietWarningPackets = 5;
             server.GoQuiet(1500);
             Assert.True(await WaitFor(() => client.TelemetryQuiet));
             Assert.True(client.LatestSession!.IsQuiet);
@@ -1102,9 +1104,77 @@ public class ClientTests
             Assert.True(client.IsConnected);
             Assert.Equal(0, client.ReconnectAttempt);
 
-            // Past the window the fallback picks the silence back up, because by then a console
-            // that is still saying nothing is a console worth asking.
-            Assert.True(await WaitFor(() => server.GetStateCount > before));
+            // Past the announced window the client is still quiet, because the last state it
+            // saw was not INGAME: a console that is starting a game says nothing for as long as it
+            // takes, and the window it named was only ever part of that.
+            await Task.Delay(1200);
+            Assert.False(client.TelemetryQuiet);
+            Assert.Equal(before, server.GetStateCount);
+
+            // The game coming up is what ends it.
+            server.GoLoud();
+            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
+        }
+    }
+
+    /// <summary>
+    /// The case that actually ships. qwark build 18 announces nothing at all before a boot: the
+    /// announcement would be one of the packets the silence is there to avoid. What the client has
+    /// to go on is the last state it saw, and telemetry stopping while the console was in the XMB
+    /// is a game being started.
+    /// </summary>
+    [Fact]
+    public async Task SilenceAfterTheXmbIsReadAsAGameStartingWithNothingAnnounced()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            // The console leaves the game it was running, which the client does hear about.
+            server.GoLoud(SessionState.Xmb);
+            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Xmb }));
+
+            // Then a game starts and everything stops. Nothing carries the flag: this module
+            // never sends one.
+            server.QuietWarningPackets = 0;
+            server.GoQuiet(8300);
+
+            int polls = server.GetStateCount;
+            int beats = server.HeartbeatCount;
+
+            // Four times the 400 ms the fallback normally starts filling silence at, and more
+            // than the two seconds the heartbeat waits.
+            await Task.Delay(2500);
+
+            Assert.False(client.TelemetryQuiet);   // nothing ever announced a window
+            Assert.Equal(polls, server.GetStateCount);
+            Assert.Equal(beats, server.HeartbeatCount);
+            Assert.True(client.IsConnected);
+            Assert.Equal(0, client.ReconnectAttempt);
+
+            // And the game coming up starts everything again.
+            server.GoLoud();
+            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
+        }
+    }
+
+    /// <summary>
+    /// The other half of that inference: silence while a game is running is UDP going missing, not
+    /// a console protecting itself, and that is exactly what the TCP fallback is for.
+    /// </summary>
+    [Fact]
+    public async Task SilenceWhileAGameIsRunningStillFallsBackToPolling()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            Assert.True(await WaitFor(() => client.LatestSession is { State: SessionState.Ingame }));
+
+            int polls = server.GetStateCount;
+            await client.UnsubscribeAsync();
+
+            Assert.True(await WaitFor(() => server.GetStateCount > polls));
         }
     }
 
@@ -1115,6 +1185,7 @@ public class ClientTests
         using (server)
         using (client)
         {
+            server.QuietWarningPackets = 5;
             server.GoQuiet(10000);
             Assert.True(await WaitFor(() => client.TelemetryQuiet));
 
@@ -1142,6 +1213,7 @@ public class ClientTests
             await client.UnsubscribeAsync();
             Assert.True(await WaitFor(() => server.GetStateCount >= 3));
 
+            server.QuietWarningPackets = 5;
             server.GoQuiet(1500);
             Assert.True(await WaitFor(() => client.TelemetryQuiet));
 
@@ -1163,7 +1235,7 @@ public class ClientTests
 
         server.GoQuiet(1500);
         Assert.True(await PumpAsync(state, () => state.Client.TelemetryQuiet));
-        Assert.Contains("the game is starting", state.StatusLine());
+        Assert.Contains("waiting", state.StatusLine());
 
         server.GoLoud();
         Assert.True(await PumpAsync(state, () => !state.Client.TelemetryQuiet));

@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 17;
+    public const byte ExpectedQwarkBuild = 18;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -528,6 +528,12 @@ public sealed class QwarkClient : IDisposable
                 long idle = Environment.TickCount64 - Interlocked.Read(ref _lastSendTicks);
                 if (idle < HeartbeatInterval.TotalMilliseconds) continue;
 
+                // "Completely quiet" has to mean this too. The heartbeat is a TCP round trip, the
+                // same cost as the poll above, and the connection does not need it for the few
+                // seconds a game takes to start: nothing here is what tells us the link is alive.
+                long age = Environment.TickCount64 - Interlocked.Read(ref _lastTelemetryTicks);
+                if (ShouldStayQuiet(age)) continue;
+
                 try
                 {
                     await HeartbeatAsync(token).ConfigureAwait(false);
@@ -651,6 +657,34 @@ public sealed class QwarkClient : IDisposable
         Interlocked.Exchange(ref _quietUntilTicks,
             session.IsQuiet ? Environment.TickCount64 + session.QuietMs : 0);
 
+    /// <summary>
+    /// How long silence is read as a game starting before the client gives up on that reading and
+    /// asks. Longer than any boot window qwark sets by default, and short enough that a console
+    /// which has genuinely stopped talking is noticed in a few breaths rather than never.
+    /// </summary>
+    private const long QuietGraceMs = 20_000;
+
+    /// <summary>
+    /// Whether this client should be silent right now, given how old the last snapshot is.
+    /// <para>
+    /// Two reasons to be. One is a window qwark named, in a block that carried the quiet flag. The
+    /// other is inference, and it is the one that matters in practice: qwark sends nothing at all
+    /// while a game is starting, so the announcement it used to send would have been one of the
+    /// packets the silence exists to avoid. What the client has instead is the last state it saw.
+    /// Telemetry stopping while the console was in the XMB is a game being started; telemetry
+    /// stopping while a game was running is UDP going missing, which is what the fallback is for.
+    /// </para>
+    /// </summary>
+    private bool ShouldStayQuiet(long ageMs)
+    {
+        if (TelemetryQuiet) return true;
+
+        var state = _latestSession?.State;
+        if (state is null || state == SessionState.Ingame) return false;
+
+        return ageMs < QuietGraceMs;
+    }
+
     private static uint ParseU32(ReadOnlySpan<byte> payload) => new SpanReader(payload).ReadU32();
 
     private static byte[] DirName(string dirname)
@@ -728,7 +762,7 @@ public sealed class QwarkClient : IDisposable
             while (!token.IsCancellationRequested)
             {
                 long age = Environment.TickCount64 - Interlocked.Read(ref _lastTelemetryTicks);
-                if (_transportUp && age > 400 && !TelemetryQuiet)
+                if (_transportUp && age > 400 && !ShouldStayQuiet(age))
                 {
                     try
                     {

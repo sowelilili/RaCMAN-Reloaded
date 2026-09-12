@@ -543,10 +543,15 @@ public sealed class FakeQwarkServer : IDisposable
     }
 
     /// <summary>
-    /// How many packets carrying flags.TELEMETRY_QUIET go out before the silence starts. qwark
-    /// sends about five, which is what gives a client the announcement it then keeps.
+    /// How many packets carrying flags.TELEMETRY_QUIET go out before the silence starts.
+    /// <para>
+    /// qwark sends none: the announcement would be one of the packets the silence exists to avoid,
+    /// so a client infers the window from the state it last saw instead. Zero is therefore what
+    /// matches the console, and a few is what an older module did and what a client still has to
+    /// cope with, so both are worth being able to set up here.
+    /// </para>
     /// </summary>
-    public int QuietWarningPackets { get; set; } = 5;
+    public int QuietWarningPackets { get; set; }
 
     private int _quietWarningsLeft;
 
@@ -560,7 +565,7 @@ public sealed class FakeQwarkServer : IDisposable
     {
         lock (_gate)
         {
-            _quietWarningsLeft = Math.Max(1, QuietWarningPackets);
+            _quietWarningsLeft = QuietWarningPackets;
             _session = _session with
             {
                 State = SessionState.Booting,
