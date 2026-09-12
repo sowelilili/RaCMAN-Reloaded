@@ -26,7 +26,8 @@ public class ParsingTests
         b[26] = 5;                                                    // selected_planet
         b[27] = 0x03;                                                 // planet_flags
         b[28] = 9;                                                    // current_planet
-        // b[29..31] pad
+        BinaryPrimitives.WriteUInt16BigEndian(b.AsSpan(29), 0);       // quiet_ms, revision 1.11
+        // b[31] pad
         BinaryPrimitives.WriteSingleBigEndian(b.AsSpan(32), 1.5f);    // pos[0]
         BinaryPrimitives.WriteSingleBigEndian(b.AsSpan(36), -2.25f);  // pos[1]
         BinaryPrimitives.WriteSingleBigEndian(b.AsSpan(40), 300f);    // pos[2]
@@ -63,6 +64,7 @@ public class ParsingTests
         Assert.Equal(5, info.SelectedPlanet);
         Assert.Equal(PlanetFlags.ResetLevelFlags | PlanetFlags.ResetSpecialBolts, info.PlanetFlags);
         Assert.Equal(9, info.CurrentPlanet);
+        Assert.Equal(0, info.QuietMs);
         Assert.Equal(1.5f, info.PosX);
         Assert.Equal(-2.25f, info.PosY);
         Assert.Equal(300f, info.PosZ);
@@ -80,18 +82,21 @@ public class ParsingTests
     }
 
     /// <summary>
-    /// The three flag bits are read independently: bit0 PREVIOUS_PENDING as it always was, and the
-    /// two the RPCS3 build of qwark added, bit1 EMULATOR and bit2 NO_CODE_PATCHES.
+    /// The four flag bits are read independently: bit0 PREVIOUS_PENDING as it always was, the two
+    /// the RPCS3 build of qwark added, bit1 EMULATOR and bit2 NO_CODE_PATCHES, and bit3
+    /// TELEMETRY_QUIET from revision 1.11.
     /// </summary>
     [Theory]
-    [InlineData(0x00, false, false, false)]
-    [InlineData(0x01, true, false, false)]
-    [InlineData(0x02, false, true, false)]
-    [InlineData(0x04, false, false, true)]
-    [InlineData(0x06, false, true, true)]
-    [InlineData(0x07, true, true, true)]
+    [InlineData(0x00, false, false, false, false)]
+    [InlineData(0x01, true, false, false, false)]
+    [InlineData(0x02, false, true, false, false)]
+    [InlineData(0x04, false, false, true, false)]
+    [InlineData(0x06, false, true, true, false)]
+    [InlineData(0x07, true, true, true, false)]
+    [InlineData(0x08, false, false, false, true)]
+    [InlineData(0x0F, true, true, true, true)]
     public void SessionInfoFlagsCarryTheEmulatorAndCodePatchBits(
-        byte flags, bool previous, bool emulator, bool noCodePatches)
+        byte flags, bool previous, bool emulator, bool noCodePatches, bool quiet)
     {
         var bytes = HandBuiltSessionInfo();
         bytes[24] = flags;
@@ -101,6 +106,7 @@ public class ParsingTests
         Assert.Equal(previous, info.PreviousPending);
         Assert.Equal(emulator, info.IsEmulator);
         Assert.Equal(noCodePatches, info.CodePatchesUnsupported);
+        Assert.Equal(quiet, info.IsQuiet);
 
         // And the byte survives a round trip, so a client that echoes a session does not lose them.
         Assert.Equal(flags, info.ToBytes()[24]);
@@ -112,6 +118,50 @@ public class ParsingTests
         Assert.Equal(1, (byte)SessionFlags.PreviousPending);
         Assert.Equal(2, (byte)SessionFlags.Emulator);
         Assert.Equal(4, (byte)SessionFlags.NoCodePatches);
+        Assert.Equal(8, (byte)SessionFlags.TelemetryQuiet);
+    }
+
+    /// <summary>
+    /// quiet_ms is the big-endian halfword at offset 29, where two of the three pad bytes after
+    /// current_planet used to be. Byte 31 is still pad, and the block is still 164 bytes.
+    /// </summary>
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2500)]
+    [InlineData(65535)]
+    public void SessionInfoReadsQuietMsFromTheTwoPadBytesAfterCurrentPlanet(int quietMs)
+    {
+        var bytes = HandBuiltSessionInfo();
+        BinaryPrimitives.WriteUInt16BigEndian(bytes.AsSpan(29), (ushort)quietMs);
+        bytes[31] = 0xAB;  // still pad: nothing reads it and nothing writes it back
+
+        var info = SessionInfo.Parse(bytes);
+
+        Assert.Equal((ushort)quietMs, info.QuietMs);
+        Assert.Equal(9, info.CurrentPlanet);
+        Assert.Equal(1.5f, info.PosX);
+
+        var written = info.ToBytes();
+        Assert.Equal(SessionInfo.Size, written.Length);
+        Assert.Equal(bytes[29], written[29]);
+        Assert.Equal(bytes[30], written[30]);
+        Assert.Equal(0, written[31]);
+    }
+
+    /// <summary>
+    /// The quiet window only counts when the flag says so: a module that leaves the field set
+    /// after the game is up is not asking for any more silence.
+    /// </summary>
+    [Fact]
+    public void SessionInfoIsQuietFollowsTheFlagRatherThanTheField()
+    {
+        var quiet = SessionInfo.Empty with { Flags = SessionFlags.TelemetryQuiet, QuietMs = 2000 };
+        Assert.True(quiet.IsQuiet);
+        Assert.Equal(2000, quiet.QuietMs);
+
+        var loud = quiet with { Flags = SessionFlags.None };
+        Assert.False(loud.IsQuiet);
     }
 
     [Fact]

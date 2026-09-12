@@ -317,6 +317,14 @@ public sealed class FakeQwarkServer : IDisposable
     public bool SaveFileRunning { get; set; } = true;
 
     /// <summary>
+    /// True makes every savefile op answer BUSY (revision 1.11): qwark waiting for a starting
+    /// game to finish loading its modules before it writes the 600-byte helper into it. It is
+    /// what a console answers for the second or two after a game appears, and it is temporary,
+    /// so a client must read it as "not ready", not as a failure.
+    /// </summary>
+    public bool SaveFileHelperPending { get; set; }
+
+    /// <summary>
     /// How many SAVEFILE_INFO polls a request stays outstanding for, standing in for the frame
     /// or two a console's helper takes to notice it. 1 is answered on the first poll.
     /// </summary>
@@ -534,6 +542,58 @@ public sealed class FakeQwarkServer : IDisposable
         set => SetSessionFlag(SessionFlags.NoCodePatches, value);
     }
 
+    /// <summary>
+    /// How many packets carrying flags.TELEMETRY_QUIET go out before the silence starts. qwark
+    /// sends about five, which is what gives a client the announcement it then keeps.
+    /// </summary>
+    public int QuietWarningPackets { get; set; } = 5;
+
+    private int _quietWarningsLeft;
+
+    /// <summary>
+    /// flags.TELEMETRY_QUIET and the <c>quiet_ms</c> beside it (revision 1.11): the console is
+    /// starting a game and is about to stop sending. A handful of packets carry the announcement
+    /// and then the telemetry loop says nothing at all, which is the half of the behaviour a
+    /// client's poll suppression has to survive.
+    /// </summary>
+    public void GoQuiet(ushort quietMs)
+    {
+        lock (_gate)
+        {
+            _quietWarningsLeft = Math.Max(1, QuietWarningPackets);
+            _session = _session with
+            {
+                State = SessionState.Booting,
+                Flags = _session.Flags | SessionFlags.TelemetryQuiet,
+                QuietMs = quietMs,
+            };
+        }
+    }
+
+    /// <summary>The game is up: the flag goes, <c>quiet_ms</c> goes back to 0 and telemetry resumes.</summary>
+    public void GoLoud(SessionState state = SessionState.Ingame)
+    {
+        lock (_gate)
+        {
+            _quietWarningsLeft = 0;
+            _session = _session with
+            {
+                State = state,
+                Flags = _session.Flags & ~SessionFlags.TelemetryQuiet,
+                QuietMs = 0,
+            };
+        }
+    }
+
+    /// <summary>True while the fake console is keeping the silence it announced.</summary>
+    public bool Quiet
+    {
+        get { lock (_gate) return (_session.Flags & SessionFlags.TelemetryQuiet) != 0; }
+    }
+
+    /// <summary>Every GET_STATE the client asked for, which is what a quiet window must not add to.</summary>
+    public int GetStateCount { get; private set; }
+
     private void SetSessionFlag(SessionFlags flag, bool on)
     {
         lock (_gate)
@@ -645,6 +705,12 @@ public sealed class FakeQwarkServer : IDisposable
     /// </summary>
     public bool EnforceIngame { get; set; } = true;
 
+    /// <summary>The savefile ops, every one of which needs the helper a starting game has not got.</summary>
+    private static bool NeedsSaveFileHelper(Opcode opcode) => opcode is
+        Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
+        or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
+        or Opcode.SaveFileRestore or Opcode.SaveFileCategory;
+
     /// <summary>The ops a real qwark refuses outside INGAME because they read or write the process.</summary>
     private static bool TouchesGameMemory(Opcode opcode) => opcode is
         Opcode.MemRead or Opcode.MemWrite or Opcode.MobyTable
@@ -664,6 +730,9 @@ public sealed class FakeQwarkServer : IDisposable
             }
 
             if (RefusedWithoutCodePatches(opcode, payload)) return (Status.Unsupported, null);
+
+            // Revision 1.11: the helper is not in the game yet, so everything that needs it waits.
+            if (SaveFileHelperPending && NeedsSaveFileHelper(opcode)) return (Status.Busy, null);
 
             switch (opcode)
             {
@@ -694,6 +763,7 @@ public sealed class FakeQwarkServer : IDisposable
                     return (Status.Ok, null);
 
                 case Opcode.GetState:
+                    GetStateCount++;
                     return (Status.Ok, BuildTelemetry().ToBytes());
 
                 case Opcode.Describe:
@@ -1494,7 +1564,18 @@ public sealed class FakeQwarkServer : IDisposable
                     },
                 };
 
-                target = _telemetryTarget;
+                // Revision 1.11: the announcement goes out a handful of times and then the module
+                // says nothing at all until the game is up.
+                if ((_session.Flags & SessionFlags.TelemetryQuiet) != 0 && _quietWarningsLeft <= 0)
+                {
+                    target = null;
+                }
+                else
+                {
+                    if (_quietWarningsLeft > 0) _quietWarningsLeft--;
+                    target = _telemetryTarget;
+                }
+
                 bytes = target is null ? Array.Empty<byte>() : BuildTelemetry().ToBytes();
 
                 // One copy of each pending autosplit event per tick, on the telemetry socket.

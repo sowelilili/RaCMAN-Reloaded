@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 16;
+    public const byte ExpectedQwarkBuild = 17;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -58,6 +58,13 @@ public sealed class QwarkClient : IDisposable
     private volatile SessionInfo? _latestSession;
     private long _lastTelemetryTicks;
     private volatile bool _telemetryViaTcp;
+
+    /// <summary>
+    /// When the announced quiet window runs out, on <see cref="Environment.TickCount64"/>. Zero
+    /// when nothing has announced one.
+    /// </summary>
+    private long _quietUntilTicks;
+
     private long _reconnectAtTicks;
     private int _reconnectAttempt;
     private bool _disposed;
@@ -120,6 +127,29 @@ public sealed class QwarkClient : IDisposable
 
     /// <summary>True when the latest snapshot came from the TCP GET_STATE fallback, i.e. UDP telemetry isn't arriving.</summary>
     public bool TelemetryViaTcp => _telemetryViaTcp;
+
+    /// <summary>
+    /// How long qwark's announced silence has left to run, or <see cref="TimeSpan.Zero"/> when
+    /// there is none. A snapshot with <see cref="SessionInfo.IsQuiet"/> set carries the window in
+    /// <see cref="SessionInfo.QuietMs"/> and this counts it down.
+    /// </summary>
+    public TimeSpan QuietRemaining
+    {
+        get
+        {
+            long until = Interlocked.Read(ref _quietUntilTicks);
+            if (until == 0) return TimeSpan.Zero;
+            long left = until - Environment.TickCount64;
+            return left <= 0 ? TimeSpan.Zero : TimeSpan.FromMilliseconds(left);
+        }
+    }
+
+    /// <summary>
+    /// True while qwark has asked for silence, i.e. the console is starting a game. Nothing is
+    /// wrong: the connection is up, telemetry has stopped on purpose, and this client is not
+    /// asking for any either until the window runs out.
+    /// </summary>
+    public bool TelemetryQuiet => QuietRemaining > TimeSpan.Zero;
 
     public int ReconnectAttempt => Volatile.Read(ref _reconnectAttempt);
 
@@ -217,6 +247,7 @@ public sealed class QwarkClient : IDisposable
             Interlocked.Exchange(ref _lastSendTicks, Environment.TickCount64);
             // Start the age clock now; the poll loop waits this out before falling back to TCP.
             Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
+            Interlocked.Exchange(ref _quietUntilTicks, 0);
             _telemetryViaTcp = false;
 
             _ = Task.Run(() => ReceiveLoopAsync(stream, cts.Token));
@@ -293,6 +324,7 @@ public sealed class QwarkClient : IDisposable
         // the next HELLO, so a stale session block must not keep colouring the UI meanwhile.
         _latestTelemetry = null;
         _latestSession = null;
+        Interlocked.Exchange(ref _quietUntilTicks, 0);
 
         if (wasUp && raiseEvent) Disconnected?.Invoke(error);
         return Task.CompletedTask;
@@ -466,6 +498,7 @@ public sealed class QwarkClient : IDisposable
 
                 _latestTelemetry = packet;
                 _latestSession = packet.Session;
+                NoteQuietWindow(packet.Session);
                 Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
                 _telemetryViaTcp = false;
                 TelemetryReceived?.Invoke(packet);
@@ -604,6 +637,20 @@ public sealed class QwarkClient : IDisposable
         return r.ReadBytes(length);
     }
 
+    /// <summary>
+    /// Takes qwark at its word about the silence it is about to keep (revision 1.11). The bit is
+    /// set for as long as the session is BOOTING, and the field is how much of the window is left,
+    /// so every snapshot that carries it simply restates the deadline; a snapshot without it means
+    /// the game is up and the window is over, however much of it was left.
+    /// <para>
+    /// A GET_STATE reply is the same bytes as a UDP packet, so a poll that happens to land inside
+    /// the window is what teaches a client that missed the announcement to stop polling too.
+    /// </para>
+    /// </summary>
+    private void NoteQuietWindow(SessionInfo session) =>
+        Interlocked.Exchange(ref _quietUntilTicks,
+            session.IsQuiet ? Environment.TickCount64 + session.QuietMs : 0);
+
     private static uint ParseU32(ReadOnlySpan<byte> payload) => new SpanReader(payload).ReadU32();
 
     private static byte[] DirName(string dirname)
@@ -618,6 +665,7 @@ public sealed class QwarkClient : IDisposable
         var payload = await RequestAsync(Opcode.Hello, new[] { ClientProtocolVersion }, cancellationToken).ConfigureAwait(false);
         var info = SessionInfo.Parse(payload);
         _latestSession = info;
+        NoteQuietWindow(info);
         return info;
     }
 
@@ -654,6 +702,7 @@ public sealed class QwarkClient : IDisposable
         var packet = TelemetryPacket.Parse(payload);
         _latestTelemetry = packet;
         _latestSession = packet.Session;
+        NoteQuietWindow(packet.Session);
         Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
         _telemetryViaTcp = true;
         TelemetryReceived?.Invoke(packet);
@@ -665,6 +714,12 @@ public sealed class QwarkClient : IDisposable
     /// flowing this stays idle; when they aren't (a firewall or NAT eating them) it pulls the same
     /// snapshot over TCP with GET_STATE at ~10 Hz, so readouts, toggle state, the selected slot and
     /// the pad mask still update. GET_STATE returns the identical bytes as the UDP packet.
+    /// <para>
+    /// The one silence it must not fill is the one qwark announced. While a game is starting the
+    /// module stops sending on purpose, and a fallback that reads that as a lost packet would put
+    /// ten requests a second on it at exactly the moment it has nothing to spare - which is what
+    /// crashed the console. The window is waited out and the fallback resumes after it.
+    /// </para>
     /// </summary>
     private async Task StatePollLoopAsync(CancellationToken token)
     {
@@ -673,7 +728,7 @@ public sealed class QwarkClient : IDisposable
             while (!token.IsCancellationRequested)
             {
                 long age = Environment.TickCount64 - Interlocked.Read(ref _lastTelemetryTicks);
-                if (_transportUp && age > 400)
+                if (_transportUp && age > 400 && !TelemetryQuiet)
                 {
                     try
                     {
