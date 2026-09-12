@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 23;
+    public const byte ExpectedQwarkBuild = 24;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
