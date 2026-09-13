@@ -956,12 +956,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(24, true)]     // the build before the one this client ships with
-    [InlineData(25, false)]    // exactly the expected build: a boot waits a second and never goes quiet
-    [InlineData(26, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(26, true)]     // the build before the one this client ships with
+    [InlineData(27, false)]    // exactly the expected build: one quiet second before PID discovery
+    [InlineData(28, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(25, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(27, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
