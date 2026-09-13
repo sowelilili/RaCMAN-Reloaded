@@ -57,6 +57,7 @@ public sealed class QwarkClient : IDisposable
     private volatile TelemetryPacket? _latestTelemetry;
     private volatile SessionInfo? _latestSession;
     private long _lastTelemetryTicks;
+    private long _lastUdpTicks;
     private volatile bool _telemetryViaTcp;
     private long _reconnectAtTicks;
     private int _reconnectAttempt;
@@ -215,8 +216,9 @@ public sealed class QwarkClient : IDisposable
             Volatile.Write(ref _lastAutosplitSeq, 0);
 
             Interlocked.Exchange(ref _lastSendTicks, Environment.TickCount64);
-            // Start the age clock now; the poll loop waits this out before falling back to TCP.
+            // Start both clocks now; the poll loop waits UdpFallbackMs out before falling back to TCP.
             Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
+            Interlocked.Exchange(ref _lastUdpTicks, Environment.TickCount64);
             _telemetryViaTcp = false;
 
             _ = Task.Run(() => ReceiveLoopAsync(stream, cts.Token));
@@ -467,6 +469,7 @@ public sealed class QwarkClient : IDisposable
                 _latestTelemetry = packet;
                 _latestSession = packet.Session;
                 Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
+                Interlocked.Exchange(ref _lastUdpTicks, Environment.TickCount64);
                 _telemetryViaTcp = false;
                 TelemetryReceived?.Invoke(packet);
             }
@@ -661,10 +664,24 @@ public sealed class QwarkClient : IDisposable
     }
 
     /// <summary>
+    /// How long UDP telemetry may be missing before the client asks for the snapshot over TCP.
+    /// Long enough to ride out a burst of packets lost on WiFi, which at 400 ms flashed the
+    /// fallback warning on and off; short enough that a PC behind a firewall has live state within
+    /// two seconds of connecting.
+    /// </summary>
+    private const long UdpFallbackMs = 1500;
+
+    /// <summary>
     /// Keeps the UI live when UDP telemetry isn't arriving. While the console's UDP packets are
-    /// flowing this stays idle; when they aren't (a firewall or NAT eating them) it pulls the same
-    /// snapshot over TCP with GET_STATE at ~10 Hz, so readouts, toggle state, the selected slot and
-    /// the pad mask still update. GET_STATE returns the identical bytes as the UDP packet.
+    /// flowing this stays idle; once none has arrived for <see cref="UdpFallbackMs"/> (a firewall or
+    /// NAT eating them) it pulls the same snapshot over TCP with GET_STATE at 10 Hz, so readouts,
+    /// toggle state, the selected slot and the pad mask still update. GET_STATE returns the
+    /// identical bytes as the UDP packet.
+    /// <para>
+    /// The wait is measured from the last UDP packet, not the last snapshot. Measured from the
+    /// snapshot, every poll reset it, and a client that had fallen back polled once per wait
+    /// rather than ten times a second.
+    /// </para>
     /// </summary>
     private async Task StatePollLoopAsync(CancellationToken token)
     {
@@ -672,8 +689,8 @@ public sealed class QwarkClient : IDisposable
         {
             while (!token.IsCancellationRequested)
             {
-                long age = Environment.TickCount64 - Interlocked.Read(ref _lastTelemetryTicks);
-                if (_transportUp && age > 400)
+                long udpAge = Environment.TickCount64 - Interlocked.Read(ref _lastUdpTicks);
+                if (_transportUp && udpAge > UdpFallbackMs)
                 {
                     try
                     {

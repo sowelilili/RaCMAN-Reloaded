@@ -515,11 +515,12 @@ public class ClientTests
     }
 
     /// <summary>
-    /// Telemetry going missing in the XMB is packets going missing, the same as in a game: the client
-    /// asks for the snapshot over TCP at once, which also keeps the console counting it as a
-    /// subscriber, and goes back to UDP as soon as packets arrive again. A build that read this
-    /// silence as a game starting asked for nothing for twenty seconds, the console stopped sending
-    /// to it, and the client polled over TCP for the rest of the connection.
+    /// Telemetry going missing in the XMB is packets going missing, the same as in a game: once UDP
+    /// has been gone for the fallback wait the client asks for the snapshot over TCP, ten times a
+    /// second, which also keeps the console counting it as a subscriber, and goes back to UDP as
+    /// soon as packets arrive again. A build that read this silence as a game starting asked for
+    /// nothing for twenty seconds, the console stopped sending to it, and the client polled over
+    /// TCP for the rest of the connection.
     /// </summary>
     [Fact]
     public async Task TelemetryLostInTheXmbFallsBackAndRecovers()
@@ -532,11 +533,48 @@ public class ClientTests
             Assert.True(await WaitFor(() => client.LatestSession?.State == SessionState.Xmb));
 
             server.TelemetryMuted = true;
+            Assert.True(await WaitFor(() => client.TelemetryViaTcp, 4000));
+
+            // Ten a second once it has fallen back, not one per fallback wait.
             int polls = server.GetStateCount;
-            Assert.True(await WaitFor(() => client.TelemetryViaTcp && server.GetStateCount >= polls + 5, 3000));
+            await Task.Delay(1000);
+            Assert.True(server.GetStateCount - polls >= 7, $"{server.GetStateCount - polls} polls in a second");
 
             server.TelemetryMuted = false;
             Assert.True(await WaitFor(() => !client.TelemetryViaTcp, 3000));
+        }
+    }
+
+    /// <summary>
+    /// A console on WiFi loses packets in bursts. A gap well under the fallback wait asks for
+    /// nothing over TCP and never shows the fallback, which at 400 ms it did, as a flash.
+    /// </summary>
+    [Fact]
+    public async Task ABriefTelemetryGapDoesNotFallBack()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            Assert.True(await WaitFor(() => client.LatestTelemetry is not null));
+
+            int polls = server.GetStateCount;
+            bool sawTcp = false;
+
+            server.TelemetryMuted = true;
+            var gap = Stopwatch.StartNew();
+            while (gap.ElapsedMilliseconds < 800)
+            {
+                sawTcp |= client.TelemetryViaTcp;
+                await Task.Delay(20);
+            }
+            server.TelemetryMuted = false;
+
+            Assert.True(await WaitFor(() => client.TelemetryAgeMs is >= 0 and < 200));
+            sawTcp |= client.TelemetryViaTcp;
+
+            Assert.False(sawTcp);
+            Assert.Equal(polls, server.GetStateCount);
         }
     }
 
