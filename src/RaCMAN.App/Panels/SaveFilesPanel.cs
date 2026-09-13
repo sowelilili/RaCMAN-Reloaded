@@ -100,11 +100,9 @@ public static class SaveFilesPanel
         bool hasHelper = info.Supported && save is not null && load is not null;
         bool enabled = state.Ingame && hasHelper && !_busy;
 
-        // SAVEFILE_INFO is read once when the panel meets a title, which is also the request that
-        // installs the helper, so that first answer always says it has not run a frame yet. A
-        // transfer polls INFO on its own and never puts the answer here. Ask again every second
-        // while that is what the last answer said, so the hint below goes away by itself once the
-        // game has reached the hook.
+        // INFO only observes the helper. An action installs it on demand; transfers poll INFO
+        // themselves without updating this snapshot. Refresh until the helper is running so
+        // an action's installation and first game frame are reflected here too.
         if (hasHelper && state.Ingame && !info.Running && !_busy)
         {
             _sinceInfo += ImGui.GetIO().DeltaTime;
@@ -135,7 +133,7 @@ public static class SaveFilesPanel
             Ui.Warning($"Saving and loading need INGAME (state is {session.State.DisplayName()}).");
             ImGui.Spacing();
         }
-        else if (!info.Running)
+        else if (info.Installed && !info.Running)
         {
             Ui.Hint("The helper is installed but has not run a frame yet. It runs while the game " +
                     "is in play, so a save started on a loading screen or in a menu may wait.");

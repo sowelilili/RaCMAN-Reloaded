@@ -956,12 +956,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(26, true)]     // the build before the one this client ships with
-    [InlineData(27, false)]    // exactly the expected build: one quiet second before PID discovery
-    [InlineData(28, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(28, true)]     // the build before the one this client ships with
+    [InlineData(29, false)]    // exactly the expected build: unsupported RaC1 autosplit options retired
+    [InlineData(30, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(27, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(29, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
