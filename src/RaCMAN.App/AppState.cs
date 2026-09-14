@@ -63,6 +63,12 @@ public sealed class AppState : IDisposable
     /// </summary>
     private bool _liveStale;
 
+    /// <summary>
+    /// Set when a background read was held back because the console was busy with a launch. The
+    /// first tick that finds the session INGAME again reads back what was held, once.
+    /// </summary>
+    private bool _heldBack;
+
     private int _inFlight;
 
     /// <summary>
@@ -183,6 +189,15 @@ public sealed class AppState : IDisposable
     public bool Connected => Client.IsConnected;
 
     public bool Ingame => Connected && Session.State == SessionState.Ingame;
+
+    /// <summary>
+    /// True while the console is refusing everything but the five control ops. PROTOCOL.md section
+    /// 1.1: through BOOTING and through QUITTING qwark allocates no request buffers, so every
+    /// list, describe, info and event read is drained and answered BUSY until the session is
+    /// INGAME. Nothing automatic is sent while this is set — the burst of refusals a launch used to
+    /// produce was a burst of toasts — and what was held back is read on the way back in.
+    /// </summary>
+    public bool ConsoleBusy => Connected && Session.State is SessionState.Booting or SessionState.Quitting;
 
     /// <summary>
     /// The console refuses code patches (RPCS3). Read straight off the session flags, so every
@@ -338,9 +353,10 @@ public sealed class AppState : IDisposable
     /// <summary>
     /// The same, for work nobody asked for: the automatic re-reads after a reboot, the panels'
     /// timed table reads, the probes. A status the console is entitled to answer while a game is
-    /// starting or ending (NOT_INGAME), or one it uses to say this game has no such table
-    /// (UNSUPPORTED, UNKNOWN_OP), says nothing at all, because the user did nothing to be told
-    /// about. Every other failure still toasts, and so does every request behind a click.
+    /// starting or ending (NOT_INGAME, and the BUSY of section 1.1), or one it uses to say this
+    /// game has no such table (UNSUPPORTED, UNKNOWN_OP), says nothing at all, because the user did
+    /// nothing to be told about. Every other failure still toasts, and so does every request behind
+    /// a click. <see cref="StatusToast"/> is the whole of that decision.
     /// </summary>
     public void RunQuiet(Func<Task> operation) => Run(operation, null, quiet: true);
 
@@ -355,16 +371,20 @@ public sealed class AppState : IDisposable
                 if (successMessage is not null) Post(() => AddToast(successMessage, ToastKind.Success));
             }
             catch (QwarkStatusException ex)
-                when (quiet && ex.Status is Status.NotIngame or Status.Unsupported or Status.UnknownOp)
             {
-                // Background work: the session moved under it, or this game has no such table.
-            }
-            catch (QwarkStatusException ex)
-            {
-                // The status is always shown; which request carried it is debug-only detail.
-                Post(() => AddToast(
-                    Panels.Ui.Debug ? $"{ex.Opcode}: {ex.Status}" : $"The console refused that: {ex.Status}",
-                    ToastKind.Error));
+                string? text = StatusToast.For(ex.Status, ex.Opcode, Session.State, quiet, Panels.Ui.Debug);
+
+                // Nothing to say out loud. With debug information on it is still worth a line on
+                // the console the client was started from: a run of these is what a launch looks
+                // like from this side, and there is no other trace of one.
+                if (text is null)
+                {
+                    if (Panels.Ui.Debug) Console.WriteLine($"quiet {ex.Opcode}: {ex.Status}");
+                }
+                else
+                {
+                    Post(() => AddToast(text, ToastKind.Error));
+                }
             }
             catch (Exception ex)
             {
@@ -487,6 +507,9 @@ public sealed class AppState : IDisposable
                 // the read that follows is what adopts the new one.
                 if (!_described.IsEmpty) ResetPanels();
                 _liveStale = false;
+
+                // RefreshAll asks for every one of them anyway.
+                _heldBack = false;
                 RefreshAll();
             }
             else if (_liveStale)
@@ -496,6 +519,16 @@ public sealed class AppState : IDisposable
                 _liveStale = false;
                 DescribedTitle = session.TitleId;
                 RefreshLive();
+
+                // And the console-side probes a launch refused, which RefreshLive does not carry
+                // and nothing else would ask for again. Once: the flag is what stops a game that
+                // boots and quits and boots from reading them three times over.
+                if (_heldBack)
+                {
+                    _heldBack = false;
+                    RefreshAutosplitEvents();
+                    RefreshSaveFileInfo();
+                }
             }
         }
 
@@ -505,8 +538,13 @@ public sealed class AppState : IDisposable
             RefreshPositions(quiet: true);
         }
 
-        if (session.PreviousPending && !_lastPreviousPending)
+        // PREVIOUS_LIST is a bulk op, and section 4.1 sets the pending flag on the way through a
+        // reboot, which is exactly when section 1.1 refuses one. So the ask waits for the console
+        // to be answering again and the flag stays unhandled until it is; the modal is a second or
+        // two later than it used to be, and nobody is told the console was busy.
+        if (session.PreviousPending && !_lastPreviousPending && !ConsoleBusy)
         {
+            _lastPreviousPending = true;
             Run(() => Client.PreviousListAsync(), previous =>
             {
                 Previous = previous;
@@ -515,11 +553,10 @@ public sealed class AppState : IDisposable
         }
         else if (!session.PreviousPending && _lastPreviousPending)
         {
+            _lastPreviousPending = false;
             Previous = null;
             PreviousModalRequested = false;
         }
-
-        _lastPreviousPending = session.PreviousPending;
     }
 
     /// <summary>
@@ -613,10 +650,33 @@ public sealed class AppState : IDisposable
     /// </summary>
     public void ForceRefresh()
     {
+        // Eleven requests would be eleven BUSYs and eleven toasts; the user asked, so they are told
+        // once, in the words and the colour a single refused button gets, and nothing is sent. The
+        // panels keep what they have, which is still this game's.
+        if (ConsoleBusy)
+        {
+            AddToast(StatusToast.WhileBusy(Session.State), ToastKind.Error);
+            return;
+        }
+
         ResetPanels();
         AdoptSession();
         RefreshAll(quiet: false);
         _liveStale = false;
+    }
+
+    /// <summary>
+    /// Whether a background read has to be held. Nothing automatic goes out while the console is
+    /// busy with a launch, and the fact that something was held is remembered here so the tick that
+    /// finds the session INGAME again can read it back. A user's own request is never held: it goes
+    /// out, and whatever comes back is theirs to see.
+    /// </summary>
+    private bool HoldsBackgroundWork()
+    {
+        if (!ConsoleBusy) return false;
+
+        _heldBack = true;
+        return true;
     }
 
     /// <summary>
@@ -628,6 +688,7 @@ public sealed class AppState : IDisposable
     public void RefreshAll(bool quiet = true)
     {
         if (!Connected) return;
+        if (quiet && HoldsBackgroundWork()) return;
 
         if (Ingame)
         {
@@ -690,6 +751,7 @@ public sealed class AppState : IDisposable
     public void RefreshLive(bool quiet = true)
     {
         if (!Connected) return;
+        if (quiet && HoldsBackgroundWork()) return;
 
         // The slots come out of the running process and are refused outside it; everything below
         // is the console's own and answers whatever the session is doing.
@@ -736,6 +798,7 @@ public sealed class AppState : IDisposable
     public void RefreshAutosplitEvents()
     {
         if (!Connected) return;
+        if (HoldsBackgroundWork()) return;
 
         RunQuiet(async () =>
         {
@@ -767,6 +830,7 @@ public sealed class AppState : IDisposable
     public void RefreshSaveFileInfo()
     {
         if (!Connected) return;
+        if (HoldsBackgroundWork()) return;
 
         RunQuiet(async () =>
         {
@@ -785,6 +849,7 @@ public sealed class AppState : IDisposable
 
     public void RefreshPositions(bool quiet = false)
     {
+        if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.PosListAsync(), positions => Positions = positions, quiet);
     }
 
@@ -795,6 +860,7 @@ public sealed class AppState : IDisposable
     public void RefreshUnlocks(bool quiet = false)
     {
         if (!Connected) return;
+        if (quiet && HoldsBackgroundWork()) return;
 
         Run(async () =>
         {
@@ -825,27 +891,32 @@ public sealed class AppState : IDisposable
 
     public void RefreshWatches(bool quiet = false)
     {
+        if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.WatchListAsync(), watches => Watches = watches, quiet);
     }
 
     public void RefreshFreezes(bool quiet = false)
     {
+        if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.FreezeListAsync(), freezes => Freezes = freezes, quiet);
     }
 
     public void RefreshPatches(bool quiet = false)
     {
+        if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.PatchListAsync(), patches => Patches = patches, quiet);
     }
 
     public void RefreshCombos(bool quiet = false)
     {
+        if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.ComboListAsync(), combos => Combos = combos, quiet);
     }
 
     public void RefreshMods(bool quiet = false)
     {
         if (!Connected) return;
+        if (quiet && HoldsBackgroundWork()) return;
 
         Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
         RescanLocalMods();

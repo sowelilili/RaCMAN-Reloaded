@@ -454,6 +454,18 @@ public sealed class AppWindow : GameWindow
             ImGui.TextColored(Ui.Yellow, "| qwark.sprx is out of date");
         }
 
+        // The same, for the fallback that is easy to run on for months without noticing: everything
+        // works, so nothing says so except the Connection panel nobody has open.
+        if (_state.Connected && _state.Client.TelemetryViaTcp)
+        {
+            ImGui.SameLine();
+            ImGui.TextColored(Ui.Yellow, "| telemetry over TCP");
+            Ui.Tooltip("The console's UDP telemetry is not reaching this PC, almost always because "
+                       + "the firewall is eating it, so live state is being polled over TCP instead. "
+                       + "Everything works; readouts and the input display just update more slowly. "
+                       + "The Connection panel has a button that adds the firewall rule.");
+        }
+
         if (_state.Connected && session.PreviousPending)
         {
             ImGui.SameLine();

@@ -115,11 +115,13 @@ public static class LevelFlagsPanel
         ImGui.EndDisabled();
 
         // Quiet outside INGAME: the automatic first read between sessions is not worth a toast.
-        if (state.Connected && _loadedPlanet != _planet) Load(state, quiet: !state.Ingame);
+        // Nothing at all while the console is busy with a launch (section 1.1): _loadedPlanet is
+        // left alone, so the next frame after INGAME is the one that reads.
+        if (state.Connected && !state.ConsoleBusy && _loadedPlanet != _planet) Load(state, quiet: !state.Ingame);
 
         // The interval is read every frame, so a change on the Settings panel takes effect at once.
         float period = state.Settings.TableRefreshSeconds;
-        if (period > 0 && state.Connected)
+        if (period > 0 && state.Connected && !state.ConsoleBusy)
         {
             _sinceRefresh += ImGui.GetIO().DeltaTime;
             if (_sinceRefresh >= period)

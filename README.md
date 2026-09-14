@@ -69,7 +69,7 @@ You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours re
 
 ## Windows firewall
 
-The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application. At the first start the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later.
+The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application. At the first start the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later. While that fallback is in use the status line at the top of the window says **telemetry over TCP**, whichever panel you are on, so a run on the slow path is not something you have to go looking for.
 
 ## Customising the Game page
 

@@ -206,6 +206,10 @@ if (exitAfter > 0)
                       $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"tcpfallback={state.Client.TelemetryViaTcp} " +
+
+                      // The last error toast of the run, so a headless session change can be
+                      // checked for the refusals a launch used to spray across the screen.
+                      $"lasterror=\"{state.LastError ?? "(none)"}\" " +
                       $"autosplitevents={state.AutosplitEvents.Length} " +
                       $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}" +
                       $"+{state.Autosplitter.Adjustments}adj " +

@@ -25,6 +25,9 @@ public sealed class FakeQwarkServer : IDisposable
     private IPEndPoint? _telemetryTarget;
     private Task? _telemetryTask;
 
+    /// <summary>Set by <see cref="Booting"/> and <see cref="Quitting"/>; see the two of them.</summary>
+    private bool _launching;
+
     public FakeQwarkServer(int port = 0)
     {
         _listener = new TcpListener(IPAddress.Loopback, port);
@@ -263,7 +266,11 @@ public sealed class FakeQwarkServer : IDisposable
             var ev = new AutosplitEvent(++_autosplitSeq, timeMs ?? AutosplitClockMs, kind, code, arg);
             AutosplitRing.Add(ev);
             if (AutosplitRing.Count > AutosplitEventsReply.MaxEvents) AutosplitRing.RemoveAt(0);
-            if (AutosplitPush) _autosplitPushes.Add((ev, AutosplitPushCopies));
+
+            // Nothing moves on the network while a game is starting or ending (section 1.1), so the
+            // datagram is not sent and not queued for later: the ring is what the client catches up
+            // from once the session is INGAME again.
+            if (AutosplitPush && !_launching) _autosplitPushes.Add((ev, AutosplitPushCopies));
             return ev;
         }
     }
@@ -519,7 +526,18 @@ public sealed class FakeQwarkServer : IDisposable
     public SessionInfo Session
     {
         get { lock (_gate) return _session; }
-        set { lock (_gate) _session = value; }
+        set
+        {
+            lock (_gate)
+            {
+                _session = value;
+
+                // A session moved by hand to anything but BOOTING or QUITTING has finished
+                // launching, so the refusals below stop with it: the two ways of driving this
+                // server cannot end up disagreeing about whether a game is on its way in.
+                if (_session.State is not (SessionState.Booting or SessionState.Quitting)) _launching = false;
+            }
+        }
     }
 
     /// <summary>
@@ -550,6 +568,64 @@ public sealed class FakeQwarkServer : IDisposable
             _session = _session with { Flags = on ? _session.Flags | flag : _session.Flags & ~flag };
         }
     }
+
+    /// <summary>
+    /// A game launching, section 1.1: the session reports BOOTING and, because qwark allocates no
+    /// request buffers while one is, every request but HELLO, HEARTBEAT, SUBSCRIBE, UNSUBSCRIBE and
+    /// GET_STATE is drained and answered BUSY. Clearing it puts the session back INGAME.
+    /// </summary>
+    public bool Booting
+    {
+        get => _launching && Session.State == SessionState.Booting;
+        set => SetLaunching(value, SessionState.Booting);
+    }
+
+    /// <summary>The same for a game on its way out, which qwark treats identically.</summary>
+    public bool Quitting
+    {
+        get => _launching && Session.State == SessionState.Quitting;
+        set => SetLaunching(value, SessionState.Quitting);
+    }
+
+    private void SetLaunching(bool on, SessionState state)
+    {
+        lock (_gate)
+        {
+            _launching = on;
+            _session = _session with { State = on ? state : SessionState.Ingame };
+        }
+    }
+
+    /// <summary>
+    /// How many requests have been refused with BUSY because a game was starting or ending. A
+    /// client that holds its bulk traffic back the way section 1.1 asks leaves this at zero.
+    /// </summary>
+    public int BusyCount { get; private set; }
+
+    private readonly List<Opcode> _requests = new();
+
+    /// <summary>
+    /// Every opcode this server has been asked for since the last <see cref="ClearRequestLog"/>,
+    /// refusals included, oldest first. A test that has to show a request was never sent needs the
+    /// negative, and no per-op counter can give it.
+    /// </summary>
+    public Opcode[] RequestLog()
+    {
+        lock (_gate) return _requests.ToArray();
+    }
+
+    /// <summary>Forgets the log, so a test can watch one window of a session on its own.</summary>
+    public void ClearRequestLog()
+    {
+        lock (_gate) _requests.Clear();
+    }
+
+    /// <summary>
+    /// The five ops that keep working through BOOTING and QUITTING: they fit in fixed buffers, so
+    /// qwark answers them with no allocation while everything else is refused.
+    /// </summary>
+    public static bool IsControlOp(Opcode opcode) => opcode is
+        Opcode.Hello or Opcode.Heartbeat or Opcode.Subscribe or Opcode.Unsubscribe or Opcode.GetState;
 
     /// <summary>The ops a platform without writable instruction memory refuses outright.</summary>
     private bool RefusedWithoutCodePatches(Opcode opcode, byte[] payload)
@@ -667,6 +743,19 @@ public sealed class FakeQwarkServer : IDisposable
     {
         lock (_gate)
         {
+            // Capped: a headless run leaves this server up for as long as the window is, and a log
+            // nobody reads should not grow for the whole of it.
+            _requests.Add(opcode);
+            if (_requests.Count > 4096) _requests.RemoveRange(0, _requests.Count - 4096);
+
+            // Section 1.1. A game is starting or ending, so there are no request buffers to put a
+            // bulk reply in: the payload is drained and the answer is BUSY until INGAME.
+            if (_launching && !IsControlOp(opcode))
+            {
+                BusyCount++;
+                return (Status.Busy, null);
+            }
+
             if (EnforceIngame && _session.State != SessionState.Ingame && TouchesGameMemory(opcode))
             {
                 return (Status.NotIngame, null);

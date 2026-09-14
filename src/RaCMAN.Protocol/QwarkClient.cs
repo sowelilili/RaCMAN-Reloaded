@@ -1269,16 +1269,33 @@ public sealed class QwarkClient : IDisposable
             await RequestAsync(Opcode.AutosplitDescribe, null, cancellationToken).ConfigureAwait(false));
 
     /// <summary>
+    /// AUTOSPLIT_EVENTS is a bulk op, and section 1.1 has qwark answer BUSY to every one of those
+    /// while a game is starting or ending. Nothing is lost by waiting: the console keeps the events
+    /// in its ring, so a read held back here is asked for again, from the same sequence number, on
+    /// the first poll after the session is INGAME.
+    /// </summary>
+    private bool AutosplitReadable => _latestSession is { State: SessionState.Ingame };
+
+    /// <summary>
     /// Reads the ring once on connect and records where the console has got to without raising
     /// anything: the events in it belong to a run this client was not watching.
     /// </summary>
     private async Task PrimeAutosplitAsync(CancellationToken token)
     {
+        // Unprimed is the safe state: every push is dropped until there is a baseline, and the poll
+        // loop primes as soon as the console will answer.
+        if (!AutosplitReadable) return;
+
         try
         {
             var reply = await AutosplitEventsAsync(0, token).ConfigureAwait(false);
             Volatile.Write(ref _lastAutosplitSeq, reply.HighestSeq);
             _autosplitPrimed = true;
+        }
+        catch (QwarkStatusException ex) when (ex.Status == Status.Busy)
+        {
+            // The session moved between the check above and the request. Still no baseline, so
+            // still not primed: the poll asks again.
         }
         catch (QwarkStatusException ex)
         {
@@ -1333,6 +1350,10 @@ public sealed class QwarkClient : IDisposable
     /// </summary>
     private async Task<bool> FetchAutosplitAsync(CancellationToken token)
     {
+        // The one place this op is sent from a running connection, and so the one place the launch
+        // rule has to hold: a push that needed this to fill a gap is held back with it, in order.
+        if (!AutosplitReadable) return false;
+
         try
         {
             var reply = await AutosplitEventsAsync(Volatile.Read(ref _lastAutosplitSeq), token).ConfigureAwait(false);
@@ -1393,7 +1414,7 @@ public sealed class QwarkClient : IDisposable
                 // from ever reaching the heartbeat.
                 if (!AutosplitSafetyPoll || AutosplitEventReceived is null) continue;
                 if (!_transportUp || !_autosplitAvailable) continue;
-                if (_latestSession is not { State: SessionState.Ingame }) continue;
+                if (!AutosplitReadable) continue;
 
                 if (!_autosplitPrimed)
                 {
