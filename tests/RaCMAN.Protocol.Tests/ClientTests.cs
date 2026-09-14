@@ -956,12 +956,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(31, true)]     // the build before the one this client ships with
-    [InlineData(32, false)]    // exactly the expected build: Deadlocked weapon levels shown as the game shows them
-    [InlineData(33, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(32, true)]     // the build before the one this client ships with
+    [InlineData(33, false)]    // exactly the expected build: the Deadlocked boots and RaC2 weapon levels
+    [InlineData(34, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(32, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(33, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 

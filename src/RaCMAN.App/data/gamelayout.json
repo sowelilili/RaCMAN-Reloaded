@@ -77,6 +77,8 @@
         "Maktar slots": "Manips",
         "Auto-reset (any%)": "Manips",
         "Auto-reset (NG+)": "Manips",
+        "Max all weapon levels": "Unlocks",
+        "Max all weapon ammo": "Unlocks",
 
         "Enable debug mode": "Debug",
         "QE save write-offset": "Debug"
