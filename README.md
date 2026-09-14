@@ -69,7 +69,17 @@ You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours re
 
 ## Windows firewall
 
-The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application. At the first start the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later.
+The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application, so the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later.
+
+A firewall rule allows one executable, named by its full path. The client checks at every start whether such a rule is really there for the copy that is running — reading the rules needs no administrator rights, only adding one does — and asks again only when it is not: after a move to another folder, or if something removed the rule. A rule you added through Windows' own "allow access" prompt counts just as much as one the client added, and a refusal is remembered for that copy and not repeated.
+
+To see the rules:
+
+```powershell
+Get-NetFirewallRule -DisplayName 'RaCMAN Reloaded (*)' | Get-NetFirewallApplicationFilter
+```
+
+The path should be the executable that is actually running — under the installer that is `%LocalAppData%\RaCMANReloaded\current\RaCMAN.App.exe`, not the launcher in the folder above it. `windows-firewall.ps1 -Remove` takes this copy's rules away again.
 
 ## Customising the Game page
 

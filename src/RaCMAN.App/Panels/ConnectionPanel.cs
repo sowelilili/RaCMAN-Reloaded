@@ -460,13 +460,20 @@ public static class ConnectionPanel
     {
         if (!FirewallHelper.IsSupported) return;   // Windows-only; the rule is a no-op elsewhere
 
+        string executable = FirewallHelper.TargetExecutable;
+
         if (ImGui.Button("Allow inbound UDP through Windows Firewall"))
         {
-            var (ok, message) = FirewallHelper.RequestRule();
+            var (ok, message) = FirewallHelper.RequestRule(executable);
             state.AddToast(message, ok ? ToastKind.Info : ToastKind.Error);
+
+            // The same book-keeping the first-run modal does: the rule is for this executable, so
+            // a later start can tell whether it is still there rather than assuming it.
+            state.Settings.RecordFirewall(ok, executable);
         }
         ImGui.SameLine();
         Ui.Hint("Adds a firewall rule for this app (asks for admin). Or run \"Allow through Firewall.cmd\".");
+        Ui.DebugHint($"Rule would name {executable}");
     }
 
     /// <summary>
