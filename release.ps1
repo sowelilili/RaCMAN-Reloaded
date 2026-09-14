@@ -15,7 +15,8 @@
       2. Refuses a working tree with uncommitted changes, in either repository.
       3. Refuses a branch that has diverged from the remote, and pushes one that is merely ahead.
       4. Refuses a tag that already exists, locally or on the remote.
-      5. Refuses a qwark dist\ folder older than qwark's own sources, or missing a file.
+      5. Refuses a qwark dist\ folder committed before the last change to qwark's sources, or
+         missing a file.
       6. Refuses a client that expects a newer qwark build than qwark carries.
       7. Runs both test suites.
       8. Shows what it is about to do and asks, then tags and pushes qwark and then this repository.
@@ -202,19 +203,27 @@ foreach ($file in @('qwark.sprx', 'qwark-rpcs3.exe')) {
     }
 }
 
-# The release takes the committed binaries, so a source file newer than them means the module in
-# dist\ is not the module in src\. Only this machine's timestamps can tell; the workflow cannot.
-$sprx = Get-Item (Combine $qwark 'dist' 'qwark.sprx')
-$newest = Get-ChildItem -Path (Combine $qwark 'src') -Recurse -File |
-    Sort-Object LastWriteTime -Descending |
-    Select-Object -First 1
+# The release takes the committed binaries, so a source committed after the module in dist\ means
+# the module is not the module in src\. File timestamps cannot tell: a checkout or a merge writes
+# the files in its own order, dist\ before src\, so a tree merged a moment ago reads as stale by
+# milliseconds. The history can tell. The tree is clean by now, so the question is exactly whether
+# anything under src\ (or the Makefile that compiles it) has changed since the commit that last
+# touched the module.
+$distCommit = (Invoke-Git $qwark @('log', '-1', '--format=%h', '--', 'dist/qwark.sprx') | Out-String).Trim()
+if (-not $distCommit) {
+    throw "qwark's dist\qwark.sprx has never been committed. Build it (make, then make dist) and commit it."
+}
 
-if ($newest -and $newest.LastWriteTime -gt $sprx.LastWriteTime) {
-    throw ("qwark's dist\qwark.sprx is older than $($newest.Name). Rebuild it in qwark " +
+$changedSince = @(Invoke-Git $qwark @('diff', '--name-only', $distCommit, 'HEAD', '--', 'src', 'Makefile') |
+    Where-Object { $_ })
+
+if ($changedSince.Count -gt 0) {
+    throw ("qwark's dist\qwark.sprx was committed in $distCommit, and $($changedSince.Count) source file(s) " +
+           "have changed since, $($changedSince[0]) among them. Rebuild it in qwark " +
            '(make, then make dist) and commit it, or the release ships the previous module.')
 }
 
-Write-Good "dist\qwark.sprx is newer than every source ($('{0:yyyy-MM-dd HH:mm}' -f $sprx.LastWriteTime))"
+Write-Good "dist\qwark.sprx was committed in $distCommit and no source has changed since"
 
 # A timestamp says the binary is not older than the source. It does not say the source still
 # compiles: a failed build leaves the previous qwark.sprx in place, and `make dist` copies it over
