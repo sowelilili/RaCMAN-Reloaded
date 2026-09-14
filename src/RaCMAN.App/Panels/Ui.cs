@@ -62,6 +62,22 @@ public static class Ui
     }
 
     /// <summary>
+    /// The explanation behind the thing just drawn, shown on hover. Built by hand rather than with
+    /// SetTooltip, which is printf underneath and would eat a per cent sign; wrapped, because a
+    /// sentence of explanation is wider than anything it hangs off.
+    /// </summary>
+    public static void Tooltip(string text)
+    {
+        if (!ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) return;
+
+        ImGui.BeginTooltip();
+        ImGui.PushTextWrapPos(ImGui.GetFontSize() * 24f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.EndTooltip();
+    }
+
+    /// <summary>
     /// A small button that opens a folder of this client's in the platform's file manager, with
     /// the path itself on the tooltip. The libraries live at absolute paths long enough to wrap
     /// over three lines of panel, and printing one was never something the user could act on.

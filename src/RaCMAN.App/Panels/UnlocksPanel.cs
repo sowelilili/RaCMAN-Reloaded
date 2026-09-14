@@ -84,8 +84,10 @@ public static class UnlocksPanel
 
         DrawSectionActions(state);
 
-        // First frame on the panel: load the list.
-        if (!_opened)
+        // First frame on the panel: load the list. Not while the console is busy with a launch,
+        // and the flag stays down when it is, so the read happens on the first frame after INGAME
+        // rather than being spent on a request the console would only refuse.
+        if (!_opened && !state.ConsoleBusy)
         {
             _opened = true;
             _sinceRefresh = 0;
@@ -111,8 +113,11 @@ public static class UnlocksPanel
         }
 
         // The interval is read every frame, so a change on the Settings panel takes effect at once.
+        // The timer stops while the console is busy with a launch: a table read is exactly what
+        // section 1.1 refuses, and a refusal every few seconds through a boot is the noise this
+        // panel used to make.
         float period = state.Settings.TableRefreshSeconds;
-        if (period > 0 && state.Connected)
+        if (period > 0 && state.Connected && !state.ConsoleBusy)
         {
             _sinceRefresh += ImGui.GetIO().DeltaTime;
             if (_sinceRefresh >= period)

@@ -71,7 +71,7 @@ You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours re
 
 ## Windows firewall
 
-The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application, so the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later.
+The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application, so the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later. While that fallback is in use the status line at the top of the window says **telemetry over TCP**, whichever panel you are on, so a run on the slow path is not something you have to go looking for.
 
 A firewall rule allows one executable, named by its full path. The client checks at every start whether such a rule is really there for the copy that is running — reading the rules needs no administrator rights, only adding one does — and asks again only when it is not: after a move to another folder, or if something removed the rule. A rule you added through Windows' own "allow access" prompt counts just as much as one the client added, and a refusal is remembered for that copy and not repeated.
 

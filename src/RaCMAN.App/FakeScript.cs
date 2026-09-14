@@ -16,7 +16,7 @@ namespace RaCMAN.App;
 /// </summary>
 public static class FakeScript
 {
-    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, boot, rac2, rac4, drop, "
+    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, drop, "
                                 + "start, split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
@@ -97,8 +97,15 @@ public static class FakeScript
         var session = fake.Session;
         switch (step)
         {
+            // Both halves of what a real quit is: the session says QUITTING, and, per PROTOCOL.md
+            // section 1.1, every request but the five control ops is answered BUSY until a game is
+            // up again. "booting" is the other side of the same coin, the launch itself.
             case "quit":
-                fake.Session = session with { State = SessionState.Quitting };
+                fake.Quitting = true;
+                break;
+
+            case "booting":
+                fake.Booting = true;
                 break;
 
             case "xmb":
