@@ -50,6 +50,9 @@ public static class InputDisplayPanel
     private static bool _scanned;
     private static string? _loadError;
 
+    /// <summary>Half-typed numbers, so a port is only taken up when Enter is pressed.</summary>
+    private static readonly Dictionary<string, string> Drafts = new();
+
     /// <summary>
     /// The sheet, once per controller: a texture belongs to the GL context that uploaded it, and
     /// the pad window has a context of its own. Both entries hold the same skin, and both are
@@ -89,6 +92,10 @@ public static class InputDisplayPanel
             {
                 settings.InputSkin = _available[index];
                 settings.Save();
+
+                // The OBS page holds its own copy of the sheet and the rectangles, so it is told
+                // to fetch them again rather than left on the old skin until somebody refreshes it.
+                state.ObsPad.SkinChanged();
             }
         }
         else
@@ -106,6 +113,7 @@ public static class InputDisplayPanel
         }
 
         DrawModeChoice(settings);
+        DrawObsSection(state, loaded);
 
         // The pad on the screen is the readout; the numbers behind it are only of use while
         // looking at the wire.
@@ -164,6 +172,63 @@ public static class InputDisplayPanel
         }
 
         ImGui.EndDisabled();
+    }
+
+    /// <summary>
+    /// The third place the pad can be shown, and the only one that is not a window of this client's:
+    /// a page OBS takes as a Browser Source. The listener is loopback-only, so there is nothing to
+    /// allow through a firewall and nothing another machine can reach.
+    /// </summary>
+    private static void DrawObsSection(AppState state, LoadedSkin? loaded)
+    {
+        var settings = state.Settings;
+        var server = state.ObsPad;
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("OBS");
+
+        bool serve = settings.ObsPadEnabled;
+        if (ImGui.Checkbox("Serve for OBS", ref serve))
+        {
+            settings.ObsPadEnabled = serve;
+            settings.Save();
+        }
+
+        ImGui.SameLine();
+        ImGui.SetNextItemWidth(90);
+        if (Ui.NumberOnEnter("Port", settings.ObsPadPort, Drafts, "obsPort", out long typed))
+        {
+            settings.ObsPadPort = (int)Math.Clamp(typed, 1, 65535);
+            settings.Save();
+        }
+
+        // Read-only rather than a label, so the URL can be selected and copied by hand as well.
+        string url = ObsPadServer.UrlFor(settings.ObsPadPort);
+        ImGui.SetNextItemWidth(260);
+        ImGui.InputText("##obsurl", ref url, 64, ImGuiInputTextFlags.ReadOnly);
+        ImGui.SameLine();
+        if (ImGui.SmallButton("Copy URL")) ImGui.SetClipboardText(url);
+
+        int width = loaded?.Skin.Base.Width ?? (int)FallbackWidth;
+        int height = loaded?.Skin.Base.Height ?? (int)FallbackHeight;
+        Ui.Hint($"Add a Browser Source in OBS with this URL; set its size to {width}x{height}.");
+
+        switch (server.State)
+        {
+            case ObsPadState.Serving:
+                Ui.Text(Ui.Green, $"Serving on 127.0.0.1:{server.Port}");
+                break;
+
+            case ObsPadState.Failed:
+                // Said here and nowhere else: a port another program holds is not worth a toast on
+                // every start, and the fix is the box above this line.
+                Ui.Error($"Port {server.Port} did not open: {server.Problem}");
+                break;
+
+            default:
+                Ui.Text(Ui.Grey, "Off");
+                break;
+        }
     }
 
     /// <summary>

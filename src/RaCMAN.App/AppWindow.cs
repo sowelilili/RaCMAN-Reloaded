@@ -192,6 +192,10 @@ public sealed class AppWindow : GameWindow
             _state.Tick((float)args.Time);
             CombosPanel.Update(_state);
 
+            // Here rather than in Tick: a test builds an AppState of its own, and nothing a test
+            // builds may open a socket.
+            _state.SyncObsPad();
+
             controller.Update((float)args.Time);
             DrawUi(controller);
 

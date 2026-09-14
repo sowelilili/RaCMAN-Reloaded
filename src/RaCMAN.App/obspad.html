@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>RaCMAN input display</title>
+<style>
+  /* Transparent throughout: a browser source shows the pad and nothing else. */
+  html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }
+  #pad { display: block; width: 100%; height: 100%; object-fit: contain; }
+
+  /* No console, no game, or no telemetry: the pose on screen is not what is being held. */
+  #pad.offline { opacity: .45; filter: grayscale(1); }
+</style>
+</head>
+<body>
+<canvas id="pad" width="16" height="16"></canvas>
+<script>
+(function () {
+  'use strict';
+
+  var canvas = document.getElementById('pad');
+  var ctx = canvas.getContext('2d');
+
+  // ?skin=<name> overrides the client's own pick for this source alone, so two browser sources
+  // can show two skins. An unknown name falls back to the selected one, server-side.
+  var wanted = new URLSearchParams(location.search).get('skin');
+
+  var skin = null;
+  var sheet = null;
+  var pad = { m: 0, a: [0, 0, 0, 0], live: false };
+  var drawing = false;
+
+  function url(path, bust) {
+    var query = new URLSearchParams();
+    if (wanted) query.set('skin', wanted);
+
+    // The sheet is fetched again on every reconnect and every skin change, and a browser that
+    // kept the old one would draw the new rectangles onto it.
+    if (bust) query.set('t', Date.now());
+
+    var text = query.toString();
+    return text ? path + '?' + text : path;
+  }
+
+  // The rectangles and the draw plan come from the client, which owns skin.txt: the page never
+  // parses one, and the pressed/idle stick names are already resolved here.
+  function load() {
+    fetch(url('/skin.json', true), { cache: 'no-store' })
+      .then(function (response) { return response.ok ? response.json() : null; })
+      .then(function (parsed) {
+        if (!parsed || !parsed.sprites || !parsed.sprites.base) return;
+
+        skin = parsed;
+        canvas.width = parsed.width;
+        canvas.height = parsed.height;
+
+        var image = new Image();
+        image.onload = function () { sheet = image; schedule(); };
+        image.src = url('/skin.png', true);
+      })
+      .catch(function () { /* The stream reconnects; the next open tries again. */ });
+  }
+
+  function blit(rect, offsetX, offsetY) {
+    if (!rect || rect.w <= 0 || rect.h <= 0) return;
+    ctx.drawImage(sheet, rect.sx, rect.sy, rect.w, rect.h,
+      rect.dx + offsetX, rect.dy + offsetY, rect.w, rect.h);
+  }
+
+  function axis(index) {
+    var value = pad.a && pad.a[index];
+    return typeof value === 'number' ? value : 0;
+  }
+
+  // The base, then every pressed button's sprite on top of it, then the two sticks offset by
+  // their axes times the skin's pitch: the order the client's own input display draws in.
+  function draw() {
+    if (!skin || !sheet) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    blit(skin.sprites.base, 0, 0);
+
+    for (var i = 0; i < skin.buttons.length; i++) {
+      var button = skin.buttons[i];
+      if (pad.m & button.bit) blit(skin.sprites[button.sprite], 0, 0);
+    }
+
+    for (var j = 0; j < skin.sticks.length; j++) {
+      var stick = skin.sticks[j];
+      var sprite = skin.sprites[(pad.m & stick.bit) ? stick.pressed : stick.idle];
+      blit(sprite, axis(stick.x) * skin.analogPitch, axis(stick.y) * skin.analogPitch);
+    }
+
+    canvas.className = pad.live ? '' : 'offline';
+  }
+
+  // Telemetry is 30 Hz and the screen is usually 60: one draw per frame, not one per packet.
+  function schedule() {
+    if (drawing) return;
+    drawing = true;
+    requestAnimationFrame(function () { drawing = false; draw(); });
+  }
+
+  var events = new EventSource('/events');
+
+  // Fires on the first connect and on every reconnect EventSource makes by itself, so a client
+  // that was restarted brings the page back with it.
+  events.addEventListener('open', load);
+
+  // The client's skin picker moved.
+  events.addEventListener('skin', load);
+
+  events.onmessage = function (event) {
+    var parsed;
+    try {
+      parsed = JSON.parse(event.data);
+    } catch (error) {
+      return;
+    }
+
+    pad = parsed;
+    schedule();
+  };
+
+  events.onerror = function () {
+    // EventSource retries on its own; until it does, nothing on screen is live.
+    pad.live = false;
+    schedule();
+  };
+})();
+</script>
+</body>
+</html>

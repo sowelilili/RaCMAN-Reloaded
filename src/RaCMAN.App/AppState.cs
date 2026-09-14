@@ -112,6 +112,12 @@ public sealed class AppState : IDisposable
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
         Updates = new UpdateService(settings, Post, AddToast, updatesAllowed);
+        ObsPad = new ObsPadServer(new SettingsPadSkins(settings));
+
+        // The pad an overlay draws is the pad in the packet, so it is taken where the packet
+        // arrives rather than a frame later: this runs on the network thread, copies six values
+        // and queues them, and touches nothing else on this object.
+        Client.TelemetryReceived += packet => ObsPad.Publish(PadSnapshot.From(packet.Session));
 
         // The console pushes run events whether or not anyone is listening; the decision about
         // what any of them means is the autosplitter's, and it is the only subscriber.
@@ -205,6 +211,19 @@ public sealed class AppState : IDisposable
     /// installed by the installer and the run is one that may touch the network.
     /// </summary>
     public UpdateService Updates { get; }
+
+    /// <summary>
+    /// Serves the input display as a page for OBS. Created here so telemetry can reach it, but
+    /// nothing listens until <see cref="SyncObsPad"/> is called with the settings that say so,
+    /// which is the window's own frame and never a test's.
+    /// </summary>
+    public ObsPadServer ObsPad { get; }
+
+    /// <summary>
+    /// Puts the OBS listener where the settings ask for it: on, off, or on another port. Once a
+    /// frame, from the render thread, because the settings panel is what changes those.
+    /// </summary>
+    public void SyncObsPad() => ObsPad.Apply(Settings.ObsPadEnabled, Settings.ObsPadPort);
 
     /// <summary>The SessionInfo the last HELLO returned, for the version readout. Null when offline.</summary>
     public SessionInfo? Hello { get; private set; }
@@ -1117,6 +1136,9 @@ public sealed class AppState : IDisposable
 
     public void Dispose()
     {
+        // Before the client, so no telemetry arrives at a stream that is being torn down.
+        ObsPad.Dispose();
+
         LiveSplit.Dispose();
         Client.Dispose();
 

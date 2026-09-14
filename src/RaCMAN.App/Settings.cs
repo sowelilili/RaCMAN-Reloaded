@@ -213,6 +213,21 @@ public sealed class Settings
     }
 
     /// <summary>
+    /// Whether the client serves the pad as a page for OBS to take as a Browser Source. On by
+    /// default: the listener is loopback-only, so it is reachable from this PC and from nowhere
+    /// else, and a source that is never added costs one idle socket.
+    /// </summary>
+    [JsonPropertyName("obsPadEnabled")]
+    public bool ObsPadEnabled { get; set; } = true;
+
+    /// <summary>
+    /// The port that page is served on, one above qwark's by default. Only 127.0.0.1 is ever bound;
+    /// see <see cref="ObsPadServer"/> and docs/obs.md.
+    /// </summary>
+    [JsonPropertyName("obsPadPort")]
+    public int ObsPadPort { get; set; } = ObsPadServer.DefaultPort;
+
+    /// <summary>
     /// The main window's client size and where its corner was, as the last run left them. Null
     /// until a run has closed once, and never smaller than the default when they are applied:
     /// <see cref="WindowGeometry"/> owns that rule and the one that keeps a size saved on a bigger

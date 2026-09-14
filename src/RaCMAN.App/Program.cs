@@ -21,6 +21,7 @@ string? dataDir = null;
 bool fakeServer = false;
 bool fakeRpcs3 = false;
 bool padWindow = false;
+bool obsPad = false;
 bool noUpdateCheck = false;
 
 for (int i = 0; i < args.Length; i++)
@@ -49,6 +50,9 @@ for (int i = 0; i < args.Length; i++)
         case "--pad-window":
             padWindow = true;
             break;
+        case "--obs-pad":
+            obsPad = true;
+            break;
         case "--fake-script" when i + 1 < args.Length:
             fakeScript = args[++i];
             break;
@@ -75,6 +79,7 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --game-section <name>  open that layout section wherever it is drawn: a sub-page");
             Console.WriteLine("                         of Game, or a tab on Unlocks (Debug, Collectables, ...)");
             Console.WriteLine("  --pad-window           show the input display in its own OS window");
+            Console.WriteLine("  --obs-pad              serve the input display for OBS and print its URL");
             Console.WriteLine("  --exit-after <secs>    close the window after this many seconds");
             Console.WriteLine("  --data-dir <path>      keep this run's settings, mods and savefiles there");
             Console.WriteLine("  --no-update-check      do not look for a new version of this client");
@@ -99,6 +104,14 @@ bool updatesAllowed = !fakeServer && !fakeRpcs3 && !noUpdateCheck && exitAfter <
 // --pad-window forces the mode on for a smoke run without leaving it on in the settings file.
 var padWindowWas = padWindow ? settings.InputMode : (InputDisplayMode?)null;
 if (padWindow) settings.InputMode = InputDisplayMode.Window;
+
+// The same for the OBS page, which a headless run can then be pointed at.
+var obsPadWas = obsPad ? settings.ObsPadEnabled : (bool?)null;
+if (obsPad)
+{
+    settings.ObsPadEnabled = true;
+    Console.WriteLine($"OBS input display on {ObsPadServer.UrlFor(settings.ObsPadPort)}");
+}
 
 using var state = new AppState(settings, updatesAllowed);
 
@@ -205,6 +218,7 @@ if (exitAfter > 0)
                       $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
                       $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
+                      $"obspad={state.ObsPad.State}/{state.ObsPad.Port} " +
                       $"tcpfallback={state.Client.TelemetryViaTcp} " +
 
                       // The last error toast of the run, so a headless session change can be
@@ -232,6 +246,7 @@ if (exitAfter > 0)
 }
 
 if (padWindowWas is { } previousMode) settings.InputMode = previousMode;
+if (obsPadWas is { } previousObsPad) settings.ObsPadEnabled = previousObsPad;
 
 fake?.Dispose();
 settings.Save();

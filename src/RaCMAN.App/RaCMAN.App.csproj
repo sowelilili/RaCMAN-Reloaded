@@ -15,6 +15,10 @@
          assembly so nothing about it can be moved, deleted or left behind by a release. The same
          picture is the executable's icon below, and the AppImage's. -->
     <EmbeddedResource Include="..\..\packaging\racman-reloaded.png" LogicalName="RaCMAN.App.icon.png" />
+
+    <!-- The page the OBS browser source loads: one file, no external assets, so a release cannot
+         ship a half of it and a source cannot be left pointing at something that has moved. -->
+    <EmbeddedResource Include="obspad.html" LogicalName="RaCMAN.App.obspad.html" />
   </ItemGroup>
 
   <ItemGroup>

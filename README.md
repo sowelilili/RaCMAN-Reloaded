@@ -75,6 +75,10 @@ The console sends live data to the client over UDP. Windows blocks that data for
 
 The client checks for its rule at every start. It asks again only if the rule is missing. See [docs/firewall.md](docs/firewall.md) if the rule does not seem to take.
 
+## The input display in OBS
+
+The client can serve the input display as a page for OBS. Add a Browser Source with the URL on the Input display panel, and give it the size the panel shows. The page is served on 127.0.0.1 only, so it needs no firewall rule. See [docs/obs.md](docs/obs.md).
+
 ## Customising the Game page
 
 The client, not the console, decides where each control is drawn. `data/gamelayout.json` holds that layout. You can move a feature to another section, and make a section into a sub-page or a tab. See [docs/gamelayout.md](docs/gamelayout.md).
@@ -110,4 +114,4 @@ There is no macOS job yet. macOS needs signing and notarisation first.
 - `controllerskins/`: input display skins.
 - `mods/`: the mod library each release ships.
 - `packaging/`: the Windows firewall helper and the AppImage icon.
-- `docs/`: the game layout reference, the firewall notes and the standalone module update.
+- `docs/`: the game layout reference, the firewall notes, the standalone module update and the OBS page.
