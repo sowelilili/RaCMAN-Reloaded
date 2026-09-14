@@ -235,7 +235,7 @@ if (-not $SkipTests -and (Test-Path $makeBat)) {
     $committed = Combine $qwark 'dist' 'qwark.sprx'
     $freshElf = Combine $env:TEMP 'qwark-release-fresh.elf'
     $committedElf = Combine $env:TEMP 'qwark-release-committed.elf'
-    Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue
+    Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue -WhatIf:$false
 
     if (Test-Path $scetool) {
         Push-Location $qwark
@@ -250,7 +250,7 @@ if (-not $SkipTests -and (Test-Path $makeBat)) {
         }
 
         $same = (Get-FileHash $freshElf -Algorithm SHA256).Hash -eq (Get-FileHash $committedElf -Algorithm SHA256).Hash
-        Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue
+        Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue -WhatIf:$false
 
         if (-not $same) {
             throw ('qwark builds a different module from the one in dist\qwark.sprx. Run `make dist` in ' +
