@@ -263,6 +263,31 @@ public static class ConnectionPanel
         }
 
         ImGui.EndDisabled();
+
+        DrawUpdateModuleButton(state, sprx);
+    }
+
+    /// <summary>
+    /// The standalone update by hand. It is the same call the client makes by itself when a
+    /// standalone console reports an old build, so there is nothing here a user has to reach for:
+    /// it exists to run the sequence against a console on demand, which is a qwark developer's
+    /// business and nobody else's, and it is offered only in the mode that has it.
+    /// </summary>
+    private static void DrawUpdateModuleButton(AppState state, string sprx)
+    {
+        if (!Ui.Debug || !state.Settings.StandaloneConnection) return;
+
+        ImGui.BeginDisabled(!state.Connected || !File.Exists(sprx));
+        if (ImGui.Button("Update qwark.sprx on the console now"))
+        {
+            state.Settings.SprxPath = _sprxPath;
+            state.Settings.Save();
+            state.UpdateConsoleModule(sprx);
+        }
+
+        ImGui.EndDisabled();
+        Ui.DebugHint($"Writes {sprx} to the boot path through qwark's own file ops and swaps it in. "
+                     + "The console reads a boot plugin once, at boot, so it has to be restarted afterwards.");
     }
 
     /// <summary>
@@ -473,15 +498,38 @@ public static class ConnectionPanel
     /// The console is running an older qwark.sprx than the one this client shipped with, so its
     /// feature tables are the previous build's. Not a debug detail: it is the difference between
     /// a missing cheat being absent and it being broken, and re-uploading the SPRX fixes it.
+    /// <para>
+    /// What fixes it depends on the mode. webMAN mode sends and loads the module itself, so the
+    /// button below is the answer. Standalone mode has already written the new module to the boot
+    /// path by the time the user reads this, and what is left is the restart, which this client
+    /// cannot do: that notice replaces the warning and stays until the console comes back on the
+    /// new build.
+    /// </para>
     /// </summary>
     private static void DrawStaleBuild(AppState state)
     {
+        if (state.QwarkUpdateStaged > 0)
+        {
+            ImGui.Spacing();
+            Ui.Warning(state.QwarkUpdateNotice);
+            return;
+        }
+
         if (!state.QwarkStale) return;
+
+        // The RPCS3 helper is a program on this PC that the client's own update replaces; the mode
+        // setting is about consoles and says nothing about it.
+        string sprx = Ps3Connect.ResolveSprx(state.Settings.SprxPath);
+        string fix = !state.Settings.StandaloneConnection || state.Settings.Rpcs3Target
+            ? "Re-upload qwark.sprx with the button below and the console will reload it."
+            : File.Exists(sprx)
+                ? "The client is putting the new qwark.sprx on the console by itself; it will say here when "
+                  + "the console has to be restarted to load it."
+                : $"There is no qwark.sprx beside this client to send ({sprx}).";
 
         ImGui.Spacing();
         Ui.Warning($"The console is running qwark build {state.Hello!.QwarkVersion}; this client shipped with build "
-                   + $"{QwarkClient.ExpectedQwarkBuild}. Re-upload qwark.sprx with the button below and the "
-                   + "console will reload it.");
+                   + $"{QwarkClient.ExpectedQwarkBuild}. " + fix);
     }
 
     /// <summary>

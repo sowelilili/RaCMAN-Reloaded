@@ -447,8 +447,16 @@ public sealed class AppWindow : GameWindow
         ImGui.SameLine();
         ImGui.TextUnformatted(_state.StatusLine());
 
-        // Visible from every panel: the Connection panel carries the explanation and the fix.
-        if (_state.QwarkStale)
+        // Visible from every panel: the Connection panel carries the explanation and the fix. Once
+        // the new module is on the console the line says what is left to do rather than what is
+        // wrong, and it stays there — over the restart's disconnect included — until the console
+        // comes back reporting the build that was put on it.
+        if (_state.QwarkUpdateStaged > 0)
+        {
+            ImGui.SameLine();
+            Ui.Text(Ui.Yellow, $"| {_state.QwarkUpdateNotice}");
+        }
+        else if (_state.QwarkStale)
         {
             ImGui.SameLine();
             ImGui.TextColored(Ui.Yellow, "| qwark.sprx is out of date");

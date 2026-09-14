@@ -72,6 +72,20 @@ public sealed class AppState : IDisposable
     private long _lastDetourMs;
 
     /// <summary>
+    /// Set once the standalone module update has been started on this connection, whether it went
+    /// through or not. One attempt per connection: a console that refused the file ops, or lost
+    /// them half way, will refuse them again a frame later, and the next connection is soon enough
+    /// to try again.
+    /// </summary>
+    private bool _sprxUpdateTried;
+
+    /// <summary>
+    /// Which qwark the staged module was written to. The restart notice belongs to that console and
+    /// must not follow the client to another one, or to the RPCS3 helper on this PC.
+    /// </summary>
+    private string _sprxUpdateTarget = string.Empty;
+
+    /// <summary>
     /// <paramref name="updatesAllowed"/> is off by default so that nothing which merely constructs
     /// an AppState — a test, a tool — can reach GitHub; only Program turns it on, and only for a
     /// run none of the headless flags apply to.
@@ -109,8 +123,21 @@ public sealed class AppState : IDisposable
             Hello = info;
             AddToast($"Connected: {(string.IsNullOrEmpty(info.TitleId) ? "no game" : info.TitleId)}", ToastKind.Success);
 
+            // A new connection, so the standalone update gets its one attempt again.
+            _sprxUpdateTried = false;
+
+            // The restart notice is done with when the console comes back running the build that
+            // was put on it, and it belongs to that console: connecting to another one, or to the
+            // helper on this PC, has nothing staged on it to restart for.
+            if (QwarkUpdateStaged != 0
+                && (!QwarkClient.IsStaleBuild(info.QwarkVersion)
+                    || !string.Equals(ConnectedTo, _sprxUpdateTarget, StringComparison.OrdinalIgnoreCase)))
+            {
+                QwarkUpdateStaged = 0;
+            }
+
             // The panels would silently show the old module's feature tables, so say it up front.
-            if (QwarkClient.IsStaleBuild(info.QwarkVersion))
+            if (QwarkClient.IsStaleBuild(info.QwarkVersion) && QwarkUpdateStaged == 0)
             {
                 AddToast("qwark.sprx on the console is older than this client; see the Connection panel");
             }
@@ -199,6 +226,21 @@ public sealed class AppState : IDisposable
     /// panel is a warning away from lying and the header says so.
     /// </summary>
     public bool QwarkStale => Connected && Hello is not null && QwarkClient.IsStaleBuild(Hello.QwarkVersion);
+
+    /// <summary>
+    /// The build this client has put on the console's boot path and the console has not loaded yet,
+    /// or 0 when there is none. A VSH plugin is read once, at boot, so the file being in place says
+    /// nothing until the console has been restarted: the notice therefore outlives the connection
+    /// that wrote it, and only a HELLO reporting a build that is no longer stale clears it.
+    /// </summary>
+    public byte QwarkUpdateStaged { get; private set; }
+
+    /// <summary>The one sentence the header and the Connection panel both show for that.</summary>
+    public string QwarkUpdateNotice =>
+        $"{WebManLoader.SprxName} {QwarkUpdateStaged} is on the console; restart the console to load it";
+
+    /// <summary>Which qwark this client is talking to, as the staged notice keys off it.</summary>
+    private string ConnectedTo => $"{Client.Host}:{Client.Port}";
 
     /// <summary>
     /// The game everything described here belongs to: the running one while a game is running, and
@@ -320,6 +362,95 @@ public sealed class AppState : IDisposable
         Post(() => AddToast($"{WebManLoader.SprxName} loaded through webMAN; reconnecting", ToastKind.Success));
     }
 
+    // ---------------------------------------------------------------- the standalone module update
+
+    /// <summary>
+    /// Standalone mode has no webMAN to send a new module through, and the console loads qwark.sprx
+    /// itself at boot, so an out-of-date console is brought up to date by the running module writing
+    /// the file that will replace it: <see cref="SprxUpdate"/> puts the shipped SPRX at the boot
+    /// path, and the console loads it at its next start. Until then the module in memory is still
+    /// the old one, which is why the stale warning stays and only its wording changes.
+    /// <para>
+    /// The conditions are all "would this be rude, or refused": webMAN mode already sends and loads
+    /// the module itself and is left alone, a launch answers the file ops BUSY, a savefile transfer
+    /// owns the link for as long as two megabytes take, and a console that is ahead of this client
+    /// is never written over because only a stale build gets here at all.
+    /// </para>
+    /// </summary>
+    private void MaybeUpdateConsoleModule(SessionInfo session)
+    {
+        if (_sprxUpdateTried || QwarkUpdateStaged != 0) return;
+        if (!Settings.StandaloneConnection || Settings.Rpcs3Target) return;
+        if (!QwarkStale) return;
+        if (session.State is not (SessionState.Xmb or SessionState.Ingame)) return;
+        if (Panels.SaveFilesPanel.Busy || SaveFile.TransferPending) return;
+
+        // No module beside this client is nothing to report: a build from a source tree has none,
+        // and the user has done nothing to be told about.
+        string sprx = Ps3Connect.ResolveSprx(Settings.SprxPath);
+        if (!File.Exists(sprx)) return;
+
+        // Before the work starts, so a failure does not come back a frame later for another go.
+        _sprxUpdateTried = true;
+        UpdateConsoleModule(sprx);
+    }
+
+    /// <summary>
+    /// Sends <paramref name="sprxPath"/> to the console's boot path through qwark's file ops. The
+    /// automatic path above and the Connection panel's debug button both come here, and a failure
+    /// at any step is one error toast that names the step and leaves the boot copy as it was.
+    /// </summary>
+    public void UpdateConsoleModule(string sprxPath)
+    {
+        // The shipped SPRX is the build this client expects, which is what the console will report
+        // once it has restarted; that is the number the notice carries.
+        byte staged = QwarkClient.ExpectedQwarkBuild;
+
+        Run(async () =>
+        {
+            byte[] bytes;
+            try
+            {
+                bytes = await File.ReadAllBytesAsync(sprxPath).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                Post(() => AddToast(
+                    $"Updating {WebManLoader.SprxName} on the console failed while reading {sprxPath}: {error.Message}",
+                    ToastKind.Error));
+                return;
+            }
+
+            try
+            {
+                var result = await SprxUpdate.RunAsync(Client, bytes,
+                    new Progress<string>(message => Post(() =>
+                    {
+                        if (Panels.Ui.Debug) AddToast(message);
+                    }))).ConfigureAwait(false);
+
+                Post(() =>
+                {
+                    QwarkUpdateStaged = staged;
+                    _sprxUpdateTarget = ConnectedTo;
+                    AddToast(QwarkUpdateNotice, ToastKind.Success);
+                    if (Panels.Ui.Debug && result.ReplacedACopy)
+                    {
+                        AddToast($"The module it replaced is at {result.BackupPath}");
+                    }
+                });
+            }
+            catch (SprxUpdateException error)
+            {
+                // The message already names the step and carries what the console said, so this is
+                // the whole of what the user is told, once.
+                Post(() => AddToast(
+                    $"Updating {WebManLoader.SprxName} on the console failed while {error.Message}",
+                    ToastKind.Error));
+            }
+        });
+    }
+
     // ---------------------------------------------------------------- plumbing
 
     public void Post(Action action) => _actions.Enqueue(action);
@@ -432,6 +563,11 @@ public sealed class AppState : IDisposable
         if (!Connected) return;
 
         var session = Session;
+
+        // Nothing to do with the game: a standalone console whose module is older than this client
+        // has the new one written to its boot path, once, as soon as the session is somewhere the
+        // file ops will be answered.
+        MaybeUpdateConsoleModule(session);
 
         // The process the values came out of, which a quit, a boot and a reboot all replace. The
         // title going empty is the trip to the XMB, and it is a session change like any other:
