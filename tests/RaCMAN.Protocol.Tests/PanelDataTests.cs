@@ -1099,3 +1099,197 @@ public class UnlockColumnTests
         Assert.Equal(1f, UnlocksPanel.ColumnWeights(columns).Sum(), 5);
     }
 }
+
+/// <summary>
+/// The Value box in the Memory panel's watches table: what it takes back in each of the formats it
+/// shows, and the bytes that go on the wire. The panel owns the box; this is the arithmetic behind
+/// it, which is the part that can be tested without a window.
+/// </summary>
+public class WatchValueCodecTests
+{
+    private static ulong Parse(string text, byte size, string format)
+    {
+        Assert.True(WatchValueCodec.TryParse(text, size, format, out ulong value), $"'{text}' should parse as {format}/{size}");
+        return value;
+    }
+
+    private static void Rejects(string text, byte size, string format)
+    {
+        Assert.False(WatchValueCodec.TryParse(text, size, format, out ulong value), $"'{text}' should not parse as {format}/{size}");
+        Assert.Equal(0ul, value);
+    }
+
+    // ---------------------------------------------------------------- hex
+
+    [Fact]
+    public void HexIsReadWithOrWithoutThePrefixTheBoxShows()
+    {
+        Assert.Equal(0xDEADBEEFul, Parse("0xDEADBEEF", 4, "hex"));
+        Assert.Equal(0xDEADBEEFul, Parse("deadbeef", 4, "hex"));
+        Assert.Equal(0xFFul, Parse("0xFF", 1, "hex"));
+        Assert.Equal(ulong.MaxValue, Parse("FFFFFFFFFFFFFFFF", 8, "hex"));
+    }
+
+    [Fact]
+    public void HexTooWideForTheWatchIsRefusedRatherThanTruncated()
+    {
+        Rejects("0x100", 1, "hex");
+        Rejects("0x10000", 2, "hex");
+        Rejects("0x100000000", 4, "hex");
+    }
+
+    [Fact]
+    public void TextThatIsNotHexIsRefused()
+    {
+        Rejects("zz", 4, "hex");
+        Rejects("0x", 4, "hex");
+        Rejects("", 4, "hex");
+        Rejects("   ", 4, "hex");
+        Rejects("-1", 4, "hex");
+    }
+
+    // ---------------------------------------------------------------- dec
+
+    [Fact]
+    public void DecimalIsUnsignedAndFitsTheWatch()
+    {
+        Assert.Equal(255ul, Parse("255", 1, "dec"));
+        Assert.Equal(65535ul, Parse("65535", 2, "dec"));
+        Assert.Equal(ulong.MaxValue, Parse("18446744073709551615", 8, "dec"));
+
+        Rejects("256", 1, "dec");
+        Rejects("-1", 1, "dec");
+        Rejects("4.5", 4, "dec");
+        Rejects("bolts", 4, "dec");
+    }
+
+    /// <summary>Every other address and value box on the panel takes a hex prefix, so this one does too.</summary>
+    [Fact]
+    public void DecimalStillTakesAHexPrefix()
+    {
+        Assert.Equal(0x20ul, Parse("0x20", 4, "dec"));
+        Rejects("0x100", 1, "dec");
+    }
+
+    // ---------------------------------------------------------------- signed
+
+    [Fact]
+    public void ASignedNumberIsStoredAsTheTwosComplementBitsOfItsSize()
+    {
+        Assert.Equal(0xFFul, Parse("-1", 1, "signed"));
+        Assert.Equal(0xFFFEul, Parse("-2", 2, "signed"));
+        Assert.Equal(0xFFFFFFFFul, Parse("-1", 4, "signed"));
+        Assert.Equal(ulong.MaxValue, Parse("-1", 8, "signed"));
+        Assert.Equal(7ul, Parse("7", 1, "signed"));
+    }
+
+    [Fact]
+    public void ASignedNumberOutsideTheWatchesRangeIsRefused()
+    {
+        Assert.Equal(0x80ul, Parse("-128", 1, "signed"));
+        Assert.Equal(0x7Ful, Parse("127", 1, "signed"));
+        Rejects("128", 1, "signed");
+        Rejects("-129", 1, "signed");
+        Rejects("32768", 2, "signed");
+        Rejects("2147483648", 4, "signed");
+
+        // The widest watch is the whole of long, and one step past it is still refused.
+        Assert.Equal(0x8000000000000000ul, Parse("-9223372036854775808", 8, "signed"));
+        Rejects("9223372036854775808", 8, "signed");
+    }
+
+    // ---------------------------------------------------------------- float
+
+    [Fact]
+    public void AFloatIsTheIeeeBitsOfTheSizeItFits()
+    {
+        Assert.Equal((ulong)(uint)BitConverter.SingleToInt32Bits(1.5f), Parse("1.5", 4, "float"));
+        Assert.Equal((ulong)BitConverter.DoubleToInt64Bits(-0.25), Parse("-0.25", 8, "float"));
+        Assert.Equal(0ul, Parse("0", 4, "float"));
+    }
+
+    /// <summary>A byte and a halfword have no float in them, and FormatValue shows them as decimal.</summary>
+    [Fact]
+    public void AFloatOnASizeWithNoFloatInItIsReadAsDecimal()
+    {
+        Assert.Equal(12ul, Parse("12", 1, "float"));
+        Assert.Equal(1000ul, Parse("1000", 2, "float"));
+        Rejects("1.5", 1, "float");
+        Rejects("300", 1, "float");
+    }
+
+    [Fact]
+    public void TextThatIsNotANumberIsRefusedInEveryFormat()
+    {
+        foreach (var format in Ui.ValueFormats)
+        {
+            Rejects("nope", 4, format);
+            Rejects("", 4, format);
+        }
+    }
+
+    // ---------------------------------------------------------------- round trip and bytes
+
+    /// <summary>What the cell shows is what the cell takes: every format, every size.</summary>
+    [Fact]
+    public void WhatFormatValueWritesIsWhatTryParseReadsBack()
+    {
+        foreach (byte size in new byte[] { 1, 2, 4, 8 })
+        {
+            ulong value = 0x0123456789ABCDEFul & WatchValueCodec.MaxFor(size);
+            foreach (var format in new[] { "dec", "hex", "signed" })
+            {
+                Assert.Equal(value, Parse(Ui.FormatValue(value, size, format), size, format));
+            }
+
+            // The float format is decimal on the sizes with no float in them, on both sides of the
+            // trip, so those go round as well.
+            if (size is 1 or 2) Assert.Equal(42ul, Parse(Ui.FormatValue(42, size, "float"), size, "float"));
+        }
+
+        // A float is shown to four decimals, so it only comes back bit for bit for a number that
+        // survives the rounding. That is the whole of what the box promises.
+        ulong single = (uint)BitConverter.SingleToInt32Bits(2.5f);
+        Assert.Equal(single, Parse(Ui.FormatValue(single, 4, "float"), 4, "float"));
+
+        ulong wide = (ulong)BitConverter.DoubleToInt64Bits(-2.5);
+        Assert.Equal(wide, Parse(Ui.FormatValue(wide, 8, "float"), 8, "float"));
+    }
+
+    [Fact]
+    public void TheBytesAreBigEndianAndAsWideAsTheWatch()
+    {
+        Assert.Equal(new byte[] { 0xAB }, WatchValueCodec.Encode(0xAB, 1));
+        Assert.Equal(new byte[] { 0x12, 0x34 }, WatchValueCodec.Encode(0x1234, 2));
+        Assert.Equal(new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }, WatchValueCodec.Encode(0xDEADBEEF, 4));
+        Assert.Equal(new byte[] { 0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF },
+            WatchValueCodec.Encode(0x0123456789ABCDEF, 8));
+    }
+
+    /// <summary>The high bits of a value too wide for the watch are dropped, not spilled into the next byte.</summary>
+    [Fact]
+    public void OnlyTheLowBytesOfTheValueAreWritten()
+    {
+        Assert.Equal(new byte[] { 0xEF }, WatchValueCodec.Encode(0xDEADBEEF, 1));
+        Assert.Equal(new byte[] { 0xBE, 0xEF }, WatchValueCodec.Encode(0xDEADBEEF, 2));
+    }
+
+    [Fact]
+    public void ASizeThatIsNotAWatchSizeIsRefused()
+    {
+        Assert.Throws<ArgumentOutOfRangeException>(() => WatchValueCodec.Encode(0, 0));
+        Assert.Throws<ArgumentOutOfRangeException>(() => WatchValueCodec.Encode(0, 9));
+
+        Rejects("1", 0, "dec");
+        Rejects("1", 9, "dec");
+    }
+
+    [Fact]
+    public void TheWidestValueAWatchHoldsIsItsSizeInBits()
+    {
+        Assert.Equal(0xFFul, WatchValueCodec.MaxFor(1));
+        Assert.Equal(0xFFFFul, WatchValueCodec.MaxFor(2));
+        Assert.Equal(0xFFFFFFFFul, WatchValueCodec.MaxFor(4));
+        Assert.Equal(ulong.MaxValue, WatchValueCodec.MaxFor(8));
+    }
+}
