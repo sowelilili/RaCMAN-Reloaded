@@ -23,6 +23,8 @@ public static class MemoryPanel
     private static string _dump = string.Empty;
     private static byte[] _dumpBytes = Array.Empty<byte>();
     private static uint _dumpBase;
+    private static float _sinceRead;
+    private static bool _reading;
 
     private static string _writeAddress = string.Empty;
     private static string _writeBytes = string.Empty;
@@ -56,6 +58,7 @@ public static class MemoryPanel
         _dump = string.Empty;
         _dumpBytes = Array.Empty<byte>();
         _dumpBase = 0;
+        _sinceRead = 0;
         ResetMobyTab();
     }
 
@@ -64,6 +67,7 @@ public static class MemoryPanel
     {
         ClearGameData();
         Local.Clear();
+        ValueDrafts.Clear();
         _watchlistName = string.Empty;
 
         // The saved-list combo is per title, so it is re-listed on the next frame that draws it.
@@ -315,13 +319,7 @@ public static class MemoryPanel
         {
             if (Ui.TryParseAddress(_readAddress, out uint address))
             {
-                uint length = (uint)_readLength;
-                state.Run(() => state.Client.MemReadAsync(address, length), bytes =>
-                {
-                    _dumpBytes = bytes;
-                    _dumpBase = address;
-                    _dump = Ui.HexDump(address, bytes);
-                });
+                ReadDump(state, address, (uint)_readLength, quiet: false);
             }
             else
             {
@@ -330,6 +328,29 @@ public static class MemoryPanel
         }
 
         ImGui.EndDisabled();
+
+        // The dump re-reads itself on the Settings panel's table interval, the way the level flags
+        // and the unlocks do: this is a window on memory the game is writing, and a stale window is
+        // worse than a re-read a second. Only what has already been read is read again, so the
+        // address and the length stay the ones the button used, and an interval of zero leaves the
+        // button as the only thing that reads.
+        float period = state.Settings.TableRefreshSeconds;
+        if (period > 0 && _dumpBytes.Length > 0 && state.Connected && !state.ConsoleBusy)
+        {
+            _sinceRead += ImGui.GetIO().DeltaTime;
+
+            // A read still on the wire means the interval is shorter than the round trip; skipping
+            // the tick keeps that from queueing reads for ever.
+            if (_sinceRead >= period && !_reading)
+            {
+                _sinceRead = 0;
+                ReadDump(state, _dumpBase, (uint)_dumpBytes.Length, quiet: true);
+            }
+        }
+        else
+        {
+            _sinceRead = 0;
+        }
 
         if (_dumpBytes.Length > 0)
         {
@@ -377,6 +398,36 @@ public static class MemoryPanel
         }
 
         ImGui.EndDisabled();
+    }
+
+    /// <summary>
+    /// One MEM_READ into the dump. The in-flight flag is what the timer above looks at, so it is
+    /// cleared in a finally: a read that failed must not stop the next one from ever starting.
+    /// </summary>
+    private static void ReadDump(AppState state, uint address, uint length, bool quiet)
+    {
+        _reading = true;
+
+        async Task Read()
+        {
+            try
+            {
+                var bytes = await state.Client.MemReadAsync(address, length).ConfigureAwait(false);
+                state.Post(() =>
+                {
+                    _dumpBytes = bytes;
+                    _dumpBase = address;
+                    _dump = Ui.HexDump(address, bytes);
+                });
+            }
+            finally
+            {
+                state.Post(() => _reading = false);
+            }
+        }
+
+        if (quiet) state.RunQuiet(Read);
+        else state.Run(Read);
     }
 
     private static void DrawTypedViews()
@@ -453,7 +504,7 @@ public static class MemoryPanel
             ImGui.TableSetupColumn("Address", ImGuiTableColumnFlags.WidthFixed, 90);
             ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 45);
             ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 160);
-            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 150);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 230);
             ImGui.TableHeadersRow();
 
             foreach (var watch in state.Watches)
@@ -468,28 +519,26 @@ public static class MemoryPanel
                     Local[key] = saved;
                 }
 
+                // The boxes in a row are drawn without a frame of their own, so the table reads as
+                // text until it is reached for: a watchlist is something to look at far more often
+                // than something to edit.
                 ImGui.TableNextColumn();
                 string name = saved.Name;
                 ImGui.SetNextItemWidth(-1);
+                Ui.PushTableInput();
                 if (ImGui.InputText("##name", ref name, 64)) saved.Name = name;
+                Ui.PopTableInput();
                 if (Ui.Debug && ImGui.IsItemHovered()) ImGui.SetTooltip($"watch id {watch.Id}");
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"0x{watch.Address:X8}");
 
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(watch.Size.ToString());
+                DrawSizeCell(state, watch, saved);
 
                 ImGui.TableNextColumn();
                 var live = state.WatchValueFor(watch.Id);
-                if (live is { Valid: true })
-                {
-                    ImGui.TextUnformatted(Ui.FormatValue(live.Value.Value, watch.Size, saved.Format));
-                }
-                else
-                {
-                    ImGui.TextColored(Ui.Grey, live is null ? "no telemetry" : "invalid");
-                }
+                DrawValueCell(state, watch, saved, live, enabled);
 
                 ImGui.TableNextColumn();
                 int format = Array.IndexOf(Ui.ValueFormats, saved.Format);
@@ -498,12 +547,32 @@ public static class MemoryPanel
                 if (ImGui.Combo("##format", ref format, Ui.ValueFormats, Ui.ValueFormats.Length))
                 {
                     saved.Format = Ui.ValueFormats[format];
+                    ValueDrafts.Remove(watch.Id);
                 }
 
+                // The value the row is showing, held where it stands. A freeze is a write repeated
+                // every frame, so it needs a game to write to and a reading to repeat.
                 ImGui.SameLine();
                 byte id = watch.Id;
+                uint address = watch.Address;
+                byte size = watch.Size;
+                ImGui.BeginDisabled(!enabled || live is not { Valid: true });
+                if (ImGui.SmallButton("Freeze"))
+                {
+                    ulong value = live!.Value.Value;
+                    state.Run(async () =>
+                    {
+                        await state.Client.FreezeAddAsync(address, size, value).ConfigureAwait(false);
+                        state.Post(() => state.RefreshFreezes());
+                    });
+                }
+
+                ImGui.EndDisabled();
+
+                ImGui.SameLine();
                 if (ImGui.SmallButton("Remove"))
                 {
+                    ValueDrafts.Remove(id);
                     state.Run(async () =>
                     {
                         await state.Client.WatchRemoveAsync(id);
@@ -547,6 +616,114 @@ public static class MemoryPanel
         ImGui.BeginDisabled(!state.Connected);
         if (ImGui.Button("Load watchlist")) LoadWatchlist(state, title);
         ImGui.EndDisabled();
+    }
+
+    // ---------------------------------------------------------------- watch rows
+
+    /// <summary>
+    /// What is in a Value box while it has focus, by watch id. It exists only for as long as the
+    /// box is being typed in, which is what keeps telemetry from overwriting a half-typed number
+    /// and what makes the box follow the live value again the moment it is let go.
+    /// </summary>
+    private static readonly Dictionary<byte, string> ValueDrafts = new();
+
+    /// <summary>
+    /// The size as a combo rather than a number. The arrow is left off so the cell reads as the
+    /// text it replaced; the frame appears on hover like the boxes beside it.
+    /// </summary>
+    private static void DrawSizeCell(AppState state, WatchEntry watch, SavedWatch saved)
+    {
+        ImGui.SetNextItemWidth(-1);
+        Ui.PushTableInput();
+        if (ImGui.BeginCombo("##size", watch.Size.ToString(), ImGuiComboFlags.NoArrowButton))
+        {
+            for (int i = 0; i < SizeLabels.Length; i++)
+            {
+                if (ImGui.Selectable(SizeLabels[i], Sizes[i] == watch.Size)) ChangeSize(state, watch, saved, (byte)Sizes[i]);
+            }
+
+            ImGui.EndCombo();
+        }
+
+        Ui.PopTableInput();
+    }
+
+    /// <summary>
+    /// Puts the same address back under another size. There is no resize op: a watch is removed and
+    /// added again, and qwark hands back the id it already has for an address and size it is
+    /// already watching (section 5.4).
+    /// </summary>
+    private static void ChangeSize(AppState state, WatchEntry watch, SavedWatch saved, byte size)
+    {
+        if (size == watch.Size) return;
+
+        uint address = watch.Address;
+        byte id = watch.Id;
+
+        // The local names are keyed by address and size, and so is a saved watchlist entry, so the
+        // name has to move to the new key with the size written through it. Left behind, the row
+        // would come back from the refresh calling itself "watch N" and save under the old size.
+        Local.Remove(Key(address, watch.Size));
+        Local[Key(address, size)] = new SavedWatch
+        {
+            Address = address,
+            Size = size,
+            Name = saved.Name,
+            Format = saved.Format,
+        };
+
+        ValueDrafts.Remove(id);
+
+        state.Run(async () =>
+        {
+            await state.Client.WatchRemoveAsync(id).ConfigureAwait(false);
+            await state.Client.WatchAddAsync(address, size).ConfigureAwait(false);
+            state.Post(() => state.RefreshWatches());
+        });
+    }
+
+    /// <summary>
+    /// The live value, as a box that writes it back. What it takes is what it shows: the row's own
+    /// format, parsed by <see cref="WatchValueCodec"/>, sent on Enter as the watch's own number of
+    /// big-endian bytes. A row with nothing to show is left as the words it used to be.
+    /// </summary>
+    private static void DrawValueCell(AppState state, WatchEntry watch, SavedWatch saved, WatchValue? live, bool enabled)
+    {
+        if (live is not { Valid: true })
+        {
+            ValueDrafts.Remove(watch.Id);
+            Ui.TableLabel(Ui.Grey, live is null ? "no telemetry" : "invalid");
+            return;
+        }
+
+        string text = ValueDrafts.TryGetValue(watch.Id, out var draft)
+            ? draft
+            : Ui.FormatValue(live.Value.Value, watch.Size, saved.Format);
+
+        ImGui.BeginDisabled(!enabled);
+        ImGui.SetNextItemWidth(-1);
+        Ui.PushTableInput();
+        bool entered = ImGui.InputText("##value", ref text, 32, ImGuiInputTextFlags.EnterReturnsTrue);
+        Ui.PopTableInput();
+        bool active = ImGui.IsItemActive();
+        ImGui.EndDisabled();
+
+        if (active) ValueDrafts[watch.Id] = text;
+        else ValueDrafts.Remove(watch.Id);
+
+        if (!entered) return;
+
+        ValueDrafts.Remove(watch.Id);
+
+        if (!WatchValueCodec.TryParse(text, watch.Size, saved.Format, out ulong value))
+        {
+            state.AddToast($"'{text.Trim()}' is not a {saved.Format} value that fits {watch.Size} bytes", ToastKind.Error);
+            return;
+        }
+
+        uint address = watch.Address;
+        var bytes = WatchValueCodec.Encode(value, watch.Size);
+        state.Run(() => state.Client.MemWriteAsync(address, bytes));
     }
 
     // ---------------------------------------------------------------- watchlist files
