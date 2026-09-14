@@ -286,6 +286,13 @@ public sealed class FakeQwarkServer : IDisposable
 
     public List<string> Directories { get; } = new();
 
+    /// <summary>
+    /// What FILE_WRITE answers instead of writing the chunk. <see cref="Status.Ok"/>, the default,
+    /// writes it. Anything else fails every write while it is set, which is how an upload that dies
+    /// part way through — the file open, truncated, and no bytes in it — is staged for a test.
+    /// </summary>
+    public Status FileWriteStatus { get; set; } = Status.Ok;
+
     /// <summary>Every FEATURE_TRIGGER id, in order, so a test can see which action a flow fired.</summary>
     public List<byte> Triggered { get; } = new();
 
@@ -1125,6 +1132,7 @@ public sealed class FakeQwarkServer : IDisposable
                     uint handle = r.ReadU32();
                     if (!_openFiles.TryGetValue(handle, out var file)) return (Status.NotFound, null);
                     if (file.Mode != FileMode.WriteTruncate) return (Status.BadArg, null);
+                    if (FileWriteStatus != Status.Ok) return (FileWriteStatus, null);
 
                     var chunk = r.ReadRest();
                     if (chunk.Length > 65536) return (Status.BadArg, null);

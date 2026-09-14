@@ -35,6 +35,8 @@ The mode is on the Settings panel, in the **Connection** section.
 
 Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
 
+In standalone mode the client also keeps that copy up to date. If the console reports an older module than the one the client ships, the client sends the new `qwark.sprx` to the console through the module itself, puts it at the path `boot_plugins.txt` names and keeps the copy it replaced beside it as `qwark.sprx.old`. The header and the Connection panel then ask you to restart the console, because the console reads a boot plugin only at startup. The client does this once per connection, and never in webMAN mode, which sends and loads the module itself.
+
 ## Connect to RPCS3
 
 1. In RPCS3, switch the IPC server on. It is in Manage, Network Services, IPC.
@@ -51,7 +53,7 @@ The client asks GitHub for a newer release once a day. If there is one, a bar ap
 
 The Settings panel holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
 
-A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one.
+A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one. In standalone mode the client sends it by itself; see [Connection modes](#connection-modes).
 
 ## Your files
 

@@ -42,6 +42,12 @@ public static class SaveFilesPanel
     /// <summary>Category and file count, for the smoke-run summary.</summary>
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
+    /// <summary>
+    /// True while a save is moving between this PC and the console. Anything else that would send
+    /// megabytes down the same link — the standalone module update — waits for it.
+    /// </summary>
+    public static bool Busy => _busy;
+
     public static void Reset()
     {
         _title = string.Empty;
