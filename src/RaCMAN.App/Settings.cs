@@ -301,9 +301,18 @@ public sealed class Settings
         sections[section] = open;
     }
 
-    /// <summary>Set once the first-run "allow through the firewall" offer has been shown, so it never nags again.</summary>
+    /// <summary>
+    /// The old marker: set once the first-run offer had been shown, whatever the user answered and
+    /// whether or not a rule came of it. Kept so a file written by an older build still loads, and
+    /// kept in step with <see cref="Firewall"/> so a downgrade does not start nagging again. Read
+    /// <see cref="FirewallSettings"/> for why one boolean was not enough.
+    /// </summary>
     [JsonPropertyName("firewallOffered")]
     public bool FirewallOffered { get; set; }
+
+    /// <summary>What was granted through Windows Firewall, and for which copy of the client.</summary>
+    [JsonPropertyName("firewall")]
+    public FirewallSettings Firewall { get; set; } = new();
 
     /// <summary>
     /// The autosplitter: whether it drives LiveSplit at all, where LiveSplit's server is, and what
@@ -315,6 +324,23 @@ public sealed class Settings
     /// <summary>Whether this client looks for a new version of itself, and when it last did.</summary>
     [JsonPropertyName("updates")]
     public UpdateSettings Updates { get; set; } = new();
+
+    /// <summary>
+    /// Records what the firewall question came to for one copy of the client: either the user's own
+    /// answer, or a rule that was found to be in place already. Writes only when something actually
+    /// changed, so the ordinary start — rule present, nothing to say — touches no file.
+    /// </summary>
+    public void RecordFirewall(bool granted, string executable)
+    {
+        bool changed = Firewall.Record(granted, executable);
+        if (!FirewallOffered)
+        {
+            FirewallOffered = true;
+            changed = true;
+        }
+
+        if (changed) Save();
+    }
 
     [JsonIgnore]
     public string Path { get; private set; } = string.Empty;
@@ -334,6 +360,7 @@ public sealed class Settings
                 {
                     loaded.Path = path;
                     loaded.Autosplit.MigrateAll();
+                    loaded.Firewall.MigrateFrom(loaded.FirewallOffered);
                     return loaded;
                 }
             }
@@ -382,6 +409,71 @@ public sealed class UpdateSettings
     /// </summary>
     [JsonPropertyName("lastCheckUtc")]
     public DateTime? LastCheckUtc { get; set; }
+}
+
+/// <summary>
+/// What the firewall question came to, and for which copy. A single "we asked once" boolean was
+/// wrong twice over: it latched on the question rather than on the answer, so a client whose rule
+/// had gone never noticed and never offered to put it back; and it said nothing about which
+/// executable was allowed, while a firewall rule names a path. The client moves — the installer
+/// replaces its <c>current\</c> folder on every update, a portable copy is dragged to another
+/// drive — and an allow granted for yesterday's path is not an allow for today's.
+/// <para>
+/// This lives in the data folder with the rest of the settings, never beside the executable: the
+/// updater replaces the application folder whole, and a marker that goes with it would reset on
+/// every update, which is the very thing being fixed.
+/// </para>
+/// </summary>
+public sealed class FirewallSettings
+{
+    /// <summary>Whether the user has been put in front of the question at all.</summary>
+    [JsonPropertyName("asked")]
+    public bool Asked { get; set; }
+
+    /// <summary>
+    /// Whether the answer was yes — or whether a rule was simply found to be there already, which
+    /// counts the same: both mean "this copy is allowed and the user need not be told about it".
+    /// </summary>
+    [JsonPropertyName("granted")]
+    public bool Granted { get; set; }
+
+    /// <summary>The executable the answer was about, normalised. Empty until something is recorded.</summary>
+    [JsonPropertyName("executable")]
+    public string Executable { get; set; } = string.Empty;
+
+    /// <summary>Which build was running at the time. Not used to decide anything; it is for the user
+    /// and for a bug report, so "it stopped working after 1.0.3" has something to point at.</summary>
+    [JsonPropertyName("version")]
+    public string Version { get; set; } = string.Empty;
+
+    /// <summary>What <see cref="FirewallHelper.Decide"/> needs out of this.</summary>
+    [JsonIgnore]
+    public FirewallMarker Marker => new(Asked, Granted, Executable);
+
+    /// <summary>
+    /// Takes over from the old <c>firewallOffered</c> flag. That flag only ever meant "the question
+    /// was put", so it becomes "asked, not known to be granted, for no particular executable" —
+    /// which sends the next start to look at the real rules and ask again if there are none.
+    /// </summary>
+    public void MigrateFrom(bool offered)
+    {
+        if (offered) Asked = true;
+    }
+
+    /// <summary>Stores an answer. True when that changed anything worth writing.</summary>
+    public bool Record(bool granted, string executable)
+    {
+        var path = FirewallHelper.Normalise(executable);
+        string version = AppVersion.Current;
+
+        if (Asked && Granted == granted && Executable == path && Version == version) return false;
+
+        Asked = true;
+        Granted = granted;
+        Executable = path;
+        Version = version;
+        return true;
+    }
 }
 
 /// <summary>

@@ -145,7 +145,8 @@ public sealed class AppWindow : GameWindow
         _controller = new ImGuiController(this);
         ApplyTheme();
 
-        // First-run only, and only on a published Windows build with the helper beside it.
+        // Only on a published Windows build with the helper beside it, and only when the firewall
+        // really has no rule for the executable that is running: an update moves that executable.
         Panels.FirewallModal.MaybeOffer(_state);
     }
 
