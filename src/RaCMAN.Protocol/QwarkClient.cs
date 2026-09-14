@@ -56,7 +56,6 @@ public sealed class QwarkClient : IDisposable
     private volatile bool _wantConnection;
     private volatile TelemetryPacket? _latestTelemetry;
     private volatile SessionInfo? _latestSession;
-    private long _lastTelemetryTicks;
     private long _lastUdpTicks;
     private volatile bool _telemetryViaTcp;
     private long _reconnectAtTicks;
@@ -115,9 +114,13 @@ public sealed class QwarkClient : IDisposable
 
     public int TelemetryPort { get; private set; }
 
-    /// <summary>Milliseconds since the last telemetry snapshot (UDP or TCP), or -1 when not connected.</summary>
+    /// <summary>
+    /// Milliseconds since the last UDP telemetry packet, or -1 when not connected. The same clock
+    /// the TCP fallback is decided on, so this and <see cref="TelemetryViaTcp"/> never disagree:
+    /// a GET_STATE reply refreshes the snapshot but is not telemetry arriving.
+    /// </summary>
     public long TelemetryAgeMs =>
-        _transportUp ? Math.Max(0, Environment.TickCount64 - Interlocked.Read(ref _lastTelemetryTicks)) : -1;
+        _transportUp ? Math.Max(0, Environment.TickCount64 - Interlocked.Read(ref _lastUdpTicks)) : -1;
 
     /// <summary>True when the latest snapshot came from the TCP GET_STATE fallback, i.e. UDP telemetry isn't arriving.</summary>
     public bool TelemetryViaTcp => _telemetryViaTcp;
@@ -216,8 +219,7 @@ public sealed class QwarkClient : IDisposable
             Volatile.Write(ref _lastAutosplitSeq, 0);
 
             Interlocked.Exchange(ref _lastSendTicks, Environment.TickCount64);
-            // Start both clocks now; the poll loop waits UdpFallbackMs out before falling back to TCP.
-            Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
+            // Start the UDP clock now; the poll loop waits UdpFallbackMs out before falling back to TCP.
             Interlocked.Exchange(ref _lastUdpTicks, Environment.TickCount64);
             _telemetryViaTcp = false;
 
@@ -468,7 +470,6 @@ public sealed class QwarkClient : IDisposable
 
                 _latestTelemetry = packet;
                 _latestSession = packet.Session;
-                Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
                 Interlocked.Exchange(ref _lastUdpTicks, Environment.TickCount64);
                 _telemetryViaTcp = false;
                 TelemetryReceived?.Invoke(packet);
@@ -657,7 +658,6 @@ public sealed class QwarkClient : IDisposable
         var packet = TelemetryPacket.Parse(payload);
         _latestTelemetry = packet;
         _latestSession = packet.Session;
-        Interlocked.Exchange(ref _lastTelemetryTicks, Environment.TickCount64);
         _telemetryViaTcp = true;
         TelemetryReceived?.Invoke(packet);
         return packet;

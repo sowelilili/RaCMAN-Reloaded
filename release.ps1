@@ -223,17 +223,51 @@ Write-Good "dist\qwark.sprx is newer than every source ($('{0:yyyy-MM-dd HH:mm}'
 # _Make.bat knows how to find; a machine without one is warned rather than stopped, since the
 # workflow takes the committed binary either way.
 $makeBat = Combine $qwark '_Make.bat'
+$scetool = Combine $qwark 'scetool.exe'
 if (-not $SkipTests -and (Test-Path $makeBat)) {
     Invoke-Suite "qwark's SPRX build" { & cmd /c "`"$makeBat`"" }
 
-    $rebuilt = Get-Item (Combine $qwark 'dist' 'qwark.sprx')
-    $built = Get-Item (Combine $qwark 'qwark.sprx')
-    if ($built.Length -ne $rebuilt.Length) {
-        throw ("qwark builds an SPRX of $($built.Length) bytes and dist\qwark.sprx is " +
-               "$($rebuilt.Length). Run `make dist` in qwark and commit it: the release takes dist\.")
-    }
+    # Two builds of one source are not the same file: scetool writes a fresh nonce into 42 bytes
+    # of the SELF header every time, so their hashes never agree, and a size is too coarse to
+    # trust. The module inside is the same, though, and scetool can unpack it back out, so the
+    # two unpacked modules are what have to match.
+    $fresh = Combine $qwark 'qwark.sprx'
+    $committed = Combine $qwark 'dist' 'qwark.sprx'
+    $freshElf = Combine $env:TEMP 'qwark-release-fresh.elf'
+    $committedElf = Combine $env:TEMP 'qwark-release-committed.elf'
+    Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue
 
-    Write-Good "the SPRX builds, and dist\ is the same size as what it built"
+    if (Test-Path $scetool) {
+        Push-Location $qwark
+        try {
+            Invoke-Native { & $scetool -d $fresh $freshElf } | Out-Null
+            Invoke-Native { & $scetool -d $committed $committedElf } | Out-Null
+        }
+        finally { Pop-Location }
+
+        if (-not (Test-Path $freshElf) -or -not (Test-Path $committedElf)) {
+            throw 'scetool could not unpack the SPRX, so the committed module cannot be checked against the build.'
+        }
+
+        $same = (Get-FileHash $freshElf -Algorithm SHA256).Hash -eq (Get-FileHash $committedElf -Algorithm SHA256).Hash
+        Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue
+
+        if (-not $same) {
+            throw ('qwark builds a different module from the one in dist\qwark.sprx. Run `make dist` in ' +
+                   'qwark and commit it: the release takes dist\.')
+        }
+
+        Write-Good 'the SPRX builds, and dist\ holds the same module'
+    }
+    else {
+        $rebuilt = Get-Item $committed
+        $built = Get-Item $fresh
+        if ($built.Length -ne $rebuilt.Length) {
+            throw ("qwark builds an SPRX of $($built.Length) bytes and dist\qwark.sprx is " +
+                   "$($rebuilt.Length). Run `make dist` in qwark and commit it: the release takes dist\.")
+        }
+        Write-Warning "no $scetool, so only the size of the built SPRX was compared with dist\."
+    }
 }
 elseif (-not $SkipTests) {
     Write-Warning "no $makeBat, so the committed SPRX was not rebuilt to prove it still compiles."
