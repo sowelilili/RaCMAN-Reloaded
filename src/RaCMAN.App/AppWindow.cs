@@ -455,12 +455,16 @@ public sealed class AppWindow : GameWindow
         if (_state.QwarkUpdateStaged > 0)
         {
             ImGui.SameLine();
-            Ui.Text(Ui.Yellow, $"| {_state.QwarkUpdateNotice}");
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            Ui.Text(Ui.Yellow, $"{_state.QwarkUpdateNotice}");
         }
         else if (_state.QwarkStale)
-        {
+        {   
             ImGui.SameLine();
-            ImGui.TextColored(Ui.Yellow, "| qwark.sprx is out of date");
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            ImGui.TextColored(Ui.Yellow, "qwark.sprx is out of date");
         }
 
         // The same, for the fallback that is easy to run on for months without noticing: everything
@@ -468,11 +472,13 @@ public sealed class AppWindow : GameWindow
         if (_state.Connected && _state.Client.TelemetryViaTcp)
         {
             ImGui.SameLine();
-            ImGui.TextColored(Ui.Yellow, "| telemetry over TCP");
-            Ui.Tooltip("The console's UDP telemetry is not reaching this PC, almost always because "
-                       + "the firewall is eating it, so live state is being polled over TCP instead. "
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            ImGui.TextColored(Ui.Yellow, "TCP fallback");
+            Ui.Tooltip("The console's UDP telemetry is not reaching this PC, likely due to a "
+                       + "firewall issue, so live state is being polled over TCP instead. "
                        + "Everything works; readouts and the input display just update more slowly. "
-                       + "The Connection panel has a button that adds the firewall rule.");
+                       + "To update your firewall, go to the Connection panel.");
         }
 
         if (_state.Connected && session.PreviousPending)

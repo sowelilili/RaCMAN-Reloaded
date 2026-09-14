@@ -252,7 +252,7 @@ public sealed class AppState : IDisposable
 
     /// <summary>The one sentence the header and the Connection panel both show for that.</summary>
     public string QwarkUpdateNotice =>
-        $"{WebManLoader.SprxName} {QwarkUpdateStaged} is on the console; restart the console to load it";
+        $"{WebManLoader.SprxName} {QwarkUpdateStaged} uploaded - reboot to update";
 
     /// <summary>Which qwark this client is talking to, as the staged notice keys off it.</summary>
     private string ConnectedTo => $"{Client.Host}:{Client.Port}";

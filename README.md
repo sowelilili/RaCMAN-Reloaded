@@ -35,7 +35,7 @@ The mode is on the Settings panel, in the **Connection** section.
 
 Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
 
-In standalone mode the client also keeps that copy up to date. If the console reports an older module than the one the client ships, the client sends the new `qwark.sprx` to the console through the module itself, puts it at the path `boot_plugins.txt` names and keeps the copy it replaced beside it as `qwark.sprx.old`. The header and the Connection panel then ask you to restart the console, because the console reads a boot plugin only at startup. The client does this once per connection, and never in webMAN mode, which sends and loads the module itself.
+In standalone mode the client also keeps that copy current. If the console runs an older module than the client ships, the client sends the new one to the console and asks you to restart it. See [docs/standalone-update.md](docs/standalone-update.md).
 
 ## Connect to RPCS3
 
@@ -53,7 +53,7 @@ The client asks GitHub for a newer release once a day. If there is one, a bar ap
 
 The Settings panel holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
 
-A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one. In standalone mode the client sends it by itself; see [Connection modes](#connection-modes).
+A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one. In standalone mode the client sends it by itself.
 
 ## Your files
 
@@ -71,17 +71,9 @@ You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours re
 
 ## Windows firewall
 
-The console sends live data to the client over UDP. Windows blocks that data for a new, unsigned application, so the client offers to add a rule for itself. If you refuse, the client uses TCP instead, which is slower, and the Connection panel keeps a button to add the rule later. While that fallback is in use the status line at the top of the window says **telemetry over TCP**, whichever panel you are on, so a run on the slow path is not something you have to go looking for.
+The console sends live data to the client over UDP. Windows blocks that data for an unsigned application, so the client offers to add a firewall rule for itself. If you refuse, the client uses TCP instead, which is slower, and the status line shows **TCP fallback**. The Connection panel keeps a button to add the rule later.
 
-A firewall rule allows one executable, named by its full path. The client checks at every start whether such a rule is really there for the copy that is running — reading the rules needs no administrator rights, only adding one does — and asks again only when it is not: after a move to another folder, or if something removed the rule. A rule you added through Windows' own "allow access" prompt counts just as much as one the client added, and a refusal is remembered for that copy and not repeated.
-
-To see the rules:
-
-```powershell
-Get-NetFirewallRule -DisplayName 'RaCMAN Reloaded (*)' | Get-NetFirewallApplicationFilter
-```
-
-The path should be the executable that is actually running — under the installer that is `%LocalAppData%\RaCMANReloaded\current\RaCMAN.App.exe`, not the launcher in the folder above it. `windows-firewall.ps1 -Remove` takes this copy's rules away again.
+The client checks for its rule at every start. It asks again only if the rule is missing. See [docs/firewall.md](docs/firewall.md) if the rule does not seem to take.
 
 ## Customising the Game page
 
@@ -118,4 +110,4 @@ There is no macOS job yet. macOS needs signing and notarisation first.
 - `controllerskins/`: input display skins.
 - `mods/`: the mod library each release ships.
 - `packaging/`: the Windows firewall helper and the AppImage icon.
-- `docs/`: the game layout reference.
+- `docs/`: the game layout reference, the firewall notes and the standalone module update.

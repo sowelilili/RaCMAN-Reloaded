@@ -131,7 +131,7 @@ public class SprxUpdateTests
         // The module in memory is still the old one, so the warning stays; what changed is what it
         // asks the user to do.
         Assert.True(state.QwarkStale);
-        Assert.Contains($"restart the console to load it", state.QwarkUpdateNotice, StringComparison.Ordinal);
+        Assert.Contains($"reboot to update", state.QwarkUpdateNotice, StringComparison.Ordinal);
         Assert.Contains(state.Toasts, toast => toast.Text == state.QwarkUpdateNotice);
         Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
     }
