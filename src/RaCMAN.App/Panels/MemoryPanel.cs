@@ -445,9 +445,10 @@ public static class MemoryPanel
         {
             Ui.Hint("No watches...");
         }
-        else if (ImGui.BeginTable("watches", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        // No Id column: the name is what a watch is known by, and the room the id took was the
+        // room the name needed. The id is on the name's tooltip with debug information on.
+        else if (ImGui.BeginTable("watches", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
-            ImGui.TableSetupColumn("Id", ImGuiTableColumnFlags.WidthFixed, 40);
             ImGui.TableSetupColumn("Name");
             ImGui.TableSetupColumn("Address", ImGuiTableColumnFlags.WidthFixed, 90);
             ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 45);
@@ -468,12 +469,10 @@ public static class MemoryPanel
                 }
 
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted(watch.Id.ToString());
-
-                ImGui.TableNextColumn();
                 string name = saved.Name;
                 ImGui.SetNextItemWidth(-1);
                 if (ImGui.InputText("##name", ref name, 64)) saved.Name = name;
+                if (Ui.Debug && ImGui.IsItemHovered()) ImGui.SetTooltip($"watch id {watch.Id}");
 
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"0x{watch.Address:X8}");
