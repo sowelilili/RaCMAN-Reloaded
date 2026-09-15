@@ -16,8 +16,8 @@ namespace RaCMAN.App;
 /// </summary>
 public static class FakeScript
 {
-    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, drop, "
-                                + "start, split[:code[:arg]], reset, "
+    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, "
+                                + "unknown, drop, start, split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
     public static IReadOnlyList<(double At, string Step)> Parse(string script)
@@ -151,6 +151,12 @@ public static class FakeScript
                     TitleId = "NPEA00423",
                     Generation = session.Generation + 1,
                 };
+                break;
+
+            // A title the module has no game for: INGAME, game 0, a title id, and every game op
+            // answered UNSUPPORTED. The client is down to its memory tools here.
+            case "unknown":
+                fake.UnknownGame = true;
                 break;
 
             case "drop":

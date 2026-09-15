@@ -237,6 +237,15 @@ public sealed class AppState : IDisposable
     public bool Ingame => Connected && Session.State == SessionState.Ingame;
 
     /// <summary>
+    /// The console is INGAME on a title qwark has no game module for: it reports game 0 with the
+    /// title id filled in (build 36). The memory ops work on such a session and every game op —
+    /// DESCRIBE, the lists, the tables, the unlocks, the mods, the save files, the combos, the
+    /// autosplit rows — answers UNSUPPORTED, so none of them is asked for and the panels that draw
+    /// them are not in the nav. What is left is the Memory panel, which is the whole point.
+    /// </summary>
+    public bool UnknownGame => Ingame && Session.Game == GameId.None;
+
+    /// <summary>
     /// True while the console is refusing everything but the five control ops. PROTOCOL.md section
     /// 1.1: through BOOTING and through QUITTING qwark allocates no request buffers, so every
     /// list, describe, info and event read is drained and answered BUSY until the session is
@@ -285,6 +294,14 @@ public sealed class AppState : IDisposable
 
     /// <summary>The title id that game was running under, for the per-title layout overrides.</summary>
     public string DescribedTitle { get; private set; } = string.Empty;
+
+    /// <summary>
+    /// The title this side's per-title files belong to: the running one while a game is running,
+    /// and the last described one otherwise, so a quit to the XMB does not swap the watchlists and
+    /// the mod library for another title's. A title qwark has no game module for describes nothing,
+    /// and this is what keeps its watchlists keyed by the id the console does report.
+    /// </summary>
+    public string CurrentTitle => Session.TitleId is { Length: > 0 } running ? running : DescribedTitle;
 
     public DescribeResult Describe { get; private set; } = DescribeResult.Empty;
 
@@ -591,6 +608,8 @@ public sealed class AppState : IDisposable
         Autosplitter.Tick(deltaSeconds);
 
         // With autosplitting off nothing acts on a run event, so the console is not polled for one.
+        // When the ring can be read at all — INGAME, and a game the module knows — is QwarkClient's
+        // own rule and is not repeated here.
         Client.AutosplitSafetyPoll = Settings.Autosplit.Enabled;
 
         for (int i = _toasts.Count - 1; i >= 0; i--)
@@ -686,8 +705,18 @@ public sealed class AppState : IDisposable
                 }
             }
         }
+        else if (UnknownGame && _liveStale)
+        {
+            // A title qwark has no game module for. There is nothing to describe and nothing that
+            // reads the game to read, but the watches, the freezes and the patches are the
+            // console's own and answer here as they do anywhere else, so they are read the same
+            // way. RefreshLive is what knows which of them to leave out.
+            _liveStale = false;
+            _heldBack = false;
+            RefreshLive();
+        }
 
-        if (session.CurrentPlanet != _lastPlanet && session.State == SessionState.Ingame)
+        if (session.CurrentPlanet != _lastPlanet && session.State == SessionState.Ingame && !UnknownGame)
         {
             _lastPlanet = session.CurrentPlanet;
             RefreshPositions(quiet: true);
@@ -696,8 +725,10 @@ public sealed class AppState : IDisposable
         // PREVIOUS_LIST is a bulk op, and section 4.1 sets the pending flag on the way through a
         // reboot, which is exactly when section 1.1 refuses one. So the ask waits for the console
         // to be answering again and the flag stays unhandled until it is; the modal is a second or
-        // two later than it used to be, and nobody is told the console was busy.
-        if (session.PreviousPending && !_lastPreviousPending && !ConsoleBusy)
+        // two later than it used to be, and nobody is told the console was busy. A previous session
+        // is a game's features and mods, so a title qwark has no game module for never has one and
+        // answers the op UNSUPPORTED.
+        if (session.PreviousPending && !_lastPreviousPending && !ConsoleBusy && !UnknownGame)
         {
             _lastPreviousPending = true;
             Run(() => Client.PreviousListAsync(), previous =>
@@ -838,14 +869,16 @@ public sealed class AppState : IDisposable
     /// The description and the values together, and the one place the description is read. The
     /// game it belongs to is adopted here, because DESCRIBE only answers for the running game
     /// while a game is running: outside INGAME it is refused or answered with the last one's
-    /// table, so nothing is asked and the panels keep what they have.
+    /// table, so nothing is asked and the panels keep what they have. A title qwark has no game
+    /// module for is the other half of that rule: it is INGAME and there is still nothing to
+    /// describe, so none of these goes out either.
     /// </summary>
     public void RefreshAll(bool quiet = true)
     {
         if (!Connected) return;
         if (quiet && HoldsBackgroundWork()) return;
 
-        if (Ingame)
+        if (Ingame && !UnknownGame)
         {
             var session = Session;
             var key = new DescribedKey(session.Game, session.QwarkVersion, session.ProtocolVersion);
@@ -909,7 +942,10 @@ public sealed class AppState : IDisposable
         if (quiet && HoldsBackgroundWork()) return;
 
         // The slots come out of the running process and are refused outside it; everything below
-        // is the console's own and answers whatever the session is doing.
+        // is the console's own and answers whatever the session is doing. On a title qwark has no
+        // game module for the slots, the mods and the combos are all the game's and answer
+        // UNSUPPORTED, which each of them knows about; the three in the middle are the memory
+        // tools' and answer there like anywhere else.
         if (Ingame) RefreshPositions(quiet);
         RefreshWatches(quiet);
         RefreshFreezes(quiet);
@@ -926,8 +962,9 @@ public sealed class AppState : IDisposable
     public void RefreshLevelFlagsSupport(bool quiet = true)
     {
         // Only INGAME: anywhere else the op answers NOT_INGAME, which says nothing about whether
-        // the game has flags and would flip the answer back for a game that has none.
-        if (!Ingame) return;
+        // the game has flags and would flip the answer back for a game that has none. A title with
+        // no game module behind it has no flag table to probe for.
+        if (!Ingame || UnknownGame) return;
 
         byte planet = Session.CurrentPlanet;
         Run(async () =>
@@ -952,7 +989,7 @@ public sealed class AppState : IDisposable
     /// </summary>
     public void RefreshAutosplitEvents()
     {
-        if (!Connected) return;
+        if (!Connected || UnknownGame) return;
         if (HoldsBackgroundWork()) return;
 
         RunQuiet(async () =>
@@ -984,7 +1021,7 @@ public sealed class AppState : IDisposable
     /// </summary>
     public void RefreshSaveFileInfo()
     {
-        if (!Connected) return;
+        if (!Connected || UnknownGame) return;
         if (HoldsBackgroundWork()) return;
 
         RunQuiet(async () =>
@@ -1004,6 +1041,7 @@ public sealed class AppState : IDisposable
 
     public void RefreshPositions(bool quiet = false)
     {
+        if (UnknownGame) return;
         if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.PosListAsync(), positions => Positions = positions, quiet);
     }
@@ -1014,7 +1052,7 @@ public sealed class AppState : IDisposable
     /// </summary>
     public void RefreshUnlocks(bool quiet = false)
     {
-        if (!Connected) return;
+        if (!Connected || UnknownGame) return;
         if (quiet && HoldsBackgroundWork()) return;
 
         Run(async () =>
@@ -1064,13 +1102,14 @@ public sealed class AppState : IDisposable
 
     public void RefreshCombos(bool quiet = false)
     {
+        if (UnknownGame) return;
         if (quiet && HoldsBackgroundWork()) return;
         if (Connected) Run(() => Client.ComboListAsync(), combos => Combos = combos, quiet);
     }
 
     public void RefreshMods(bool quiet = false)
     {
-        if (!Connected) return;
+        if (!Connected || UnknownGame) return;
         if (quiet && HoldsBackgroundWork()) return;
 
         Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
@@ -1083,7 +1122,7 @@ public sealed class AppState : IDisposable
     /// </summary>
     public void RescanLocalMods()
     {
-        string title = Session.TitleId is { Length: > 0 } running ? running : DescribedTitle;
+        string title = CurrentTitle;
         if (string.IsNullOrEmpty(title))
         {
             LocalMods = Array.Empty<LocalMod>();
@@ -1126,7 +1165,7 @@ public sealed class AppState : IDisposable
 
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
-        string line = $"{session.State.DisplayName()} | {title} | {session.Game.DisplayName()}";
+        string line = $"{session.State.DisplayName()} | {title} | {session.GameName}";
         if (!Panels.Ui.Debug) return line;
 
         string tick = session.Tick > 0 ? $"tick {session.Tick}" : "tick -";

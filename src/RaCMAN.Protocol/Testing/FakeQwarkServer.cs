@@ -13,6 +13,10 @@ namespace RaCMAN.Protocol.Testing;
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
 /// ops of revision 1.10 over the same in-memory filesystem the file ops use. Everything else
 /// answers UNKNOWN_OP.
+/// <para>
+/// <see cref="UnknownGame"/> is the other session build 36 can report: a title the module has no
+/// game for, where the memory ops work and every game op answers UNSUPPORTED.
+/// </para>
 /// </summary>
 public sealed class FakeQwarkServer : IDisposable
 {
@@ -543,6 +547,10 @@ public sealed class FakeQwarkServer : IDisposable
                 // launching, so the refusals below stop with it: the two ways of driving this
                 // server cannot end up disagreeing about whether a game is on its way in.
                 if (_session.State is not (SessionState.Booting or SessionState.Quitting)) _launching = false;
+
+                // The same for a session moved to a game the module knows: it describes that one,
+                // so the game ops answer again.
+                if (_session.Game != GameId.None) _unknownGame = false;
             }
         }
     }
@@ -603,11 +611,81 @@ public sealed class FakeQwarkServer : IDisposable
         }
     }
 
+    /// <summary>The title the unknown-game session runs under: a real id, and not one of the four.</summary>
+    public string UnknownTitleId { get; set; } = "BLES00932";
+
+    private bool _unknownGame;
+
+    /// <summary>
+    /// A title qwark has no game module for, as build 36 reports one: INGAME, game 0 and the title
+    /// id filled in. Setting it moves the session there and makes every game op answer UNSUPPORTED;
+    /// the memory ops go on working, which is the whole of what such a session has to offer.
+    /// </summary>
+    public bool UnknownGame
+    {
+        get { lock (_gate) return _unknownGame; }
+        set
+        {
+            lock (_gate)
+            {
+                _unknownGame = value;
+                if (!value) return;
+
+                _launching = false;
+
+                // Telemetry carries the watch values and nothing else: the readouts, the position
+                // and the pad are all read through the game module there is none of.
+                _session = _session with
+                {
+                    State = SessionState.Ingame,
+                    Game = GameId.None,
+                    TitleId = UnknownTitleId,
+                    Generation = _session.Generation + 1,
+                    CurrentPlanet = 0,
+                    PosX = 0f,
+                    PosY = 0f,
+                    PosZ = 0f,
+                    PadMask = 0,
+                    Analog = new float[4],
+                    Readout = new uint[SessionInfo.ReadoutCount],
+                };
+            }
+        }
+    }
+
+    /// <summary>
+    /// The ops that answer for the game: what qwark described, the tables it keeps for it and
+    /// everything read out of the game's own structures. A module running a title it has no game
+    /// module for answers every one of them UNSUPPORTED, and the memory ops of section 5.4 are what
+    /// is left.
+    /// </summary>
+    public static bool IsGameOp(Opcode opcode) => opcode is
+        Opcode.Describe or Opcode.FeatureSet or Opcode.FeatureTrigger or Opcode.FeatureSetAuto
+        or Opcode.FeatureOptions
+        or Opcode.PreviousList or Opcode.PreviousReapply or Opcode.PreviousDismiss
+        or Opcode.PosSelect or Opcode.PosSave or Opcode.PosLoad or Opcode.PosList or Opcode.PosClear
+        or Opcode.PlanetList or Opcode.PlanetSelect or Opcode.PlanetLoad or Opcode.Die or Opcode.MobyTable
+        or Opcode.UnlockList or Opcode.UnlockSet
+        or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
+        or Opcode.ModList or Opcode.ModLoad or Opcode.ModUnload or Opcode.ModSetAuto
+        or Opcode.ModRescan or Opcode.ModInfo
+        or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend
+        or Opcode.AutosplitEvents or Opcode.AutosplitDescribe
+        or Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
+        or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
+        or Opcode.SaveFileRestore or Opcode.SaveFileCategory;
+
     /// <summary>
     /// How many requests have been refused with BUSY because a game was starting or ending. A
     /// client that holds its bulk traffic back the way section 1.1 asks leaves this at zero.
     /// </summary>
     public int BusyCount { get; private set; }
+
+    /// <summary>
+    /// How many game ops were refused because the console is running a title it has no module for.
+    /// A client that knows better than to ask leaves this at zero.
+    /// </summary>
+    public int UnsupportedCount { get; private set; }
 
     private readonly List<Opcode> _requests = new();
 
@@ -766,6 +844,14 @@ public sealed class FakeQwarkServer : IDisposable
             if (EnforceIngame && _session.State != SessionState.Ingame && TouchesGameMemory(opcode))
             {
                 return (Status.NotIngame, null);
+            }
+
+            // Build 36: the console is running a title this module has no game for. It can still
+            // read and write the process, and knows nothing else about it.
+            if (_unknownGame && IsGameOp(opcode))
+            {
+                UnsupportedCount++;
+                return (Status.Unsupported, null);
             }
 
             if (RefusedWithoutCodePatches(opcode, payload)) return (Status.Unsupported, null);
@@ -1589,7 +1675,10 @@ public sealed class FakeQwarkServer : IDisposable
             {
                 // The tick thread runs at 120 Hz and telemetry goes out every fourth tick.
                 _session = _session with { Tick = _session.Tick + 4 };
-                if (AnimateInput) _session = _session with
+
+                // The pad is read through the game module, so a title there is none for leaves it
+                // where the session put it: at rest.
+                if (AnimateInput && !_unknownGame) _session = _session with
                 {
                     PadMask = (uint)PadButtons.All[(_session.Tick / 60) % PadButtons.All.Length].Button,
                     Analog = new[]

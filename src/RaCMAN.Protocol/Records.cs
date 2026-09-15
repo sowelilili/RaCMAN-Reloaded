@@ -51,6 +51,19 @@ public sealed record SessionInfo(
 
     public bool IsIngame => State == SessionState.Ingame;
 
+    /// <summary>
+    /// The console is running a title qwark has no game module for: INGAME, the title id filled in
+    /// and the game left at <see cref="GameId.None"/>. The memory ops answer for such a session and
+    /// every game op answers UNSUPPORTED, so the client offers the memory tools and nothing else.
+    /// </summary>
+    public bool IsUnknownGame => State == SessionState.Ingame && Game == GameId.None;
+
+    /// <summary>
+    /// What to call the game on screen. "no game" belongs to the XMB, where nothing is running at
+    /// all; a title the module has nothing for is a game, just not one this client can name.
+    /// </summary>
+    public string GameName => IsUnknownGame ? "Unknown game" : Game.DisplayName();
+
     /// <summary>The readout at <paramref name="index"/>, or null when the index names none.</summary>
     public uint? ReadoutAt(int index) =>
         index >= 0 && index < Readout.Length ? Readout[index] : null;

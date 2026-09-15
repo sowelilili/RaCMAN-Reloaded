@@ -1273,8 +1273,12 @@ public sealed class QwarkClient : IDisposable
     /// while a game is starting or ending. Nothing is lost by waiting: the console keeps the events
     /// in its ring, so a read held back here is asked for again, from the same sequence number, on
     /// the first poll after the session is INGAME.
+    /// <para>
+    /// A title the module has no game for is INGAME and has no watcher behind it, so the op answers
+    /// UNSUPPORTED: there is nothing to prime a baseline from and nothing to poll for.
+    /// </para>
     /// </summary>
-    private bool AutosplitReadable => _latestSession is { State: SessionState.Ingame };
+    private bool AutosplitReadable => _latestSession is { State: SessionState.Ingame, IsUnknownGame: false };
 
     /// <summary>
     /// Reads the ring once on connect and records where the console has got to without raising

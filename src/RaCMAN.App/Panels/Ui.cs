@@ -28,6 +28,14 @@ public static class Ui
 
     public const string PatchesAreCodePatches = "Client patches are code patches, which RPCS3 cannot apply";
 
+    /// <summary>
+    /// What is going on when the console is INGAME and the client has nothing but the Memory panel
+    /// to show: the title running on it is not one qwark has a game module for. Said in the same
+    /// words on the Connection panel and on the Memory panel, which are the two places to look.
+    /// </summary>
+    public const string NoGameModule = "qwark has no game module for this title, so nothing about the "
+                                      + "game itself can be read. The memory tools work as they always do.";
+
     public static Vector4 Green => Light ? new(0.10f, 0.55f, 0.15f, 1f) : new(0.45f, 0.85f, 0.45f, 1f);
     public static Vector4 Red => Light ? new(0.80f, 0.15f, 0.15f, 1f) : new(0.95f, 0.45f, 0.45f, 1f);
     public static Vector4 Yellow => Light ? new(0.70f, 0.45f, 0.00f, 1f) : new(0.95f, 0.82f, 0.35f, 1f);

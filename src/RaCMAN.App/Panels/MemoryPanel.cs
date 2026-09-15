@@ -130,6 +130,11 @@ public static class MemoryPanel
         bool enabled = state.Ingame;
         if (!enabled) Ui.Warning($"Memory commands need INGAME (state is {state.Session.State.DisplayName()}).");
 
+        // A title the console has no game module for: the memory ops are the whole of what works,
+        // which is why this is the only panel left in the nav.
+        bool unknown = state.UnknownGame;
+        if (unknown) Ui.Hint(Ui.NoGameModule);
+
         if (ImGui.BeginTabBar("memory-tabs"))
         {
             // Watches is the tab people live in, so it is first and opens selected by default.
@@ -161,7 +166,9 @@ public static class MemoryPanel
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Mobys"))
+            // The moby table is read through MOBY_TABLE, which is the game's own: a title qwark has
+            // no module for has no table to point at, so the tab is not offered.
+            if (!unknown && ImGui.BeginTabItem("Mobys"))
             {
                 DrawMobys(state, enabled);
                 ImGui.EndTabItem();
@@ -852,9 +859,10 @@ public static class MemoryPanel
         ImGui.Separator();
         Ui.Heading("Watchlist file");
 
-        // The described title, so a quit to the XMB does not swap the saved lists for "unknown"
-        // and walk the folder again on the way back.
-        string title = string.IsNullOrEmpty(state.DescribedTitle) ? "unknown" : state.DescribedTitle;
+        // The running title, and the described one at the XMB, so a quit does not swap the saved
+        // lists for "unknown" and walk the folder again on the way back. A game qwark cannot name
+        // still has a title id, and its watchlists are kept under it like anybody else's.
+        string title = string.IsNullOrEmpty(state.CurrentTitle) ? "unknown" : state.CurrentTitle;
 
         // Only when the title changes: this walks the watchlists folder, which is not something to
         // do once a frame.

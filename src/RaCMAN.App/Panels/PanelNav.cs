@@ -102,6 +102,41 @@ public static class PanelNav
     }
 
     /// <summary>
+    /// The panels that draw what qwark knows about the running game: its description and its own
+    /// tables, the slots and flags read out of it, the libraries kept for it. A title the console
+    /// has no game module for answers every one of those UNSUPPORTED, so none of them has anything
+    /// to draw. What is left is the connection, the memory tools, the pad and the settings.
+    /// </summary>
+    private static readonly int[] GamePanels =
+        { Game, Unlocks, Positions, Combos, Mods, SaveFiles, Autosplitter, LevelFlags };
+
+    /// <summary>Whether a panel is one of those, so the rule below can be read in one line.</summary>
+    public static bool IsGamePanel(int panel) => Array.IndexOf(GamePanels, panel) >= 0;
+
+    /// <summary>
+    /// Whether the nav lists a panel at all. A panel with nothing behind it is hidden rather than
+    /// greyed out: greying says "this console cannot do that", and there is a tooltip to explain
+    /// it, while these are panels the running game simply has no such thing for.
+    /// </summary>
+    public static bool Visible(int panel, bool unknownGame, bool unlocksUnsupported, bool levelFlagsUnsupported)
+    {
+        if (unknownGame) return !IsGamePanel(panel);
+
+        return panel switch
+        {
+            Unlocks => !unlocksUnsupported,
+            LevelFlags => !levelFlagsUnsupported,
+            _ => true,
+        };
+    }
+
+    /// <summary>
+    /// Where the nav puts someone whose panel has just been hidden: the game, or the memory tools
+    /// when there is no game to show.
+    /// </summary>
+    public static int Fallback(bool unknownGame) => unknownGame ? Memory : Game;
+
+    /// <summary>
     /// Why the nav greys a panel out, or null when the panel is usable. Every mod is patch words
     /// or code caves, and the savefile helper the Save files panel works through is a code cave
     /// and a branch into it, so a console that refuses code patches (RPCS3) leaves both with

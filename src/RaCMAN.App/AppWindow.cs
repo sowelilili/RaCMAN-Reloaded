@@ -286,10 +286,11 @@ public sealed class AppWindow : GameWindow
                 // soon as the descriptors say the running game has that section at all.
                 RouteRequestedSection();
 
-                // If the current panel is one the running game doesn't support, fall back to Game;
-                // if it is one this console cannot drive at all, to Connection, which is the panel
-                // that says which target is connected.
-                if (!PanelVisible(_panel)) _panel = PanelNav.Game;
+                // If the current panel is one the running game doesn't support, fall back to Game —
+                // or, on a title qwark knows nothing about, to Memory, which is what such a session
+                // has; if it is one this console cannot drive at all, to Connection, which is the
+                // panel that says which target is connected.
+                if (!PanelVisible(_panel)) _panel = PanelNav.Fallback(_state.UnknownGame);
                 if (DisabledReason(_panel) is not null) _panel = PanelNav.Connection;
 
                 for (int i = 0; i < PanelNames.Length; i++)
@@ -387,13 +388,13 @@ public sealed class AppWindow : GameWindow
         if (PanelVisible(panel) && DisabledReason(panel) is null) _panel = panel;
     }
 
-    /// <summary>Hide panels the running game has no data for: Unlocks and Level flags.</summary>
-    private bool PanelVisible(int panel) => panel switch
-    {
-        PanelNav.Unlocks => !_state.UnlocksUnsupported,
-        PanelNav.LevelFlags => !_state.LevelFlagsUnsupported,
-        _ => true,
-    };
+    /// <summary>
+    /// Hide panels the running game has no data for: Unlocks and Level flags, and on a title qwark
+    /// has no game module for every panel that draws the game. The rule is
+    /// <see cref="PanelNav.Visible"/>; the state it reads is the session's.
+    /// </summary>
+    private bool PanelVisible(int panel) =>
+        PanelNav.Visible(panel, _state.UnknownGame, _state.UnlocksUnsupported, _state.LevelFlagsUnsupported);
 
     /// <summary>
     /// Why the nav greys a panel out, or null when it is usable. The rule is

@@ -25,6 +25,8 @@ The client finds the module on the console, sends it if no plugin slot holds it,
 
 The panels fill with the controls for the game that runs. If the connection stops, the client connects again by itself. The console keeps the state, so nothing is lost.
 
+If you start a game the module does not know, the client keeps the Memory panel and hides the rest: watches, freezes, patches and the memory viewer work on any title.
+
 ## Connection modes
 
 The mode is on the Settings panel, in the **Connection** section.

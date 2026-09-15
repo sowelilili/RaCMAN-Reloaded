@@ -97,6 +97,10 @@ public static class ConnectionPanel
             }
             Ui.DebugHint($"Planet {session.CurrentPlanet} | slot {session.SelectedSlot} | position {session.PosX:0.##}, {session.PosY:0.##}, {session.PosZ:0.##}");
             if (session.PreviousPending) Ui.Warning("A previous session is waiting to be re-applied.");
+
+            // Why the nav is down to four entries: the console is running something qwark cannot
+            // name, and the status line above says so.
+            if (state.UnknownGame) Ui.Warning(Ui.NoGameModule);
         }
 
         DrawStaleBuild(state);
