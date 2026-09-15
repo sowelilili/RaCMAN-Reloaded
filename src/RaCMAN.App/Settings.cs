@@ -148,6 +148,59 @@ public sealed class Settings
     [JsonPropertyName("mirrorSaveFiles")]
     public bool MirrorSaveFiles { get; set; } = true;
 
+    /// <summary>
+    /// The category the Save files panel was last left on, keyed by title id. A savefile library
+    /// grows a category per route or per run, and the one being worked in is the same one for days
+    /// at a time, so the combo opens where it was rather than on whatever sorts first.
+    /// </summary>
+    [JsonPropertyName("saveFileCategory")]
+    public Dictionary<string, string> SaveFileCategory { get; set; } = new();
+
+    /// <summary>
+    /// Which category a title was last left on, or null when it has never been left on one. The
+    /// lookup is a scan for the same reason as <see cref="SectionOpen"/>: deserialization hands
+    /// back a plain dictionary with a comparer of its own, and the file is hand-editable.
+    /// </summary>
+    public string? SaveFileCategoryFor(string titleId)
+    {
+        if (string.IsNullOrEmpty(titleId)) return null;
+
+        foreach (var (title, category) in SaveFileCategory)
+        {
+            if (string.Equals(title, titleId, StringComparison.OrdinalIgnoreCase))
+            {
+                return string.IsNullOrWhiteSpace(category) ? null : category;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Records the category a title is being worked in, replacing whatever spelling of the title
+    /// the file had. True when that changed anything, so the caller only writes the file when there
+    /// is something new in it.
+    /// </summary>
+    public bool SetSaveFileCategory(string titleId, string category)
+    {
+        if (string.IsNullOrEmpty(titleId) || string.IsNullOrWhiteSpace(category)) return false;
+
+        string key = titleId;
+        foreach (var title in SaveFileCategory.Keys)
+        {
+            if (!string.Equals(title, titleId, StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (title == titleId && SaveFileCategory[title] == category) return false;
+
+            key = title;
+            break;
+        }
+
+        SaveFileCategory.Remove(key);
+        SaveFileCategory[titleId] = category;
+        return true;
+    }
+
     [JsonPropertyName("lastZipPath")]
     public string LastZipPath { get; set; } = string.Empty;
 

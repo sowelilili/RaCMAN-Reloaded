@@ -43,6 +43,12 @@ public static class SaveFilesPanel
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
     /// <summary>
+    /// The library changed under the panel — an import put files in it — so read it again on the
+    /// next frame. Render thread only, like everything else here.
+    /// </summary>
+    public static void Invalidate() => _title = string.Empty;
+
+    /// <summary>
     /// True while a save is moving between this PC and the console. Anything else that would send
     /// megabytes down the same link — the standalone module update — waits for it.
     /// </summary>
@@ -197,6 +203,7 @@ public static class SaveFilesPanel
         {
             _categoryIndex = index;
             _fileIndex = -1;
+            Remember(state, title);
             RescanFiles(state, title);
         }
 
@@ -240,7 +247,8 @@ public static class SaveFilesPanel
             state.Post(() =>
             {
                 Rescan(state, title);
-                _categoryIndex = Math.Max(0, Array.IndexOf(_categories, wanted));
+                Select(_categories, wanted);
+                Remember(state, title);
                 RescanFiles(state, title);
                 state.AddToast($"Category '{wanted}' created", ToastKind.Success);
             });
@@ -549,14 +557,26 @@ public static class SaveFilesPanel
     {
         // A new game means a new answer about the console's helper, and this panel is the only
         // thing that reads it, so a rescan is a good moment to make sure it is current.
-        if (!string.Equals(_title, title, StringComparison.Ordinal)) state.RefreshSaveFileInfo();
+        bool arrived = !string.Equals(_title, title, StringComparison.Ordinal);
+        if (arrived) state.RefreshSaveFileInfo();
 
+        // Coming to a title opens the combo where that title was last left; a rescan after a save
+        // or a delete leaves it exactly where the user put it.
+        string wanted = arrived ? state.Settings.SaveFileCategoryFor(title) ?? string.Empty : Category;
         _title = title;
 
         string[] local;
         try
         {
             local = state.SaveFiles.Categories(title);
+
+            // A library copied out of the old RaCMAN is full of files with no extension at all, and
+            // the console will not load one. Putting the suffix on is the library's own doing; this
+            // is only where it gets said out loud, once, on the title's first scan.
+            if (arrived && DescribeRenames(state.SaveFiles.EnsureExtensions(title)) is { Length: > 0 } renamed)
+            {
+                state.AddToast(renamed, ToastKind.Success);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -564,8 +584,7 @@ public static class SaveFilesPanel
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
-        _categories = local;
-        _categoryIndex = Math.Clamp(_categoryIndex, 0, Math.Max(0, _categories.Length - 1));
+        Select(Merge(local, Array.Empty<string>()), wanted);
         RescanFiles(state, title);
 
         // The console's categories are read on its own time, and the two lists are merged when the
@@ -581,8 +600,7 @@ public static class SaveFilesPanel
                 state.Post(() =>
                 {
                     string wanted = Category;
-                    _categories = Merge(_categories, categories);
-                    _categoryIndex = Math.Max(0, Array.IndexOf(_categories, wanted));
+                    Select(Merge(_categories, categories), wanted);
                     RescanFiles(state, title);
                 });
             }
@@ -598,16 +616,91 @@ public static class SaveFilesPanel
         });
     }
 
-    /// <summary>The categories both sides know about, in one sorted list with no repeats.</summary>
-    private static string[] Merge(IEnumerable<string> local, IEnumerable<string> console)
+    /// <summary>
+    /// The categories both sides know about, in one list with no repeats, and the only place the
+    /// order of the combo is decided: alphabetical, except that the default category goes to the
+    /// bottom. It is the one nobody named — every save lands in it until the user says otherwise —
+    /// so it has no business sitting in the middle of the categories they did name.
+    /// </summary>
+    public static string[] Merge(IEnumerable<string>? local, IEnumerable<string>? console)
     {
-        var names = new SortedSet<string>(local, StringComparer.OrdinalIgnoreCase);
-        foreach (var name in console)
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var name in (local ?? Enumerable.Empty<string>()).Concat(console ?? Enumerable.Empty<string>()))
         {
-            if (!string.IsNullOrWhiteSpace(name)) names.Add(name);
+            if (string.IsNullOrWhiteSpace(name) || !seen.Add(name)) continue;
+            names.Add(name);
         }
 
+        names.Sort(CompareCategories);
         return names.Count == 0 ? new[] { SaveFileLibrary.DefaultCategory } : names.ToArray();
+    }
+
+    /// <summary>Alphabetical, with <see cref="SaveFileLibrary.DefaultCategory"/> last of all.</summary>
+    public static int CompareCategories(string? left, string? right)
+    {
+        bool leftDefault = IsDefault(left);
+        if (leftDefault != IsDefault(right)) return leftDefault ? 1 : -1;
+
+        return string.Compare(left, right, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsDefault(string? category) =>
+        string.Equals(category, SaveFileLibrary.DefaultCategory, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Takes the list and selects <paramref name="wanted"/>, or the first entry when that category
+    /// is not there any more — a remembered one that has since been deleted, or one only the
+    /// console had before a rescan.
+    /// </summary>
+    private static void Select(string[] categories, string? wanted)
+    {
+        _categories = categories;
+        _categoryIndex = IndexOf(categories, wanted);
+    }
+
+    /// <summary>
+    /// Where a category is in the list, and 0 — the first entry — when it is not in it at all,
+    /// which is what a title remembered on a category that has since been deleted falls back to.
+    /// </summary>
+    public static int IndexOf(string[] categories, string? wanted)
+    {
+        int index = Array.FindIndex(categories, c => string.Equals(c, wanted, StringComparison.OrdinalIgnoreCase));
+        return index < 0 ? 0 : index;
+    }
+
+    /// <summary>Remembers the selected category for this title, so the combo opens on it next time.</summary>
+    private static void Remember(AppState state, string title)
+    {
+        if (string.IsNullOrEmpty(title)) return;
+        if (!state.Settings.SetSaveFileCategory(title, Category)) return;
+
+        state.Settings.Save();
+    }
+
+    /// <summary>
+    /// The one line the panel says when a library carried over from the old RaCMAN is put right.
+    /// Empty when there was nothing to put right, which is every scan after the first.
+    /// </summary>
+    public static string DescribeRenames(IReadOnlyList<SaveFileRename> renames)
+    {
+        int dropped = 0;
+        foreach (var rename in renames)
+        {
+            if (rename.Dropped) dropped++;
+        }
+
+        int renamed = renames.Count - dropped;
+        var parts = new List<string>(2);
+        if (renamed > 0)
+        {
+            parts.Add($"{renamed} old save{(renamed == 1 ? string.Empty : "s")} renamed to {SaveFileLibrary.Extension}");
+        }
+
+        if (dropped > 0) parts.Add($"{dropped} duplicate{(dropped == 1 ? string.Empty : "s")} dropped");
+
+        return string.Join(", ", parts);
     }
 
     private static void RescanFiles(AppState state, string title)

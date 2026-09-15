@@ -708,6 +708,81 @@ public class SettingsTests
         }
     }
 
+    // ---------------------------------------------------------------- the save file category
+
+    [Fact]
+    public void ATitleWithNoRememberedCategoryHasNone()
+    {
+        var settings = new Settings();
+
+        Assert.Null(settings.SaveFileCategoryFor("NPEA00385"));
+        Assert.Null(settings.SaveFileCategoryFor(string.Empty));
+    }
+
+    [Fact]
+    public void TheCategoryIsRememberedPerTitleAndFoundHoweverTheTitleIsSpelt()
+    {
+        var settings = new Settings();
+
+        Assert.True(settings.SetSaveFileCategory("NPEA00385", "any%"));
+        Assert.True(settings.SetSaveFileCategory("NPEA00386", "misc"));
+
+        Assert.Equal("any%", settings.SaveFileCategoryFor("NPEA00385"));
+        Assert.Equal("any%", settings.SaveFileCategoryFor("npea00385"));
+        Assert.Equal("misc", settings.SaveFileCategoryFor("NPEA00386"));
+    }
+
+    [Fact]
+    public void RememberingTheSameCategoryAgainWritesNothing()
+    {
+        var settings = new Settings();
+
+        Assert.True(settings.SetSaveFileCategory("NPEA00385", "any%"));
+        Assert.False(settings.SetSaveFileCategory("NPEA00385", "any%"));
+        Assert.True(settings.SetSaveFileCategory("NPEA00385", "hundred"));
+
+        // Nothing worth a file write, and nothing worth an entry either.
+        Assert.False(settings.SetSaveFileCategory(string.Empty, "any%"));
+        Assert.False(settings.SetSaveFileCategory("NPEA00385", "   "));
+        Assert.Equal("hundred", settings.SaveFileCategoryFor("NPEA00385"));
+        Assert.Single(settings.SaveFileCategory);
+    }
+
+    [Fact]
+    public void ATitleSpeltAnotherWayInTheFileIsReplacedRatherThanRepeated()
+    {
+        var settings = new Settings();
+        settings.SaveFileCategory["npea00385"] = "misc";
+
+        Assert.True(settings.SetSaveFileCategory("NPEA00385", "any%"));
+
+        var entry = Assert.Single(settings.SaveFileCategory);
+        Assert.Equal("NPEA00385", entry.Key);
+        Assert.Equal("any%", entry.Value);
+    }
+
+    [Fact]
+    public void SaveAndLoadRoundTripTheRememberedCategories()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.SetSaveFileCategory("NPEA00385", "any%");
+            saved.Save();
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal("any%", loaded.SaveFileCategoryFor("NPEA00385"));
+            Assert.Null(loaded.SaveFileCategoryFor("NPEA00387"));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     private static string TempFolder()
     {
         var folder = Path.Combine(Path.GetTempPath(), "racman-settings-" + Guid.NewGuid().ToString("N"));
