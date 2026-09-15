@@ -72,6 +72,21 @@ public static class WatchValueCodec
         }
     }
 
+    /// <summary>
+    /// One byte as a cell of the viewer's hex dump takes it: two hex digits, and nothing else. A
+    /// single digit is a pair the user has not finished typing rather than a value to write, so it
+    /// is refused here and the cell drops it.
+    /// </summary>
+    public static bool TryParseByte(string? text, out byte value)
+    {
+        value = 0;
+
+        var typed = (text ?? string.Empty).Trim();
+        if (typed.Length != 2 || !char.IsAsciiHexDigit(typed[0]) || !char.IsAsciiHexDigit(typed[1])) return false;
+
+        return byte.TryParse(typed, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value);
+    }
+
     private static bool TryParseHex(string typed, byte size, out ulong value)
     {
         if (typed.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) typed = typed[2..];

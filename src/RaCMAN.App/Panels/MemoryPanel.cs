@@ -20,7 +20,6 @@ public static class MemoryPanel
 
     private static string _readAddress = string.Empty;
     private static int _readLength = 64;
-    private static string _dump = string.Empty;
     private static byte[] _dumpBytes = Array.Empty<byte>();
     private static uint _dumpBase;
     private static float _sinceRead;
@@ -41,6 +40,9 @@ public static class MemoryPanel
 
     private static string _watchlistName = string.Empty;
 
+    /// <summary>Set when something outside the Viewer tab put an address in its box.</summary>
+    private static bool _selectViewer;
+
     /// <summary>
     /// The sizes offered for a new watch or freeze, and in a row's size combo. Eight is missing on
     /// purpose: no value in these games is that wide, and the choice took room the table needed.
@@ -56,15 +58,52 @@ public static class MemoryPanel
     private static string Key(uint address, byte size) => $"{address:X8}:{size}";
 
     /// <summary>
+    /// Points the Viewer tab at an address and opens it. The moby table's rows and the pointer
+    /// fields in an inspector both come here, so there is one place that decides what the box says
+    /// and how much is read.
+    /// </summary>
+    public static void ShowInViewer(AppState state, uint address, int length)
+    {
+        _readAddress = $"0x{address:X8}";
+        _readLength = Math.Clamp(length, 1, 65536);
+        _selectViewer = true;
+        state.AddToast($"Viewer address set to 0x{address:X8}");
+    }
+
+    /// <summary>
+    /// Adds a watch that arrives already named. The name and the format are the PC's half of a
+    /// watch and are keyed by address and size, so they are put down before the request goes out:
+    /// the refresh that follows then finds them rather than calling the row "watch N".
+    /// </summary>
+    public static void AddNamedWatch(AppState state, uint address, byte size, string name, string format)
+    {
+        Local[Key(address, size)] = new SavedWatch
+        {
+            Address = address,
+            Size = size,
+            Name = name,
+            Format = format,
+        };
+
+        state.Run(async () =>
+        {
+            await state.Client.WatchAddAsync(address, size).ConfigureAwait(false);
+            state.Post(() => state.RefreshWatches());
+        }, $"Watching {name} at 0x{address:X8}");
+    }
+
+    /// <summary>
     /// Drops the hex dump and the moby rows: both are copies of the running process's memory and
-    /// have no meaning once the session leaves INGAME.
+    /// have no meaning once the session leaves INGAME. The open inspectors go with them, because a
+    /// moby's address says nothing at all about the next process.
     /// </summary>
     public static void ClearGameData()
     {
-        _dump = string.Empty;
         _dumpBytes = Array.Empty<byte>();
         _dumpBase = 0;
         _sinceRead = 0;
+        ByteDrafts.Clear();
+        MobyInspector.CloseAll();
         ResetMobyTab();
     }
 
@@ -100,7 +139,11 @@ public static class MemoryPanel
                 ImGui.EndTabItem();
             }
 
-            if (ImGui.BeginTabItem("Viewer"))
+            // The one tab another window sends the user to: a moby row and a pointer inside one
+            // both put an address in its box, and a box nobody can see is not an answer.
+            var viewerFlags = _selectViewer ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
+            _selectViewer = false;
+            if (Ui.BeginTabItem("Viewer", viewerFlags))
             {
                 DrawViewer(state, enabled);
                 ImGui.EndTabItem();
@@ -203,7 +246,8 @@ public static class MemoryPanel
 
         var rows = FilterMobys(_mobyRows, _mobyFilter);
         ImGui.Spacing();
-        Ui.Hint($"{rows.Length} of {_mobyRows.Length} rows shown. Double-click a row to put its address in the viewer.");
+        Ui.Hint($"{rows.Length} of {_mobyRows.Length} rows shown. Double-click a row to open it; "
+                + "right-click it for the viewer.");
 
         bool hasClass = layout?.Has("oClass") == true;
         bool hasUid = layout?.Has("uid") == true;
@@ -231,12 +275,21 @@ public static class MemoryPanel
                 ImGui.TableNextRow();
                 ImGui.TableNextColumn();
 
+                int stride = _mobyInfo?.Stride ?? layout?.Stride ?? 256;
+
                 if (ImGui.Selectable($"{row.Index}##moby{row.Index}", false, ImGuiSelectableFlags.SpanAllColumns
                         | ImGuiSelectableFlags.AllowDoubleClick) && ImGui.IsMouseDoubleClicked(0))
                 {
-                    _readAddress = $"0x{row.Address:X8}";
-                    _readLength = _mobyInfo?.Stride ?? 256;
-                    state.AddToast($"Viewer address set to 0x{row.Address:X8}");
+                    MobyInspector.Open(state, row, layout, stride);
+                }
+
+                // What the double-click used to do. It is still wanted - a row is an address like
+                // any other - but it is not what opening a moby means any more.
+                if (ImGui.BeginPopupContextItem())
+                {
+                    if (ImGui.MenuItem("Show in viewer")) ShowInViewer(state, row.Address, stride);
+                    if (ImGui.MenuItem("Open inspector")) MobyInspector.Open(state, row, layout, stride);
+                    ImGui.EndPopup();
                 }
 
                 ImGui.TableNextColumn();
@@ -363,17 +416,11 @@ public static class MemoryPanel
             ImGui.Spacing();
             DrawTypedViews();
             ImGui.Spacing();
+            DrawDump(state, enabled);
 
-            // A read-only child rather than InputTextMultiline: ImGui.NET would allocate the whole
-            // edit buffer every frame for a dump that is never edited.
-            if (ImGui.BeginChild("##dump", new Vector2(-1, 260), ImGuiChildFlags.Borders,
-                    ImGuiWindowFlags.HorizontalScrollbar))
-            {
-                ImGui.TextUnformatted(_dump);
-            }
-
-            ImGui.EndChild();
-            if (ImGui.SmallButton("Copy dump")) ImGui.SetClipboardText(_dump);
+            // Built here rather than kept: the table draws from the bytes, and the only thing the
+            // old text was still for is this button.
+            if (ImGui.SmallButton("Copy dump")) ImGui.SetClipboardText(Ui.HexDump(_dumpBase, _dumpBytes));
         }
 
         ImGui.Spacing();
@@ -423,7 +470,6 @@ public static class MemoryPanel
                 {
                     _dumpBytes = bytes;
                     _dumpBase = address;
-                    _dump = Ui.HexDump(address, bytes);
                 });
             }
             finally
@@ -434,6 +480,188 @@ public static class MemoryPanel
 
         if (quiet) state.RunQuiet(Read);
         else state.Run(Read);
+    }
+
+    // ---------------------------------------------------------------- the hex dump
+
+    /// <summary>How tall the dump is. Sixteen or so lines, the way the text block was.</summary>
+    private const float DumpHeight = 260f;
+
+    /// <summary>
+    /// What is in a byte cell while it has focus, by address. The watches table's rule, for the
+    /// same reason: a re-read arriving mid-edit must not take the half-typed pair away.
+    /// </summary>
+    private static readonly Dictionary<uint, string> ByteDrafts = new();
+
+    /// <summary>
+    /// Writes a committed cell into this side's copy of memory, so the byte on screen is the byte
+    /// that was sent rather than the one the last read brought back. False - and nothing written -
+    /// for a pair the user has not finished typing and for a byte that is already what is there.
+    /// </summary>
+    public static bool TryApplyByteEdit(byte[] dump, int index, string? text, out byte value)
+    {
+        value = 0;
+        if (index < 0 || index >= dump.Length) return false;
+        if (!WatchValueCodec.TryParseByte(text, out value)) return false;
+        if (dump[index] == value) return false;
+
+        dump[index] = value;
+        return true;
+    }
+
+    /// <summary>
+    /// The dump as a table of editable bytes: the address, sixteen cells, and the text column the
+    /// old dump ended each line with. Only the rows on screen are drawn, because a dump is up to
+    /// 64 KB and every cell of it is a box.
+    /// </summary>
+    private static unsafe void DrawDump(AppState state, bool enabled)
+    {
+        // Measured from the font rather than guessed, and tight: sixteen boxes, an address and the
+        // text column have to fit the window at the size it opens at without a scrollbar sideways.
+        ImGui.PushStyleVar(ImGuiStyleVar.CellPadding, new Vector2(2f, 1f));
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(2f, ImGui.GetStyle().FramePadding.Y));
+
+        float byteWidth = ImGui.CalcTextSize("FF").X + (ImGui.GetStyle().FramePadding.X * 2f);
+        float addressWidth = ImGui.CalcTextSize("00000000").X;
+        float textWidth = ImGui.CalcTextSize("0123456789ABCDEF").X;
+
+        const ImGuiTableFlags flags = ImGuiTableFlags.RowBg | ImGuiTableFlags.ScrollY
+                                      | ImGuiTableFlags.SizingFixedFit | ImGuiTableFlags.BordersOuter;
+
+        if (ImGui.BeginTable("dump", 18, flags, new Vector2(-1, DumpHeight)))
+        {
+            ImGui.TableSetupScrollFreeze(0, 1);
+            ImGui.TableSetupColumn("Address", ImGuiTableColumnFlags.WidthFixed, addressWidth);
+
+            // The column headings are the low nibble of the address, so a byte in the middle of a
+            // line can be found without counting along it.
+            for (int i = 0; i < 16; i++)
+            {
+                ImGui.TableSetupColumn(i.ToString("X"), ImGuiTableColumnFlags.WidthFixed, byteWidth);
+            }
+
+            ImGui.TableSetupColumn("Text", ImGuiTableColumnFlags.WidthFixed, textWidth);
+            ImGui.TableHeadersRow();
+
+            var clipper = new ImGuiListClipperPtr(ImGuiNative.ImGuiListClipper_ImGuiListClipper());
+            clipper.Begin((_dumpBytes.Length + 15) / 16);
+            while (clipper.Step())
+            {
+                for (int row = clipper.DisplayStart; row < clipper.DisplayEnd; row++)
+                {
+                    DrawDumpRow(state, row, enabled);
+                }
+            }
+
+            clipper.End();
+            clipper.Destroy();
+            ImGui.EndTable();
+        }
+
+        ImGui.PopStyleVar(2);
+    }
+
+    private static void DrawDumpRow(AppState state, int row, bool enabled)
+    {
+        int first = row * 16;
+
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        Ui.TableLabel((_dumpBase + (uint)first).ToString("X8"));
+
+        for (int column = 0; column < 16; column++)
+        {
+            ImGui.TableNextColumn();
+            int index = first + column;
+            if (index >= _dumpBytes.Length) continue;
+
+            // The cells all draw the same box, so the byte's place in the dump is what tells them
+            // apart to ImGui.
+            ImGui.PushID(index);
+            DrawByteCell(state, index, enabled);
+            ImGui.PopID();
+        }
+
+        ImGui.TableNextColumn();
+        Ui.TableLabel(AsciiLine(first));
+    }
+
+    /// <summary>
+    /// One byte, as two hex digits that write themselves back. Enter sends it, and so does clicking
+    /// away from a cell that was changed; a pair that was left half typed is dropped without a
+    /// write and without a word, because a stray keystroke over a dump is not a request.
+    /// </summary>
+    private static void DrawByteCell(AppState state, int index, bool enabled)
+    {
+        uint address = _dumpBase + (uint)index;
+        string text = ByteDrafts.TryGetValue(address, out var draft) ? draft : _dumpBytes[index].ToString("X2");
+
+        ImGui.BeginDisabled(!enabled);
+        ImGui.SetNextItemWidth(-1);
+        Ui.PushTableInput();
+        bool entered = ImGui.InputText("##byte", ref text, 2, ImGuiInputTextFlags.CharsHexadecimal
+                                                              | ImGuiInputTextFlags.CharsUppercase
+                                                              | ImGuiInputTextFlags.EnterReturnsTrue);
+        Ui.PopTableInput();
+        bool active = ImGui.IsItemActive();
+        bool committed = entered || ImGui.IsItemDeactivatedAfterEdit();
+        ImGui.EndDisabled();
+
+        DrawByteMenu(state, address, index);
+
+        if (active) ByteDrafts[address] = text;
+        else ByteDrafts.Remove(address);
+
+        if (!committed) return;
+
+        ByteDrafts.Remove(address);
+        if (!TryApplyByteEdit(_dumpBytes, index, text, out byte value)) return;
+
+        var bytes = new[] { value };
+        state.Run(() => state.Client.MemWriteAsync(address, bytes));
+    }
+
+    /// <summary>
+    /// What a byte of the dump can become: a watch of any of the three sizes, or an address on the
+    /// clipboard. A size that would run off the end of what was read is not offered.
+    /// </summary>
+    private static void DrawByteMenu(AppState state, uint address, int index)
+    {
+        if (!ImGui.BeginPopupContextItem()) return;
+
+        ImGui.TextUnformatted($"0x{address:X8}");
+        ImGui.Separator();
+
+        ImGui.BeginDisabled(!state.Connected);
+        foreach (int size in Sizes)
+        {
+            ImGui.BeginDisabled(index + size > _dumpBytes.Length);
+            if (ImGui.MenuItem($"Add {size}-byte watch"))
+            {
+                AddNamedWatch(state, address, (byte)size, $"0x{address:X8} u{size * 8}", "hex");
+            }
+
+            ImGui.EndDisabled();
+        }
+
+        ImGui.EndDisabled();
+
+        if (ImGui.MenuItem("Copy address")) ImGui.SetClipboardText($"0x{address:X8}");
+        ImGui.EndPopup();
+    }
+
+    /// <summary>The sixteen bytes of a line as text, the way the old dump's last column had them.</summary>
+    private static string AsciiLine(int first)
+    {
+        int count = Math.Min(16, _dumpBytes.Length - first);
+        var line = new char[count];
+        for (int i = 0; i < count; i++)
+        {
+            char c = (char)_dumpBytes[first + i];
+            line[i] = c is >= ' ' and <= '~' ? c : '.';
+        }
+
+        return new string(line);
     }
 
     private static void DrawTypedViews()

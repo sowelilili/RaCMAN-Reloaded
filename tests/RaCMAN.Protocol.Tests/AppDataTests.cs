@@ -184,6 +184,88 @@ public class AppDataTests
         Assert.Equal(uid, layout.Fields["uid"].Offset);
     }
 
+    /// <summary>
+    /// The struct list is the whole row and nothing but: in order, no gaps, no overlaps, and ending
+    /// exactly on the stride. The old client's structs are packed and sequential, so a list that
+    /// does not add up to 256 bytes has a field missing, doubled or given the wrong type.
+    /// </summary>
+    [Theory]
+    [InlineData(GameId.Rac1, 74)]
+    [InlineData(GameId.Rac2, 94)]
+    [InlineData(GameId.Rac3, 94)]
+    [InlineData(GameId.Rac4, 70)]
+    public void EveryMobyStructListCoversItsWholeRow(GameId game, int count)
+    {
+        var layout = MobyLayouts.Load(MobyDataFolder())[game];
+        Assert.Equal(count, layout.Struct.Count);
+
+        int next = 0;
+        foreach (var field in layout.Struct)
+        {
+            Assert.NotEmpty(field.Name);
+            Assert.True(field.Length > 0, $"{game} field {field.Name} has an unknown type '{field.Type}'");
+
+            // Each field starts where the one before it ended, which is ordered, gapless and
+            // overlap-free in one line.
+            Assert.True(field.Offset == next,
+                $"{game} field {field.Name} is at 0x{field.Offset:X} and the field before it ended at 0x{next:X}");
+
+            next += field.Length;
+        }
+
+        Assert.Equal(layout.Stride, next);
+    }
+
+    /// <summary>
+    /// The columns the table draws are fields of the same struct, so each of them has to land on a
+    /// struct entry of the same shape. The position is the one that differs on purpose: the table
+    /// wants three floats of the game's Vec4 and the struct has all four.
+    /// </summary>
+    [Theory]
+    [InlineData(GameId.Rac1)]
+    [InlineData(GameId.Rac2)]
+    [InlineData(GameId.Rac3)]
+    [InlineData(GameId.Rac4)]
+    public void TheMobyColumnsAgreeWithTheStructTheyCameFrom(GameId game)
+    {
+        var layout = MobyLayouts.Load(MobyDataFolder())[game];
+
+        foreach (var (name, column) in layout.Fields)
+        {
+            var field = layout.Struct.FirstOrDefault(entry => entry.Offset == column.Offset);
+            Assert.True(field is not null,
+                $"{game} column {name} is at 0x{column.Offset:X} and the struct names no field there");
+
+            Assert.Equal(column.Type == "vec3f" ? "vec4f" : column.Type, field!.Type);
+        }
+    }
+
+    [Theory]
+    [InlineData("u8", 1)]
+    [InlineData("i8", 1)]
+    [InlineData("u16", 2)]
+    [InlineData("i16", 2)]
+    [InlineData("u32", 4)]
+    [InlineData("i32", 4)]
+    [InlineData("f32", 4)]
+    [InlineData("ptr", 4)]
+    [InlineData("u64", 8)]
+    [InlineData("vec3f", 12)]
+    [InlineData("vec4f", 16)]
+    [InlineData("nonsense", 0)]
+    public void AMobyFieldIsAsLongAsItsType(string type, int length)
+    {
+        Assert.Equal(length, new MobyField { Type = type }.Length);
+    }
+
+    /// <summary>A raw block is as long as the file says, and a block with no length is not a field.</summary>
+    [Fact]
+    public void ARawBlockIsAsLongAsTheFileSays()
+    {
+        Assert.Equal(48, new MobyField { Type = "bytes", RawLength = 48 }.Length);
+        Assert.Equal(0, new MobyField { Type = "bytes" }.Length);
+    }
+
     [Fact]
     public void MobyLayoutDecodesARowBigEndian()
     {

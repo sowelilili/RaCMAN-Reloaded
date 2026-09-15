@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using RaCMAN.App;
 using RaCMAN.App.Panels;
 
@@ -1291,5 +1292,213 @@ public class WatchValueCodecTests
         Assert.Equal(0xFFFFul, WatchValueCodec.MaxFor(2));
         Assert.Equal(0xFFFFFFFFul, WatchValueCodec.MaxFor(4));
         Assert.Equal(ulong.MaxValue, WatchValueCodec.MaxFor(8));
+    }
+
+    // ---------------------------------------------------------------- the viewer's byte cells
+
+    [Theory]
+    [InlineData("FF", 0xFF)]
+    [InlineData("00", 0x00)]
+    [InlineData("0a", 0x0A)]
+    [InlineData(" 7f ", 0x7F)]
+    public void ACellOfTwoHexDigitsIsAByte(string text, int value)
+    {
+        Assert.True(WatchValueCodec.TryParseByte(text, out byte parsed));
+        Assert.Equal((byte)value, parsed);
+    }
+
+    /// <summary>A pair that is not finished is not a value: the cell drops it rather than writing.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("F")]
+    [InlineData("FFF")]
+    [InlineData("GG")]
+    [InlineData("0xFF")]
+    [InlineData("-1")]
+    public void HalfATypedByteIsRefused(string text)
+    {
+        Assert.False(WatchValueCodec.TryParseByte(text, out byte parsed));
+        Assert.Equal(0, parsed);
+    }
+}
+
+/// <summary>
+/// The Memory panel's hex dump, now that its bytes are boxes: what a committed cell does to this
+/// side's copy of memory, which is what keeps the grid showing the byte that was sent rather than
+/// the byte the last read brought back.
+/// </summary>
+public class ViewerByteEditTests
+{
+    [Fact]
+    public void ACommittedCellChangesTheDumpItCameFrom()
+    {
+        var dump = new byte[] { 0x11, 0x22, 0x33 };
+
+        Assert.True(MemoryPanel.TryApplyByteEdit(dump, 1, "AB", out byte value));
+        Assert.Equal(0xAB, value);
+        Assert.Equal(new byte[] { 0x11, 0xAB, 0x33 }, dump);
+    }
+
+    [Fact]
+    public void ACellThatDidNotChangeAnythingWritesNothing()
+    {
+        var dump = new byte[] { 0x11, 0x22 };
+
+        Assert.False(MemoryPanel.TryApplyByteEdit(dump, 0, "11", out _));
+        Assert.Equal(new byte[] { 0x11, 0x22 }, dump);
+    }
+
+    [Theory]
+    [InlineData(0, "F")]
+    [InlineData(0, "")]
+    [InlineData(0, "zz")]
+    [InlineData(-1, "AB")]
+    [InlineData(2, "AB")]
+    public void NothingIsWrittenForATextOrAPlaceTheDumpCannotTake(int index, string text)
+    {
+        var dump = new byte[] { 0x11, 0x22 };
+
+        Assert.False(MemoryPanel.TryApplyByteEdit(dump, index, text, out _));
+        Assert.Equal(new byte[] { 0x11, 0x22 }, dump);
+    }
+}
+
+/// <summary>
+/// The moby inspector's fields: what each type shows in its box, and what the box takes back. The
+/// window owns the boxes, this owns the bytes.
+/// </summary>
+public class MobyFieldCodecTests
+{
+    private static MobyField Field(string type, int offset = 0, int rawLength = 0) =>
+        new() { Name = "field", Type = type, Offset = offset, RawLength = rawLength };
+
+    /// <summary>A row with one of everything in it, big-endian, the way the console stores it.</summary>
+    private static byte[] Row()
+    {
+        var row = new byte[64];
+        row[0] = 0xFF;                                              // u8 255, i8 -1
+        BinaryPrimitives.WriteUInt16BigEndian(row.AsSpan(2), 0xFFFE);
+        BinaryPrimitives.WriteUInt32BigEndian(row.AsSpan(4), 0x0012ABCD);
+        BinaryPrimitives.WriteInt32BigEndian(row.AsSpan(8), -2);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(12), 1.5f);
+        BinaryPrimitives.WriteUInt64BigEndian(row.AsSpan(16), 0x0123456789ABCDEF);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(24), 1.5f);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(28), -2.5f);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(32), 300f);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(36), 0f);
+        row[40] = 0xDE;
+        row[41] = 0xAD;
+        row[42] = 0xBE;
+        row[43] = 0xEF;
+        return row;
+    }
+
+    [Theory]
+    [InlineData("u8", 0, "255")]
+    [InlineData("i8", 0, "-1")]
+    [InlineData("u16", 2, "65534")]
+    [InlineData("i16", 2, "-2")]
+    [InlineData("u32", 4, "1223629")]
+    [InlineData("ptr", 4, "0x0012ABCD")]
+    [InlineData("i32", 8, "-2")]
+    [InlineData("f32", 12, "1.5")]
+    [InlineData("u64", 16, "0x0123456789ABCDEF")]
+    [InlineData("vec4f", 24, "1.5, -2.5, 300, 0")]
+    [InlineData("vec3f", 24, "1.5, -2.5, 300")]
+    public void EachTypeIsShownInTheFormatItsBoxTakesBack(string type, int offset, string shown)
+    {
+        var field = Field(type, offset);
+        Assert.Equal(shown, MobyFieldCodec.Format(field, Row()));
+
+        // What it shows is what it takes: the same bytes come back out of the box's own text.
+        Assert.True(MobyFieldCodec.TryEncode(field, shown, out var bytes));
+        Assert.Equal(Row().AsSpan(offset, field.Length).ToArray(), bytes);
+    }
+
+    [Fact]
+    public void ARawBlockIsHexAndIsNeverWritten()
+    {
+        var field = Field("bytes", 40, 4);
+
+        Assert.Equal("DE AD BE EF", MobyFieldCodec.Format(field, Row()));
+        Assert.False(MobyFieldCodec.IsEditable(field.Type));
+        Assert.False(MobyFieldCodec.TryEncode(field, "DE AD BE EF", out _));
+    }
+
+    /// <summary>A row too short for the field is a dash on screen rather than an exception.</summary>
+    [Fact]
+    public void AFieldPastTheEndOfTheRowShowsNothing()
+    {
+        Assert.Equal(string.Empty, MobyFieldCodec.Format(Field("u32", 62), Row()));
+        Assert.Equal(string.Empty, MobyFieldCodec.Format(Field("vec4f", 60), Row()));
+        Assert.False(MobyFieldCodec.TryReadScalar(Field("u32", 62), Row(), out _));
+    }
+
+    [Theory]
+    [InlineData("u8", 1)]
+    [InlineData("i16", 2)]
+    [InlineData("u32", 4)]
+    [InlineData("ptr", 4)]
+    [InlineData("f32", 4)]
+    [InlineData("u64", 0)]
+    [InlineData("vec4f", 0)]
+    [InlineData("bytes", 0)]
+    public void OnlyAFieldAWatchFitsOffersOne(string type, int size)
+    {
+        Assert.Equal((byte)size, MobyFieldCodec.WatchSize(Field(type, rawLength: 8)));
+    }
+
+    [Fact]
+    public void APointerFieldSaysWhatItPointsAt()
+    {
+        Assert.True(MobyFieldCodec.TryReadPointer(Field("ptr", 4), Row(), out uint target));
+        Assert.Equal(0x0012ABCDu, target);
+
+        // Only a pointer: nothing else in a row is an address as far as this client knows.
+        Assert.False(MobyFieldCodec.TryReadPointer(Field("u32", 4), Row(), out _));
+    }
+
+    [Fact]
+    public void AVectorTakesItsFloatsSeparatedByCommasOrSpaces()
+    {
+        var field = Field("vec4f", 24);
+
+        Assert.True(MobyFieldCodec.TryEncode(field, "1 2 3 4", out var spaced));
+        Assert.True(MobyFieldCodec.TryEncode(field, "1, 2, 3, 4", out var commas));
+        Assert.Equal(commas, spaced);
+        Assert.Equal(1f, BinaryPrimitives.ReadSingleBigEndian(spaced));
+        Assert.Equal(4f, BinaryPrimitives.ReadSingleBigEndian(spaced.AsSpan(12)));
+
+        // Three floats are not a vec4f, and neither is a word.
+        Assert.False(MobyFieldCodec.TryEncode(field, "1, 2, 3", out _));
+        Assert.False(MobyFieldCodec.TryEncode(field, "1, 2, 3, 4, 5", out _));
+        Assert.False(MobyFieldCodec.TryEncode(field, "x, y, z, w", out _));
+    }
+
+    [Fact]
+    public void TextThatIsNotTheTypeIsRefusedAndNothingIsWritten()
+    {
+        Assert.False(MobyFieldCodec.TryEncode(Field("u8"), "256", out _));
+        Assert.False(MobyFieldCodec.TryEncode(Field("i8"), "-129", out _));
+        Assert.False(MobyFieldCodec.TryEncode(Field("ptr"), "not-an-address", out _));
+        Assert.False(MobyFieldCodec.TryEncode(Field("f32"), "1.2.3", out _));
+        Assert.False(MobyFieldCodec.TryEncode(Field("u32"), "   ", out _));
+    }
+
+    /// <summary>
+    /// The format a field is read and written in is the one the watch it becomes gets, so a watch
+    /// made out of a field shows what the field showed.
+    /// </summary>
+    [Theory]
+    [InlineData("u8", "dec")]
+    [InlineData("u32", "dec")]
+    [InlineData("i16", "signed")]
+    [InlineData("f32", "float")]
+    [InlineData("ptr", "hex")]
+    [InlineData("u64", "hex")]
+    public void EachTypeCarriesItsFormatToTheWatchesTable(string type, string format)
+    {
+        Assert.Equal(format, MobyFieldCodec.FormatFor(type));
+        Assert.Contains(format, Ui.ValueFormats);
     }
 }

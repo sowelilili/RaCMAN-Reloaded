@@ -423,6 +423,59 @@ public class ClientTests
         }
     }
 
+    /// <summary>
+    /// What the moby inspector does, without the window: one MEM_READ of a row, every field of the
+    /// layout's struct decoded out of it, and one field written back and read again. The window
+    /// only owns the boxes those strings go in.
+    /// </summary>
+    [Fact]
+    public async Task TheMobyInspectorReadsARowDecodesEveryFieldAndWritesOneBack()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var layout = MobyLayouts.Load(Path.Combine(AppContext.BaseDirectory, "data", "moby"))[GameId.Rac1];
+            uint address = server.MemoryBase + FakeQwarkServer.MobyTableOffset;
+
+            var row = await client.MemReadAsync(address, (uint)layout.Stride);
+            Assert.Equal(layout.Stride, row.Length);
+
+            foreach (var field in layout.Struct)
+            {
+                string shown = MobyFieldCodec.Format(field, row);
+                Assert.False(shown.Length == 0, $"{field.Name} ({field.Type}) showed nothing");
+                if (!MobyFieldCodec.IsEditable(field.Type)) continue;
+
+                // Every editable field takes back exactly what it shows. The floats in this row are
+                // whole numbers, so they survive being shown to four decimals as well.
+                Assert.True(MobyFieldCodec.TryEncode(field, shown, out var bytes), $"{field.Name} refused '{shown}'");
+                Assert.Equal(row.AsSpan(field.Offset, field.Length).ToArray(), bytes);
+            }
+
+            // The fake console's first row: x = 100, y = 200, z = 300, and a w nobody set.
+            var position = layout.Struct.Single(f => f.Name == "position");
+            Assert.Equal("100, 200, 300, 0", MobyFieldCodec.Format(position, row));
+
+            // A field written the way the inspector writes one, and the row again to prove it.
+            var oClass = layout.Struct.Single(f => f.Name == "oClass");
+            Assert.True(MobyFieldCodec.TryEncode(oClass, "1234", out var written));
+            await client.MemWriteAsync(address + (uint)oClass.Offset, written);
+
+            Assert.True(MobyFieldCodec.TryEncode(position, "1.5, -2.5, 3, 4", out var moved));
+            await client.MemWriteAsync(address + (uint)position.Offset, moved);
+
+            var again = await client.MemReadAsync(address, (uint)layout.Stride);
+            Assert.Equal("1234", MobyFieldCodec.Format(oClass, again));
+            Assert.Equal("1.5, -2.5, 3, 4", MobyFieldCodec.Format(position, again));
+
+            // And the table's own columns read the row the same way the inspector just did.
+            var decoded = MobyTableReader.Decode(layout, 0, address, again);
+            Assert.Equal(1234, decoded.OClass);
+            Assert.Equal(1.5f, decoded.X);
+        }
+    }
+
     [Fact]
     public async Task MobyTableReaderCapsTheRowCountAndSaysSo()
     {

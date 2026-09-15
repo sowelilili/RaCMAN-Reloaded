@@ -8,23 +8,42 @@ namespace RaCMAN.App;
 /// <summary>One field of a moby row: where it sits and how to read it.</summary>
 public sealed class MobyField
 {
+    /// <summary>
+    /// The struct field's own name. The <c>fields</c> map is keyed by name and leaves this empty;
+    /// the <c>struct</c> list is an ordered array, so every entry in it carries one.
+    /// </summary>
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+
     [JsonPropertyName("offset")]
     public int Offset { get; set; }
 
-    /// <summary>u8, i8, u16, i16, u32, i32, f32 or vec3f.</summary>
+    /// <summary>u8, i8, u16, i16, u32, i32, u64, f32, ptr, vec3f, vec4f or bytes.</summary>
     [JsonPropertyName("type")]
     public string Type { get; set; } = "u32";
+
+    /// <summary>How many bytes a <c>bytes</c> block holds; ignored by every other type.</summary>
+    [JsonPropertyName("length")]
+    public int RawLength { get; set; }
 
     /// <summary>The struct field this offset was derived from, for the record.</summary>
     [JsonPropertyName("from")]
     public string From { get; set; } = string.Empty;
 
+    /// <summary>
+    /// How many bytes the field is. Ignored by the serializer on purpose: the file's own "length"
+    /// is <see cref="RawLength"/>, and two properties cannot answer to one name.
+    /// </summary>
+    [JsonIgnore]
     public int Length => Type switch
     {
         "u8" or "i8" => 1,
         "u16" or "i16" => 2,
-        "u32" or "i32" or "f32" => 4,
+        "u32" or "i32" or "f32" or "ptr" => 4,
+        "u64" => 8,
         "vec3f" => 12,
+        "vec4f" => 16,
+        "bytes" => RawLength,
         _ => 0,
     };
 }
@@ -52,6 +71,14 @@ public sealed class MobyLayout
 
     [JsonPropertyName("fields")]
     public Dictionary<string, MobyField> Fields { get; set; } = new();
+
+    /// <summary>
+    /// The whole row, in the order the struct declares it: what the inspector lists. The
+    /// <see cref="Fields"/> map above is the handful of them the table draws columns for, and every
+    /// one of those is in here too, at the same offset.
+    /// </summary>
+    [JsonPropertyName("struct")]
+    public List<MobyField> Struct { get; set; } = new();
 
     public GameId GameId => (GameId)Game;
 
