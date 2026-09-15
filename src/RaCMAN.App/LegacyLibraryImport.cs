@@ -14,6 +14,12 @@ namespace RaCMAN.App;
 /// old client took any name at all.
 /// </para>
 /// <para>
+/// Every save file comes over. Not every mod does: the old defaults this client decided against
+/// are named in <see cref="LegacyModExclusions"/>, and a savefile helper or a mod that drives a Lua
+/// script is left behind whatever that file says. Each one is reported with its reason, because a
+/// mod that quietly did not arrive is a mod the user goes looking for.
+/// </para>
+/// <para>
 /// No ImGui and no console: this is a file copy, so it runs off the render thread and works with
 /// nothing plugged in.
 /// </para>
@@ -25,20 +31,40 @@ public static class LegacyLibraryImport
 
     public const string ModFolderName = "mods";
 
+    /// <summary>What makes a folder under a title a mod at all, in both libraries.</summary>
+    public const string PatchFileName = "patch.txt";
+
+    /// <summary>
+    /// <c>mods/libs/</c> in the old folder: the Lua helpers its scripts shared, sitting where a
+    /// title id otherwise does. Not a title, so never a folder of mods.
+    /// </summary>
+    public const string LuaLibraryFolder = "libs";
+
+    /// <summary>Why a mod that drives a Lua script is left where it is.</summary>
+    public const string NeedsLuaReason = "needs Lua";
+
+    /// <summary>Why a savefile helper is left where it is, whatever it calls itself.</summary>
+    public const string BuiltIntoQwarkReason = "built into qwark";
+
+    /// <summary>A mod the import left in the old folder, and the reason it gives for it.</summary>
+    public sealed record ExcludedMod(string TitleId, string DirName, string Reason);
+
     /// <summary>
     /// What the old folder holds, counted before anything is copied, so the panel can say what
     /// pressing the button would bring over. A folder without either library is simply nothing.
+    /// The mods this client does not import are counted apart from the ones it does, because the
+    /// number to press the button for is the second one.
     /// </summary>
-    public sealed record Survey(int Saves, int Categories, int Mods)
+    public sealed record Survey(int Saves, int Categories, int Mods, int Excluded)
     {
-        public static readonly Survey Nothing = new(0, 0, 0);
+        public static readonly Survey Nothing = new(0, 0, 0, 0);
 
         public bool Anything => Saves > 0 || Mods > 0;
 
-        /// <summary>"12 saves in 3 categories, 4 mods", in the words the Settings panel prints.</summary>
+        /// <summary>"12 saves in 3 categories, 4 mods, 6 excluded", in the words the Settings panel prints.</summary>
         public string Describe()
         {
-            var parts = new List<string>(2);
+            var parts = new List<string>(3);
             if (Saves > 0)
             {
                 parts.Add($"{Saves} save{(Saves == 1 ? string.Empty : "s")} in "
@@ -46,6 +72,7 @@ public static class LegacyLibraryImport
             }
 
             if (Mods > 0) parts.Add($"{Mods} mod{(Mods == 1 ? string.Empty : "s")}");
+            if (Excluded > 0) parts.Add($"{Excluded} excluded");
 
             return parts.Count == 0 ? "no save files or mods" : string.Join(", ", parts);
         }
@@ -62,10 +89,11 @@ public static class LegacyLibraryImport
         int Mods,
         int ModsAlreadyHere,
         IReadOnlyList<string> Shipped,
-        IReadOnlyList<string> BesideYours)
+        IReadOnlyList<string> BesideYours,
+        IReadOnlyList<ExcludedMod> Excluded)
     {
         public static readonly Result Nothing =
-            new(0, 0, 0, 0, 0, Array.Empty<string>(), Array.Empty<string>());
+            new(0, 0, 0, 0, 0, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<ExcludedMod>());
 
         public bool Anything => Saves > 0 || Mods > 0;
 
@@ -99,13 +127,61 @@ public static class LegacyLibraryImport
                         : $"{ModsAlreadyHere} mod(s) already here");
                 }
 
+                if (Excluded.Count > 0) lines.Add(DescribeExcluded(Excluded));
+
                 return lines;
             }
         }
+
+        /// <summary>
+        /// "excluded: sfhelper and rc2-save (built into qwark), flight and ohko (need Lua)": every
+        /// mod that was left behind, gathered under the reason it was left behind for, in the order
+        /// the reasons first came up. A folder name that appears under two titles — three games
+        /// have a "flight" — is said once, because the reason is what the line is about.
+        /// </summary>
+        private static string DescribeExcluded(IReadOnlyList<ExcludedMod> excluded)
+        {
+            var order = new List<string>();
+            var byReason = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var mod in excluded)
+            {
+                if (!byReason.TryGetValue(mod.Reason, out var names))
+                {
+                    byReason[mod.Reason] = names = new List<string>(1);
+                    order.Add(mod.Reason);
+                }
+
+                if (!names.Contains(mod.DirName, StringComparer.OrdinalIgnoreCase)) names.Add(mod.DirName);
+            }
+
+            var groups = order.Select(reason => $"{Names(byReason[reason])} ({Agree(reason, byReason[reason].Count)})");
+            return $"excluded: {string.Join(", ", groups)}";
+        }
+
+        /// <summary>"sfhelper", "sfhelper and rc2-save", "sfhelper, rc2-save and rc3-save".</summary>
+        private static string Names(IReadOnlyList<string> names) => names.Count switch
+        {
+            1 => names[0],
+            2 => $"{names[0]} and {names[1]}",
+            _ => $"{string.Join(", ", names.Take(names.Count - 1))} and {names[^1]}",
+        };
+
+        /// <summary>
+        /// The reason read as a sentence about the mods in front of it: one "needs Lua", two
+        /// "need Lua". Only the reasons written that way have a plural to agree with.
+        /// </summary>
+        private static string Agree(string reason, int count) =>
+            count > 1 && reason.StartsWith("needs ", StringComparison.OrdinalIgnoreCase)
+                ? $"need {reason["needs ".Length..]}"
+                : reason;
     }
 
-    /// <summary>Counts <paramref name="oldFolder"/>'s two libraries without touching anything.</summary>
-    public static Survey Look(string? oldFolder)
+    /// <summary>
+    /// Counts <paramref name="oldFolder"/>'s two libraries without touching anything, under the
+    /// same rules the import itself applies, so the number it shows is the number that lands.
+    /// </summary>
+    public static Survey Look(string? oldFolder, LegacyModExclusions exclusions)
     {
         if (string.IsNullOrWhiteSpace(oldFolder) || !Directory.Exists(oldFolder)) return Survey.Nothing;
 
@@ -114,6 +190,7 @@ public static class LegacyLibraryImport
             int saves = 0;
             int categories = 0;
             int mods = 0;
+            int excluded = 0;
 
             var saveRoot = new DirectoryInfo(Path.Combine(oldFolder, SaveFolderName));
             if (saveRoot.Exists)
@@ -134,10 +211,22 @@ public static class LegacyLibraryImport
             var modRoot = new DirectoryInfo(Path.Combine(oldFolder, ModFolderName));
             if (modRoot.Exists)
             {
-                foreach (var title in modRoot.GetDirectories()) mods += title.GetDirectories().Length;
+                foreach (var title in modRoot.GetDirectories())
+                {
+                    if (IsLuaLibrary(title.Name)) continue;
+
+                    string titleId = SaveFileLibrary.Sanitise(title.Name, "unknown");
+                    foreach (var mod in title.GetDirectories())
+                    {
+                        if (!IsMod(mod)) continue;
+
+                        if (ExcludedReason(exclusions, titleId, mod) is null) mods++;
+                        else excluded++;
+                    }
+                }
             }
 
-            return new Survey(saves, categories, mods);
+            return new Survey(saves, categories, mods, excluded);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -149,19 +238,25 @@ public static class LegacyLibraryImport
     /// Copies both libraries out of <paramref name="oldFolder"/>, which is the folder the old
     /// racman.exe and its config.txt sat in. <paramref name="shippedModsRoot"/> is the library this
     /// release ships, read only to recognise a mod the user never had to bring over in the first
-    /// place; null when there is not one.
+    /// place; null when there is not one. <paramref name="exclusions"/> is the shipped list of the
+    /// old defaults this client decided against, which the tests hand their own.
     /// </summary>
-    public static Result Run(string? oldFolder, string saveFilesRoot, string modsRoot, string? shippedModsRoot)
+    public static Result Run(
+        string? oldFolder,
+        string saveFilesRoot,
+        string modsRoot,
+        string? shippedModsRoot,
+        LegacyModExclusions exclusions)
     {
         if (string.IsNullOrWhiteSpace(oldFolder) || !Directory.Exists(oldFolder)) return Result.Nothing;
 
         var tally = new Tally();
         CopySaves(Path.Combine(oldFolder, SaveFolderName), saveFilesRoot, tally);
-        CopyMods(Path.Combine(oldFolder, ModFolderName), modsRoot, shippedModsRoot, tally);
+        CopyMods(Path.Combine(oldFolder, ModFolderName), modsRoot, shippedModsRoot, exclusions, tally);
 
         return new Result(
             tally.Saves, tally.SavesAlreadyHere, tally.SavesRenamed,
-            tally.Mods, tally.ModsAlreadyHere, tally.Shipped, tally.BesideYours);
+            tally.Mods, tally.ModsAlreadyHere, tally.Shipped, tally.BesideYours, tally.Excluded);
     }
 
     /// <summary>What the copy has done so far, passed down rather than threaded back up.</summary>
@@ -176,6 +271,8 @@ public static class LegacyLibraryImport
         public List<string> Shipped { get; } = new();
 
         public List<string> BesideYours { get; } = new();
+
+        public List<ExcludedMod> Excluded { get; } = new();
     }
 
     // ---------------------------------------------------------------- save files
@@ -294,13 +391,23 @@ public static class LegacyLibraryImport
     // ---------------------------------------------------------------- mods
 
     /// <summary>
-    /// Every folder under <c>mods/&lt;TITLEID&gt;/</c>. A mod is the folder as a whole, so it is
-    /// compared as a whole: one the release ships is not worth importing, and neither is one the
-    /// user already has under any name. A folder name this client uses for something else is
-    /// imported beside it, because that name is the id qwark loads the mod by and the user should
-    /// see both of them.
+    /// Every folder under <c>mods/&lt;TITLEID&gt;/</c>, in the order the rules are asked:
+    /// <c>libs/</c> is the old Lua library and not a title; a folder with no patch.txt is not a mod
+    /// and is not worth a word either way; a mod this client decided against is left behind with
+    /// the reason it was left behind for; and only then is the copy itself considered.
+    /// <para>
+    /// A mod is the folder as a whole, so it is compared as a whole: one the release ships is not
+    /// worth importing, and neither is one the user already has under any name. A folder name this
+    /// client uses for something else is imported beside it, because that name is the id qwark
+    /// loads the mod by and the user should see both of them.
+    /// </para>
     /// </summary>
-    private static void CopyMods(string source, string root, string? shippedRoot, Tally tally)
+    private static void CopyMods(
+        string source,
+        string root,
+        string? shippedRoot,
+        LegacyModExclusions exclusions,
+        Tally tally)
     {
         if (!Directory.Exists(source)) return;
 
@@ -308,11 +415,21 @@ public static class LegacyLibraryImport
 
         foreach (var title in new DirectoryInfo(source).GetDirectories())
         {
+            if (IsLuaLibrary(title.Name)) continue;
+
             string titleId = SaveFileLibrary.Sanitise(title.Name, "unknown");
             string destination = Path.Combine(root, titleId);
 
             foreach (var mod in title.GetDirectories())
             {
+                if (!IsMod(mod)) continue;
+
+                if (ExcludedReason(exclusions, titleId, mod) is { } reason)
+                {
+                    tally.Excluded.Add(new ExcludedMod(titleId, mod.Name, reason));
+                    continue;
+                }
+
                 try
                 {
                     CopyMod(mod, destination, titleId, shippedRoot, shipped, tally);
@@ -323,6 +440,120 @@ public static class LegacyLibraryImport
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// <c>mods/libs/</c> sits where a title id does, but it is the Lua the old client's scripts
+    /// shared and not a game's mods, so nothing under it is ever imported or reported.
+    /// </summary>
+    private static bool IsLuaLibrary(string dirName) =>
+        string.Equals(dirName, LuaLibraryFolder, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a folder under a title is a mod at all. A mod is its patch.txt, and the old library
+    /// also holds the source a few of them were built from — a Makefile and a <c>src/</c>, no patch
+    /// file — which is nothing to import and nothing to say anything about.
+    /// </summary>
+    private static bool IsMod(DirectoryInfo mod) => File.Exists(Path.Combine(mod.FullName, PatchFileName));
+
+    /// <summary>
+    /// Why a mod stays in the old folder, or null when it comes over. The shipped list is asked
+    /// first because it names its own reason; the two rules after it hold whatever the list says,
+    /// since a copy of either kind can be sitting under any folder name at all.
+    /// </summary>
+    private static string? ExcludedReason(LegacyModExclusions exclusions, string titleId, DirectoryInfo mod)
+    {
+        if (exclusions.Reason(titleId, mod.Name) is { } listed) return listed;
+        if (IsSavefileHelper(mod)) return BuiltIntoQwarkReason;
+        return NeedsLua(mod) ? NeedsLuaReason : null;
+    }
+
+    /// <summary>
+    /// Whether a mod is one of the savefile helpers, which qwark does itself now. Several releases
+    /// of the old client shipped one under several names — "Savefile helper" in RaC1 and RaC4,
+    /// "Savefile Manager" in RaC2 and RaC3 — so it is recognised by what its patch.txt calls it as
+    /// well as by the folder names those copies used, and a renamed copy is caught by the first.
+    /// </summary>
+    private static bool IsSavefileHelper(DirectoryInfo mod) =>
+        IsSavefileHelperName(mod.Name) || IsSavefileHelperTitle(PatchName(mod));
+
+    /// <summary>The folder names the helpers were kept under: <c>sfhelper</c>, <c>rc2-save</c>, ...</summary>
+    private static bool IsSavefileHelperName(string dirName) =>
+        dirName.Equals("sfhelper", StringComparison.OrdinalIgnoreCase)
+        || dirName.EndsWith("-save", StringComparison.OrdinalIgnoreCase)
+        || dirName.Contains("sfhelper", StringComparison.OrdinalIgnoreCase)
+        || dirName.Contains("savefile", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>What the mod calls itself, whatever its folder is called.</summary>
+    private static bool IsSavefileHelperTitle(string? name) =>
+        name is not null
+        && (name.Contains("savefile helper", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("savefile manager", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// The <c>#- name:</c> header of a mod's patch.txt, the one the mod list shows, or null when it
+    /// has none. The same header <see cref="ModLibrary"/> reads; this walks a folder that is not a
+    /// library yet, so it reads the one line it needs rather than the whole mod.
+    /// </summary>
+    private static string? PatchName(DirectoryInfo mod)
+    {
+        try
+        {
+            foreach (var line in File.ReadLines(Path.Combine(mod.FullName, PatchFileName)))
+            {
+                if (!line.StartsWith("#-", StringComparison.Ordinal)) continue;
+
+                var fields = line[2..].Split(':', 2);
+                if (fields.Length == 2 && fields[0].Trim().Equals("name", StringComparison.OrdinalIgnoreCase))
+                {
+                    return fields[1].Trim();
+                }
+            }
+
+            return null;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a mod drives a Lua script: an <c>automation:</c> line in its patch.txt, which is the
+    /// test publish.ps1 applies to the shipped library, or a .lua file anywhere under the folder.
+    /// qwark does not run Lua, so importing one would be importing a checkbox that does nothing.
+    /// </summary>
+    private static bool NeedsLua(DirectoryInfo mod)
+    {
+        try
+        {
+            foreach (var file in mod.EnumerateFiles("*", SearchOption.AllDirectories))
+            {
+                if (file.Extension.Equals(".lua", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+
+            foreach (var line in File.ReadLines(Path.Combine(mod.FullName, PatchFileName)))
+            {
+                if (IsAutomationLine(line)) return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // A folder that cannot be read is not one to decide about: let the copy try it and
+            // report what it could not take.
+            return false;
+        }
+    }
+
+    /// <summary>publish.ps1's <c>^\s*automation\s*:</c>, in the words C# has for it.</summary>
+    private static bool IsAutomationLine(string line)
+    {
+        var text = line.TrimStart();
+        if (!text.StartsWith("automation", StringComparison.OrdinalIgnoreCase)) return false;
+
+        return text["automation".Length..].TrimStart().StartsWith(':');
     }
 
     private static void CopyMod(

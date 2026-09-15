@@ -1,0 +1,27 @@
+# The old RaCMAN's own default mods that this client does not bring over, one per line:
+#
+#   TITLEID/modfolder   a short reason, which the import prints after it runs
+#
+# Blank lines and lines starting with # are ignored. Add a line to keep another mod out of
+# the import, remove one to let it come over. Two rules hold whatever this file says: a mod
+# that drives a Lua script is left behind, because this release does not run Lua, and so is
+# any savefile helper or savefile manager, whatever folder a copy of it sits in, because
+# qwark does that itself now. The named helpers below are the ones the old default library
+# shipped; the rule catches the copies from every other release as well.
+
+# Savefile and autosplitter helpers: qwark carries these itself now.
+NPEA00385/sfhelper          built into qwark
+NPEA00385/gb_sp_as_helper   built into qwark
+NPEA00386/rc2-save          built into qwark
+NPEA00387/rc3-save          built into qwark
+NPEA00423/rc4-save          built into qwark
+# Merged: older releases shipped the two trainers apart, this one ships them as one mod.
+NPEA00386/barlow_trainer     superseded by barlow_joba_trainer
+NPEA00386/joba_trainer       superseded by barlow_joba_trainer
+# Retired: they sat on the same hook as the savefile helper and fought it.
+NPEA00385/state-display     retired
+NPEA00385/quartu-grinder    retired
+NPEA00385/rc1-hoven-health  retired
+NPEA00387/suckman           retired
+# Not shipped.
+NPEA00387/coolcam           not shipped
