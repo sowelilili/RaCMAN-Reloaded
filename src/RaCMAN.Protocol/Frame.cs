@@ -9,7 +9,21 @@ namespace RaCMAN.Protocol;
 public readonly struct Frame
 {
     public const int HeaderSize = 8;
-    public const int MaxPayload = 65600;
+
+    /// <summary>
+    /// QWARK_MAX_PAYLOAD as of revision 1.11: the most a request this client sends may carry, and
+    /// the most a build 37 module will answer with. It is what lets the module stop allocating a
+    /// 128 KB block per request, so nothing here asks for more than a 16 KB piece of anything.
+    /// </summary>
+    public const int MaxPayload = 16384;
+
+    /// <summary>
+    /// The most a frame arriving may carry. A module from before revision 1.11 still answers a
+    /// 64 KB MEM_READ with a 64 KB reply; this client no longer asks for one, but a reply it has
+    /// to be able to read is not the same thing as a request it may send, so the receive side
+    /// keeps the old cap and works against either module.
+    /// </summary>
+    public const int MaxReceivePayload = 65600;
 
     public ushort Seq { get; }
 
@@ -23,9 +37,9 @@ public readonly struct Frame
         Seq = seq;
         Code = code;
         Payload = payload ?? Array.Empty<byte>();
-        if (Payload.Length > MaxPayload)
+        if (Payload.Length > MaxReceivePayload)
         {
-            throw new ProtocolException($"payload of {Payload.Length} bytes exceeds QWARK_MAX_PAYLOAD ({MaxPayload})");
+            throw new ProtocolException($"payload of {Payload.Length} bytes exceeds the framing cap ({MaxReceivePayload})");
         }
     }
 
@@ -33,7 +47,20 @@ public readonly struct Frame
 
     public Status Status => (Status)Code;
 
-    public static Frame Request(Opcode opcode, ushort seq, byte[]? payload = null) => new(seq, (ushort)opcode, payload);
+    /// <summary>
+    /// A request, which is where the revision 1.11 cap bites: a payload over
+    /// <see cref="MaxPayload"/> throws here, before a byte of it reaches the socket, rather than
+    /// having the console close the connection on a frame it cannot buffer.
+    /// </summary>
+    public static Frame Request(Opcode opcode, ushort seq, byte[]? payload = null)
+    {
+        if (payload is not null && payload.Length > MaxPayload)
+        {
+            throw new ProtocolException($"payload of {payload.Length} bytes exceeds QWARK_MAX_PAYLOAD ({MaxPayload})");
+        }
+
+        return new Frame(seq, (ushort)opcode, payload);
+    }
 
     public static Frame Reply(Status status, ushort seq, byte[]? payload = null) => new(seq, (ushort)status, payload);
 
@@ -68,9 +95,9 @@ public readonly struct Frame
         }
 
         uint length = BinaryPrimitives.ReadUInt32BigEndian(header[..4]);
-        if (length > MaxPayload)
+        if (length > MaxReceivePayload)
         {
-            throw new ProtocolException($"frame length {length} exceeds QWARK_MAX_PAYLOAD ({MaxPayload})");
+            throw new ProtocolException($"frame length {length} exceeds the framing cap ({MaxReceivePayload})");
         }
 
         ushort seq = BinaryPrimitives.ReadUInt16BigEndian(header.Slice(4, 2));

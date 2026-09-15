@@ -92,6 +92,7 @@ public class SaveFileTests : IDisposable
             const string path = "/dev_hdd0/qwark/roundtrip.bin";
 
             var written = new List<long>();
+            server.ClearRequestLog();
             await client.WriteFileAsync(path, data, new Progress<long>(written.Add));
 
             Assert.Equal(data, server.Files[path]);
@@ -99,8 +100,14 @@ public class SaveFileTests : IDisposable
             var read = await client.ReadFileAsync(path);
             Assert.Equal(data, read);
 
-            // 64 KB chunks, so 200 KB is three full writes and an 8 KB tail.
-            Assert.Equal(4, (int)Math.Ceiling(data.Length / (double)QwarkClient.FileChunkSize));
+            // Revision 1.11 chunks: 16000 bytes, so 200 KB is twelve full writes and a tail, and
+            // the read back is twelve full reads and the short one that says end of file.
+            Assert.Equal(16000, QwarkClient.FileChunkSize);
+            Assert.Equal(13, (int)Math.Ceiling(data.Length / (double)QwarkClient.FileChunkSize));
+
+            var log = server.RequestLog();
+            Assert.Equal(13, log.Count(op => op == Opcode.FileWrite));
+            Assert.Equal(13, log.Count(op => op == Opcode.FileRead));
         }
     }
 
@@ -288,6 +295,7 @@ public class SaveFileTests : IDisposable
             var data = Pattern(server.SaveFileBuffer.Length);
 
             var written = new List<long>();
+            server.ClearRequestLog();
             await client.SaveFileUploadAsync(data, new Progress<long>(written.Add));
             Assert.Equal(data, server.SaveFileBuffer);
 
@@ -295,9 +303,14 @@ public class SaveFileTests : IDisposable
             var back = await client.SaveFileDownloadAsync((uint)data.Length, new Progress<long>(read.Add));
             Assert.Equal(data, back);
 
-            // 200 KB is three full 64 KB chunks and an 8 KB tail, both ways.
+            // Revision 1.11 chunks: 16000 bytes, so 200 KB is twelve full ones and a tail, both ways.
+            Assert.Equal(16000, QwarkClient.SaveFileChunkSize);
             int chunks = (int)Math.Ceiling(data.Length / (double)QwarkClient.SaveFileChunkSize);
-            Assert.Equal(4, chunks);
+            Assert.Equal(13, chunks);
+
+            var log = server.RequestLog();
+            Assert.Equal(chunks, log.Count(op => op == Opcode.SaveFileWrite));
+            Assert.Equal(chunks, log.Count(op => op == Opcode.SaveFileRead));
         }
     }
 
@@ -320,6 +333,40 @@ public class SaveFileTests : IDisposable
             var overrun = await Assert.ThrowsAsync<QwarkStatusException>(
                 () => client.SaveFileWriteAsync(size - 2, new byte[] { 1, 2, 3, 4 }));
             Assert.Equal(Status.BadArg, overrun.Status);
+        }
+    }
+
+    /// <summary>
+    /// A whole save out and back again at the revision 1.11 chunk: 100 KB is seven SAVEFILE_WRITEs
+    /// of 16000 bytes and a tail, in order and from offset zero, and the bytes that come back are
+    /// the bytes that went out.
+    /// </summary>
+    [Fact]
+    public async Task A100KbSaveRoundTripsIn16000ByteChunks()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.SaveAsideContent = Pattern(100 * 1024);
+
+            var data = await SaveFileTransfer.DownloadAsync(client, server.Describe.SaveAsideAction!.Id);
+            Assert.Equal(server.SaveAsideContent, data);
+
+            server.SaveFileOrder.Clear();
+            await SaveFileTransfer.UploadAsync(client, server.Describe.LoadAsideAction!.Id, data);
+
+            var expected = new List<string>();
+            for (int offset = 0; offset < data.Length; offset += QwarkClient.SaveFileChunkSize)
+            {
+                expected.Add($"write {offset}");
+            }
+
+            expected.Add("load");
+
+            Assert.Equal(7, expected.Count - 1);
+            Assert.Equal(expected, server.SaveFileOrder);
+            Assert.Equal(data, server.LoadedSaveFile);
         }
     }
 
@@ -487,16 +534,11 @@ public class SaveFileTests : IDisposable
             await SaveFileTransfer.UploadAsync(client, id, data);
 
             int chunk = QwarkClient.SaveFileChunkSize;
-            Assert.Equal(
-                new[]
-                {
-                    "write 0",
-                    $"write {chunk}",
-                    $"write {chunk * 2}",
-                    $"write {chunk * 3}",
-                    "load",
-                },
-                server.SaveFileOrder);
+            var expected = new List<string>();
+            for (int offset = 0; offset < data.Length; offset += chunk) expected.Add($"write {offset}");
+            expected.Add("load");
+
+            Assert.Equal(expected, server.SaveFileOrder);
             Assert.Equal(data, server.LoadedSaveFile);
         }
     }

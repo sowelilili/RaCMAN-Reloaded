@@ -1,4 +1,7 @@
+using System.Buffers.Binary;
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 
 using RaCMAN.App;
@@ -389,6 +392,145 @@ public class ClientTests
 
             var rows = await client.MemReadAsync(start, end - start);
             Assert.Equal(FakeQwarkServer.MobyCount * FakeQwarkServer.MobyStride, rows.Length);
+        }
+    }
+
+    /// <summary>
+    /// Revision 1.11: MEM_READ takes 16384 bytes at the most, and a client that asks for more is
+    /// stopped while the frame is being built rather than by a console that closes the connection.
+    /// </summary>
+    [Fact]
+    public async Task AReadLongerThanTheCapIsRefusedBeforeItIsSent()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            Assert.Equal(16384, QwarkClient.MaxReadLength);
+            Assert.Equal(16380, QwarkClient.MaxWriteLength);
+
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => client.MemReadAsync(server.MemoryBase, QwarkClient.MaxReadLength + 1));
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(
+                () => client.MemWriteAsync(server.MemoryBase, new byte[QwarkClient.MaxWriteLength + 1]));
+
+            // Nothing went out, so the connection is still there and still answering.
+            server.ClearRequestLog();
+            await client.HeartbeatAsync();
+            Assert.Equal(new[] { Opcode.Heartbeat }, server.RequestLog());
+        }
+    }
+
+    /// <summary>
+    /// The console's side of the same rule: a request frame announcing more than QWARK_MAX_PAYLOAD
+    /// cannot be drained into a buffer the module never allocates, so it closes the connection
+    /// rather than answering. This is what a client still asking for 64 KB would meet.
+    /// </summary>
+    [Fact]
+    public async Task AnOversizeRequestFrameClosesTheConnection()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+
+        using var raw = new TcpClient();
+        await raw.ConnectAsync(IPAddress.Loopback, server.Port);
+        var stream = raw.GetStream();
+
+        // A MEM_READ whose header claims 65600 payload bytes: the cap as it was, and now too long.
+        var header = new byte[Frame.HeaderSize];
+        BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(0, 4), Frame.MaxReceivePayload);
+        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(4, 2), 1);
+        BinaryPrimitives.WriteUInt16BigEndian(header.AsSpan(6, 2), (ushort)Opcode.MemRead);
+        await stream.WriteAsync(header);
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, await stream.ReadAsync(new byte[Frame.HeaderSize], timeout.Token));
+    }
+
+    /// <summary>
+    /// The Viewer tab still lets anyone ask for 64 KB; it is now four MEM_READs rather than one,
+    /// and what the box shows is all of it, in order.
+    /// </summary>
+    [Fact]
+    public async Task TheViewerReadsSixtyFourKilobytesInFourPieces()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.SetMemorySize(96 * 1024);
+            server.ClearRequestLog();
+
+            byte[]? dump = null;
+            await MemoryPanel.ReadRangeAsync(client, server.MemoryBase, 65536, bytes => dump = bytes);
+
+            Assert.NotNull(dump);
+            Assert.Equal(server.Memory.AsSpan(0, 65536).ToArray(), dump);
+            Assert.Equal(4, server.RequestLog().Count(op => op == Opcode.MemRead));
+        }
+    }
+
+    /// <summary>
+    /// A piece the console refuses ends the read, and what had already arrived is kept: a short
+    /// dump of the address someone asked about is worth more than none. The status is not
+    /// swallowed, so the panel's runner still has one failure to report.
+    /// </summary>
+    [Fact]
+    public async Task AViewerReadThatFailsPartWayKeepsWhatArrived()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            // Two pieces fit in the fake process; the third runs off the end of it.
+            server.SetMemorySize(QwarkClient.MaxReadLength * 2);
+
+            byte[]? dump = null;
+            var failed = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => MemoryPanel.ReadRangeAsync(client, server.MemoryBase, 65536, bytes => dump = bytes));
+
+            Assert.Equal(Status.BadArg, failed.Status);
+            Assert.NotNull(dump);
+            Assert.Equal(QwarkClient.MaxReadLength * 2, dump!.Length);
+            Assert.Equal(server.Memory, dump);
+        }
+    }
+
+    /// <summary>
+    /// The row cap is what it was, so a capped read is the same 2048 rows it used to be; only the
+    /// number of requests it takes to fetch them changed.
+    /// </summary>
+    [Fact]
+    public async Task MobyTableReaderWalksACappedTableInPieces()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.SetMobyRows(MobyTableReader.DefaultRowCap);
+            server.ClearRequestLog();
+
+            var layout = MobyLayouts.Load(Path.Combine(AppContext.BaseDirectory, "data", "moby"))[GameId.Rac1];
+            var snapshot = await MobyTableReader.ReadAsync(client, layout);
+
+            Assert.Equal(MobyTableReader.DefaultRowCap, snapshot.TotalRows);
+            Assert.Equal(MobyTableReader.DefaultRowCap, snapshot.Rows.Length);
+            Assert.False(snapshot.Capped);
+
+            // The same rows the fake console laid down, decoded exactly as the eight-row table is.
+            for (int i = 0; i < snapshot.Rows.Length; i++)
+            {
+                var row = snapshot.Rows[i];
+                Assert.Equal(snapshot.Start + (uint)(i * FakeQwarkServer.MobyStride), row.Address);
+                Assert.Equal(100f + i, row.X);
+                Assert.Equal(5000 + (i * 7), row.OClass);
+                Assert.Equal(1 + i, row.Uid);
+            }
+
+            // 64 rows of 0x100 bytes fit one 16 KB read, plus the two pointer words in front.
+            int rowsPerRead = QwarkClient.MaxReadLength / FakeQwarkServer.MobyStride;
+            Assert.Equal(2 + (MobyTableReader.DefaultRowCap / rowsPerRead),
+                server.RequestLog().Count(op => op == Opcode.MemRead));
         }
     }
 

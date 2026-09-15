@@ -741,15 +741,24 @@ public sealed class QwarkClient : IDisposable
 
     // ---------------------------------------------------------------- 5.4 memory
 
+    /// <summary>
+    /// The most one read op may ask for: a reply is one frame, and revision 1.11 caps a frame at
+    /// QWARK_MAX_PAYLOAD. Anything longer is several reads, which is the caller's business.
+    /// </summary>
+    public const int MaxReadLength = Frame.MaxPayload;
+
+    /// <summary>The most one write op may carry: the same frame, less the four bytes of address or handle in front of the data.</summary>
+    public const int MaxWriteLength = Frame.MaxPayload - 4;
+
     public Task<byte[]> MemReadAsync(uint address, uint length, CancellationToken cancellationToken = default)
     {
-        if (length > 65536) throw new ArgumentOutOfRangeException(nameof(length), "MEM_READ is capped at 65536 bytes");
+        if (length > MaxReadLength) throw new ArgumentOutOfRangeException(nameof(length), $"MEM_READ is capped at {MaxReadLength} bytes");
         return RequestAsync(Opcode.MemRead, Bytes(8, (scoped ref SpanWriter w) => { w.WriteU32(address); w.WriteU32(length); }), cancellationToken);
     }
 
     public Task MemWriteAsync(uint address, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
     {
-        if (data.Length > 65536) throw new ArgumentOutOfRangeException(nameof(data), "MEM_WRITE is capped at 65536 bytes");
+        if (data.Length > MaxWriteLength) throw new ArgumentOutOfRangeException(nameof(data), $"MEM_WRITE is capped at {MaxWriteLength} bytes");
         var payload = new byte[4 + data.Length];
         var w = new SpanWriter(payload);
         w.WriteU32(address);
@@ -920,7 +929,7 @@ public sealed class QwarkClient : IDisposable
 
     public Task FileWriteAsync(uint handle, ReadOnlyMemory<byte> data, CancellationToken cancellationToken = default)
     {
-        if (data.Length > 65536) throw new ArgumentOutOfRangeException(nameof(data), "FILE_WRITE is capped at 65536 bytes");
+        if (data.Length > MaxWriteLength) throw new ArgumentOutOfRangeException(nameof(data), $"FILE_WRITE is capped at {MaxWriteLength} bytes");
         var payload = new byte[4 + data.Length];
         var w = new SpanWriter(payload);
         w.WriteU32(handle);
@@ -972,12 +981,17 @@ public sealed class QwarkClient : IDisposable
         return ParseU32(payload);
     }
 
-    /// <summary>The chunk both file helpers use. FILE_READ and FILE_WRITE cap at 65536 bytes.</summary>
-    public const int FileChunkSize = 65536;
+    /// <summary>
+    /// The chunk both file helpers use. Revision 1.11 caps FILE_READ and FILE_WRITE at one frame,
+    /// so this is a round number comfortably inside <see cref="MaxWriteLength"/>: a transfer is
+    /// more round trips than it was, and nothing else about it changes.
+    /// </summary>
+    public const int FileChunkSize = 16000;
 
     /// <summary>
-    /// FILE_OPEN read, FILE_READ in 64 KB chunks until a short read says end of file, FILE_CLOSE.
-    /// <paramref name="progress"/> is told the running byte count after every chunk.
+    /// FILE_OPEN read, FILE_READ in <see cref="FileChunkSize"/> chunks until a short read says end
+    /// of file, FILE_CLOSE. <paramref name="progress"/> is told the running byte count after every
+    /// chunk.
     /// </summary>
     public async Task<byte[]> ReadFileAsync(
         string path,
@@ -1008,7 +1022,7 @@ public sealed class QwarkClient : IDisposable
         }
     }
 
-    /// <summary>FILE_OPEN write-truncate, FILE_WRITE in 64 KB chunks, FILE_CLOSE.</summary>
+    /// <summary>FILE_OPEN write-truncate, FILE_WRITE in <see cref="FileChunkSize"/> chunks, FILE_CLOSE.</summary>
     public async Task WriteFileAsync(
         string path,
         ReadOnlyMemory<byte> data,
@@ -1036,10 +1050,11 @@ public sealed class QwarkClient : IDisposable
     // ---------------------------------------------------------------- 5.12 save files
 
     /// <summary>
-    /// The chunk the savefile helpers move. SAVEFILE_READ and SAVEFILE_WRITE cap at 65536 bytes,
-    /// the same cap the file ops have.
+    /// The chunk the savefile helpers move. SAVEFILE_READ and SAVEFILE_WRITE are capped by the
+    /// same frame the file ops are, so this is the same round number <see cref="FileChunkSize"/>
+    /// is: a megabyte of save is a few dozen more round trips and nothing else.
     /// </summary>
-    public const int SaveFileChunkSize = 65536;
+    public const int SaveFileChunkSize = 16000;
 
     /// <summary>
     /// SAVEFILE_INFO, revision 1.9. Answers UNSUPPORTED where code cannot be patched (RPCS3) and
@@ -1070,7 +1085,7 @@ public sealed class QwarkClient : IDisposable
     }
 
     /// <summary>
-    /// Reads the whole aside buffer in 64 KB chunks. <paramref name="size"/> comes from
+    /// Reads the whole aside buffer in <see cref="SaveFileChunkSize"/> chunks. <paramref name="size"/> comes from
     /// SAVEFILE_INFO; the console trims the last chunk itself, so the loop asks for a round
     /// chunk every time and stops when it has the lot.
     /// <para>
@@ -1111,7 +1126,7 @@ public sealed class QwarkClient : IDisposable
     }
 
     /// <summary>
-    /// Writes a whole save into the aside buffer in 64 KB chunks, from offset 0, strictly in
+    /// Writes a whole save into the aside buffer in <see cref="SaveFileChunkSize"/> chunks, from offset 0, strictly in
     /// order: each write is answered before the next one is sent, so the console's buffer is
     /// filled front to back and the caller knows the whole of it is there when this returns.
     /// </summary>

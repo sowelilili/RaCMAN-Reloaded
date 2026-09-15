@@ -140,13 +140,13 @@ public sealed class FakeQwarkServer : IDisposable
     private void BuildMobyTable()
     {
         uint start = MemoryBase + MobyTableOffset;
-        uint end = start + (uint)(MobyCount * MobyStride);
+        uint end = start + (uint)(_mobyRows * MobyStride);
 
         var w = new SpanWriter(Memory.AsSpan((int)MobyPointerOffset, 8));
         w.WriteU32(start);
         w.WriteU32(end);
 
-        for (int i = 0; i < MobyCount; i++)
+        for (int i = 0; i < _mobyRows; i++)
         {
             var entry = Memory.AsSpan((int)MobyTableOffset + i * MobyStride, MobyStride);
             entry.Clear();
@@ -172,9 +172,34 @@ public sealed class FakeQwarkServer : IDisposable
 
     public const int MobyCount = 8;
 
+    private int _mobyRows = MobyCount;
+
+    /// <summary>How many rows the moby array holds: <see cref="MobyCount"/> until the memory was resized.</summary>
+    public int MobyRows => _mobyRows;
+
+    /// <summary>
+    /// Regrows the fake process to <paramref name="bytes"/>, refills its byte pattern and relays
+    /// the moby array over whatever room is past <see cref="MobyTableOffset"/>. The 8 KB the
+    /// constructor lays down is enough for the ops themselves; a test that has to watch one read
+    /// be broken into pieces needs more memory than a single request can carry.
+    /// </summary>
+    public void SetMemorySize(int bytes)
+    {
+        lock (_gate)
+        {
+            Memory = new byte[bytes];
+            for (int i = 0; i < Memory.Length; i++) Memory[i] = (byte)(i & 0xFF);
+            _mobyRows = Math.Max(0, (bytes - (int)MobyTableOffset) / MobyStride);
+            BuildMobyTable();
+        }
+    }
+
+    /// <summary>The same, sized to hold exactly <paramref name="rows"/> mobys and nothing after them.</summary>
+    public void SetMobyRows(int rows) => SetMemorySize((int)MobyTableOffset + (rows * MobyStride));
+
     public int Port { get; }
 
-    public byte[] Memory { get; }
+    public byte[] Memory { get; private set; }
 
     public uint MemoryBase { get; set; } = 0x300000;
 
@@ -313,8 +338,9 @@ public sealed class FakeQwarkServer : IDisposable
     /// <see cref="SaveAsideContent"/>, as the game's own helper would.
     /// <para>
     /// Small on purpose: a console's is one or two megabytes, and a test that moved that much
-    /// through a loopback socket for every case would be slow for no gain. It is more than one
-    /// 64 KB chunk, which is what the chunking needs to be exercised.
+    /// through a loopback socket for every case would be slow for no gain. It is still several
+    /// chunks of <see cref="QwarkClient.SaveFileChunkSize"/>, which is what the chunking needs to
+    /// be exercised.
     /// </para>
     /// </summary>
     public byte[] SaveFileBuffer { get; private set; } = new byte[200 * 1024];
@@ -789,6 +815,12 @@ public sealed class FakeQwarkServer : IDisposable
                 {
                     await stream.ReadExactlyAsync(header, _cts.Token);
                     var (length, seq, code) = Frame.DecodeHeader(header);
+
+                    // Revision 1.11, section 1: a request longer than QWARK_MAX_PAYLOAD cannot be
+                    // drained into a buffer the module never allocates, so it closes the connection
+                    // rather than answering. A client still asking for 64 KB fails here, loudly.
+                    if (length > Frame.MaxPayload) break;
+
                     var payload = new byte[length];
                     if (length > 0) await stream.ReadExactlyAsync(payload, _cts.Token);
 
@@ -979,6 +1011,7 @@ public sealed class FakeQwarkServer : IDisposable
                     var r = new SpanReader(payload);
                     uint addr = r.ReadU32();
                     uint len = r.ReadU32();
+                    if (len > QwarkClient.MaxReadLength) return (Status.BadArg, null);
                     if (!InRange(addr, len)) return (Status.BadArg, null);
                     return (Status.Ok, Memory.AsSpan((int)(addr - MemoryBase), (int)len).ToArray());
                 }
@@ -1310,7 +1343,7 @@ public sealed class FakeQwarkServer : IDisposable
                     if (FileWriteStatus != Status.Ok) return (FileWriteStatus, null);
 
                     var chunk = r.ReadRest();
-                    if (chunk.Length > 65536) return (Status.BadArg, null);
+                    if (chunk.Length > QwarkClient.MaxWriteLength) return (Status.BadArg, null);
                     Files[file.Path] = Files[file.Path].Concat(chunk.ToArray()).ToArray();
                     file.Position += chunk.Length;
                     return (Status.Ok, null);
@@ -1324,7 +1357,7 @@ public sealed class FakeQwarkServer : IDisposable
                     uint length = r.ReadU32();
                     if (!_openFiles.TryGetValue(handle, out var file)) return (Status.NotFound, null);
                     if (file.Mode != FileMode.Read) return (Status.BadArg, null);
-                    if (length > 65536) return (Status.BadArg, null);
+                    if (length > QwarkClient.MaxReadLength) return (Status.BadArg, null);
 
                     var content = Files.TryGetValue(file.Path, out var bytes) ? bytes : Array.Empty<byte>();
                     int available = Math.Max(0, content.Length - file.Position);
@@ -1428,7 +1461,7 @@ public sealed class FakeQwarkServer : IDisposable
                     uint offset = r.ReadU32();
                     uint length = r.ReadU32();
 
-                    if (length == 0 || length > QwarkClient.SaveFileChunkSize) return (Status.BadArg, null);
+                    if (length == 0 || length > QwarkClient.MaxReadLength) return (Status.BadArg, null);
                     if (offset >= (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
                     if (SaveFileReadFailsFrom is uint fails && offset >= fails)
                     {
@@ -1451,7 +1484,7 @@ public sealed class FakeQwarkServer : IDisposable
                     uint offset = r.ReadU32();
                     var data = r.ReadRest();
 
-                    if (data.Length > QwarkClient.SaveFileChunkSize) return (Status.BadArg, null);
+                    if (data.Length > QwarkClient.MaxWriteLength) return (Status.BadArg, null);
                     if (offset >= (uint)SaveFileBuffer.Length) return (Status.BadArg, null);
                     // Unlike a read, a write past the end is refused rather than trimmed.
                     if (offset + (uint)data.Length > (uint)SaveFileBuffer.Length) return (Status.BadArg, null);

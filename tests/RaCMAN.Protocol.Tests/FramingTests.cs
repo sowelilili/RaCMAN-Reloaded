@@ -76,6 +76,22 @@ public class FramingTests
         Assert.Throws<ProtocolException>(() => Frame.Request(Opcode.MemWrite, 1, new byte[Frame.MaxPayload + 1]));
     }
 
+    /// <summary>
+    /// Revision 1.11: what this client may send is 16 KB, and what it must still be able to read
+    /// is the 64 KB an older module answers a 64 KB MEM_READ with. A request over the send cap
+    /// throws while it is being built, so nothing oversized ever reaches the socket.
+    /// </summary>
+    [Fact]
+    public void TheSendCapIsSixteenKilobytesAndTheReceiveCapIsTheOldOne()
+    {
+        Assert.Equal(16384, Frame.MaxPayload);
+        Assert.Equal(65600, Frame.MaxReceivePayload);
+
+        var reply = Frame.Reply(Status.Ok, 1, new byte[65536]).Encode();
+        Assert.True(Frame.TryDecode(reply, out var decoded, out _));
+        Assert.Equal(65536, decoded.Payload.Length);
+    }
+
     [Fact]
     public void SpanReaderAndWriterAreBigEndian()
     {

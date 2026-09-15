@@ -375,7 +375,7 @@ public static class SaveFileTransfer
 
     /// <summary>
     /// FEATURE_TRIGGER the SAVE_ASIDE action, poll SAVEFILE_INFO until the set-aside bit clears,
-    /// then read the whole aside buffer in 64 KB chunks.
+    /// then read the whole aside buffer in <see cref="QwarkClient.SaveFileChunkSize"/> chunks.
     /// <para>
     /// Every chunk is read before this returns, and nothing is written to disk here at all: see
     /// <see cref="SaveToLibraryAsync"/> for the reason. A chunk the console refuses throws

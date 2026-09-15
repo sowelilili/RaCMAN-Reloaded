@@ -31,15 +31,20 @@ public sealed record MobyTableSnapshot(
 
 /// <summary>
 /// MOBY_TABLE names two pointer words and a stride; this reads the pointers, then walks the
-/// array with MEM_READ in chunks of at most 64 KB and decodes each row with the game's layout
-/// file. Nothing about a moby is known here beyond those offsets.
+/// array with MEM_READ in chunks of at most <see cref="MaxReadBytes"/> and decodes each row with
+/// the game's layout file. Nothing about a moby is known here beyond those offsets.
 /// </summary>
 public static class MobyTableReader
 {
     /// <summary>Rows past this are not read: a full table can be tens of thousands of entries.</summary>
     public const int DefaultRowCap = 2048;
 
-    public const int MaxReadBytes = 65536;
+    /// <summary>
+    /// What one MEM_READ may ask for. Revision 1.11 made this a quarter of what it was, so a
+    /// capped table takes four times the round trips and reads exactly the same rows; a row
+    /// wider than this could never be read at all, which is why the stride is checked against it.
+    /// </summary>
+    public const int MaxReadBytes = QwarkClient.MaxReadLength;
 
     public static async Task<MobyTableSnapshot> ReadAsync(
         QwarkClient client,

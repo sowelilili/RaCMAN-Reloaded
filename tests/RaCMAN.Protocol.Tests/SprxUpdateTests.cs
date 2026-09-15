@@ -21,7 +21,7 @@ public class SprxUpdateTests
 
     private static string BackupPath(string bootPath) => bootPath + SprxUpdate.BackupSuffix;
 
-    /// <summary>A module-sized blob: more than one 64 KB chunk, so the upload and the read-back are chunked.</summary>
+    /// <summary>A module-sized blob: several chunks of it, so the upload and the read-back are chunked.</summary>
     private static byte[] Module(byte seed, int length = 70_000)
     {
         var bytes = new byte[length];
@@ -134,6 +134,39 @@ public class SprxUpdateTests
         Assert.Contains($"reboot to update", state.QwarkUpdateNotice, StringComparison.Ordinal);
         Assert.Contains(state.Toasts, toast => toast.Text == state.QwarkUpdateNotice);
         Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
+    }
+
+    /// <summary>
+    /// Revision 1.11 chunks: a 70 KB module goes up in five FILE_WRITEs of 16000 bytes and is read
+    /// back in as many FILE_READs. More round trips, and the same module at the other end.
+    /// </summary>
+    [Fact]
+    public async Task TheModuleGoesUpInChunksTheConsoleWillTake()
+    {
+        var shipped = Module(5);
+
+        using var server = new FakeQwarkServer();
+        server.Files[WebManLoader.BootPath] = Module(90, 4096);
+        server.Files[WebManLoader.BootPluginsPath] = Utf8($"{WebManLoader.BootPath}\n");
+        server.Start();
+
+        using var client = new QwarkClient { AutoReconnect = false };
+        await client.ConnectAsync("127.0.0.1", server.Port);
+
+        server.ClearRequestLog();
+        var result = await SprxUpdate.RunAsync(client, shipped);
+
+        Assert.Equal(WebManLoader.BootPath, result.BootPath);
+        Assert.Equal(shipped, server.Files[WebManLoader.BootPath]);
+
+        int chunks = (int)Math.Ceiling(shipped.Length / (double)QwarkClient.FileChunkSize);
+        Assert.Equal(5, chunks);
+
+        var log = server.RequestLog();
+        Assert.Equal(chunks, log.Count(op => op == Opcode.FileWrite));
+
+        // The read-back is the same count, and the boot list before it was one short read of its own.
+        Assert.Equal(chunks + 1, log.Count(op => op == Opcode.FileRead));
     }
 
     [Fact]

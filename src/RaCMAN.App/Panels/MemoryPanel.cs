@@ -461,8 +461,55 @@ public static class MemoryPanel
     }
 
     /// <summary>
-    /// One MEM_READ into the dump. The in-flight flag is what the timer above looks at, so it is
-    /// cleared in a finally: a read that failed must not stop the next one from ever starting.
+    /// One range of game memory, from as many MEM_READs as its length needs: revision 1.11 caps
+    /// one at <see cref="QwarkClient.MaxReadLength"/> and the Bytes box still takes 64 KB, so
+    /// 64 KB is four requests, each answered before the next goes out.
+    /// <para>
+    /// A piece the console refuses throws, and what had already arrived is handed to
+    /// <paramref name="got"/> before it does: a short dump of the address someone asked about is
+    /// worth more than none, and reporting the status stays the caller's job, so it is said once
+    /// rather than once per piece. <paramref name="got"/> is not called at all when nothing
+    /// arrived, which is what leaves an earlier dump where it was.
+    /// </para>
+    /// </summary>
+    public static async Task ReadRangeAsync(
+        QwarkClient client,
+        uint address,
+        uint length,
+        Action<byte[]> got,
+        CancellationToken cancellationToken = default)
+    {
+        var buffer = new byte[length];
+        int have = 0;
+
+        try
+        {
+            while (have < length)
+            {
+                uint want = Math.Min((uint)QwarkClient.MaxReadLength, length - (uint)have);
+                var piece = await client.MemReadAsync(address + (uint)have, want, cancellationToken)
+                    .ConfigureAwait(false);
+                piece.CopyTo(buffer, have);
+                have += piece.Length;
+
+                // A console that answered short has no more to give at that address.
+                if (piece.Length < want) break;
+            }
+        }
+        finally
+        {
+            if (have > 0) got(have == buffer.Length ? buffer : buffer[..have]);
+        }
+    }
+
+    /// <summary>
+    /// The dump, read through <see cref="ReadRangeAsync"/> and put where the table draws from.
+    /// A read that brought nothing back leaves the dump that was already there alone, so a
+    /// failure does not also empty the table and stop the timer below from ever retrying.
+    /// <para>
+    /// The in-flight flag is what the timer above looks at, so it is cleared in a finally: a read
+    /// that failed must not stop the next one from ever starting.
+    /// </para>
     /// </summary>
     private static void ReadDump(AppState state, uint address, uint length, bool quiet)
     {
@@ -472,12 +519,11 @@ public static class MemoryPanel
         {
             try
             {
-                var bytes = await state.Client.MemReadAsync(address, length).ConfigureAwait(false);
-                state.Post(() =>
+                await ReadRangeAsync(state.Client, address, length, bytes => state.Post(() =>
                 {
                     _dumpBytes = bytes;
                     _dumpBase = address;
-                });
+                })).ConfigureAwait(false);
             }
             finally
             {
