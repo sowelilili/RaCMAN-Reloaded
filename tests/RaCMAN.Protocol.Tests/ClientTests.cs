@@ -1009,12 +1009,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(33, true)]     // the build before the one this client ships with
-    [InlineData(34, false)]    // exactly the expected build: the RaC2 table without XP, and the carry-over weapon versions
-    [InlineData(35, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(34, true)]     // the build before the one this client ships with
+    [InlineData(35, false)]    // exactly the expected build: the slimmed module, same wire protocol
+    [InlineData(36, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(34, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(35, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
