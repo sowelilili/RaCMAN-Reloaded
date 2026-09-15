@@ -1197,24 +1197,24 @@ public class SaveFileTests : IDisposable
         var library = new SaveFileLibrary(_root);
         library.EnsureCategory("NPEA00385", "zebra");
         library.EnsureCategory("NPEA00385", "any%");
-        library.Write("NPEA00385", "any%", "b", new byte[] { 1 });
-        library.Write("NPEA00385", "any%", "a", new byte[] { 1 });
+        library.Write("NPEA00385", "any%", "b.sav", new byte[] { 1 });
+        library.Write("NPEA00385", "any%", "a.sav", new byte[] { 1 });
 
         Assert.Equal(new[] { "any%", "zebra" }, library.Categories("NPEA00385"));
-        Assert.Equal(new[] { "a", "b" }, library.Files("NPEA00385", "any%"));
+        Assert.Equal(new[] { "a.sav", "b.sav" }, library.Files("NPEA00385", "any%"));
     }
 
     [Fact]
     public void RenameAndDeleteMoveTheLocalFile()
     {
         var library = new SaveFileLibrary(_root);
-        library.Write("NPEA00385", "misc", "old", new byte[] { 4, 5 });
+        library.Write("NPEA00385", "misc", "old.sav", new byte[] { 4, 5 });
 
-        library.Rename("NPEA00385", "misc", "old", "new");
-        Assert.Equal(new[] { "new" }, library.Files("NPEA00385", "misc"));
-        Assert.Equal(new byte[] { 4, 5 }, library.Read("NPEA00385", "misc", "new"));
+        library.Rename("NPEA00385", "misc", "old.sav", "new.sav");
+        Assert.Equal(new[] { "new.sav" }, library.Files("NPEA00385", "misc"));
+        Assert.Equal(new byte[] { 4, 5 }, library.Read("NPEA00385", "misc", "new.sav"));
 
-        library.Delete("NPEA00385", "misc", "new");
+        library.Delete("NPEA00385", "misc", "new.sav");
         Assert.Empty(library.Files("NPEA00385", "misc"));
     }
 
@@ -1226,6 +1226,118 @@ public class SaveFileTests : IDisposable
         library.Write("NPEA00385", "misc", "two", new byte[] { 2 });
 
         Assert.Throws<IOException>(() => library.Rename("NPEA00385", "misc", "one", "two"));
+    }
+
+    // ---------------------------------------------------------------- names out of the old RaCMAN
+
+    /// <summary>Writes a file into a category exactly as it is named, suffix or no suffix.</summary>
+    private string WriteRaw(SaveFileLibrary library, string category, string name, params byte[] data)
+    {
+        var path = Path.Combine(library.EnsureCategory(Title, category), name);
+        File.WriteAllBytes(path, data);
+        return path;
+    }
+
+    [Fact]
+    public void AFileWithNoExtensionGetsOneWhenTheCategoryIsScanned()
+    {
+        var library = new SaveFileLibrary(_root);
+        WriteRaw(library, "misc", "start of veldin", 1, 2, 3);
+
+        // The scan itself is what puts it right, so the listing is already correct.
+        Assert.Equal(new[] { "start of veldin.sav" }, library.Files(Title, "misc"));
+        Assert.Equal(new byte[] { 1, 2, 3 }, library.Read(Title, "misc", "start of veldin.sav"));
+
+        // And it is one rename, not one per scan.
+        Assert.Empty(library.EnsureExtensions(Title, "misc"));
+    }
+
+    [Fact]
+    public void TheRenamesAreReportedSoThePanelCanSaySoOnce()
+    {
+        var library = new SaveFileLibrary(_root);
+        WriteRaw(library, "any%", "veldin", 1);
+        WriteRaw(library, "misc", "kerwan", 2);
+
+        // The title-wide sweep is what the panel runs when it arrives at a game.
+        var renames = library.EnsureExtensions(Title);
+
+        Assert.Equal(2, renames.Count);
+        Assert.Equal(new[] { "any%", "misc" }, renames.Select(r => r.Category).ToArray());
+        Assert.Equal("veldin", renames[0].From);
+        Assert.Equal("veldin.sav", renames[0].To);
+        Assert.False(renames[0].Dropped);
+        Assert.Empty(library.EnsureExtensions(Title));
+    }
+
+    [Fact]
+    public void ACopyOfASaveThatIsAlreadyThereIsDroppedRatherThanKeptTwice()
+    {
+        var library = new SaveFileLibrary(_root);
+        library.Write(Title, "misc", "veldin.sav", new byte[] { 7, 7, 7 });
+        WriteRaw(library, "misc", "veldin", 7, 7, 7);
+
+        var rename = Assert.Single(library.EnsureExtensions(Title, "misc"));
+
+        Assert.True(rename.Dropped);
+        Assert.Equal("veldin", rename.From);
+        Assert.Equal("veldin.sav", rename.To);
+        Assert.Equal(new[] { "veldin.sav" }, library.Files(Title, "misc"));
+        Assert.Equal(new byte[] { 7, 7, 7 }, library.Read(Title, "misc", "veldin.sav"));
+    }
+
+    [Fact]
+    public void ADifferentSaveOfTheSameNameLandsBesideItRatherThanOverIt()
+    {
+        var library = new SaveFileLibrary(_root);
+        library.Write(Title, "misc", "veldin.sav", new byte[] { 1 });
+        WriteRaw(library, "misc", "veldin", 2);
+
+        var rename = Assert.Single(library.EnsureExtensions(Title, "misc"));
+        Assert.False(rename.Dropped);
+        Assert.Equal("veldin (2).sav", rename.To);
+
+        // A third copy takes the next number, and none of the three lost its bytes.
+        WriteRaw(library, "misc", "veldin", 3);
+        Assert.Equal("veldin (3).sav", Assert.Single(library.EnsureExtensions(Title, "misc")).To);
+
+        Assert.Equal(new[] { "veldin (2).sav", "veldin (3).sav", "veldin.sav" }, library.Files(Title, "misc"));
+        Assert.Equal(new byte[] { 1 }, library.Read(Title, "misc", "veldin.sav"));
+        Assert.Equal(new byte[] { 2 }, library.Read(Title, "misc", "veldin (2).sav"));
+        Assert.Equal(new byte[] { 3 }, library.Read(Title, "misc", "veldin (3).sav"));
+    }
+
+    [Fact]
+    public void AFileWithASuffixOfItsOwnIsNobodysBusiness()
+    {
+        var library = new SaveFileLibrary(_root);
+        WriteRaw(library, "misc", "veldin.sav.sum", 1);
+        WriteRaw(library, "misc", "notes.txt", 2);
+        WriteRaw(library, "misc", "veldin.bak", 3);
+        WriteRaw(library, "misc", "veldin.sav" + SaveFileLibrary.PartialExtension, 4);
+
+        Assert.Empty(library.EnsureExtensions(Title, "misc"));
+        Assert.Equal(
+            new[] { "notes.txt", "veldin.bak", "veldin.sav.part", "veldin.sav.sum" },
+            library.Files(Title, "misc"));
+    }
+
+    [Fact]
+    public void AHiddenFileIsLeftAloneToo()
+    {
+        var library = new SaveFileLibrary(_root);
+        var path = WriteRaw(library, "misc", "housekeeping", 1);
+        File.SetAttributes(path, FileAttributes.Hidden);
+
+        try
+        {
+            Assert.Empty(library.EnsureExtensions(Title, "misc"));
+            Assert.Equal(new[] { "housekeeping" }, library.Files(Title, "misc"));
+        }
+        finally
+        {
+            File.SetAttributes(path, FileAttributes.Normal);
+        }
     }
 
     [Theory]

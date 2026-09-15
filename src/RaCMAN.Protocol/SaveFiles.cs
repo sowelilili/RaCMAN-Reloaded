@@ -87,10 +87,122 @@ public sealed class SaveFileLibrary
         return folder;
     }
 
+    /// <summary>
+    /// Puts <see cref="Extension"/> on every file in a category that has no extension at all, which
+    /// is what a library carried over from the old RaCMAN is full of: it took any file name, and
+    /// both this listing and the console's loader want the suffix. Every scan of a category does
+    /// this first, so a save copied in by hand loads rather than sitting there doing nothing.
+    /// <para>
+    /// Only a file with no suffix of its own is touched: a <c>.sum</c>, a <c>.bak</c>, a
+    /// <c>.txt</c> beside a save is somebody else's file and is left exactly as it is, and so is
+    /// anything hidden. Where <c>&lt;name&gt;.sav</c> is already there the two are compared — the
+    /// same bytes twice is one save and the extension-less copy goes, different bytes are two saves
+    /// and the copy lands as <c>&lt;name&gt; (2).sav</c>. Nothing is ever overwritten, and a second
+    /// run finds nothing left to do.
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<SaveFileRename> EnsureExtensions(string titleId, string category)
+    {
+        var folder = CategoryFolder(titleId, category);
+        if (!Directory.Exists(folder)) return Array.Empty<SaveFileRename>();
+
+        List<SaveFileRename>? renames = null;
+
+        // The whole listing up front: this moves files about in the folder it is reading, and an
+        // enumerator over a folder being written to may hand back a file twice or not at all.
+        foreach (var path in Directory.GetFiles(folder))
+        {
+            var name = Path.GetFileName(path);
+            if (string.IsNullOrEmpty(name) || Path.GetExtension(name).Length > 0) continue;
+
+            try
+            {
+                var info = new FileInfo(path);
+                if ((info.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0) continue;
+
+                var target = Path.Combine(folder, name + Extension);
+                bool dropped = File.Exists(target) && SameContent(path, target);
+                if (dropped)
+                {
+                    File.Delete(path);
+                }
+                else
+                {
+                    target = FreeName(folder, name, Extension);
+                    File.Move(path, target);
+                }
+
+                renames ??= new List<SaveFileRename>();
+                renames.Add(new SaveFileRename(category, name, Path.GetFileName(target), dropped));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // A file something else has open keeps the name it has. The listing is worth more
+                // than the rename, and the next scan will try again.
+            }
+        }
+
+        return renames ?? (IReadOnlyList<SaveFileRename>)Array.Empty<SaveFileRename>();
+    }
+
+    /// <summary>The same over every category of a title, which is what opening one of them does.</summary>
+    public IReadOnlyList<SaveFileRename> EnsureExtensions(string titleId)
+    {
+        List<SaveFileRename>? renames = null;
+        foreach (var category in Categories(titleId))
+        {
+            var renamed = EnsureExtensions(titleId, category);
+            if (renamed.Count == 0) continue;
+
+            renames ??= new List<SaveFileRename>();
+            renames.AddRange(renamed);
+        }
+
+        return renames ?? (IReadOnlyList<SaveFileRename>)Array.Empty<SaveFileRename>();
+    }
+
+    /// <summary>
+    /// <paramref name="stem"/> and <paramref name="extension"/> as they are when nothing in the
+    /// folder is called that, and the first free "<c>stem (2)</c>", "<c>stem (3)</c>" otherwise.
+    /// The whole path, ready to be written to.
+    /// </summary>
+    public static string FreeName(string folder, string stem, string extension)
+    {
+        var path = Path.Combine(folder, stem + extension);
+        for (int n = 2; File.Exists(path) || Directory.Exists(path); n++)
+        {
+            path = Path.Combine(folder, $"{stem} ({n}){extension}");
+        }
+
+        return path;
+    }
+
+    /// <summary>
+    /// Whether two files hold the same bytes. The length is asked first, because it settles it for
+    /// almost every pair; a file that cannot be read is not the same as anything.
+    /// </summary>
+    public static bool SameContent(string left, string right)
+    {
+        try
+        {
+            var a = new FileInfo(left);
+            var b = new FileInfo(right);
+            if (!a.Exists || !b.Exists || a.Length != b.Length) return false;
+
+            return File.ReadAllBytes(left).AsSpan().SequenceEqual(File.ReadAllBytes(right));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return false;
+        }
+    }
+
     public string[] Files(string titleId, string category)
     {
         var folder = CategoryFolder(titleId, category);
         if (!Directory.Exists(folder)) return Array.Empty<string>();
+
+        EnsureExtensions(titleId, category);
 
         return Directory.EnumerateFiles(folder)
             .Select(Path.GetFileName)
@@ -116,6 +228,8 @@ public sealed class SaveFileLibrary
     {
         var folder = CategoryFolder(titleId, category);
         if (!Directory.Exists(folder)) return Array.Empty<LocalSaveFile>();
+
+        EnsureExtensions(titleId, category);
 
         var files = new List<LocalSaveFile>();
         foreach (var path in Directory.EnumerateFiles(folder))
@@ -232,6 +346,13 @@ public sealed class SaveFileLibrary
 
 /// <summary>One file in the PC's mirror: its name, its size and its CRC32.</summary>
 public readonly record struct LocalSaveFile(string Name, long Size, uint Crc);
+
+/// <summary>
+/// One file <see cref="SaveFileLibrary.EnsureExtensions(string, string)"/> put right: what it was
+/// called and what it is called now. <see cref="Dropped"/> says <see cref="To"/> already held those
+/// exact bytes, so the copy went rather than being kept twice under two names.
+/// </summary>
+public readonly record struct SaveFileRename(string Category, string From, string To, bool Dropped);
 
 /// <summary>Which side of the wire a save is on, once the two listings are merged.</summary>
 public enum SaveFileLocation

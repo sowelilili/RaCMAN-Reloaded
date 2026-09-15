@@ -1665,3 +1665,85 @@ public class MobyInspectorRowTests
         Assert.Equal((float)MobyInspectorRows.ValueSample.Length, widths.Value);
     }
 }
+
+/// <summary>
+/// The Save files panel's category combo, as far as it goes without ImGui: the one list the two
+/// sides are merged into, its order, and the line the panel says when a library carried over from
+/// the old RaCMAN has had the suffix put on it.
+/// </summary>
+public class SaveFileCategoryTests
+{
+    [Fact]
+    public void TheDefaultCategorySortsToTheBottomAndTheRestAreAlphabetical()
+    {
+        var categories = SaveFilesPanel.Merge(
+            new[] { "zebra", SaveFileLibrary.DefaultCategory, "any%", "Hundred" },
+            Array.Empty<string>());
+
+        Assert.Equal(new[] { "any%", "Hundred", "zebra", SaveFileLibrary.DefaultCategory }, categories);
+    }
+
+    [Fact]
+    public void BothSidesAreInOneListWithNoRepeats()
+    {
+        var categories = SaveFilesPanel.Merge(
+            new[] { "any%", SaveFileLibrary.DefaultCategory },
+            new[] { "ANY%", "hundred", string.Empty, "   " });
+
+        Assert.Equal(new[] { "any%", "hundred", SaveFileLibrary.DefaultCategory }, categories);
+    }
+
+    [Fact]
+    public void NeitherSideHavingAnythingStillOffersTheDefault()
+    {
+        Assert.Equal(new[] { SaveFileLibrary.DefaultCategory },
+            SaveFilesPanel.Merge(Array.Empty<string>(), Array.Empty<string>()));
+        Assert.Equal(new[] { SaveFileLibrary.DefaultCategory }, SaveFilesPanel.Merge(null, null));
+    }
+
+    [Theory]
+    [InlineData("any%", "zebra", -1)]
+    [InlineData("zebra", "any%", 1)]
+    [InlineData("any%", SaveFileLibrary.DefaultCategory, -1)]
+    [InlineData(SaveFileLibrary.DefaultCategory, "any%", 1)]
+    [InlineData(SaveFileLibrary.DefaultCategory, "zebra", 1)]
+    [InlineData("MISC", SaveFileLibrary.DefaultCategory, 0)]
+    public void TheDefaultIsAfterEveryOtherCategoryHoweverItIsSpelt(string left, string right, int expected)
+    {
+        Assert.Equal(expected, Math.Sign(SaveFilesPanel.CompareCategories(left, right)));
+    }
+
+    [Fact]
+    public void TheRememberedCategoryIsSelectedAndAForgottenOneFallsBackToTheFirst()
+    {
+        var categories = SaveFilesPanel.Merge(
+            new[] { "any%", "hundred", SaveFileLibrary.DefaultCategory }, Array.Empty<string>());
+
+        Assert.Equal(1, SaveFilesPanel.IndexOf(categories, "hundred"));
+        Assert.Equal(1, SaveFilesPanel.IndexOf(categories, "HUNDRED"));
+        Assert.Equal(2, SaveFilesPanel.IndexOf(categories, SaveFileLibrary.DefaultCategory));
+
+        // A category that has since been deleted, and a title that was never left on one.
+        Assert.Equal(0, SaveFilesPanel.IndexOf(categories, "gone"));
+        Assert.Equal(0, SaveFilesPanel.IndexOf(categories, null));
+        Assert.Equal(0, SaveFilesPanel.IndexOf(categories, string.Empty));
+    }
+
+    [Fact]
+    public void TheRenameLineCountsWhatWasRenamedAndWhatWasDropped()
+    {
+        Assert.Equal(string.Empty, SaveFilesPanel.DescribeRenames(Array.Empty<SaveFileRename>()));
+
+        Assert.Equal("1 old save renamed to .sav", SaveFilesPanel.DescribeRenames(new[]
+        {
+            new SaveFileRename("misc", "veldin", "veldin.sav", Dropped: false),
+        }));
+
+        Assert.Equal("2 old saves renamed to .sav, 1 duplicate dropped", SaveFilesPanel.DescribeRenames(new[]
+        {
+            new SaveFileRename("misc", "veldin", "veldin.sav", Dropped: false),
+            new SaveFileRename("misc", "kerwan", "kerwan (2).sav", Dropped: false),
+            new SaveFileRename("any%", "novalis", "novalis.sav", Dropped: true),
+        }));
+    }
+}

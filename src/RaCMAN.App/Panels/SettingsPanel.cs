@@ -18,6 +18,9 @@ public static class SettingsPanel
     private static bool _dialogOpen;
     private static bool _importing;
 
+    /// <summary>The two libraries beside the config.txt, counted when the path last changed.</summary>
+    private static LegacyLibraryImport.Survey _found = LegacyLibraryImport.Survey.Nothing;
+
     /// <summary>The LiveSplit endpoint while it is being typed; committed when the boxes are left.</summary>
     private static string _liveSplitHost = string.Empty;
     private static int _liveSplitPort;
@@ -327,10 +330,15 @@ public static class SettingsPanel
     /// client's settings; the combos and the mod auto-apply list go to the console, so those two
     /// need a connection (and the mod list needs the matching game running, since the console
     /// keeps that list per title).
+    /// <para>
+    /// The file's own folder is the old RaCMAN folder, and the old client kept its save files and
+    /// its mods in it, so those come across at the same time. They are files on this PC and need
+    /// nothing plugged in.
+    /// </para>
     /// </summary>
     private static void DrawImport(AppState state)
     {
-        Ui.Hint("Import settings from previous versions of RaCMAN");
+        Ui.Hint("Import settings, save files and mods from previous versions of RaCMAN");
 
         ImGui.SetNextItemWidth(-110);
         Ui.InputTextWithHint("##legacy-config", "C:\\RaCMAN\\config.txt", ref _importPath, 512);
@@ -354,53 +362,65 @@ public static class SettingsPanel
         }
 
         var config = _parsed;
-        if (!config.HasAnything)
+        if (!config.HasAnything && !_found.Anything)
         {
-            Ui.Hint("That file has nothing this client can use.");
+            Ui.Hint("That file has nothing this client can use, and there are no save files or mods beside it.");
             return;
         }
 
         ImGui.Spacing();
-        ImGui.TextUnformatted(config.Ip is { } ip ? $"Console IP: {ip}" : "No console IP in the file.");
 
-        ImGui.TextUnformatted(config.HasComboKeys ? "Combos:" : "Combos (the file has none set; these are the old RaCMAN defaults):");
-        ImGui.Indent();
-        foreach (var combo in config.Combos)
+        if (config.HasAnything)
         {
-            string note = combo.WasDefault && config.HasComboKeys ? "  (RaCMAN default)" : string.Empty;
-            Ui.Hint($"{CombosPanel.Label(combo.Action)} = {PadButtons.Describe(combo.Mask)}{note}");
-        }
-        ImGui.Unindent();
+            ImGui.TextUnformatted(config.Ip is { } ip ? $"Console IP: {ip}" : "No console IP in the file.");
 
-        var mods = config.ModAutoByTitle;
-        string title = state.Session.TitleId ?? string.Empty;
-        if (mods.Count > 0)
-        {
-            if (title.Length > 0 && mods.TryGetValue(title, out var here))
+            ImGui.TextUnformatted(config.HasComboKeys ? "Combos:" : "Combos (the file has none set; these are the old RaCMAN defaults):");
+            ImGui.Indent();
+            foreach (var combo in config.Combos)
             {
-                ImGui.TextUnformatted($"Auto-apply mods for {title}: {string.Join(", ", here)}");
+                string note = combo.WasDefault && config.HasComboKeys ? "  (RaCMAN default)" : string.Empty;
+                Ui.Hint($"{CombosPanel.Label(combo.Action)} = {PadButtons.Describe(combo.Mask)}{note}");
+            }
+            ImGui.Unindent();
+
+            var mods = config.ModAutoByTitle;
+            string title = state.Session.TitleId ?? string.Empty;
+            if (mods.Count > 0)
+            {
+                if (title.Length > 0 && mods.TryGetValue(title, out var here))
+                {
+                    ImGui.TextUnformatted($"Auto-apply mods for {title}: {string.Join(", ", here)}");
+                }
+
+                int others = mods.Count - (title.Length > 0 && mods.ContainsKey(title) ? 1 : 0);
+                if (others > 0)
+                {
+                    Ui.Hint($"Auto-apply mod lists for {others} other title(s) are only imported while that game is running; "
+                            + "start it and import again.");
+                }
             }
 
-            int others = mods.Count - (title.Length > 0 && mods.ContainsKey(title) ? 1 : 0);
-            if (others > 0)
+            var slots = config.ColourSlots;
+            if (slots.Count > 0)
             {
-                Ui.Hint($"Auto-apply mod lists for {others} other title(s) are only imported while that game is running; "
-                        + "start it and import again.");
+                ImGui.TextUnformatted($"{slots.Count} chargeboot colour slot(s)");
+                Ui.Hint("Saved as colour presets named \"RaCMAN slot N\" for both RaC2 and RaC3, since the old picker was "
+                        + "shared by the two games.");
             }
         }
 
-        var slots = config.ColourSlots;
-        if (slots.Count > 0)
+        // What is in the folder the file sits in, which is the old RaCMAN folder itself.
+        if (_found.Anything)
         {
-            ImGui.TextUnformatted($"{slots.Count} chargeboot colour slot(s)");
-            Ui.Hint("Saved as colour presets named \"RaCMAN slot N\" for both RaC2 and RaC3, since the old picker was "
-                    + "shared by the two games.");
+            ImGui.TextUnformatted($"In that folder: {_found.Describe()}");
+            Ui.Hint("Copied into this client's own save file and mod folders. Nothing already here is replaced: a save "
+                    + "you already have is left alone, and a mod folder of the same name is kept beside yours.");
         }
 
-        if (!state.Connected)
+        if (!state.Connected && config.HasAnything)
         {
-            Ui.Warning("Not connected: only the IP and the colour slots will be imported now. Connect to import the "
-                       + "combos and mod flags.");
+            Ui.Warning("Not connected: the IP, the colour slots, the save files and the mods are imported now. "
+                       + "Connect to import the combos and mod flags.");
         }
 
         ImGui.Spacing();
@@ -417,6 +437,7 @@ public static class SettingsPanel
         _parsedPath = path;
         _parsed = null;
         _parseError = null;
+        _found = LegacyLibraryImport.Survey.Nothing;
         if (path.Length == 0 || !File.Exists(path)) return;
 
         try
@@ -427,7 +448,15 @@ public static class SettingsPanel
         {
             _parseError = $"Could not read it: {ex.Message}";
         }
+
+        // Counting the two libraries walks the old folder, so it happens here, with the parse, and
+        // not on every frame the section is drawn.
+        _found = LegacyLibraryImport.Look(OldFolder());
     }
+
+    /// <summary>The folder the config.txt sits in, which is the folder the old racman.exe sat in.</summary>
+    private static string OldFolder() =>
+        System.IO.Path.GetDirectoryName(_parsedPath) is { Length: > 0 } folder ? folder : string.Empty;
 
     private static void Browse(AppState state)
     {
@@ -455,6 +484,12 @@ public static class SettingsPanel
         });
     }
 
+    /// <summary>
+    /// Everything the file and its folder hold, in one go. The IP and the colour slots are this
+    /// client's own files and are written here and now; the two libraries are a file copy and go
+    /// off the render thread, because a savefile library is megabytes; only the combos and the mod
+    /// flags need a console, and they are the one part a disconnected import leaves for later.
+    /// </summary>
     private static void Import(AppState state, LegacyConfig config)
     {
         var settings = state.Settings;
@@ -468,21 +503,20 @@ public static class SettingsPanel
             done.Add($"IP {ip}");
         }
 
-        // The colour slots become files in the data folder, so they are imported whether or not a
-        // console is listening; everything below this point is a request to the console.
         int presets = ImportColourSlots(state, config);
         if (presets > 0) done.Add($"{presets} colour preset(s) for RaC2 and RaC3");
 
-        if (!state.Connected)
-        {
-            state.AddToast(done.Count > 0 ? $"Imported {string.Join(", ", done)}; connect to import the rest" : "Nothing imported: not connected",
-                done.Count > 0 ? ToastKind.Success : ToastKind.Error);
-            return;
-        }
+        string folder = OldFolder();
+        bool connected = state.Connected;
 
-        var combos = config.Combos;
+        // A file with nothing in it at all is not an instruction to set the old defaults on the
+        // console; it is a config.txt that happens to sit beside a library worth importing.
+        var combos = config.HasAnything ? config.Combos : Array.Empty<LegacyConfig.ComboImport>();
+
         string title = state.Session.TitleId ?? string.Empty;
-        var wanted = title.Length > 0 && config.ModAutoByTitle.TryGetValue(title, out var list) ? list : Array.Empty<string>();
+        var wanted = connected && title.Length > 0 && config.ModAutoByTitle.TryGetValue(title, out var list)
+            ? list
+            : Array.Empty<string>();
         var known = state.ConsoleMods.Select(m => m.DirName).ToHashSet(StringComparer.OrdinalIgnoreCase);
         var flagged = wanted.Where(known.Contains).ToArray();
         var missing = wanted.Where(f => !known.Contains(f)).ToArray();
@@ -492,23 +526,53 @@ public static class SettingsPanel
         {
             try
             {
-                foreach (var combo in combos)
-                {
-                    await state.Client.ComboSetAsync(combo.Action, combo.Mask).ConfigureAwait(false);
-                }
+                var copied = await Task.Run(() => LegacyLibraryImport.Run(
+                        folder, AppPaths.SaveFiles, AppPaths.Mods, AppPaths.ShippedMods))
+                    .ConfigureAwait(false);
 
-                foreach (var dir in flagged)
+                state.Post(() =>
                 {
-                    await state.Client.ModSetAutoAsync(dir, true).ConfigureAwait(false);
+                    done.AddRange(copied.Lines);
+                    if (copied.Mods > 0) state.RescanLocalMods();
+                    if (copied.Saves > 0) SaveFilesPanel.Invalidate();
+                });
+
+                if (connected)
+                {
+                    foreach (var combo in combos)
+                    {
+                        await state.Client.ComboSetAsync(combo.Action, combo.Mask).ConfigureAwait(false);
+                    }
+
+                    foreach (var dir in flagged)
+                    {
+                        await state.Client.ModSetAutoAsync(dir, true).ConfigureAwait(false);
+                    }
+
+                    state.Post(() =>
+                    {
+                        if (combos.Count > 0) done.Add($"{combos.Count} combos");
+                        if (flagged.Length > 0) done.Add($"{flagged.Length} mod auto flag(s)");
+                        state.RefreshCombos();
+                        state.RefreshMods();
+                    });
                 }
 
                 state.Post(() =>
                 {
-                    done.Add($"{combos.Count} combos");
-                    if (flagged.Length > 0) done.Add($"{flagged.Length} mod auto flag(s)");
-                    state.RefreshCombos();
-                    state.RefreshMods();
-                    state.AddToast($"Imported {string.Join(", ", done)}", ToastKind.Success);
+                    if (done.Count == 0)
+                    {
+                        state.AddToast("Nothing imported: there was nothing this client can use", ToastKind.Error);
+                        return;
+                    }
+
+                    // Only the combos and the mod flags are left for a console; a folder whose
+                    // config.txt held nothing has nothing waiting on one.
+                    state.AddToast(!connected && combos.Count > 0
+                        ? $"Imported {string.Join(", ", done)}; connect to import the combos and mod flags"
+                        : $"Imported {string.Join(", ", done)}",
+                        ToastKind.Success);
+
                     if (missing.Length > 0)
                     {
                         state.AddToast($"Not on the console yet, so not flagged: {string.Join(", ", missing)}. Load each once, then import again.");
