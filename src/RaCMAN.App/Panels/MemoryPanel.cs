@@ -41,8 +41,14 @@ public static class MemoryPanel
 
     private static string _watchlistName = string.Empty;
 
-    private static readonly int[] Sizes = { 1, 2, 4, 8 };
-    private static readonly string[] SizeLabels = { "1", "2", "4", "8" };
+    /// <summary>
+    /// The sizes offered for a new watch or freeze, and in a row's size combo. Eight is missing on
+    /// purpose: no value in these games is that wide, and the choice took room the table needed.
+    /// The protocol still carries it, so a watch that arrived at size 8 - an old watchlist, or
+    /// another client - keeps showing 8 and reading correctly; it is only not offered.
+    /// </summary>
+    private static readonly int[] Sizes = { 1, 2, 4 };
+    private static readonly string[] SizeLabels = { "1", "2", "4" };
 
     /// <summary>Local names and formats for watches; qwark owns the watches themselves.</summary>
     private static readonly Dictionary<string, SavedWatch> Local = new(StringComparer.Ordinal);
@@ -500,16 +506,28 @@ public static class MemoryPanel
         // room the name needed. The id is on the name's tooltip with debug information on.
         else if (ImGui.BeginTable("watches", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
+            // The last column is the format combo with the two buttons stacked beside it, measured
+            // rather than guessed: side by side the buttons pushed the Name column down to a
+            // couple of letters at the size the window opens at. A fixed width is the cell's own
+            // contents, so there is no padding to add to it here.
+            var buttons = ButtonSize();
+            float actions = FormatWidth + ImGui.GetStyle().ItemSpacing.X + buttons.X;
+            float rowHeight = Ui.StackedButtonRowHeight();
+
+            // Name takes what the other four leave, which is now most of the row.
             ImGui.TableSetupColumn("Name");
             ImGui.TableSetupColumn("Address", ImGuiTableColumnFlags.WidthFixed, 90);
             ImGui.TableSetupColumn("Size", ImGuiTableColumnFlags.WidthFixed, 45);
-            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 160);
-            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 230);
+
+            // Wide enough for a signed 32-bit number spelled out in decimal, which is the longest
+            // thing any of the four formats puts in the box.
+            ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthFixed, 110);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, actions);
             ImGui.TableHeadersRow();
 
             foreach (var watch in state.Watches)
             {
-                ImGui.TableNextRow();
+                ImGui.TableNextRow(ImGuiTableRowFlags.None, rowHeight);
                 ImGui.PushID(watch.Id);
 
                 string key = Key(watch.Address, watch.Size);
@@ -523,6 +541,7 @@ public static class MemoryPanel
                 // text until it is reached for: a watchlist is something to look at far more often
                 // than something to edit.
                 ImGui.TableNextColumn();
+                Ui.CentreInRow(rowHeight);
                 string name = saved.Name;
                 ImGui.SetNextItemWidth(-1);
                 Ui.PushTableInput();
@@ -531,33 +550,58 @@ public static class MemoryPanel
                 if (Ui.Debug && ImGui.IsItemHovered()) ImGui.SetTooltip($"watch id {watch.Id}");
 
                 ImGui.TableNextColumn();
-                ImGui.TextUnformatted($"0x{watch.Address:X8}");
+                Ui.CentreInRow(rowHeight);
+                Ui.TableLabel($"0x{watch.Address:X8}");
 
                 ImGui.TableNextColumn();
+                Ui.CentreInRow(rowHeight);
                 DrawSizeCell(state, watch, saved);
 
                 ImGui.TableNextColumn();
+                Ui.CentreInRow(rowHeight);
                 var live = state.WatchValueFor(watch.Id);
                 DrawValueCell(state, watch, saved, live, enabled);
 
+                // The last cell holds the combo and, stacked beside it, the two buttons. The row's
+                // top is kept because SameLine comes back to the combo's own line, which is the
+                // centred one, and the stack has to start at the top to fit.
                 ImGui.TableNextColumn();
+                float top = ImGui.GetCursorPosY();
+                Ui.CentreInRow(rowHeight);
                 int format = Array.IndexOf(Ui.ValueFormats, saved.Format);
                 if (format < 0) format = 0;
-                ImGui.SetNextItemWidth(80);
+                ImGui.SetNextItemWidth(FormatWidth);
                 if (ImGui.Combo("##format", ref format, Ui.ValueFormats, Ui.ValueFormats.Length))
                 {
                     saved.Format = Ui.ValueFormats[format];
                     ValueDrafts.Remove(watch.Id);
                 }
 
-                // The value the row is showing, held where it stands. A freeze is a write repeated
-                // every frame, so it needs a game to write to and a reading to repeat.
                 ImGui.SameLine();
+                ImGui.SetCursorPosY(top);
+
                 byte id = watch.Id;
                 uint address = watch.Address;
                 byte size = watch.Size;
+                ImGui.BeginGroup();
+
+                // Remove on top, because it is the one that is always available: a Freeze greyed
+                // out for want of a reading would otherwise leave a gap where the row's live
+                // button should be.
+                if (ImGui.Button("Remove", buttons))
+                {
+                    ValueDrafts.Remove(id);
+                    state.Run(async () =>
+                    {
+                        await state.Client.WatchRemoveAsync(id);
+                        state.Post(() => state.RefreshWatches());
+                    });
+                }
+
+                // The value the row is showing, held where it stands. A freeze is a write repeated
+                // every frame, so it needs a game to write to and a reading to repeat.
                 ImGui.BeginDisabled(!enabled || live is not { Valid: true });
-                if (ImGui.SmallButton("Freeze"))
+                if (ImGui.Button("Freeze", buttons))
                 {
                     ulong value = live!.Value.Value;
                     state.Run(async () =>
@@ -568,17 +612,7 @@ public static class MemoryPanel
                 }
 
                 ImGui.EndDisabled();
-
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Remove"))
-                {
-                    ValueDrafts.Remove(id);
-                    state.Run(async () =>
-                    {
-                        await state.Client.WatchRemoveAsync(id);
-                        state.Post(() => state.RefreshWatches());
-                    });
-                }
+                ImGui.EndGroup();
 
                 ImGui.PopID();
             }
@@ -626,6 +660,18 @@ public static class MemoryPanel
     /// and what makes the box follow the live value again the moment it is let go.
     /// </summary>
     private static readonly Dictionary<byte, string> ValueDrafts = new();
+
+    /// <summary>The row's format combo, which the last column is sized around.</summary>
+    private const float FormatWidth = 80f;
+
+    /// <summary>
+    /// The width Remove and Freeze share, so the stack reads as one block of buttons rather than
+    /// as two of different lengths. Measured, because the label lengths are the font's business.
+    /// </summary>
+    private static Vector2 ButtonSize() => new(
+        MathF.Max(ImGui.CalcTextSize("Remove").X, ImGui.CalcTextSize("Freeze").X)
+            + (ImGui.GetStyle().FramePadding.X * 2f),
+        0f);
 
     /// <summary>
     /// The size as a combo rather than a number. The arrow is left off so the cell reads as the

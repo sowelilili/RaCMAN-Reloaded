@@ -157,6 +157,26 @@ public static class Ui
         Text(colour, text);
     }
 
+    /// <summary>
+    /// How tall a table row is when one of its cells holds two buttons stacked on top of each
+    /// other. Rows are built around the tallest cell, so the number is wanted before the row is
+    /// drawn as well as inside it.
+    /// </summary>
+    public static float StackedButtonRowHeight() =>
+        (ImGui.GetFrameHeight() * 2f) + ImGui.GetStyle().ItemSpacing.Y;
+
+    /// <summary>
+    /// Moves the cursor down to where a single-line widget sits on the middle of a row that is
+    /// <paramref name="rowHeight"/> tall. A cell is filled from the top, so a box in a row made
+    /// tall by a stack of buttons beside it would otherwise hang off that row's top edge and read
+    /// as belonging to the row above.
+    /// </summary>
+    public static void CentreInRow(float rowHeight)
+    {
+        float offset = (rowHeight - ImGui.GetFrameHeight()) * 0.5f;
+        if (offset > 0f) ImGui.SetCursorPosY(ImGui.GetCursorPosY() + offset);
+    }
+
     private static void Wrapped(Vector4 colour, string text)
     {
         ImGui.PushStyleColor(ImGuiCol.Text, colour);

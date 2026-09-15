@@ -138,7 +138,21 @@ public sealed class ImGuiController : IDisposable
         _clipboardWindow = window;
         _getClipboard = _ =>
         {
-            var text = _clipboardWindow?.ClipboardString ?? string.Empty;
+            // GLFW throws when the clipboard holds something that is not text - a screenshot, say -
+            // and this runs inside a native callback, where an exception takes the process down.
+            // A paste with an image on the clipboard should do nothing, so it becomes no text.
+            string text;
+            try
+            {
+                text = _clipboardWindow?.ClipboardString ?? string.Empty;
+            }
+            catch (GLFWException)
+            {
+                text = string.Empty;
+            }
+
+            // Still a real buffer: ImGui reads the pointer it is handed and a null one is a crash
+            // of its own.
             if (_clipboardBuffer != IntPtr.Zero) Marshal.FreeHGlobal(_clipboardBuffer);
             _clipboardBuffer = Marshal.StringToHGlobalAnsi(text);
             return _clipboardBuffer;
@@ -147,7 +161,16 @@ public sealed class ImGuiController : IDisposable
         _setClipboard = (_, text) =>
         {
             if (_clipboardWindow is null) return;
-            _clipboardWindow.ClipboardString = Marshal.PtrToStringAnsi(text) ?? string.Empty;
+
+            // Same reason: the setter is a native callback too, and the platform can refuse the
+            // clipboard while another process holds it open.
+            try
+            {
+                _clipboardWindow.ClipboardString = Marshal.PtrToStringAnsi(text) ?? string.Empty;
+            }
+            catch (GLFWException)
+            {
+            }
         };
 
         var platform = ImGui.GetPlatformIO();
