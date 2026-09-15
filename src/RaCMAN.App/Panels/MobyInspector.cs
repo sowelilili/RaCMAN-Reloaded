@@ -19,6 +19,16 @@ public static class MobyInspector
     /// <summary>How much of the pointed-to memory "Show target in viewer" reads: the viewer's own default.</summary>
     private const int PointerReadLength = 64;
 
+    /// <summary>Field, Offset, Type, Value.</summary>
+    private const int Columns = 4;
+
+    /// <summary>
+    /// How much of the main window an inspector may take up before it stops growing with its table.
+    /// Past that the table scrolls down inside the window, and a raw block's hex scrolls along
+    /// inside its own box.
+    /// </summary>
+    private const float Share = 0.7f;
+
     private sealed class Inspector
     {
         public required uint Address { get; init; }
@@ -30,10 +40,42 @@ public static class MobyInspector
 
         public required MobyLayout? Layout { get; init; }
 
+        /// <summary>
+        /// The lines the table draws: the struct list with every vector split into its floats. The
+        /// layout of a window never changes under it, so they are made once, with the window.
+        /// </summary>
+        public required List<MobyInspectorRow> Rows { get; init; }
+
         /// <summary>Kept for the title bar, and re-read out of every row that arrives.</summary>
         public long? OClass { get; set; }
 
         public byte[] Row { get; set; } = Array.Empty<byte>();
+
+        /// <summary>Counted up by every row that arrives, which is what makes the values stale.</summary>
+        public int RowVersion { get; set; }
+
+        /// <summary>The row, the font and the room the values and the widths were made for.</summary>
+        public int MeasuredVersion { get; set; } = -1;
+
+        public float MeasuredFont { get; set; }
+
+        public float MeasuredRoom { get; set; }
+
+        public MobyColumnWidths Widths { get; set; }
+
+        /// <summary>How wide the line of buttons is, which is a floor under the window's width.</summary>
+        public float ToolbarWidth { get; set; }
+
+        /// <summary>The size the table asks for, once it has been drawn once, and the last one given.</summary>
+        public Vector2? Wanted { get; set; }
+
+        public Vector2 Given { get; set; }
+
+        /// <summary>
+        /// Set the first frame the window is not the size it was told to be, which is the frame
+        /// after a corner was dragged. From then on the size is the user's and is left alone.
+        /// </summary>
+        public bool UserSized { get; set; }
 
         public float SinceRead { get; set; }
 
@@ -64,7 +106,11 @@ public static class MobyInspector
         {
             if (open.Address != row.Address) continue;
 
+            // Opening a moby again is the way back to the size its table wants, after the window
+            // has been dragged to some other one.
             open.Focus = true;
+            open.UserSized = false;
+            open.Given = Vector2.Zero;
             return;
         }
 
@@ -74,6 +120,7 @@ public static class MobyInspector
             Index = row.Index,
             Stride = stride > 0 ? stride : 256,
             Layout = layout,
+            Rows = MobyInspectorRows.Build(layout?.Struct ?? new List<MobyField>()),
             OClass = row.OClass,
             Cascade = Windows.Count % 6,
         };
@@ -108,7 +155,20 @@ public static class MobyInspector
         float step = window.Cascade * 26f;
         ImGui.SetNextWindowPos(new Vector2(centre.X + step, centre.Y + step), ImGuiCond.Appearing,
             new Vector2(0.5f, 0.5f));
+
+        // Until the table has been drawn once there is nothing to measure it against.
         ImGui.SetNextWindowSize(new Vector2(560, 480), ImGuiCond.Appearing);
+
+        // After that the window is the size its table asks for. Always, so it shrinks as well as
+        // grows, but only on the frames that size changes: forcing it every frame would sit on top
+        // of a corner being dragged and the user could never make the window their own.
+        bool given = false;
+        if (!window.UserSized && window.Wanted is { } wanted && Differs(window.Given, wanted))
+        {
+            ImGui.SetNextWindowSize(wanted, ImGuiCond.Always);
+            window.Given = wanted;
+            given = true;
+        }
 
         if (window.Focus)
         {
@@ -117,12 +177,29 @@ public static class MobyInspector
         }
 
         bool open = true;
-        if (ImGui.Begin(title, ref open)) DrawBody(state, window);
+        if (ImGui.Begin(title, ref open))
+        {
+            // A window that is not the size it was last given was dragged there by hand.
+            if (!given && !window.UserSized && window.Wanted is not null
+                && Differs(ImGui.GetWindowSize(), window.Given))
+            {
+                window.UserSized = true;
+            }
+
+            DrawBody(state, window);
+        }
 
         // Always: Begin is false for a collapsed window as well as for a closed one.
         ImGui.End();
         return open;
     }
+
+    /// <summary>
+    /// Whether two sizes are the same window. A pixel of slack, because ImGui keeps a window's size
+    /// as whole pixels and the one asked for is measured text.
+    /// </summary>
+    private static bool Differs(Vector2 a, Vector2 b) =>
+        MathF.Abs(a.X - b.X) > 1f || MathF.Abs(a.Y - b.Y) > 1f;
 
     private static void DrawBody(AppState state, Inspector window)
     {
@@ -139,6 +216,10 @@ public static class MobyInspector
 
         ImGui.SameLine();
         Ui.TableLabel(Ui.Grey, $"{window.Stride} bytes at 0x{window.Address:X8}");
+
+        // The line of buttons holds the window open as much as the table does: the address behind
+        // them is wider than a narrow table.
+        window.ToolbarWidth = ImGui.GetItemRectMax().X - ImGui.GetWindowPos().X - ImGui.GetCursorStartPos().X;
 
         Tick(state, window);
 
@@ -159,7 +240,7 @@ public static class MobyInspector
         }
 
         ImGui.Spacing();
-        DrawFields(state, window, layout);
+        DrawFields(state, window);
     }
 
     /// <summary>
@@ -206,6 +287,7 @@ public static class MobyInspector
                 state.Post(() =>
                 {
                     window.Row = bytes;
+                    window.RowVersion++;
                     if (window.Layout is { } layout && layout.TryReadInteger(bytes, "oClass", out long oClass))
                     {
                         window.OClass = oClass;
@@ -222,51 +304,112 @@ public static class MobyInspector
         else state.Run(ReadRow);
     }
 
-    private static void DrawFields(AppState state, Inspector window, MobyLayout layout)
+    private static void DrawFields(AppState state, Inspector window)
     {
-        if (!ImGui.BeginTable("fields", 4, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg
-                | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit))
+        var style = ImGui.GetStyle();
+        var viewport = ImGui.GetMainViewport();
+        float overhead = TableOverhead(style);
+
+        // What the four columns may take between them: whatever a window that wide has left after
+        // the table's own padding and the window's.
+        Measure(window, (viewport.Size.X * Share) - overhead - (style.WindowPadding.X * 2f));
+        var widths = window.Widths;
+
+        // A row is as tall as the box in its Value cell and the header is a line of text, both with
+        // the cell padding above and below, and two pixels of slack keep the last row off the
+        // border rather than half a pixel behind a scrollbar.
+        float rowHeight = ImGui.GetFrameHeight() + (style.CellPadding.Y * 2f);
+        float padded = (style.CellPadding.Y * 2f) + 2f;
+        float whole = ImGui.GetTextLineHeight() + padded + (window.Rows.Count * rowHeight);
+
+        // The window is as tall as the table up to the cap; past it the rows that fit are shown and
+        // the rest are scrolled to, which is what a hundred-row struct needs on any screen.
+        float top = ImGui.GetCursorPosY();
+        float room = (viewport.Size.Y * Share) - top - style.WindowPadding.Y;
+        float height = MathF.Ceiling(whole <= room ? whole : MathF.Max(room, (rowHeight * 4f) + padded));
+        bool scrolls = height < whole;
+
+        // The height is given here rather than left to the window: it is the window that is made to
+        // fit the table, and a table told to fill what is left would be measuring itself.
+        if (!ImGui.BeginTable("fields", Columns, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg
+                | ImGuiTableFlags.ScrollY | ImGuiTableFlags.SizingFixedFit, new Vector2(0f, height)))
         {
             return;
         }
 
         ImGui.TableSetupScrollFreeze(0, 1);
-        ImGui.TableSetupColumn("Field", ImGuiTableColumnFlags.WidthFixed, 180);
-        ImGui.TableSetupColumn("Offset", ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("Type", ImGuiTableColumnFlags.WidthFixed, 70);
-        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn(MobyInspectorRows.FieldHeader, ImGuiTableColumnFlags.WidthFixed, widths.Field);
+        ImGui.TableSetupColumn(MobyInspectorRows.OffsetHeader, ImGuiTableColumnFlags.WidthFixed, widths.Offset);
+        ImGui.TableSetupColumn(MobyInspectorRows.TypeHeader, ImGuiTableColumnFlags.WidthFixed, widths.Type);
+        ImGui.TableSetupColumn(MobyInspectorRows.ValueHeader, ImGuiTableColumnFlags.WidthFixed, widths.Value);
         ImGui.TableHeadersRow();
 
         // Writing a field is writing game memory, so it needs a game; reading one only needs the
         // row that is already here.
         bool enabled = state.Ingame;
 
-        foreach (var field in layout.Struct)
+        foreach (var row in window.Rows)
         {
             ImGui.TableNextRow();
-            ImGui.PushID(field.Offset);
+            ImGui.PushID(row.Field.Offset);
 
             // A selectable rather than a label, so the whole row takes the right-click that turns a
             // field into a watch; it allows overlap so the box in the last column stays reachable.
             ImGui.TableNextColumn();
             ImGui.AlignTextToFramePadding();
-            ImGui.Selectable(field.Name, false,
+            ImGui.Selectable(row.Name, false,
                 ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap);
-            DrawContextMenu(state, window, field);
+            DrawContextMenu(state, window, row.Field);
 
             ImGui.TableNextColumn();
-            Ui.TableLabel($"0x{field.Offset:X2}");
+            Ui.TableLabel(row.Offset);
 
             ImGui.TableNextColumn();
-            Ui.TableLabel(field.Type == "bytes" ? $"bytes[{field.Length}]" : field.Type);
+            Ui.TableLabel(row.Type);
 
             ImGui.TableNextColumn();
-            DrawValue(state, window, field, enabled);
+            DrawValue(state, window, row, enabled);
 
             ImGui.PopID();
         }
 
         ImGui.EndTable();
+
+        // What the window is made to be next frame: the table, the line of buttons above it, and
+        // the scrollbar when the rows did not all fit.
+        float width = MathF.Max(widths.Total + overhead + (scrolls ? style.ScrollbarSize : 0f), window.ToolbarWidth);
+        window.Wanted = new Vector2(MathF.Ceiling(width + (style.WindowPadding.X * 2f)),
+            MathF.Ceiling(top + height + style.WindowPadding.Y));
+    }
+
+    /// <summary>
+    /// What the table puts around the four columns: the cell padding on both sides of each of them,
+    /// the border line between two, and the outer border down each edge.
+    /// </summary>
+    private static float TableOverhead(ImGuiStylePtr style) =>
+        (style.CellPadding.X * 2f * Columns) + (Columns - 1) + 2f;
+
+    /// <summary>
+    /// The values and the column widths, made again when a row has arrived, the font has changed
+    /// size or the main window has left them less room. Measuring a struct's worth of strings is
+    /// not a per-frame job and does not have to be one: a column only moves when what is in it does.
+    /// </summary>
+    private static void Measure(Inspector window, float room)
+    {
+        float font = ImGui.GetFontSize();
+        if (window.MeasuredVersion == window.RowVersion
+            && MathF.Abs(window.MeasuredFont - font) < 0.01f
+            && MathF.Abs(window.MeasuredRoom - room) < 0.5f)
+        {
+            return;
+        }
+
+        window.MeasuredVersion = window.RowVersion;
+        window.MeasuredFont = font;
+        window.MeasuredRoom = room;
+
+        MobyInspectorRows.Refresh(window.Rows, window.Row);
+        window.Widths = MobyInspectorRows.Measure(window.Rows, static text => ImGui.CalcTextSize(text).X, room);
     }
 
     /// <summary>
@@ -292,19 +435,10 @@ public static class MobyInspector
                 MemoryPanel.AddNamedWatch(state, address, size, name, MobyFieldCodec.FormatFor(field.Type));
             }
         }
-        else if (MobyFieldCodec.IsVector(field.Type))
-        {
-            // A watch holds one number, so a vector is offered as the floats it is made of.
-            for (int i = 0; i < MobyFieldCodec.ComponentCount(field.Type); i++)
-            {
-                string component = MobyFieldCodec.Components[i];
-                if (!ImGui.MenuItem($"Add {component} to watches")) continue;
-
-                MemoryPanel.AddNamedWatch(state, address + (uint)(i * 4), 4, $"{name}.{component}", "float");
-            }
-        }
         else
         {
+            // The 8-byte fields and the raw blocks. A vector is not one of them any more: each of
+            // its floats is a row of its own here, and four bytes is a watch like any other.
             ImGui.MenuItem("Add to watches", string.Empty, false, false);
             Ui.Tooltip(MobyFieldCodec.WatchSizes);
         }
@@ -329,9 +463,13 @@ public static class MobyInspector
     /// field's own type deciding what the box shows and what it takes. A raw block is shown and
     /// never written, because nothing here knows what is in one.
     /// </summary>
-    private static void DrawValue(AppState state, Inspector window, MobyField field, bool enabled)
+    private static void DrawValue(AppState state, Inspector window, MobyInspectorRow row, bool enabled)
     {
-        string live = MobyFieldCodec.Format(field, window.Row);
+        var field = row.Field;
+
+        // Formatted when the row arrived rather than here: the same string the column was measured
+        // against is the one the box shows.
+        string live = row.Value;
         if (live.Length == 0)
         {
             window.Drafts.Remove(field.Offset);

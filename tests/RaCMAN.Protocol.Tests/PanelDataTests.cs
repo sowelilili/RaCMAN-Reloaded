@@ -1502,3 +1502,166 @@ public class MobyFieldCodecTests
         Assert.Contains(format, Ui.ValueFormats);
     }
 }
+
+/// <summary>
+/// The lines the moby inspector draws: the struct list with its vectors taken apart, and how much
+/// room the four columns holding them need. The window measures the text and draws it; which
+/// strings there are to measure is all decided here, so all of it is tested here.
+/// </summary>
+public class MobyInspectorRowTests
+{
+    private static MobyField Field(string name, string type, int offset, int rawLength = 0) =>
+        new() { Name = name, Type = type, Offset = offset, RawLength = rawLength };
+
+    /// <summary>A font that is one unit per character, which is all the arithmetic needs of one.</summary>
+    private static float Characters(string text) => text.Length;
+
+    /// <summary>
+    /// A vector is four numbers the game writes one at a time, so it is four lines: each named for
+    /// its component, at its own offset, and a watch like any other four-byte field.
+    /// </summary>
+    [Theory]
+    [InlineData("vec4f", 4)]
+    [InlineData("vec3f", 3)]
+    public void AVectorIsOneRowPerComponent(string type, int count)
+    {
+        var rows = MobyInspectorRows.Build(new[] { Field("position", type, 0x10) });
+        var names = new[] { "position.x", "position.y", "position.z", "position.w" };
+
+        Assert.Equal(count, rows.Count);
+        for (int i = 0; i < count; i++)
+        {
+            Assert.Equal(names[i], rows[i].Name);
+            Assert.Equal(0x10 + (i * 4), rows[i].Field.Offset);
+            Assert.Equal($"0x{0x10 + (i * 4):X2}", rows[i].Offset);
+            Assert.Equal("f32", rows[i].Field.Type);
+            Assert.Equal("f32", rows[i].Type);
+            Assert.Equal((byte)4, MobyFieldCodec.WatchSize(rows[i].Field));
+        }
+    }
+
+    [Fact]
+    public void AComponentShowsAndWritesItsOwnFloat()
+    {
+        var row = new byte[32];
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(0x10), 1.5f);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(0x14), -2.5f);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(0x18), 300f);
+        BinaryPrimitives.WriteSingleBigEndian(row.AsSpan(0x1C), 0f);
+
+        var rows = MobyInspectorRows.Build(new[] { Field("position", "vec4f", 0x10) });
+        MobyInspectorRows.Refresh(rows, row);
+
+        Assert.Equal(new[] { "1.5", "-2.5", "300", "0" }, rows.Select(line => line.Value));
+
+        // Its box writes those four bytes and nothing either side of them.
+        Assert.True(MobyFieldCodec.TryEncode(rows[1].Field, "9.5", out var bytes));
+        Assert.Equal(4, bytes.Length);
+        Assert.Equal(9.5f, BinaryPrimitives.ReadSingleBigEndian(bytes));
+    }
+
+    /// <summary>Everything that is not a vector is one line, and is the struct's own entry.</summary>
+    [Fact]
+    public void EverythingElseIsOneLineAndTheFieldItself()
+    {
+        var fields = new[] { Field("state", "i8", 0x20), Field("bSphere", "bytes", 0, 16), Field("wide", "u64", 0x30) };
+        var rows = MobyInspectorRows.Build(fields);
+
+        Assert.Equal(3, rows.Count);
+        Assert.Same(fields[0], rows[0].Field);
+        Assert.Equal("0x20", rows[0].Offset);
+        Assert.Equal("i8", rows[0].Type);
+        Assert.Equal((byte)1, MobyFieldCodec.WatchSize(rows[0].Field));
+
+        // The raw block is where its length is said, and neither it nor an eight-byte field is a
+        // watch: that is still 1, 2 or 4 bytes.
+        Assert.Equal("bytes[16]", rows[1].Type);
+        Assert.Equal((byte)0, MobyFieldCodec.WatchSize(rows[1].Field));
+        Assert.Equal("u64", rows[2].Type);
+        Assert.Equal((byte)0, MobyFieldCodec.WatchSize(rows[2].Field));
+    }
+
+    /// <summary>Split or not, the lines are still the whole row: in order, and with no byte lost.</summary>
+    [Fact]
+    public void TheLinesStillCoverTheRowTheyCameFrom()
+    {
+        var fields = new[]
+        {
+            Field("bSphere", "bytes", 0, 16),
+            Field("position", "vec4f", 16),
+            Field("state", "i8", 32),
+            Field("group", "u8", 33),
+            Field("mClass", "i8", 34),
+            Field("alpha", "i8", 35),
+            Field("pClass", "ptr", 36),
+        };
+
+        int next = 0;
+        var rows = MobyInspectorRows.Build(fields);
+
+        Assert.Equal(fields.Length + 3, rows.Count);
+        foreach (var row in rows)
+        {
+            Assert.Equal(next, row.Field.Offset);
+            next += row.Field.Length;
+        }
+
+        Assert.Equal(40, next);
+    }
+
+    [Fact]
+    public void EachColumnIsAsWideAsTheLongestThingInIt()
+    {
+        var rows = MobyInspectorRows.Build(new[]
+        {
+            Field("position", "vec4f", 0x10),
+            Field("updateDistance", "u8", 0x30),
+        });
+
+        var widths = MobyInspectorRows.Measure(rows, Characters, room: 1000f);
+
+        Assert.Equal(14f, widths.Field);                                    // updateDistance
+        Assert.Equal(6f, widths.Offset);                                    // the header, over 0x10
+        Assert.Equal(4f, widths.Type);                                      // the header, over f32
+        Assert.Equal(10f, widths.Value);                                    // nothing read yet
+        Assert.Equal(34f, widths.Total);
+
+        // A value longer than all of that takes the column with it.
+        rows[4].Value = "12345678901234";
+        Assert.Equal(14f, MobyInspectorRows.Measure(rows, Characters, room: 1000f).Value);
+    }
+
+    /// <summary>
+    /// A raw block is 191 characters of hex and no screen is that wide. Value is the column that
+    /// gives way, down to a floor that can still be typed into, because its box scrolls along where
+    /// the other three would simply be cut off.
+    /// </summary>
+    [Fact]
+    public void TheValueColumnIsTheOneThatGivesWay()
+    {
+        var rows = MobyInspectorRows.Build(new[] { Field("bSphere", "bytes", 0, 16) });
+        rows[0].Value = new string('A', 200);
+
+        var widths = MobyInspectorRows.Measure(rows, Characters, room: 60f);
+        Assert.Equal(7f, widths.Field);                                     // bSphere
+        Assert.Equal(9f, widths.Type);                                      // bytes[16]
+        Assert.Equal(38f, widths.Value);
+        Assert.Equal(60f, widths.Total);
+
+        // And never below what a value can be typed into, however little room there is.
+        var tight = MobyInspectorRows.Measure(rows, Characters, room: 1f);
+        Assert.Equal((float)MobyInspectorRows.ValueSample.Length, tight.Value);
+    }
+
+    /// <summary>A table with nothing in it is still as wide as the four headers.</summary>
+    [Fact]
+    public void TheHeadersAreAFloorUnderEveryColumn()
+    {
+        var widths = MobyInspectorRows.Measure(Array.Empty<MobyInspectorRow>(), Characters, room: 1000f);
+
+        Assert.Equal((float)MobyInspectorRows.FieldHeader.Length, widths.Field);
+        Assert.Equal((float)MobyInspectorRows.OffsetHeader.Length, widths.Offset);
+        Assert.Equal((float)MobyInspectorRows.TypeHeader.Length, widths.Type);
+        Assert.Equal((float)MobyInspectorRows.ValueSample.Length, widths.Value);
+    }
+}
