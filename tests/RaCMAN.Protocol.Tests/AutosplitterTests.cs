@@ -712,6 +712,139 @@ public class AutosplitterTests
         Assert.DoesNotContain("none", h.Settings.Autosplit.Games.Keys);
     }
 
+    // ------------------------------------------------- one split, and not on a run boundary
+
+    /// <summary>
+    /// The reported bug: a run resets and a split goes in front of it, so LiveSplit closes the
+    /// run on a segment nobody ran and keeps the gold. The console stamps both events in the same
+    /// moment, which is the whole of the evidence needed — no old script could split on the update
+    /// its reset block answered true, because the two were an if/else.
+    /// </summary>
+    [Fact]
+    public async Task ASplitTheConsoleStampedWithTheResetIsNotASplit()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 5_000, AutosplitKind.Reset, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.Reset));
+
+        h.Engine.Handle(new AutosplitEvent(2, 5_000, AutosplitKind.Split, BossDefeated.Code, 0));
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(LiveSplitClient.Split, h.Server.Actions);
+        Assert.Contains("started or reset on this console tick", h.Engine.Log()[^1].Action);
+    }
+
+    /// <summary>
+    /// The same burst the console really sends on a new game: RESET, START and, on a module that
+    /// still emits one, a planet split for the planet the run starts on. The run gets its timer
+    /// and nothing else.
+    /// </summary>
+    [Fact]
+    public async Task ASplitInTheNewGameBurstNeverSplitsTheFreshRun()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 9_000, AutosplitKind.Reset, 0, 0));
+        h.Engine.Handle(new AutosplitEvent(2, 9_000, AutosplitKind.Start, 0, 0));
+        h.Engine.Handle(new AutosplitEvent(3, 9_001, AutosplitKind.Split, PlanetEntered.Code, 0));
+
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        await Task.Delay(200);
+
+        Assert.DoesNotContain(LiveSplitClient.Split, h.Server.Actions);
+    }
+
+    /// <summary>
+    /// And nothing beyond that moment is touched. RaC1's Veldin split comes a handful of frames
+    /// after its start — the script's own `planetFramesCount > 5` — so a guard that reached any
+    /// further than the console's own tick would swallow the first split of every RaC1 run.
+    /// </summary>
+    [Fact]
+    public async Task ASplitAFewFramesAfterTheStartIsStillASplit()
+    {
+        using var h = new Harness(GameId.Rac1, new[] { "Veldin", "Novalis" }, PlanetEntered, BossDefeated);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 9_000, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
+        h.Server.ClearCommands();
+
+        h.Engine.Handle(new AutosplitEvent(2, 9_090, AutosplitKind.Split, BossDefeated.Code, 0));
+
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    /// <summary>
+    /// The other reported bug: one transition, two splits. A watcher evaluates every condition it
+    /// holds and hands over each one that matched; a script's split block stopped at the first
+    /// <c>return true</c>. Arriving on Tabora moves the planet and the chunk byte on the same tick,
+    /// and the run used to jump two segments for it.
+    /// </summary>
+    [Fact]
+    public async Task OneConsoleMomentTakesOneSplit()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 12_000, AutosplitKind.Split, PlanetEntered.Code, 1));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+
+        h.Engine.Handle(new AutosplitEvent(2, 12_000, AutosplitKind.Split, BossDefeated.Code, 0));
+        await Task.Delay(200);
+
+        Assert.Single(h.Server.Actions.Where(c => c == LiveSplitClient.Split));
+        Assert.Contains("already split on this console tick", h.Engine.Log()[^1].Action);
+
+        // The next moment is a different moment, and splits again.
+        h.Engine.Handle(new AutosplitEvent(3, 12_400, AutosplitKind.Split, BossDefeated.Code, 0));
+        Assert.True(await WaitFor(() => h.Server.Actions.Count(c => c == LiveSplitClient.Split) == 2));
+    }
+
+    /// <summary>
+    /// A candidate the route turns down has not split, so it does not use the moment up. That is
+    /// the fall-through every old script had: a planet change the route would not take dropped
+    /// through to the subsplits written under it, and one of those could still be the split.
+    /// </summary>
+    [Fact]
+    public async Task ACandidateTheRouteTurnsDownLeavesTheMomentFree()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla", "Maktar" }, PlanetEntered, BossDefeated);
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+
+        // Maktar is planet 2 and the upcoming split is Oozla, so the route turns this one down.
+        h.Engine.Handle(new AutosplitEvent(1, 20_000, AutosplitKind.Split, PlanetEntered.Code, 2));
+        h.Engine.Handle(new AutosplitEvent(2, 20_000, AutosplitKind.Split, BossDefeated.Code, 0));
+
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Single(h.Server.Actions.Where(c => c == LiveSplitClient.Split));
+    }
+
+    /// <summary>
+    /// The corrections are not decisions and are not capped: section 8.3 has the client apply them
+    /// whenever the autosplitter is on, whatever the checkboxes say, and a split that loses its
+    /// moment to another one still owes the run its frames.
+    /// </summary>
+    [Fact]
+    public async Task ASplitThatLosesItsMomentStillPaysItsCorrection()
+    {
+        using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, FlatBoss);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 30_000, AutosplitKind.Split, PlanetEntered.Code, 1));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+
+        h.Engine.Handle(new AutosplitEvent(2, 30_000, AutosplitKind.Split, FlatBoss.Code, 0));
+
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 0.116667 }, h.Server.LoadingTimeSeconds);
+        Assert.Single(h.Server.Actions.Where(c => c == LiveSplitClient.Split));
+    }
+
     // ---------------------------------------------------------------- start, reset, pause
 
     [Fact]
