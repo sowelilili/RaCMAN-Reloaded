@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(37, true)]     // the build before the one this client ships with
-    [InlineData(38, false)]    // exactly the expected build: the combo switch, protocol 1.12
-    [InlineData(39, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(38, true)]     // the build before the one this client ships with
+    [InlineData(39, false)]    // exactly the expected build: the boot notification pause, no request trace
+    [InlineData(40, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(38, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(39, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
