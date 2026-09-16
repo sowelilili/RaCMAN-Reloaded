@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(39, true)]     // the build before the one this client ships with
-    [InlineData(40, false)]    // exactly the expected build: the PC helper listens on loopback
-    [InlineData(41, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(40, true)]     // the build before the one this client ships with
+    [InlineData(41, false)]    // exactly the expected build: the autosplitter fixes
+    [InlineData(42, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(40, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(41, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
