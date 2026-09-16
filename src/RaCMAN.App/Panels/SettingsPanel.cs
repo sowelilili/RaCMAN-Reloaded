@@ -413,15 +413,6 @@ public static class SettingsPanel
         if (_found.Anything || _found.Excluded > 0)
         {
             ImGui.TextUnformatted($"In that folder: {_found.Describe()}");
-            Ui.Hint("Copied into this client's own save file and mod folders. Nothing already here is replaced: a save "
-                    + "you already have is left alone, and a mod folder of the same name is kept beside yours.");
-
-            if (_found.Excluded > 0)
-            {
-                Ui.Hint("The excluded mods are the old defaults this client does not carry: the savefile helpers, which "
-                        + "qwark does itself now, and the mods that drive a Lua script, which it cannot run. The import "
-                        + "names each one and why.");
-            }
 
             if (LegacyModExclusions.Shipped.Problem is { } problem) Ui.DebugHint(problem);
         }
