@@ -1170,7 +1170,7 @@ public sealed class AppState : IDisposable
         // The console's combo switch is on the header rather than only on the Combos panel: a pad
         // that has stopped doing anything is noticed from whichever panel the user is looking at.
         if (session.CombosOff) line += " | combos disabled";
-        else line += "| combos enabled";
+        else line += " | combos enabled";
 
         if (!Panels.Ui.Debug) return line;
 
