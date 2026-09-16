@@ -253,9 +253,25 @@ public static class ConnectionPanel
             string ip = _host.Trim();
             string path = sprx;
             state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                changed => state.AddToast(
-                    (changed ? "Added to boot_plugins.txt" : "boot_plugins.txt already had it")
-                    + ". Restart the console; the module only loads at boot."));
+                result =>
+                {
+                    state.AddToast(result.Outcome switch
+                    {
+                        BootInstallOutcome.Added => "Added at the top of boot_plugins.txt",
+                        BootInstallOutcome.Moved => "Moved to the top of boot_plugins.txt",
+                        _ => "boot_plugins.txt already starts with it",
+                    } + ". Restart the console; the module only loads at boot.");
+
+                    // qwark is first, so it loads whatever follows it; the lines past the limit are
+                    // the user's own plugins, and only the user can say which of them to drop.
+                    if (result.BeyondHenLimit)
+                    {
+                        state.AddToast(
+                            $"HEN reads only the first {WebManLoader.HenPluginLimit} lines of boot_plugins.txt"
+                            + $" and the list now has {result.Lines}; the ones past the sixth will not load.",
+                            ToastKind.Error);
+                    }
+                });
         }
 
         ImGui.SameLine();

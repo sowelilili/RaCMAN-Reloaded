@@ -35,7 +35,7 @@ The mode is on the Settings panel, in the **Connection** section.
 
 **Standalone** never uses webMAN. The client only connects to the module's port. Use this mode if the console loads the module at startup.
 
-Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
+Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. The install puts qwark first on the list, so HEN loads it before webMAN. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
 
 In standalone mode the client also keeps that copy current. If the console runs an older module than the client ships, the client sends the new one to the console and asks you to restart it. See [docs/standalone-update.md](docs/standalone-update.md).
 

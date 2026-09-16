@@ -1,6 +1,6 @@
 # The standalone module update
 
-In standalone mode the console loads `qwark.sprx` itself at startup, from the path listed in `/dev_hdd0/boot_plugins.txt`. The client never uses webMAN in this mode. So when a new client ships a newer module, the client replaces the file on the console through the module that is already running.
+In standalone mode the console loads `qwark.sprx` itself at startup, from the path listed in `/dev_hdd0/boot_plugins.txt`. The boot install writes that path as the first line of the list, so HEN loads qwark before webMAN; a console that loads webMAN first has been seen to hang the XMB. The client never uses webMAN in this mode. So when a new client ships a newer module, the client replaces the file on the console through the module that is already running.
 
 ## When it runs
 

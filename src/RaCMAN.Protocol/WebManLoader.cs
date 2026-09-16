@@ -4,12 +4,40 @@ using System.Text;
 
 namespace RaCMAN.Protocol;
 
+/// <summary>What an install did to boot_plugins.txt, for the one message the user sees.</summary>
+public enum BootInstallOutcome
+{
+    /// <summary>The list did not name qwark at all; its line is now the first one.</summary>
+    Added,
+
+    /// <summary>The list named qwark lower down, more than once, or at an older path; it names it once, first.</summary>
+    Moved,
+
+    /// <summary>The list already began with the boot path, so it was left exactly as it was.</summary>
+    AlreadyFirst,
+}
+
+/// <summary>
+/// What an install did and how many lines the list holds afterwards, which is the other thing the
+/// user has to be told: see <see cref="BeyondHenLimit"/>.
+/// </summary>
+public readonly record struct BootInstallResult(BootInstallOutcome Outcome, int Lines)
+{
+    /// <summary>
+    /// Whether the console reads past the end of the list. qwark is the first line either way, so
+    /// this is a warning and never a failure: what falls off the end is somebody else's plugin, and
+    /// only the user can decide which line to drop.
+    /// </summary>
+    public bool BeyondHenLimit => Lines > WebManLoader.HenPluginLimit;
+}
+
 /// <summary>
 /// Gets qwark.sprx onto the console the way racman-official does it: FTP the file into
 /// /dev_hdd0/tmp/ and load it through webMAN's vshplugin.ps3mapi endpoint.
 ///
-/// None of this can be tested here: it needs a console running webMAN MOD with its FTP server
-/// up. The FTP client below is checked against RFC 959 rather than against hardware.
+/// The console side of this cannot be tested here: it needs a console running webMAN MOD with its
+/// FTP server up. The FTP client below is checked against RFC 959 rather than against hardware, and
+/// the boot_plugins.txt rewrite against a loopback FTP server.
 /// </summary>
 public sealed class WebManLoader
 {
@@ -28,12 +56,24 @@ public sealed class WebManLoader
     public const string BootPluginsPath = "/dev_hdd0/boot_plugins.txt";
     public const int DefaultSlot = 5;
 
+    /// <summary>
+    /// How many lines of boot_plugins.txt PS3HEN loads. A longer list is not an error and no line
+    /// of it is ever dropped here, but the console stops reading after the sixth.
+    /// </summary>
+    public const int HenPluginLimit = 6;
+
     private readonly HttpClient _http;
 
     public WebManLoader(HttpClient? http = null)
     {
         _http = http ?? new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
     }
+
+    /// <summary>
+    /// The console's FTP port. webMAN's server is always on 21; the tests point this at a loopback
+    /// server, so the boot list rewrite runs against a real transfer rather than a copy of itself.
+    /// </summary>
+    public int FtpPort { get; init; } = 21;
 
     public static string RemotePath => $"{RemoteDirectory}/{SprxName}";
 
@@ -86,7 +126,7 @@ public sealed class WebManLoader
         progress?.Report($"Uploading {SprxName} to {RemotePath}");
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
-        using (var ftp = new FtpSession(ip))
+        using (var ftp = new FtpSession(ip, FtpPort))
         {
             await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
             await ftp.StoreAsync(RemotePath, bytes, cancellationToken).ConfigureAwait(false);
@@ -101,11 +141,12 @@ public sealed class WebManLoader
     }
 
     /// <summary>
-    /// Puts the SPRX in /dev_hdd0/plugins and appends that path to /dev_hdd0/boot_plugins.txt so
-    /// the console loads it at boot. Only ever called from an explicit user action: a VSH plugin
-    /// that crashes at boot is recovered only by disabling plugins.
+    /// Puts the SPRX in /dev_hdd0/plugins and makes that path the first line of
+    /// /dev_hdd0/boot_plugins.txt so the console loads it at boot, before anything else on the list.
+    /// Only ever called from an explicit user action: a VSH plugin that crashes at boot is recovered
+    /// only by disabling plugins.
     /// </summary>
-    public async Task<bool> InstallToBootAsync(
+    public async Task<BootInstallResult> InstallToBootAsync(
         string ip,
         string localSprxPath,
         IProgress<string>? progress = null,
@@ -114,7 +155,7 @@ public sealed class WebManLoader
         if (!File.Exists(localSprxPath)) throw new FileNotFoundException($"{SprxName} not found", localSprxPath);
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
-        using var ftp = new FtpSession(ip);
+        using var ftp = new FtpSession(ip, FtpPort);
         await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
         progress?.Report($"Uploading {SprxName} to {BootPath}");
@@ -123,39 +164,83 @@ public sealed class WebManLoader
 
         var existing = await ftp.RetrieveAsync(BootPluginsPath, cancellationToken).ConfigureAwait(false);
         var text = existing is null ? string.Empty : Encoding.UTF8.GetString(existing);
+        var (rewritten, result) = PlanBootList(text);
 
-        if (text.Split('\n').Any(line => line.Trim().Equals(BootPath, StringComparison.OrdinalIgnoreCase)))
+        if (result.Outcome is BootInstallOutcome.AlreadyFirst)
         {
-            progress?.Report($"{BootPluginsPath} already lists {BootPath}");
-            return false;
+            progress?.Report($"{BootPluginsPath} already starts with {BootPath}");
+            return result;
         }
 
-        var builder = new StringBuilder(text);
-        if (builder.Length > 0 && builder[^1] is not ('\n' or '\r')) builder.Append('\n');
-        builder.Append(BootPath).Append('\n');
-
-        await ftp.StoreAsync(BootPluginsPath, Encoding.UTF8.GetBytes(builder.ToString()), cancellationToken).ConfigureAwait(false);
-        progress?.Report($"Added {BootPath} to {BootPluginsPath}");
-        return true;
+        await ftp.StoreAsync(BootPluginsPath, Encoding.UTF8.GetBytes(rewritten), cancellationToken).ConfigureAwait(false);
+        progress?.Report(result.Outcome is BootInstallOutcome.Added
+            ? $"Added {BootPath} at the top of {BootPluginsPath}"
+            : $"Moved {BootPath} to the top of {BootPluginsPath}");
+        return result;
     }
 
     /// <summary>Drops every boot_plugins.txt line naming qwark.sprx, wherever it points.</summary>
     public async Task<bool> RemoveFromBootAsync(string ip, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {
-        using var ftp = new FtpSession(ip);
+        using var ftp = new FtpSession(ip, FtpPort);
         await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
         var existing = await ftp.RetrieveAsync(BootPluginsPath, cancellationToken).ConfigureAwait(false);
         if (existing is null) return false;
 
-        var lines = Encoding.UTF8.GetString(existing).Split('\n');
-        var kept = lines.Where(l => !l.Trim().EndsWith(SprxName, StringComparison.OrdinalIgnoreCase)).ToArray();
-        if (kept.Length == lines.Length) return false;
+        var lines = BootLines(Encoding.UTF8.GetString(existing));
+        var kept = lines.Where(line => !NamesSprx(line)).ToArray();
+        if (kept.Length == lines.Count) return false;
 
-        await ftp.StoreAsync(BootPluginsPath, Encoding.UTF8.GetBytes(string.Join('\n', kept)), cancellationToken).ConfigureAwait(false);
+        // A list with nothing left on it becomes an empty file rather than a lone newline; one that
+        // keeps lines keeps its final newline too, and never gains a blank line at the top.
+        var text = kept.Length == 0 ? string.Empty : string.Join('\n', kept) + '\n';
+        await ftp.StoreAsync(BootPluginsPath, Encoding.UTF8.GetBytes(text), cancellationToken).ConfigureAwait(false);
         progress?.Report($"Removed {SprxName} from {BootPluginsPath}");
         return true;
     }
+
+    /// <summary>
+    /// What boot_plugins.txt should hold after an install, and what to tell the user about it.
+    /// <para>
+    /// PS3HEN loads the list in order, and a console that loads webMAN before qwark has been seen to
+    /// hang the XMB, so qwark's line goes first and everything else keeps its order behind it. A
+    /// line naming qwark anywhere else is dropped on the way — the old /dev_hdd0/tmp path included —
+    /// so the list names the module once and once only.
+    /// </para>
+    /// <para>
+    /// The rewrite is written with \n endings and no byte-order mark, so a list webMAN wrote with
+    /// CRLF comes back normalised; blank lines are not plugins and do not survive it. A list that
+    /// already begins with the boot path is not rewritten at all, whatever its endings are.
+    /// </para>
+    /// </summary>
+    private static (string Text, BootInstallResult Result) PlanBootList(string existing)
+    {
+        var lines = BootLines(existing);
+        int listed = lines.Count(NamesSprx);
+
+        if (listed == 1 && lines[0].Trim().Equals(BootPath, StringComparison.OrdinalIgnoreCase))
+        {
+            return (existing, new BootInstallResult(BootInstallOutcome.AlreadyFirst, lines.Count));
+        }
+
+        var rewritten = new List<string> { BootPath };
+        rewritten.AddRange(lines.Where(line => !NamesSprx(line)));
+
+        var outcome = listed == 0 ? BootInstallOutcome.Added : BootInstallOutcome.Moved;
+        return (string.Join('\n', rewritten) + '\n', new BootInstallResult(outcome, rewritten.Count));
+    }
+
+    /// <summary>The lines of a boot plugin list: what the console would load, in its order.</summary>
+    private static List<string> BootLines(string text) => text
+        .Split('\n')
+        .Select(line => line.TrimEnd('\r'))
+        .Where(line => line.Trim().Length > 0)
+        .ToList();
+
+    /// <summary>Whether a line names qwark.sprx, at whichever path it was installed to.</summary>
+    private static bool NamesSprx(string line) =>
+        line.Trim().EndsWith(SprxName, StringComparison.OrdinalIgnoreCase);
 }
 
 /// <summary>
