@@ -106,12 +106,37 @@ public class ParsingTests
         Assert.Equal(flags, info.ToBytes()[24]);
     }
 
+    /// <summary>
+    /// bit3 COMBOS_OFF, revision 1.12: the console's combo switch, and the only thing that says it
+    /// is off. It is read on its own, so a session carrying the other three bits does not make the
+    /// combos look held and a session holding them does not disturb the other three.
+    /// </summary>
+    [Theory]
+    [InlineData(0x00, false)]
+    [InlineData(0x07, false)]
+    [InlineData(0x08, true)]
+    [InlineData(0x0F, true)]
+    public void SessionInfoFlagsCarryTheCombosOffBit(byte flags, bool combosOff)
+    {
+        var bytes = HandBuiltSessionInfo();
+        bytes[24] = flags;
+
+        var info = SessionInfo.Parse(bytes);
+
+        Assert.Equal(combosOff, info.CombosOff);
+        Assert.Equal((flags & 0x01) != 0, info.PreviousPending);
+        Assert.Equal((flags & 0x02) != 0, info.IsEmulator);
+        Assert.Equal((flags & 0x04) != 0, info.CodePatchesUnsupported);
+        Assert.Equal(flags, info.ToBytes()[24]);
+    }
+
     [Fact]
     public void SessionFlagBitsAreTheDocumentedOnes()
     {
         Assert.Equal(1, (byte)SessionFlags.PreviousPending);
         Assert.Equal(2, (byte)SessionFlags.Emulator);
         Assert.Equal(4, (byte)SessionFlags.NoCodePatches);
+        Assert.Equal(8, (byte)SessionFlags.CombosOff);
     }
 
     [Fact]

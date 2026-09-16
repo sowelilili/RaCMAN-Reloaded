@@ -89,6 +89,42 @@ public static class CombosPanel
         }, $"{Label(action)} = {PadButtons.Describe(value)}");
     }
 
+    /// <summary>
+    /// The console's own switch over every combo it holds, COMBO_ENABLE of revision 1.12. It is
+    /// drawn from the session flag and never from anything remembered here, so the box always says
+    /// what the console says: a click sends the request and the next packet moves it. The switch
+    /// lives in the console's config, so it outlives this client and the console's next boot.
+    /// <para>
+    /// A capture already holds the combos off through COMBO_SUSPEND, so there is nothing for the
+    /// switch to do while one is running and it is greyed out for the length of it. The list below
+    /// stays editable whatever the switch says: a combo recorded now is one that fires when the
+    /// combos are turned back on.
+    /// </para>
+    /// </summary>
+    private static void DrawSwitch(AppState state)
+    {
+        bool off = state.Session.CombosOff;
+        bool enabled = !off;
+
+        ImGui.BeginDisabled(_capturing is not null);
+        if (ImGui.Checkbox("Combos enabled", ref enabled))
+        {
+            bool on = enabled;
+            state.Run(() => state.Client.ComboEnableAsync(on));
+        }
+
+        ImGui.EndDisabled();
+
+        // The console's answer, not the click's: the hint goes when the packet that carries the
+        // switch back on does, exactly as the box itself does.
+        if (off)
+        {
+            Ui.Hint("The console is holding every combo off; the ones below are still stored and can still be changed.");
+        }
+
+        ImGui.Spacing();
+    }
+
     public static void Draw(AppState state)
     {
         Ui.Heading("Controller combos");
@@ -98,6 +134,8 @@ public static class CombosPanel
             Ui.Hint("Connect to configure combos.");
             return;
         }
+
+        DrawSwitch(state);
 
         var current = state.Combos.ToDictionary(c => c.Action, c => c.Mask);
 

@@ -1166,6 +1166,11 @@ public sealed class AppState : IDisposable
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
         string line = $"{session.State.DisplayName()} | {title} | {session.GameName}";
+
+        // The console's combo switch is on the header rather than only on the Combos panel: a pad
+        // that has stopped doing anything is noticed from whichever panel the user is looking at.
+        if (session.CombosOff) line += " | combos off";
+
         if (!Panels.Ui.Debug) return line;
 
         string tick = session.Tick > 0 ? $"tick {session.Tick}" : "tick -";

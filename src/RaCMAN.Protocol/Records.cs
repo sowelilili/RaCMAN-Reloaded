@@ -49,6 +49,13 @@ public sealed record SessionInfo(
     /// </summary>
     public bool CodePatchesUnsupported => (Flags & SessionFlags.NoCodePatches) != 0;
 
+    /// <summary>
+    /// The console is holding every combo off until COMBO_ENABLE turns them back on (revision
+    /// 1.12). The switch is the console's, kept in its config, so this is what the checkbox on the
+    /// Combos panel draws itself from rather than anything the client remembers.
+    /// </summary>
+    public bool CombosOff => (Flags & SessionFlags.CombosOff) != 0;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>

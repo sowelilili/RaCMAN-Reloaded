@@ -86,6 +86,7 @@ public enum Opcode : ushort
     ComboSet = 0x0080,
     ComboList = 0x0081,
     ComboSuspend = 0x0082,   // revision 1.8
+    ComboEnable = 0x0083,    // revision 1.12
 
     // 5.10 Config
     ConfigReload = 0x0090,
@@ -340,6 +341,14 @@ public enum SessionFlags : byte
     /// PATCH_ADD. Everything that only reads and writes data still works.
     /// </summary>
     NoCodePatches = 1 << 2,
+
+    /// <summary>
+    /// The console's combo switch is off (revision 1.12): every combo is held off until a
+    /// COMBO_ENABLE with 1 turns them back on. The switch lives in the console's config, so it
+    /// survives a client restart and a reboot, and this is the only place the client reads it
+    /// from. The capture-time hold of COMBO_SUSPEND is a different thing and does not show here.
+    /// </summary>
+    CombosOff = 1 << 3,
 }
 
 /// <summary>

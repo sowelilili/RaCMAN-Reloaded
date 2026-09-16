@@ -1250,6 +1250,22 @@ public sealed class QwarkClient : IDisposable
             w.WriteU8((byte)(suspend ? 1 : 0));
         }), cancellationToken);
 
+    /// <summary>
+    /// COMBO_ENABLE, revision 1.12: the console's own switch over every combo it holds. Off keeps
+    /// them all from firing until a later on, and it is kept in the console's config, so it
+    /// outlives this client and the console's next boot. <see cref="SessionInfo.CombosOff"/> is
+    /// where its state comes back, on HELLO, on GET_STATE and on every telemetry packet.
+    /// <para>
+    /// Nothing to do with <see cref="ComboSuspendAsync"/>, which is the capture's own hold: that
+    /// one expires by itself and the switch does not.
+    /// </para>
+    /// </summary>
+    public Task ComboEnableAsync(bool on, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.ComboEnable, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)(on ? 1 : 0));
+        }), cancellationToken);
+
     // ---------------------------------------------------------------- 5.10 config
 
     public Task ConfigReloadAsync(CancellationToken cancellationToken = default) =>

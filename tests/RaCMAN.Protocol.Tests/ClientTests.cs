@@ -303,6 +303,60 @@ public class ClientTests
         }
     }
 
+    /// <summary>
+    /// COMBO_ENABLE, revision 1.12: the console's own switch over every combo it holds. It is `u8
+    /// on` at 0x0083 and nothing comes back, so the answer is flags bit3 — on the GET_STATE
+    /// snapshot and on the telemetry packets the panels actually read.
+    /// </summary>
+    [Fact]
+    public async Task ComboEnableTurnsTheConsolesComboSwitchOffAndOnAgain()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            Assert.Equal(0x0083, (int)Opcode.ComboEnable);
+            Assert.True(server.CombosEnabled);
+            Assert.False((await client.GetStateAsync()).Session.CombosOff);
+
+            await client.ComboEnableAsync(false);
+            Assert.False(server.CombosEnabled);
+            Assert.True((await client.GetStateAsync()).Session.CombosOff);
+
+            // And the next UDP packet, which is where the flag has to be for a panel to draw it:
+            // TelemetryViaTcp is what says the snapshot came off the wire rather than out of the
+            // GET_STATE above.
+            Assert.True(await WaitFor(() =>
+                client.LatestTelemetry is { Session.CombosOff: true } && !client.TelemetryViaTcp));
+
+            await client.ComboEnableAsync(true);
+            Assert.True(server.CombosEnabled);
+            Assert.True(await WaitFor(() =>
+                client.LatestTelemetry is { Session.CombosOff: false } && !client.TelemetryViaTcp));
+        }
+    }
+
+    /// <summary>
+    /// The switch is a switch: the console takes 0 and 1 and refuses everything else rather than
+    /// reading some third value as one of them.
+    /// </summary>
+    [Theory]
+    [InlineData(2)]
+    [InlineData(255)]
+    public async Task ComboEnableRefusesAByteThatIsNeitherOffNorOn(byte value)
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.RequestAsync(Opcode.ComboEnable, new[] { value }));
+
+            Assert.Equal(Status.BadArg, refused.Status);
+            Assert.True(server.CombosEnabled);
+        }
+    }
+
     [Fact]
     public async Task UnlockListAndSetRoundTrip()
     {
@@ -1242,6 +1296,29 @@ public class ClientTests
 
         Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
         Assert.Empty(server.Combos);
+    }
+
+    /// <summary>
+    /// The combo switch is the console's and is worth knowing about from any panel, so the header
+    /// says so for as long as it is off and says nothing about it otherwise.
+    /// </summary>
+    [Fact]
+    public async Task TheStatusLineSaysWhenTheConsoleIsHoldingTheCombosOff()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Telemetry is not null));
+        Assert.DoesNotContain("combos off", state.StatusLine());
+
+        server.CombosEnabled = false;
+        Assert.True(await PumpAsync(state, () => state.Session.CombosOff));
+        Assert.Contains("combos off", state.StatusLine());
+
+        server.CombosEnabled = true;
+        Assert.True(await PumpAsync(state, () => !state.Session.CombosOff));
+        Assert.DoesNotContain("combos off", state.StatusLine());
     }
 
     // ------------------------------------------------------------------ RPCS3 (the session flags)

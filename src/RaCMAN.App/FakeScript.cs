@@ -17,7 +17,7 @@ namespace RaCMAN.App;
 public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, "
-                                + "unknown, drop, start, split[:code[:arg]], reset, "
+                                + "unknown, drop, combos-off, combos-on, start, split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
     public static IReadOnlyList<(double At, string Step)> Parse(string script)
@@ -157,6 +157,17 @@ public static class FakeScript
             // answered UNSUPPORTED. The client is down to its memory tools here.
             case "unknown":
                 fake.UnknownGame = true;
+                break;
+
+            // The console's combo switch, which the client only ever sees as flags bit3. Nothing
+            // else about the session moves, so a headless run can be pointed at the Combos panel
+            // with the combos held off and watched drawing that.
+            case "combos-off":
+                fake.CombosEnabled = false;
+                break;
+
+            case "combos-on":
+                fake.CombosEnabled = true;
                 break;
 
             case "drop":

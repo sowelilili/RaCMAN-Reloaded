@@ -9,7 +9,7 @@ namespace RaCMAN.Protocol.Testing;
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
 /// memory primitives, POS_LIST, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
-/// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND, the two AUTOSPLIT ops
+/// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND/ENABLE, the two AUTOSPLIT ops
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
 /// ops of revision 1.10 over the same in-memory filesystem the file ops use. Everything else
 /// answers UNKNOWN_OP.
@@ -316,6 +316,17 @@ public sealed class FakeQwarkServer : IDisposable
     /// can tell "never asked" from "asked and resumed".
     /// </summary>
     public bool? CombosSuspended { get; private set; }
+
+    /// <summary>
+    /// The console's combo switch, COMBO_ENABLE of revision 1.12. On by default, as a fresh
+    /// config is; off sets flags bit3 in the info block HELLO and GET_STATE return and in every
+    /// telemetry packet, which is the only way the client ever learns about it.
+    /// </summary>
+    public bool CombosEnabled
+    {
+        get => (Session.Flags & SessionFlags.CombosOff) == 0;
+        set => SetSessionFlag(SessionFlags.CombosOff, !value);
+    }
 
     /// <summary>The console's filesystem, as far as the file ops are concerned.</summary>
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
@@ -695,7 +706,7 @@ public sealed class FakeQwarkServer : IDisposable
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
         or Opcode.ModList or Opcode.ModLoad or Opcode.ModUnload or Opcode.ModSetAuto
         or Opcode.ModRescan or Opcode.ModInfo
-        or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend
+        or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend or Opcode.ComboEnable
         or Opcode.AutosplitEvents or Opcode.AutosplitDescribe
         or Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
         or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
@@ -1288,6 +1299,17 @@ public sealed class FakeQwarkServer : IDisposable
                     // sends an empty one is caught here rather than passing quietly.
                     if (payload.Length != 1) return (Status.BadArg, null);
                     CombosSuspended = payload[0] != 0;
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.ComboEnable:
+                {
+                    // `u8 on`, and only 0 or 1: the switch is a switch, so anything else is a
+                    // client that has made the byte up rather than one asking for a third state.
+                    if (payload.Length != 1 || payload[0] > 1) return (Status.BadArg, null);
+                    _session = payload[0] != 0
+                        ? _session with { Flags = _session.Flags & ~SessionFlags.CombosOff }
+                        : _session with { Flags = _session.Flags | SessionFlags.CombosOff };
                     return (Status.Ok, null);
                 }
 
