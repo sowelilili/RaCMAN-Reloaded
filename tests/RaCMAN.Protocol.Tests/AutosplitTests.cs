@@ -320,6 +320,72 @@ public class AutosplitTests
         }
     }
 
+    /// <summary>
+    /// The audit's other half: a run that took two splits could have been one event delivered
+    /// twice rather than two events emitted, so both of the ways a connection starts over are
+    /// checked here. Reconnecting reads the ring again, and the whole of it is old news.
+    /// </summary>
+    [Fact]
+    public async Task AReconnectPrimesFromTheRingAgainAndReplaysNothing()
+    {
+        var (server, client, seen) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.EmitAutosplitEvent(AutosplitKind.Start);
+            server.EmitAutosplitEvent(AutosplitKind.Split, 1, 3);
+            Assert.True(await WaitFor(() => Snapshot(seen).Length == 2));
+
+            await client.DisconnectAsync();
+            lock (seen) seen.Clear();
+
+            await client.ConnectAsync("127.0.0.1", server.Port);
+            await Task.Delay(400);
+
+            Assert.Empty(Snapshot(seen));
+            Assert.Equal(2u, client.LastAutosplitSeq);
+
+            // And the connection is live: the next event is new and does arrive, once.
+            server.EmitAutosplitEvent(AutosplitKind.Split, 1, 4);
+            Assert.True(await WaitFor(() => Snapshot(seen).Length == 1));
+            await Task.Delay(300);
+            Assert.Single(Snapshot(seen));
+            Assert.Equal(3u, Snapshot(seen)[0].Seq);
+        }
+    }
+
+    /// <summary>
+    /// And the game rebooting underneath the connection — Deadlocked's quit to the XMB, which the
+    /// runner does on purpose — neither replays what the ring holds nor starts the sequence over.
+    /// The event the console emits while the session is away carries no datagram, so the poll is
+    /// what finds it, and it finds it once.
+    /// </summary>
+    [Fact]
+    public async Task AGameRebootingUnderneathTheClientReplaysNothing()
+    {
+        var (server, client, seen) = await ConnectAsync(safetyPoll: true);
+        using (server)
+        using (client)
+        {
+            server.EmitAutosplitEvent(AutosplitKind.Split, 1, 3);
+            Assert.True(await WaitFor(() => Snapshot(seen).Length == 1));
+
+            server.Quitting = true;
+            var paused = server.EmitAutosplitEvent(AutosplitKind.Pause, 3);
+            await Task.Delay(200);
+            server.Quitting = false;
+
+            Assert.True(await WaitFor(() => Snapshot(seen).Length == 2, 5000));
+            await Task.Delay(400);
+
+            var events = Snapshot(seen);
+            Assert.Equal(2, events.Length);
+            Assert.Equal(new uint[] { 1, 2 }, events.Select(e => e.Seq));
+            Assert.Equal(paused.Seq, events[1].Seq);
+            Assert.Equal(AutosplitKind.Pause, events[1].Kind);
+        }
+    }
+
     [Fact]
     public async Task TheSafetyPollDeliversAnEventWhosePushWasLost()
     {

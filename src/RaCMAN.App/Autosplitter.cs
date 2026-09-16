@@ -56,6 +56,19 @@ public sealed class Autosplitter
     /// <summary>How many events the panel's log keeps.</summary>
     public const int LogLength = 100;
 
+    /// <summary>
+    /// How far apart two events' console stamps may be and still be one moment in the game. The
+    /// stamp is taken inside the console's tick, once per event, so everything one pass of a
+    /// watcher emits lands on the same millisecond or the one after it. A tick is several times
+    /// this, and nothing a runner does twice is anywhere near it.
+    /// <para>
+    /// Both rules that use it are the old scripts', and neither waits for anything: the decision is
+    /// made on the <c>time_ms</c> the events already carry, when they arrive, so no split reaches
+    /// LiveSplit later than it otherwise would and no run's time moves.
+    /// </para>
+    /// </summary>
+    private const uint SameMomentMs = 1;
+
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(1);
 
     private readonly Settings _settings;
@@ -93,6 +106,17 @@ public sealed class Autosplitter
     /// setting up, however close together the console reports them.
     /// </summary>
     private Task _gameTimeWork = Task.CompletedTask;
+
+    /// <summary>
+    /// The console stamp of the last START or RESET that arrived, and of the last split this
+    /// engine actually took. Both are the console's own clock, not this machine's, so a slow
+    /// datagram or a busy render thread cannot make two events look further apart than the watcher
+    /// put them. Guarded by <see cref="_gate"/>.
+    /// </summary>
+    private uint _boundaryMs;
+    private bool _haveBoundary;
+    private uint _splitMs;
+    private bool _haveSplit;
 
     private volatile LiveSplitView _view = LiveSplitView.Empty;
     private GameId _game = GameId.None;
@@ -228,8 +252,14 @@ public sealed class Autosplitter
         var game = GameOptions;
 
         // A run that starts or resets is a run in which nothing of the last one is still open,
-        // whatever the master switches say about the timer itself.
-        if (ev.Kind is AutosplitKind.Start or AutosplitKind.Reset) ClearPairs();
+        // whatever the master switches say about the timer itself. The moment it happened is kept
+        // with it: a split candidate the console stamped in that same moment is not a split, and
+        // that is true whether or not the switches let the boundary itself move the timer.
+        if (ev.Kind is AutosplitKind.Start or AutosplitKind.Reset)
+        {
+            ClearPairs();
+            MarkBoundary(ev);
+        }
 
         // Pausing is one decision covering both halves of a pair, and it comes before the
         // corrections rather than after: a run whose category does not charge for a quit wants no
@@ -458,6 +488,18 @@ public sealed class Autosplitter
     /// </summary>
     private bool HandleSplit(AutosplitEvent ev, AutosplitEventDesc? desc, string what, AutosplitGameSettings game)
     {
+        // Every old script checked its reset block before its split block and skipped split
+        // entirely when reset answered true, and none of them could split on the update a run
+        // began, because the timer was not running yet when start was asked. A candidate the
+        // console stamped in the same moment as a START or a RESET is therefore not a split: the
+        // run behind it has just been thrown away, or has not begun. Left alone it put a segment
+        // nobody ran on the end of a discarded run, and LiveSplit kept the gold.
+        if (InSameMomentAsBoundary(ev))
+        {
+            Record(ev, what, "no split: the run started or reset on this console tick", false);
+            return false;
+        }
+
         if (!game.Split)
         {
             Record(ev, what, "ignored: splitting is switched off", false);
@@ -474,12 +516,12 @@ public sealed class Autosplitter
                       && ev.Code == AutosplitEvent.PlanetEnteredCode
                       && (desc?.PlanetRoute ?? true);
 
-        if (!routed) return Act(ev, what, LiveSplitClient.Split);
+        if (!routed) return TakeSplit(ev, what);
 
         // The old script's exception, verbatim: planet 0 always splits.
         if (ev.Arg == 0)
         {
-            return Act(ev, what, LiveSplitClient.Split, "planet 0 is not on any route and always splits");
+            return TakeSplit(ev, what, "planet 0 is not on any route and always splits");
         }
 
         string? name = _view.UpcomingSplit;
@@ -491,11 +533,67 @@ public sealed class Autosplitter
 
         if (AutosplitRoutes.Matches(Game, (int)ev.Arg, name))
         {
-            return Act(ev, what, LiveSplitClient.Split, $"the next split \"{name}\" is this planet");
+            return TakeSplit(ev, what, $"the next split \"{name}\" is this planet");
         }
 
         Record(ev, what, $"no split: the next split \"{name}\" is not on this planet's route", false);
         return false;
+    }
+
+    /// <summary>
+    /// Splits, unless the run has already split on this console tick.
+    /// <para>
+    /// A script's <c>split</c> block ran once per update and returned at most one <c>true</c>: the
+    /// first condition that matched took the update and the rest of the block never ran. The
+    /// console has no such block — it emits every candidate and leaves the deciding here — so one
+    /// pass of a watcher can hand over two, and a single moment in the game took two splits off
+    /// LiveSplit. The cap belongs on this side of the wire and nowhere else, because the checkboxes
+    /// and the planet route are here: a candidate the settings or the route turn down has not
+    /// split, so it does not use the moment up, which is exactly how the scripts fell through from
+    /// a planet change the route would not take to the subsplits under it.
+    /// </para>
+    /// </summary>
+    private bool TakeSplit(AutosplitEvent ev, string what, string? because = null)
+    {
+        if (AlreadySplitThisMoment(ev))
+        {
+            Record(ev, what, "no split: the run already split on this console tick", false);
+            return false;
+        }
+
+        lock (_gate)
+        {
+            _splitMs = ev.TimeMs;
+            _haveSplit = true;
+        }
+
+        return Act(ev, what, LiveSplitClient.Split, because);
+    }
+
+    /// <summary>Remembers when the console said this run started or was thrown away.</summary>
+    private void MarkBoundary(AutosplitEvent ev)
+    {
+        lock (_gate)
+        {
+            _boundaryMs = ev.TimeMs;
+            _haveBoundary = true;
+        }
+    }
+
+    private bool InSameMomentAsBoundary(AutosplitEvent ev)
+    {
+        lock (_gate)
+        {
+            return _haveBoundary && AutosplitEvent.Elapsed(_boundaryMs, ev.TimeMs) <= SameMomentMs;
+        }
+    }
+
+    private bool AlreadySplitThisMoment(AutosplitEvent ev)
+    {
+        lock (_gate)
+        {
+            return _haveSplit && AutosplitEvent.Elapsed(_splitMs, ev.TimeMs) <= SameMomentMs;
+        }
     }
 
     /// <summary>
