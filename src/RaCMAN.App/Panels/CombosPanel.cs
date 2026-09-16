@@ -115,13 +115,6 @@ public static class CombosPanel
 
         ImGui.EndDisabled();
 
-        // The console's answer, not the click's: the hint goes when the packet that carries the
-        // switch back on does, exactly as the box itself does.
-        if (off)
-        {
-            Ui.Hint("The console is holding every combo off; the ones below are still stored and can still be changed.");
-        }
-
         ImGui.Spacing();
     }
 

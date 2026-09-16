@@ -1310,15 +1310,15 @@ public class ClientTests
         using var state = await ConnectedStateAsync(server);
 
         Assert.True(await PumpAsync(state, () => state.Telemetry is not null));
-        Assert.DoesNotContain("combos off", state.StatusLine());
+        Assert.DoesNotContain("combos disabled", state.StatusLine());
 
         server.CombosEnabled = false;
         Assert.True(await PumpAsync(state, () => state.Session.CombosOff));
-        Assert.Contains("combos off", state.StatusLine());
+        Assert.Contains("combos disabled", state.StatusLine());
 
         server.CombosEnabled = true;
         Assert.True(await PumpAsync(state, () => !state.Session.CombosOff));
-        Assert.DoesNotContain("combos off", state.StatusLine());
+        Assert.DoesNotContain("combos disabled", state.StatusLine());
     }
 
     // ------------------------------------------------------------------ RPCS3 (the session flags)
