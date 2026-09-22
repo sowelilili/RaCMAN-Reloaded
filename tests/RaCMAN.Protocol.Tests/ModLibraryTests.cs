@@ -315,7 +315,7 @@ public class ShippedModLibraryTests
     /// dropping one of the pair.
     /// </summary>
     [Fact]
-    public void TheDeadlockedIntroCutsceneModNopsBothBranchesThatGateTheIntro()
+    public void TheDeadlockedIntroCutsceneModPassesBothGatesAndRearmsTheIntroMoby()
     {
         string folder = Path.Combine(LibraryPath(), "NPEA00423", "force-misson-cutscenes");
         var mod = ModLibrary.Read(folder, shipped: true);
@@ -323,12 +323,21 @@ public class ShippedModLibraryTests
         Assert.NotNull(mod);
         Assert.Equal("Force start cutscenes", mod!.Name);
         Assert.Equal("robo", mod.Author);
-        Assert.Equal("2.0", mod.Version);
+        Assert.Equal("3.0", mod.Version);
         Assert.Empty(mod.BinFiles);
-        Assert.Equal(2, mod.PatchWordCount);
+        Assert.Equal(12, mod.PatchWordCount);
 
+        // The two gates on the mission's status bit, then the chooser's state-3 test on the intro
+        // moby replaced by code that sets its play-every-time byte and re-arms a finished moby.
         Assert.Equal(
-            new[] { (0x001D75E8u, 0x60000000u), (0x001D7DA0u, 0x60000000u) },
+            new[]
+            {
+                (0x001D75E8u, 0x60000000u), (0x001D7DA0u, 0x60000000u),
+                (0x001D7778u, 0x809F00ACu), (0x001D777Cu, 0x38000001u), (0x001D7780u, 0x98040071u),
+                (0x001D7784u, 0x88BF0020u), (0x001D7788u, 0x2C050003u), (0x001D778Cu, 0x38600000u),
+                (0x001D7790u, 0x4082000Cu), (0x001D7794u, 0x981F0020u), (0x001D7798u, 0x98640080u),
+                (0x001D779Cu, 0x60000000u),
+            },
             PatchWords(mod.PatchFile));
     }
 

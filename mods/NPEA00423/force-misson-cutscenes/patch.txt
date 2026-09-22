@@ -1,5 +1,5 @@
 #- name: Force start cutscenes
-#- version: 2.0
+#- version: 3.0
 #- author: robo
 #- description: Plays a mission's intro cutscene every time the mission starts, not only the first time.
 
@@ -18,3 +18,44 @@
 # is set. nop, so the byte is always set. The camera clears it again when it takes over,
 # so the intro still runs once per mission start, exactly as it does on a first visit.
 0x1d7da0: 0x60000000
+
+# Version 3: intros played by a cutscene moby. A mission's intro is either a cutscene id
+# or a moby of class 0xF6E, named by its descriptor. The first mission of each planet and
+# every mission on Shaar use the moby, and the moby keeps its own record:
+#
+#   state 0  spawned; 0x412058 arms it (state 1) unless the scene's bit is set in the
+#            "scene seen" bitset at 0xb1f58c, in which case it goes straight to 3
+#   state 1  armed; its update at 0x412240 plays the scene once 0x7f in its variables
+#            is set, again only if the scene is unseen
+#   state 2  playing
+#   state 3  done, and the chooser skips a moby in state 3 (interface 0x14 at 0x413028)
+#
+# A seen scene never gets past state 3, so the intro never plays again. Both seen tests
+# also pass when byte 0x71 of the moby's variables is set, which is the game's own
+# "play every time" switch. The words below replace the chooser's call to the state-3
+# test (0x1d7778 to 0x1d779c) with code that sets that switch on the intro moby, puts a
+# finished moby back to armed, and clears its "scene queued" byte 0x80 so it queues the
+# scene again. Only the moby this mission's descriptor names is touched, and only when
+# the mission starts. r31 holds the moby there; r0, r3, r4 and r5 are free, as they
+# were across the call these words replace.
+
+# Was 0x60640000, "mr r4,r3". Now "lwz r4,0xac(r31)": the moby's variables.
+0x1d7778: 0x809F00AC
+# Was 0x63e30000, "mr r3,r31". Now "li r0,1".
+0x1d777c: 0x38000001
+# Was 0x80a40000, "lwz r5,0(r4)". Now "stb r0,0x71(r4)": play every time.
+0x1d7780: 0x98040071
+# Was 0xf8410028, "std r2,40(r1)". Now "lbz r5,0x20(r31)": the moby's state.
+0x1d7784: 0x88BF0020
+# Was 0x7ca903a6, "mtctr r5". Now "cmpwi r5,3".
+0x1d7788: 0x2C050003
+# Was 0x80440004, "lwz r2,4(r4)". Now "li r3,0": the chooser goes on as for a moby not done.
+0x1d778c: 0x38600000
+# Was 0x4e9e0421, "bctrl". Now "bne 0x1d779c": a moby not yet done is left as it is.
+0x1d7790: 0x4082000C
+# Was 0xe8410028, "ld r2,40(r1)". Now "stb r0,0x20(r31)": a done moby is armed again.
+0x1d7794: 0x981F0020
+# Was 0x2c030000, "cmpwi r3,0". Now "stb r3,0x80(r4)": and queues its scene again.
+0x1d7798: 0x98640080
+# Was 0x4082013c, "bne 0x1d78d8". nop: the test it made is always passed now.
+0x1d779c: 0x60000000
