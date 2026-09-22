@@ -69,11 +69,9 @@ public static class LevelFlagsPanel
         }
         else
         {
-            int index = _planet;
-            if (ImGui.InputInt("Planet index", ref index))
-            {
-                _planet = Math.Clamp(index, 0, 255);
-            }
+            // Enter reads the planet that was typed, which is what picking one from the combo above
+            // does; without a list there is no picking, so the box is the only way to ask.
+            if (Ui.SubmitInt("Planet index", ref _planet, 0, 255)) Load(state);
         }
 
         // Only where nothing else reads the table: with an interval set on the Settings panel the

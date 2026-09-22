@@ -375,13 +375,13 @@ public static class MemoryPanel
         ImGui.BeginDisabled(!enabled);
 
         ImGui.SetNextItemWidth(160);
-        Ui.InputTextWithHint("Address", AddressHint, ref _readAddress, 16);
+        bool read = Ui.SubmitTextWithHint("Address", AddressHint, ref _readAddress, 16);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("Bytes", ref _readLength)) _readLength = Math.Clamp(_readLength, 1, 65536);
+        read |= Ui.SubmitInt("Bytes", ref _readLength, 1, 65536);
         ImGui.SameLine();
 
-        if (ImGui.Button("Read"))
+        if (ImGui.Button("Read") || read)
         {
             if (Ui.TryParseAddress(_readAddress, out uint address))
             {
@@ -436,11 +436,11 @@ public static class MemoryPanel
 
         ImGui.BeginDisabled(!enabled);
         ImGui.SetNextItemWidth(160);
-        Ui.InputTextWithHint("Address##write", AddressHint, ref _writeAddress, 16);
+        bool write = Ui.SubmitTextWithHint("Address##write", AddressHint, ref _writeAddress, 16);
         ImGui.SetNextItemWidth(420);
-        Ui.InputTextWithHint("Bytes (hex)", "60000000 or 60 00 00 00", ref _writeBytes, 4096);
+        write |= Ui.SubmitTextWithHint("Bytes (hex)", "60000000 or 60 00 00 00", ref _writeBytes, 4096);
         ImGui.SameLine();
-        if (ImGui.Button("Write"))
+        if (ImGui.Button("Write") || write)
         {
             var bytes = Ui.TryParseHexBytes(_writeBytes);
             if (!Ui.TryParseAddress(_writeAddress, out uint address))
@@ -751,12 +751,12 @@ public static class MemoryPanel
     {
         ImGui.BeginDisabled(!state.Connected);
         ImGui.SetNextItemWidth(160);
-        Ui.InputTextWithHint("Address##watch", AddressHint, ref _watchAddress, 16);
+        bool add = Ui.SubmitTextWithHint("Address##watch", AddressHint, ref _watchAddress, 16);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(80);
         ImGui.Combo("Size##watch", ref _watchSizeIndex, SizeLabels, SizeLabels.Length);
         ImGui.SameLine();
-        if (ImGui.Button("Add watch"))
+        if (ImGui.Button("Add watch") || add)
         {
             if (Ui.TryParseAddress(_watchAddress, out uint address))
             {
@@ -917,7 +917,8 @@ public static class MemoryPanel
         DrawWatchlistPicker(state, title);
 
         ImGui.SetNextItemWidth(200);
-        if (Ui.InputTextWithHint("Name", "default", ref _watchlistName, 64))
+        bool saveList = Ui.SubmitTextWithHint("Name", "default", ref _watchlistName, 64);
+        if (ImGui.IsItemEdited())
         {
             // Typing a name is how a new list is made, so the combo follows the box rather than
             // the other way round; a name with no file behind it simply selects nothing.
@@ -926,7 +927,7 @@ public static class MemoryPanel
         }
 
         ImGui.SameLine();
-        if (ImGui.Button("Save watchlist")) SaveWatchlist(state, title);
+        if (ImGui.Button("Save watchlist") || saveList) SaveWatchlist(state, title);
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!state.Connected);
@@ -1232,15 +1233,15 @@ public static class MemoryPanel
     {
         ImGui.BeginDisabled(!enabled);
         ImGui.SetNextItemWidth(160);
-        Ui.InputTextWithHint("Address##freeze", AddressHint, ref _freezeAddress, 16);
+        bool addFreeze = Ui.SubmitTextWithHint("Address##freeze", AddressHint, ref _freezeAddress, 16);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(80);
         ImGui.Combo("Size##freeze", ref _freezeSizeIndex, SizeLabels, SizeLabels.Length);
-        
+
         ImGui.SetNextItemWidth(160);
-        ImGui.InputText("Value##freeze", ref _freezeValue, 32);
+        addFreeze |= Ui.SubmitText("Value##freeze", ref _freezeValue, 32);
         ImGui.SameLine();
-        if (ImGui.Button("Freeze"))
+        if (ImGui.Button("Freeze") || addFreeze)
         {
             if (!Ui.TryParseAddress(_freezeAddress, out uint address))
             {
@@ -1348,12 +1349,12 @@ public static class MemoryPanel
         ImGui.BeginDisabled(!enabled);
         ImGui.SameLine();
         ImGui.SetNextItemWidth(160);
-        Ui.InputTextWithHint("First address", PatchAddressHint, ref _revertAddress, 16);
+        bool revert = Ui.SubmitTextWithHint("First address", PatchAddressHint, ref _revertAddress, 16);
         ImGui.SameLine();
 
         // Spelled out rather than left as "Revert", which is also what every row of the table below
         // calls its own button.
-        if (ImGui.Button("Revert##typed"))
+        if (ImGui.Button("Revert##typed") || revert)
         {
             if (Ui.TryParseAddress(_revertAddress, out uint address))
             {

@@ -990,7 +990,8 @@ public static class GamePanel
         }
 
         ImGui.SetNextItemWidth(200);
-        if (Ui.InputTextWithHint("##preset-name", "Preset name", ref _presetName, 64))
+        bool save = Ui.SubmitTextWithHint("##preset-name", "Preset name", ref _presetName, 64);
+        if (ImGui.IsItemEdited())
         {
             // Typing is how a new preset is made, so the combo follows the box; a name with no
             // preset behind it simply selects nothing.
@@ -999,8 +1000,12 @@ public static class GamePanel
         }
 
         ImGui.SameLine();
-        ImGui.BeginDisabled(_presetName.Trim().Length == 0);
-        if (ImGui.Button("Save")) SavePreset(state, game, colours, key);
+
+        // The box is typed in whether or not there is a name in it yet, so Enter asks what the
+        // button's own greying out asks.
+        bool named = _presetName.Trim().Length > 0;
+        ImGui.BeginDisabled(!named);
+        if (ImGui.Button("Save") || (save && named)) SavePreset(state, game, colours, key);
         ImGui.EndDisabled();
 
         ImGui.PopID();

@@ -41,16 +41,21 @@ public static class ConnectionPanel
 
         bool rpcs3 = DrawTarget(state);
 
+        bool connect = false;
         if (!rpcs3)
         {
             ImGui.SetNextItemWidth(260);
-            ImGui.InputText("PS3 address", ref _host, 64);
+            connect = Ui.SubmitText("PS3 address", ref _host, 64);
             ImGui.SameLine();
         }
 
         bool connecting = state.Client.WantsConnection && !state.Connected;
-        ImGui.BeginDisabled(state.Connected || connecting);
-        if (ImGui.Button("Connect"))
+
+        // The address box is not greyed out while a connection is up, so Enter in it asks the same
+        // question the button does about whether there is anything to connect.
+        bool busy = state.Connected || connecting;
+        ImGui.BeginDisabled(busy);
+        if (ImGui.Button("Connect") || (connect && !busy))
         {
             if (rpcs3) ConnectToRpcs3(state);
             else
@@ -142,7 +147,7 @@ public static class ConnectionPanel
                 + "In webMAN mode Connect does this on its own when nothing answers on qwark's port.");
 
         ImGui.SetNextItemWidth(360);
-        ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
+        bool load = Ui.SubmitText("qwark.sprx path", ref _sprxPath, 512);
 
         // The default is qwark.sprx beside the executable, which is where the release layout puts it.
         string sprx = Ps3Connect.ResolveSprx(_sprxPath);
@@ -152,12 +157,9 @@ public static class ConnectionPanel
         else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
 
         ImGui.SetNextItemWidth(120);
-        if (ImGui.InputInt("VSH slot", ref _slot))
-        {
-            _slot = Math.Clamp(_slot, 0, 7);
-        }
+        load |= Ui.SubmitInt("VSH slot", ref _slot, 0, 7);
 
-        if (ImGui.Button("Load qwark via webMAN"))
+        if (ImGui.Button("Load qwark via webMAN") || load)
         {
             if (!File.Exists(sprx))
             {
@@ -217,6 +219,7 @@ public static class ConnectionPanel
     {
         ImGui.Spacing();
 
+        bool install = false;
         if (withPathBox)
         {
             ImGui.Separator();
@@ -226,7 +229,7 @@ public static class ConnectionPanel
                     + "Requires webMAN for installation.");
 
             ImGui.SetNextItemWidth(360);
-            ImGui.InputText("qwark.sprx path", ref _sprxPath, 512);
+            install = Ui.SubmitText("qwark.sprx path", ref _sprxPath, 512);
         }
         else
         {
@@ -245,7 +248,10 @@ public static class ConnectionPanel
 
         ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
         ImGui.BeginDisabled(!_confirmBootInstall);
-        if (ImGui.Button("Install to boot_plugins.txt"))
+
+        // The path box above the checkbox is not greyed out with the buttons below it, so Enter in
+        // it waits for the same confirmation a press would.
+        if (ImGui.Button("Install to boot_plugins.txt") || (install && _confirmBootInstall))
         {
             state.Settings.SprxPath = _sprxPath;
             state.Settings.Save();
@@ -373,9 +379,9 @@ public static class ConnectionPanel
 
         ImGui.BeginDisabled(!state.Connected);
         ImGui.SetNextItemWidth(360);
-        ImGui.InputText("Notification", ref _notifyText, 255);
+        bool send = Ui.SubmitText("Notification", ref _notifyText, 255);
         ImGui.SameLine();
-        if (ImGui.Button("Send"))
+        if (ImGui.Button("Send") || send)
         {
             string text = _notifyText;
             state.Run(() => state.Client.NotifyAsync(text), "Notification sent");

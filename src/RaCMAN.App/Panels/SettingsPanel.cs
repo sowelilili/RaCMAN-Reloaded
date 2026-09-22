@@ -361,7 +361,12 @@ public static class SettingsPanel
         Ui.Hint("Import settings, save files and mods from previous versions of RaCMAN");
 
         ImGui.SetNextItemWidth(-110);
-        Ui.InputTextWithHint("##legacy-config", "C:\\RaCMAN\\config.txt", ref _importPath, 512);
+
+        // Enter in the path box is the Import button at the bottom of this section, which is the
+        // only thing the panel does with a path. Every return between here and it is a file that
+        // holds nothing to import, so a press on one of those is a press on a button that is not
+        // drawn: nothing.
+        bool import = Ui.SubmitTextWithHint("##legacy-config", "C:\\RaCMAN\\config.txt", ref _importPath, 512);
         ImGui.SameLine();
         ImGui.BeginDisabled(!FileDialog.IsSupported || _dialogOpen);
         if (ImGui.Button("Browse...")) Browse(state);
@@ -449,7 +454,7 @@ public static class SettingsPanel
 
         ImGui.Spacing();
         ImGui.BeginDisabled(_importing);
-        if (ImGui.Button("Import")) Import(state, config);
+        if (ImGui.Button("Import") || (import && !_importing)) Import(state, config);
         ImGui.EndDisabled();
     }
 

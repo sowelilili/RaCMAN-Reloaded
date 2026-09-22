@@ -291,6 +291,42 @@ public static class Ui
     public static bool InputTextWithHint(string label, string hint, ref string value, uint maxLength = 256) =>
         ImGui.InputTextWithHint(label, hint, ref value, maxLength);
 
+    // ---------------------------------------------------------------- boxes that submit
+
+    /// <summary>
+    /// A box whose Enter key presses the button beside it. What is typed still reaches
+    /// <paramref name="value"/> on every keystroke; only the return changes, which is true on Enter
+    /// and on nothing else, so the call site reads <c>if (ImGui.Button("Connect") || connect)</c>.
+    /// The button goes first in that test so that it is drawn on the frame Enter is pressed too.
+    /// <para>
+    /// A box that also has something to do on every keystroke - a filter, or a name that selects as
+    /// it is typed - asks <see cref="ImGui.IsItemEdited"/> for that after the call, since the return
+    /// no longer says it.
+    /// </para>
+    /// </summary>
+    public static bool SubmitText(string label, ref string value, uint maxLength = 256) =>
+        ImGui.InputText(label, ref value, maxLength, ImGuiInputTextFlags.EnterReturnsTrue);
+
+    /// <summary>The same box with the grey placeholder an empty one carries.</summary>
+    public static bool SubmitTextWithHint(string label, string hint, ref string value, uint maxLength = 256) =>
+        ImGui.InputTextWithHint(label, hint, ref value, maxLength, ImGuiInputTextFlags.EnterReturnsTrue);
+
+    /// <summary>
+    /// The same for a whole number, kept inside <paramref name="min"/>..<paramref name="max"/>. The
+    /// flag is no use here, since InputInt is InputScalar underneath and that asserts when it is
+    /// given EnterReturnsTrue (see <see cref="NumberOnEnter"/>), so Enter is read off the box
+    /// instead: a box stops being active the moment Enter is pressed in it, and the key is what
+    /// tells that apart from a click somewhere else. Keeping InputInt is what keeps the stepper
+    /// buttons, which are half of what these boxes are for.
+    /// </summary>
+    public static bool SubmitInt(string label, ref int value, int min, int max)
+    {
+        if (ImGui.InputInt(label, ref value)) value = Math.Clamp(value, min, max);
+
+        return ImGui.IsItemDeactivatedAfterEdit()
+               && (ImGui.IsKeyPressed(ImGuiKey.Enter) || ImGui.IsKeyPressed(ImGuiKey.KeypadEnter));
+    }
+
     /// <summary>
     /// A tab item with flags on it. The binding only offers those through the overload that also
     /// takes the "still open" flag a close box writes back to, and none of these tabs has a close

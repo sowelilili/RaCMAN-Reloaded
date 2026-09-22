@@ -363,7 +363,7 @@ public static class ModsPanel
         Ui.Heading("Install from ZIP");
 
         ImGui.SetNextItemWidth(-250);
-        Ui.InputTextWithHint("##zip", "C:\\downloads\\some-mod.zip", ref _zipPath, 512);
+        bool install = Ui.SubmitTextWithHint("##zip", "C:\\downloads\\some-mod.zip", ref _zipPath, 512);
 
         ImGui.SameLine();
         ImGui.BeginDisabled(!FileDialog.IsSupported || _dialogOpen);
@@ -371,7 +371,7 @@ public static class ModsPanel
         ImGui.EndDisabled();
 
         ImGui.SameLine();
-        if (ImGui.Button("Install ZIP")) InstallZip(state, title);
+        if (ImGui.Button("Install ZIP") || install) InstallZip(state, title);
 
         if (!FileDialog.IsSupported) Ui.Hint("No file dialog available; paste the path.");
 

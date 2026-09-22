@@ -216,10 +216,14 @@ public static class SaveFilesPanel
         }
 
         ImGui.SetNextItemWidth(220);
-        Ui.InputTextWithHint("##newcategory", "New category", ref _newCategory, 64);
+        bool create = Ui.SubmitTextWithHint("##newcategory", "New category", ref _newCategory, 64);
         ImGui.SameLine();
-        ImGui.BeginDisabled(string.IsNullOrWhiteSpace(_newCategory) || _busy);
-        if (ImGui.Button("Create category")) CreateCategory(state, title);
+
+        // The box stays live while the button beside it is greyed out, so Enter in it asks the same
+        // two questions the button does.
+        bool canCreate = !string.IsNullOrWhiteSpace(_newCategory) && !_busy;
+        ImGui.BeginDisabled(!canCreate);
+        if (ImGui.Button("Create category") || (create && canCreate)) CreateCategory(state, title);
 
         ImGui.EndDisabled();
     }
@@ -338,11 +342,14 @@ public static class SaveFilesPanel
         var selected = Selected;
 
         ImGui.SetNextItemWidth(260);
-        Ui.InputTextWithHint("##name", "File name to save as", ref _name, 64);
+        bool saveNow = Ui.SubmitTextWithHint("##name", "File name to save as", ref _name, 64);
         ImGui.SameLine();
 
-        ImGui.BeginDisabled(!enabled || save is null || string.IsNullOrWhiteSpace(_name));
-        if (ImGui.Button("Save on console")) StartSave(state, title);
+        // The name box is typed in whether or not a save can be taken, so Enter in it asks what the
+        // button's own greying out asks.
+        bool canSave = enabled && save is not null && !string.IsNullOrWhiteSpace(_name);
+        ImGui.BeginDisabled(!canSave);
+        if (ImGui.Button("Save on console") || (saveNow && canSave)) StartSave(state, title);
         ImGui.EndDisabled();
 
         ImGui.SameLine();
@@ -353,9 +360,9 @@ public static class SaveFilesPanel
         ImGui.BeginDisabled(selected is null || _busy);
 
         ImGui.SetNextItemWidth(260);
-        Ui.InputTextWithHint("##rename", "Rename to", ref _renameTo, 64);
+        bool renamed = Ui.SubmitTextWithHint("##rename", "Rename to", ref _renameTo, 64);
         ImGui.SameLine();
-        if (ImGui.Button("Rename")) StartRename(state, title, selected!.Value);
+        if (ImGui.Button("Rename") || renamed) StartRename(state, title, selected!.Value);
 
         ImGui.SameLine();
         if (_confirmDelete)
