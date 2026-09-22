@@ -29,9 +29,12 @@ public sealed class PlanetChoices
     /// <summary>
     /// True when a name is nothing but a parenthesised note. qwark's planet lists are indexed by
     /// the game's own planet id, so where a game has no planet at an id the list carries filler to
-    /// keep the numbering: UYA's id 0 is "(none)", Deadlocked has "(unused)" and three
-    /// "(infinite loop)" entries. Nobody wants to load one, and the ids around them still have to
-    /// mean what they meant, so they are dropped from the combo rather than from the list.
+    /// keep the numbering: UYA's id 0 is "(none)" and its ids 15 and 25 are "(unused)" gaps in the
+    /// game's own numbering, and Deadlocked has an "(unused)" id 0 and three "(infinite loop)"
+    /// entries. Nobody wants to load one — there is nothing at the id to load — and the ids around
+    /// them still have to mean what they meant, so they are dropped from the combo rather than
+    /// from the list. One rule for every note, so a gap a later qwark words differently is dropped
+    /// too without anything here having to be told about it.
     /// </summary>
     public static bool IsPlaceholder(string? name)
     {
@@ -75,6 +78,16 @@ public sealed class PlanetChoices
 
     /// <summary>Where a planet index sits in the combo, or -1 when it is one of the hidden ones.</summary>
     public int PositionOf(int planet) => Array.IndexOf(Indices, planet);
+
+    /// <summary>
+    /// Where the combo should sit for a planet the console holds, or a setting remembers: its own
+    /// row, and the first row of the list when the id has none. An id with no row is a hidden one
+    /// — a stale setting pointing at an "(unused)" gap, or a console standing somewhere the combo
+    /// does not offer — and a combo has to sit on something, so it sits on a real planet rather
+    /// than on whatever row -1 would have drawn. Every picker asks this, so they all fall back the
+    /// same way.
+    /// </summary>
+    public int PositionFor(int planet) => Math.Max(0, PositionOf(planet));
 
     /// <summary>The planet index a combo position stands for, or 0 when there is nothing to pick.</summary>
     public int PlanetAt(int position) =>

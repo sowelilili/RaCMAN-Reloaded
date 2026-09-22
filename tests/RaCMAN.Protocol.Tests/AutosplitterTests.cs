@@ -35,6 +35,8 @@ internal sealed class FakeLiveSplitServer : IDisposable
     private readonly List<string> _commands = new();
     private readonly object _gate = new();
 
+    private int _accepted;
+
     /// <summary>
     /// The run's loading times, which is what game time is measured against: while game time runs
     /// it is real time less this. Null until a loading-times or a game-time command creates one,
@@ -66,6 +68,12 @@ internal sealed class FakeLiveSplitServer : IDisposable
     }
 
     public int Port { get; }
+
+    /// <summary>
+    /// How many connections this server has taken. It is what a socket costs from the other end,
+    /// so a probe that is supposed to be doing nothing at all can be held to it.
+    /// </summary>
+    public int Accepted => Volatile.Read(ref _accepted);
 
     public string[] Splits { get; set; }
 
@@ -181,6 +189,7 @@ internal sealed class FakeLiveSplitServer : IDisposable
                 return;
             }
 
+            Interlocked.Increment(ref _accepted);
             _ = Task.Run(() => ServeAsync(client));
         }
     }
@@ -1682,12 +1691,13 @@ public class AutosplitterTests
 
     /// <summary>
     /// Nothing listening is the everyday case: LiveSplit's server is off until somebody starts it.
-    /// The client has to report it as a failed attempt rather than sit in "Connecting...", because
-    /// that count is what puts the "LiveSplit not found" popup on the screen, and it has to keep
-    /// counting so a second attempt the user asked for is told from the first.
+    /// The client reports it as a failed attempt rather than sitting in "Connecting...", because
+    /// that count is what puts the "LiveSplit not found" popup on the screen — and it reports it
+    /// once, because the press was one attempt. Nothing is behind it: no backoff, no second
+    /// "Connecting", no second popup.
     /// </summary>
     [Fact]
-    public async Task AConnectToAPortNothingListensOnIsCountedAsAFailedAttempt()
+    public async Task AConnectToAPortNothingListensOnIsCountedOnceAndNotRetried()
     {
         int deadPort = FreePort();
 
@@ -1700,11 +1710,15 @@ public class AutosplitterTests
         Assert.False(client.IsConnected);
         Assert.Equal(LiveSplitStatus.Disconnected, client.Status);
         Assert.NotNull(client.LastError);
-        Assert.Contains($"Not connected to {LiveSplitClient.DefaultHost}:{deadPort}", client.StatusLine);
 
-        // The reconnect loop keeps trying, and every retry counts: the panel is what decides which
-        // of them is worth a popup.
-        Assert.True(await WaitFor(() => client.ConnectFailures >= 2), "the reconnect loop stopped retrying");
+        // Four seconds, which under the old backoff was 1 s, 2 s and 4 s: three more attempts,
+        // three more flashes of the panel's yellow line, and a count the popup would have watched
+        // move three more times.
+        await Task.Delay(4000);
+        Assert.Equal(1, client.ConnectFailures);
+        Assert.Equal(0, client.TooOldFailures);
+        Assert.False(client.Enabled);
+        Assert.Equal("Not connected", client.StatusLine);
 
         client.Stop();
     }
@@ -1732,6 +1746,7 @@ public class AutosplitterTests
         int port = FreePort();
         var settings = new Settings();
         settings.Autosplit.Enabled = true;
+        settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = port;
 
         using var client = new LiveSplitClient();
@@ -1777,6 +1792,7 @@ public class AutosplitterTests
     {
         var settings = new Settings { AutoReconnect = false };
         settings.Autosplit.Enabled = true;
+        settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = FreePort();
 
         using var state = new AppState(settings);
@@ -1798,9 +1814,10 @@ public class AutosplitterTests
     }
 
     /// <summary>
-    /// LiveSplit closed in the middle of a session. The connection goes, the probe finds the server
-    /// again as soon as it is back, and none of it is worth a word: nobody pressed anything, so
-    /// there is nothing anybody has to be told.
+    /// LiveSplit closed in the middle of a session, with the switch on. The connection goes, the
+    /// probe finds the server again as soon as it is back, and none of it is worth a word: nobody
+    /// pressed anything, so there is nothing anybody has to be told. A dropped connection is the
+    /// one thing anything ever goes back for, and this is the only thing that goes back for it.
     /// </summary>
     [Fact]
     public async Task AConnectionThatDropsIsPickedUpAgainWithoutAWord()
@@ -1808,6 +1825,7 @@ public class AutosplitterTests
         int port = FreePort();
         var settings = new Settings();
         settings.Autosplit.Enabled = true;
+        settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = port;
 
         using var client = new LiveSplitClient();
@@ -1830,32 +1848,220 @@ public class AutosplitterTests
         using var again = new FakeLiveSplitServer(port, "Aranos", "Oozla");
         Assert.True(await WaitProbing(probe, () => client.IsConnected), "the probe never found it again");
         Assert.True(await WaitFor(() => client.Version == again.Version), "the handshake never ran again");
+
+        // Silently, in all three places it could have said something.
+        Assert.True(client.Quiet, "the probe's reconnection was not a quiet one");
         Assert.Equal(0, client.ConnectFailures);
+        Assert.Equal(0, client.TooOldFailures);
 
         client.Stop();
     }
 
     /// <summary>
-    /// The other half of the rule: a Connect the user pressed is counted whatever the probe is
-    /// doing, because that count is what puts "LiveSplit server not found" on the screen and a user
-    /// who pressed a button is owed an answer. It is one attempt and no loop, because with the
-    /// automatic switch on the probe is what looks again.
+    /// The same drop with the switch off, which is where the client used to keep a reconnect loop
+    /// of its own. Nothing goes back for it: the server is up and answering again and never sees
+    /// another connection, the probe never looks, and the panel says the plain thing until
+    /// somebody presses Connect.
     /// </summary>
     [Fact]
-    public async Task AConnectPressedByHandAgainstNothingIsCountedAndSaidOnce()
+    public async Task ADroppedConnectionWithTheSwitchOffIsNotPickedUpAgain()
+    {
+        int port = FreePort();
+        var settings = new Settings();
+        settings.Autosplit.Enabled = true;
+        settings.Autosplit.Port = port;
+        Assert.False(settings.Autosplit.ConnectsAutomatically);
+
+        using var client = new LiveSplitClient();
+        var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(100));
+
+        // Connected by hand, which is all the switch off leaves.
+        var server = new FakeLiveSplitServer(port, "Aranos", "Oozla");
+        client.Start(LiveSplitClient.DefaultHost, port);
+        Assert.True(await WaitFor(() => client.IsConnected), "the fake LiveSplit never accepted the press");
+        Assert.Equal(1, server.Accepted);
+        server.Dispose();
+
+        for (int i = 0; i < 20 && client.IsConnected; i++)
+        {
+            client.Send(LiveSplitClient.Ping);
+            await Task.Delay(50);
+        }
+
+        Assert.False(client.IsConnected, "the dropped connection was never noticed");
+
+        // Two seconds of the render loop against a server that is back and waiting.
+        using var again = new FakeLiveSplitServer(port, "Aranos", "Oozla");
+        for (int i = 0; i < 40; i++)
+        {
+            probe.Tick(0.05);
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(0, again.Accepted);
+        Assert.Equal(0, probe.Looks);
+        Assert.False(client.IsConnected);
+        Assert.False(client.Enabled);
+        Assert.Equal(0, client.ConnectFailures);
+        Assert.Equal("Not connected", client.StatusLine);
+    }
+
+    /// <summary>
+    /// The switch off means off: not a quieter probe, not a slower one, but no socket at all. The
+    /// server is up and answering throughout, so anything the probe did would show as a connection
+    /// on it, and ten probe periods go by without one. Ticking the switch then finds the server
+    /// that was there all along, which is the other half of the same fact.
+    /// </summary>
+    [Fact]
+    public async Task WithTheSwitchOffTheProbeNeverLooksAtAll()
+    {
+        using var server = new FakeLiveSplitServer("Aranos", "Oozla");
+
+        var settings = new Settings();
+        settings.Autosplit.Enabled = true;
+        settings.Autosplit.Port = server.Port;
+
+        // Off in a fresh file, which is the case this test is really about: the autosplitter being
+        // on says nothing about whether this client should go looking for LiveSplit by itself.
+        Assert.False(settings.Autosplit.ConnectsAutomatically);
+
+        using var client = new LiveSplitClient();
+        var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(100));
+        Assert.False(probe.Wanted);
+
+        // A second of the render loop at a 100 ms interval: ten looks if it were looking.
+        for (int i = 0; i < 20; i++)
+        {
+            probe.Tick(0.05);
+            await Task.Delay(50);
+        }
+
+        Assert.Equal(0, probe.Looks);
+        Assert.Equal(0, probe.Found);
+        Assert.Equal(0, server.Accepted);
+        Assert.False(client.IsConnected);
+        Assert.False(client.Enabled);
+        Assert.Equal(0, client.ConnectFailures);
+        Assert.Equal(0, client.TooOldFailures);
+        Assert.Equal("Not connected", client.StatusLine);
+
+        // And the switch is the whole of it: nothing else had to change for the probe to start.
+        settings.Autosplit.ConnectsAutomatically = true;
+        Assert.True(probe.Wanted);
+        Assert.True(await WaitProbing(probe, () => client.IsConnected), "the probe never found the server");
+        Assert.True(server.Accepted >= 1);
+
+        client.Stop();
+    }
+
+    /// <summary>
+    /// The attempt itself, where the panel would see it. A look that finds something is handed to
+    /// the client quietly: the status never passes through "Connecting", nothing lands in the
+    /// toast queue, and neither of the counts the popup watches moves — not even at the version
+    /// wall, which is a real problem but not one anybody pressed a button to find. The wall is
+    /// still latched and still said on the status line, which is where a thing nobody asked about
+    /// belongs.
+    /// </summary>
+    [Fact]
+    public async Task AProbeAttemptRaisesNoToastAndNoPopup()
+    {
+        int port = FreePort();
+        var settings = new Settings { AutoReconnect = false };
+        settings.Autosplit.Enabled = true;
+        settings.Autosplit.ConnectsAutomatically = true;
+        settings.Autosplit.Port = port;
+
+        // Something is listening and it is not a build this client can drive, which is the one
+        // shape of probe attempt that used to reach the screen.
+        using var server = new FakeLiveSplitServer(port, "Aranos", "Oozla");
+        server.Ignored.Add(LiveSplitClient.GetLiveSplitVersion);
+
+        using var state = new AppState(settings);
+
+        bool announced = false;
+        for (int i = 0; i < 80 && !state.LiveSplit.TooOld; i++)
+        {
+            state.Tick(0.05f);
+            announced |= state.LiveSplit.Status == LiveSplitStatus.Connecting;
+            await Task.Delay(50);
+        }
+
+        Assert.True(state.LiveSplitProbe.Found >= 1, "the probe never found the server");
+        Assert.True(state.LiveSplit.TooOld, "the build was never turned away");
+        Assert.True(state.LiveSplit.Quiet, "the probe's attempt was not a quiet one");
+
+        // Nothing the user would have had to look at, in any of the three places it could show.
+        Assert.False(announced, "the probe's attempt flashed \"Connecting\" on the panel");
+        Assert.Equal(0, state.LiveSplit.ConnectFailures);
+        Assert.Equal(0, state.LiveSplit.TooOldFailures);
+        Assert.Empty(state.Toasts);
+
+        // And it is still said, where saying it costs nobody a click.
+        Assert.StartsWith(LiveSplitClient.TooOldStatus, state.LiveSplit.StatusLine);
+    }
+
+    /// <summary>
+    /// The other shape: the server goes away between the look and the connection, which is the
+    /// everyday race and used to leave a socket error on the status line every few seconds. A
+    /// quiet attempt leaves the line exactly as it found it.
+    /// </summary>
+    [Fact]
+    public async Task AQuietAttemptThatFailsLeavesTheStatusLineAlone()
     {
         int deadPort = FreePort();
         using var client = new LiveSplitClient();
 
-        client.Start(LiveSplitClient.DefaultHost, deadPort, retry: false);
+        client.Start(LiveSplitClient.DefaultHost, deadPort, quiet: true);
+
+        Assert.True(await WaitFor(() => !client.Enabled), "the single attempt never finished");
+        Assert.True(client.Quiet);
+        Assert.False(client.IsConnected);
+        Assert.Equal(LiveSplitStatus.Disconnected, client.Status);
+
+        Assert.Equal(0, client.ConnectFailures);
+        Assert.Null(client.LastError);
+        Assert.Equal("Not connected", client.StatusLine);
+    }
+
+    /// <summary>
+    /// The other half of the rule: a Connect the user pressed is counted, because that count is
+    /// what puts "LiveSplit server not found" on the screen and a user who pressed a button is owed
+    /// an answer. Counted <b>once</b>, and the same once whichever way the automatic switch is set:
+    /// the press used to drag the whole reconnect loop behind it when the switch was off, which is
+    /// how one press became an attempt and a popup's worth of failure every few seconds. The probe
+    /// running alongside it adds nothing either, because there is nothing there to find.
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task AConnectPressedByHandAgainstNothingIsCountedOnceWhateverTheSwitchSays(bool automatic)
+    {
+        int deadPort = FreePort();
+
+        var settings = new Settings();
+        settings.Autosplit.Enabled = true;
+        settings.Autosplit.ConnectsAutomatically = automatic;
+        settings.Autosplit.Port = deadPort;
+
+        using var client = new LiveSplitClient();
+        var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(100));
+
+        client.Start(LiveSplitClient.DefaultHost, deadPort);
 
         Assert.True(await WaitFor(() => client.ConnectFailures >= 1), "the press was never reported");
         Assert.False(client.IsConnected);
 
-        // The reconnect loop would have tried again a second later; this one has nothing behind it,
-        // and the client stops wanting a connection, so the status line says the plain thing.
-        await Task.Delay(1500);
+        // Three seconds of the render loop, which the old loop would have spent on 1 s, 2 s and a
+        // third attempt: the client stops wanting a connection, so the status line says the plain
+        // thing and goes on saying it.
+        for (int i = 0; i < 60; i++)
+        {
+            probe.Tick(0.05);
+            await Task.Delay(50);
+        }
+
         Assert.Equal(1, client.ConnectFailures);
+        Assert.Equal(0, client.TooOldFailures);
         Assert.False(client.Enabled);
         Assert.Equal("Not connected", client.StatusLine);
     }
@@ -1998,45 +2204,51 @@ public class AutosplitterTests
     }
 
     /// <summary>
-    /// The automatic connection: on in a fresh file, saved and read back as the user left it, and
-    /// answered for a file written before the switch existed by what that file was already doing.
+    /// The automatic connection is off for everybody until somebody ticks it: in a fresh file, in
+    /// one this build wrote, and in one written before the switch existed whatever its autosplitter
+    /// said. A tick is remembered, which is the only way it is ever on.
     /// </summary>
     [Fact]
-    public void TheAutomaticConnectionRoundTripsAndAnOlderFileAnswersForItself()
+    public void TheAutomaticConnectionIsOffUntilItIsAskedFor()
     {
-        // Finding LiveSplit is the client's job, and a look that finds nothing is silent, so there
-        // is nothing for a new user to be spared from.
-        Assert.True(new Settings().Autosplit.ConnectsAutomatically);
+        // Going looking for a server on this PC every few seconds is a thing to be asked for.
+        Assert.False(new Settings().Autosplit.ConnectsAutomatically);
 
         var folder = Path.Combine(Path.GetTempPath(), "racman-autosplit-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         try
         {
-            string path = Path.Combine(folder, "racman-reloaded.settings.json");
-            var saved = Settings.Load(path);
+            // A file this build writes says so rather than leaving it to be worked out again.
+            string fresh = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(fresh);
             saved.Autosplit.Enabled = true;
-            saved.Autosplit.ConnectsAutomatically = false;
             saved.Save();
 
-            Assert.Contains("autoConnect", File.ReadAllText(path));
+            Assert.Contains("\"autoConnect\": false", File.ReadAllText(fresh));
 
-            // Switched off and written down, so the migration below has nothing to answer for it.
-            var loaded = Settings.Load(path);
+            var loaded = Settings.Load(fresh);
             Assert.True(loaded.Autosplit.Enabled);
             Assert.False(loaded.Autosplit.ConnectsAutomatically);
 
-            // A file from before the switch: the autosplitter that was already pointing the client
-            // at LiveSplit at every start keeps doing it.
+            // A file from before the switch, with the autosplitter on: that switch was about the
+            // run events, and it was never anybody's answer to this question.
             string on = Path.Combine(folder, "on.settings.json");
             File.WriteAllText(on, """{ "autosplit": { "enabled": true, "host": "10.0.0.4" } }""");
             var older = Settings.Load(on);
-            Assert.True(older.Autosplit.ConnectsAutomatically);
+            Assert.False(older.Autosplit.ConnectsAutomatically);
             Assert.Equal("10.0.0.4", older.Autosplit.Host);
 
-            // And one whose autosplitter was off has never asked this client to go looking.
+            // And one whose autosplitter was off, which never asked either.
             string off = Path.Combine(folder, "off.settings.json");
             File.WriteAllText(off, """{ "autosplit": { "enabled": false } }""");
             Assert.False(Settings.Load(off).Autosplit.ConnectsAutomatically);
+
+            // Ticked by hand, it round trips: the switch is the user's and nothing undoes it.
+            string ticked = Path.Combine(folder, "ticked.settings.json");
+            var wanted = Settings.Load(ticked);
+            wanted.Autosplit.ConnectsAutomatically = true;
+            wanted.Save();
+            Assert.True(Settings.Load(ticked).Autosplit.ConnectsAutomatically);
         }
         finally
         {

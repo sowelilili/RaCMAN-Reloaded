@@ -314,7 +314,7 @@ public static class SettingsPanel
         editing |= ImGui.IsItemActive();
 
         // Committed the moment both boxes are left alone: a half-typed host would otherwise send
-        // the reconnect loop somewhere nobody asked for.
+        // a connection attempt somewhere nobody asked for, and a popup after it.
         bool changed = !string.Equals(_liveSplitHost.Trim(), autosplit.Host, StringComparison.OrdinalIgnoreCase)
                        || _liveSplitPort != autosplit.Port;
         if (changed && !editing) ApplyLiveSplit(state, autosplit);
@@ -337,9 +337,9 @@ public static class SettingsPanel
         if (!state.LiveSplit.IsConnected && !state.LiveSplit.Enabled) return;
 
         // Start only restarts a connection that is now pointed somewhere else, and a failure there
-        // is one the user asked for, so it earns the popup.
+        // is one the user asked for, so it earns the popup. One attempt, like the button's.
         LiveSplitModal.ArmForAttempt();
-        state.LiveSplit.Start(autosplit.Host, autosplit.Port, retry: !autosplit.ConnectsAutomatically);
+        state.LiveSplit.Start(autosplit.Host, autosplit.Port);
     }
 
     // ---------------------------------------------------------------- import

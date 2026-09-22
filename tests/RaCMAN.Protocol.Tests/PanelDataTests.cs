@@ -623,6 +623,25 @@ public class PlanetChoiceTests
     // UYA's list, whose id 0 is a placeholder because RAC3Form's combo box was one-based.
     private static string[] Uya() => new[] { "(none)", "Veldin", "Florana", "Starship Phoenix" };
 
+    /// <summary>
+    /// UYA's own numbering around its two gaps, as qwark names them: 14 is Koros, 15 and 25 are
+    /// ids the game has no planet at, and 16 and 26 carry on. The whole list is too long to spell
+    /// out, so this is the stretch that matters with the ids kept where they are.
+    /// </summary>
+    private static string[] UyaAroundTheGaps()
+    {
+        var planets = new string[27];
+        for (int i = 0; i < planets.Length; i++) planets[i] = $"Planet {i}";
+        planets[0] = "(none)";
+        planets[14] = "Koros";
+        planets[15] = "(unused)";
+        planets[16] = "Metropolis";
+        planets[24] = "Insomniac Museum";
+        planets[25] = "(unused)";
+        planets[26] = "Metropolis Rangers";
+        return planets;
+    }
+
     // Deadlocked's, which has filler in the middle as well as at the front.
     private static string[] Deadlocked() => new[]
     {
@@ -713,6 +732,66 @@ public class PlanetChoiceTests
         var rac1 = PlanetChoices.For(new[] { "Veldin", "Novalis", "Aridia" });
         Assert.Equal(new[] { 0, 1, 2 }, rac1.Indices);
         Assert.Equal(3, rac1.Count);
+    }
+
+    /// <summary>
+    /// UYA's two gaps, which are ids the game numbers past rather than planets qwark failed to
+    /// name. They are not offered, and every name that is offered still stands for the id it had:
+    /// picking Metropolis is planet 16 whether or not 15 is drawn above it.
+    /// </summary>
+    [Fact]
+    public void UyasUnusedIdsAreNotOfferedAndTheIdsPastThemStillHold()
+    {
+        var planets = UyaAroundTheGaps();
+        var choices = PlanetChoices.For(planets);
+
+        Assert.DoesNotContain("(unused)", choices.Labels);
+        Assert.DoesNotContain("(none)", choices.Labels);
+        Assert.Equal(planets.Length - 3, choices.Count);
+
+        // Every label still names the id it was read at, which is what a request carries.
+        for (int i = 0; i < choices.Count; i++)
+        {
+            Assert.Equal(planets[choices.Indices[i]], choices.Labels[i]);
+            Assert.Equal(choices.Indices[i], choices.PlanetAt(i));
+        }
+
+        // And the ids either side of a gap are the game's own, not the combo's row numbers.
+        Assert.Equal(16, choices.PlanetAt(choices.PositionOf(16)));
+        Assert.Equal(26, choices.PlanetAt(choices.PositionOf(26)));
+        Assert.Equal("Koros", choices.Labels[choices.PositionOf(14)]);
+        Assert.Equal("Metropolis", choices.Labels[choices.PositionOf(16)]);
+        Assert.Equal("Metropolis Rangers", choices.Labels[choices.PositionOf(26)]);
+
+        // The gaps themselves have no row at all.
+        Assert.Equal(-1, choices.PositionOf(15));
+        Assert.Equal(-1, choices.PositionOf(25));
+    }
+
+    /// <summary>
+    /// A selection left on an id the combo does not draw — a console standing on one, a setting
+    /// saved before the gaps were named — sits on the first planet the game really has rather than
+    /// on nothing. Every picker asks the same question, so they all land in the same place.
+    /// </summary>
+    [Fact]
+    public void ASelectionOnAHiddenIdFallsBackToTheFirstRealPlanet()
+    {
+        var choices = PlanetChoices.For(UyaAroundTheGaps());
+
+        Assert.Equal(0, choices.PositionFor(15));
+        Assert.Equal(0, choices.PositionFor(25));
+        Assert.Equal(0, choices.PositionFor(0));
+        Assert.Equal(1, choices.PlanetAt(choices.PositionFor(15)));
+
+        // An id the list never had at all, which is the same answer for the same reason.
+        Assert.Equal(0, choices.PositionFor(200));
+
+        // A planet that is drawn keeps its own row, gaps above it or not.
+        Assert.Equal(choices.PositionOf(16), choices.PositionFor(16));
+        Assert.Equal(16, choices.PlanetAt(choices.PositionFor(16)));
+
+        // And a game with no planet list at all answers without throwing.
+        Assert.Equal(0, PlanetChoices.For(Array.Empty<string>()).PositionFor(3));
     }
 }
 

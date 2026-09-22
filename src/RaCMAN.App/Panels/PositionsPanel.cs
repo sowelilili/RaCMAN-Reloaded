@@ -180,7 +180,7 @@ public static class PositionsPanel
         // console numbered it with, filler entries included, because that is what a request
         // carries. A selection the console holds on a hidden entry shows as the first real one.
         var choices = PlanetChoices.For(state.Planets);
-        int pick = Math.Max(0, choices.PositionOf(state.Session.SelectedPlanet));
+        int pick = choices.PositionFor(state.Session.SelectedPlanet);
         var flags = state.Session.PlanetFlags;
 
         ImGui.SetNextItemWidth(FittedComboWidth("Planet"));

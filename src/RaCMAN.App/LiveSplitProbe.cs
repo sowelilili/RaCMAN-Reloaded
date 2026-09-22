@@ -10,9 +10,16 @@ namespace RaCMAN.App;
 /// <para>
 /// A look is a bare TCP connect with a short timeout and not one byte written. It costs a socket
 /// that is thrown away again, and when it fails <b>nobody is told</b>: no popup, no toast, no
-/// status line of its own. That silence is the whole point. LiveSplit not being up yet is the
-/// everyday case and is nobody's mistake; the popup belongs to an attempt the user made and to a
-/// LiveSplit that answers and cannot be driven, and neither of those comes through here.
+/// status line of its own. That silence is the whole point, and it covers the connection a look
+/// decides on as well as the look itself: the attempt is made quietly, so it never flashes
+/// "Connecting" on the panel and never moves a count the popup watches. LiveSplit not being up yet
+/// is the everyday case and is nobody's mistake; the popup belongs to an attempt the user made,
+/// and that one does not come through here.
+/// </para>
+/// <para>
+/// The switch it hangs off is off until somebody ticks it. Nothing here runs while it is off — not
+/// a socket, not a timer, not a status line — because a client that goes looking for a server on
+/// this PC every few seconds is a thing to be asked for rather than one to be opted out of.
 /// </para>
 /// <para>
 /// One look at a time, and one look only: <see cref="Looking"/> is what stops a slow connect from
@@ -75,18 +82,34 @@ public sealed class LiveSplitProbe
     /// <summary>True while a look is in flight, which is why a second one is never started.</summary>
     public bool Looking => Volatile.Read(ref _looking) != 0;
 
+    /// <summary>
+    /// True when this tick would look: both switches on, nothing connected, and no build already
+    /// turned away. It is the whole of the decision, so the guard and the panel cannot drift apart
+    /// and a test can ask the question without waiting for an interval.
+    /// </summary>
+    public bool Wanted
+    {
+        get
+        {
+            var autosplit = _settings.Autosplit;
+            return autosplit.Enabled && autosplit.ConnectsAutomatically
+                   && !_liveSplit.IsConnected && !_liveSplit.TooOld;
+        }
+    }
+
     /// <summary>Drives the looking off the render loop, the way the autosplitter's own poll is driven.</summary>
     public void Tick(double deltaSeconds)
     {
         var autosplit = _settings.Autosplit;
 
-        // Nothing to look for: the autosplitter is off, the user does not want this, LiveSplit is
-        // already there, or the build on the other end is one this client has turned away and would
-        // turn away again — that one is not retried, here or anywhere else, because it will not have
-        // changed by the time the next look came round. The clock is left due rather than reset, so
-        // a connection that drops is looked for on the very next frame and not an interval later.
-        if (!autosplit.Enabled || !autosplit.ConnectsAutomatically
-            || _liveSplit.IsConnected || _liveSplit.TooOld)
+        // Nothing to look for: the autosplitter is off, the user has not asked for this, LiveSplit
+        // is already there, or the build on the other end is one this client has turned away and
+        // would turn away again — that one is not retried, here or anywhere else, because it will
+        // not have changed by the time the next look came round. The clock is left due rather than
+        // reset, so a connection that drops is looked for on the very next frame and not an
+        // interval later. No socket is opened on this path at all: with the switch off the probe
+        // is not slow, it is absent.
+        if (!Wanted)
         {
             _sinceLook = _interval.TotalSeconds;
             return;
@@ -129,8 +152,8 @@ public sealed class LiveSplitProbe
             Volatile.Write(ref _looking, 0);
         }
 
-        // Something answered. One attempt, and nothing counted if it has gone again in the
-        // meantime: this probe is what looks next, and it does that without a word.
-        _post(() => _liveSplit.Start(host, port, retry: false, countFailures: false));
+        // Something answered. One attempt, made quietly: nothing is said about it unless it works,
+        // because this probe is what looks next and it does that without a word.
+        _post(() => _liveSplit.Start(host, port, quiet: true));
     }
 }
