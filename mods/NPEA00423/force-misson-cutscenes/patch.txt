@@ -1,5 +1,5 @@
 #- name: Force start cutscenes
-#- version: 3.0
+#- version: 4.0
 #- author: robo
 #- description: Plays a mission's intro cutscene every time the mission starts, not only the first time.
 
@@ -59,3 +59,48 @@
 0x1d7798: 0x98640080
 # Was 0x4082013c, "bne 0x1d78d8". nop: the test it made is always passed now.
 0x1d779c: 0x60000000
+
+# Version 4: the camera on a cutscene that has already played. Every id cutscene has a
+# record in the table at 0xadad10 (0x20 bytes an entry, the record at +0x1c), and the
+# record carries four state machines that only run forwards: +0x8c is the camera path
+# (0 sets up the start of the pan, 1 waits, 2 runs the pan along the timeline, 3 done),
+# and +0x5f, +0x63 and +0x91 step the cutscene's other timed events through their states
+# the same way. Starting a cutscene (0x12b754, which calls 0x12b6b0) resets the timeline
+# and its flags but none of those four, so the first play after a level load pans and
+# every later one finds the camera path already done and holds a static shot. Read on
+# the console on Valix mission 2: the two cutscenes that had played sat at 3, 3, 5 and 3,
+# the one replaying had its path done, and every cutscene not yet played was at 0.
+#
+# The words below zero the four at every start, which leaves a record exactly as it is
+# before its first play. The room comes from the start itself: its four byte stores to
+# +0x104..+0x107 become one word store, and the store of zero to +0x106 that follows the
+# reset is redundant. The same is done where a cutscene hands over to the one chained
+# after it (0x12c500), which resets the next record inline rather than by the call.
+# A cutscene that has never played already holds zeros, so a first play is unchanged.
+
+# 0x12b6b0, the reset every id cutscene start goes through; r4 is the record, r5 is 0.
+# Was 0x98a40104, "stb r5,0x104(r4)". Now "stw r5,0x104(r4)": the four flags at once.
+0x12b6cc: 0x90A40104
+# Was 0x98a40105, "stb r5,0x105(r4)". Now "stw r5,0x8c(r4)": the camera path.
+0x12b6d0: 0x90A4008C
+# Was 0x98a40106, "stb r5,0x106(r4)". Now "stb r5,0x63(r4)".
+0x12b6d8: 0x98A40063
+# Was 0x98a40107, "stb r5,0x107(r4)". Now "stb r5,0x91(r4)".
+0x12b6e8: 0x98A40091
+
+# 0x12b754, the start itself, just after that call; r23 is the record, r29 is 0.
+# Was 0x9bb70106, "stb r29,0x106(r23)", already zero. Now "stb r29,0x5f(r23)".
+0x12b888: 0x9BB7005F
+
+# 0x12c500, the chained cutscene's reset; r3 is its record, r20 is 0.
+# Was 0x9a830104, "stb r20,0x104(r3)". Now "stw r20,0x104(r3)".
+0x12c500: 0x92830104
+# Was 0x9a830105, "stb r20,0x105(r3)". Now "stw r20,0x8c(r3)".
+0x12c504: 0x9283008C
+# Was 0x9a830106, "stb r20,0x106(r3)". Now "stb r20,0x63(r3)".
+0x12c50c: 0x9A830063
+# Was 0x9a830107, "stb r20,0x107(r3)". Now "stb r20,0x91(r3)".
+0x12c51c: 0x9A830091
+# Was 0x9a960106, "stb r20,0x106(r22)", already zero; r22 is the same record.
+# Now "stb r20,0x5f(r22)".
+0x12c588: 0x9A96005F
