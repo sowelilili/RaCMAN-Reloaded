@@ -19,17 +19,20 @@ namespace RaCMAN.App.Panels;
 /// Either way it says so where it cannot be missed instead of in a hint under a status line.
 /// <para>
 /// An attempt the user started (the Autosplitter panel's Connect button, the endpoint on the
-/// Settings panel) always gets the popup. The reconnect loop's own retries get it once per run of
-/// the client and never again: it retries every five seconds for as long as it is on, and a popup
-/// every five seconds is worse than no popup at all. The two messages are counted apart, so a user
-/// who starts the server and then meets the version wall sees both.
+/// Settings panel) always gets the popup, and one press is one attempt, so one press is one popup:
+/// there is no reconnect loop behind a button any more, and there used to be one saying the same
+/// thing every five seconds. The "already shown unasked" guard below stays as the net it always
+/// was, in case a count ever moves with nothing armed. The two messages are counted apart, so a
+/// user who starts the server and then meets the version wall sees both.
 /// </para>
 /// <para>
-/// <see cref="LiveSplitProbe"/> is on neither of those roads. Looking for a server that is not
-/// running yet is the everyday case rather than a failure, so a look that finds nothing counts no
-/// failure at all and there is nothing here to watch: see <see cref="LiveSplitClient.Start"/>. The
-/// version wall is still counted whoever walked into it, because a LiveSplit that answers and
-/// cannot be driven is the user's to hear about however the connection was made.
+/// <see cref="LiveSplitProbe"/> is on neither of those roads, and nothing it does can reach this
+/// class at all. Its attempts are made quietly, which is exactly this: neither count moves, so
+/// there is nothing here to watch however a look turns out — see <see cref="LiveSplitClient.Start"/>.
+/// It looks every few seconds for as long as the client runs, and a popup from something nobody
+/// pressed is a popup every few seconds. The version wall a look walks into is still latched and
+/// still said on the panel's status line; it is the popup, and only the popup, that belongs to a
+/// press.
 /// </para>
 /// </summary>
 public static class LiveSplitModal
@@ -102,8 +105,8 @@ public static class LiveSplitModal
 
     /// <summary>
     /// One frame's look at the client's two failure counts. Only a count that moved is a new
-    /// failure, so a popup dismissed while the loop keeps retrying stays dismissed. The version
-    /// wall is checked first: it is the more specific of the two answers.
+    /// failure, so a popup dismissed stays dismissed until something fails again. The version wall
+    /// is checked first: it is the more specific of the two answers.
     /// </summary>
     private static void Watch(int failures, int tooOld)
     {

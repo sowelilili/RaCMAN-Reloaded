@@ -173,6 +173,7 @@ public sealed class LiveSplitClient : IDisposable
     private volatile LiveSplitStatus _status = LiveSplitStatus.Disconnected;
     private volatile string? _version;
     private volatile bool _tooOld;
+    private volatile bool _quiet;
     private int _connectFailures;
     private int _tooOldFailures;
     private bool _disposed;
@@ -205,7 +206,8 @@ public sealed class LiveSplitClient : IDisposable
     /// </summary>
     public string? LastNote { get; private set; }
 
-    /// <summary>True while the client wants a connection: connected, or waiting to retry.</summary>
+    /// <summary>True while an attempt is in flight or a connection is up, and false the moment it
+    /// is over: there is nothing behind an attempt to go on wanting a connection for it.</summary>
     public bool Enabled { get; private set; }
 
     /// <summary>Every command actually written to LiveSplit, in order. Debug aid and test hook.</summary>
@@ -214,8 +216,9 @@ public sealed class LiveSplitClient : IDisposable
     /// <summary>
     /// How many attempts never opened a connection at all: nothing was listening, or the machine
     /// refused it. A socket that dies once the connection is up is a drop and is not counted, so
-    /// this really is "LiveSplit's server was not there". Read from the render thread, which is how
-    /// the client tells a failure the user asked for from the reconnect loop's own retries.
+    /// this really is "LiveSplit's server was not there". One press moves it once, because a press
+    /// is one attempt; a quiet attempt does not move it at all. Read from the render thread, which
+    /// is where the popup decides whether a count that moved is one to say something about.
     /// </summary>
     public int ConnectFailures => Volatile.Read(ref _connectFailures);
 
@@ -232,6 +235,13 @@ public sealed class LiveSplitClient : IDisposable
     /// client at a server again, because it is what the panel is still explaining.
     /// </summary>
     public bool TooOld => _tooOld;
+
+    /// <summary>
+    /// True while the connection this client last made is one nobody pressed anything for, which
+    /// today is <see cref="LiveSplitProbe"/>'s and nothing else. Such an attempt says nothing at
+    /// all unless it works: see <see cref="Start"/>.
+    /// </summary>
+    public bool Quiet => _quiet;
 
     /// <summary>
     /// What <see cref="GetLiveSplitVersion"/> answered on this connection, for the status line.
@@ -262,27 +272,39 @@ public sealed class LiveSplitClient : IDisposable
             : $"Connected to LiveSplit at {Host}:{Port}",
         LiveSplitStatus.Connecting => $"Connecting to {Host}:{Port}...",
         _ when TooOld => $"{TooOldStatus}: RaCMAN needs the LiveSplit development build",
-        _ when !Enabled => "Not connected",
+
+        // A quiet attempt leaves the line where it was: the probe looking, finding and losing a
+        // server every few seconds is not a thing to write on the screen every few seconds.
+        _ when !Enabled || _quiet => "Not connected",
         _ => $"Not connected to {Host}:{Port}{(LastError is null ? string.Empty : $" ({LastError})")}",
     };
 
     /// <summary>
-    /// Points the client at a server and keeps it there: it reconnects with a backoff for as long
-    /// as it is enabled, because LiveSplit's server is often started after the game is.
+    /// Points the client at a server: <b>one attempt, and no loop behind it</b>. Whatever it comes
+    /// to, the client stops wanting a connection when it ends, so the status line goes back to a
+    /// plain "Not connected" and the next Start is a fresh one.
+    /// <para>
+    /// There used to be a reconnect loop here, retrying with a backoff for as long as the client
+    /// was enabled, because LiveSplit's server is often started after the game is. That is true and
+    /// it is <see cref="LiveSplitProbe"/>'s job: the probe looks on its own clock, says nothing
+    /// while it finds nothing, and only runs while the user has asked it to. A loop here as well
+    /// raced it for the same port, and against a server nobody had started it put a "Connecting"
+    /// on the panel and a failed attempt on the popup's count every few seconds — for a button
+    /// that was pressed once.
+    /// </para>
     /// </summary>
-    /// <param name="retry">
-    /// False for one attempt and no loop behind it, which is what <see cref="LiveSplitProbe"/>
-    /// asks for: the probe is what keeps looking, on its own clock and without saying anything, so
-    /// a second loop here would only race it for the same port. A worker that is not the loop stops
-    /// wanting a connection when it ends, so the status line goes back to a plain "Not connected".
+    /// <param name="quiet">
+    /// True for an attempt nobody pressed anything for, which is <see cref="LiveSplitProbe"/>'s and
+    /// nothing else. Such an attempt is <b>invisible unless it works</b>: the status never passes
+    /// through <see cref="LiveSplitStatus.Connecting"/>, a failure writes no
+    /// <see cref="LastError"/> and neither <see cref="ConnectFailures"/> nor
+    /// <see cref="TooOldFailures"/> moves, so nothing the popup watches can fire. The probe looks
+    /// every few seconds for as long as the client runs, and an attempt that announced itself
+    /// would be a line flashing on the panel every few seconds for something nobody asked for.
+    /// A build that answers and will not name its version still latches <see cref="TooOld"/>,
+    /// which the status line explains and which stops the probe looking again.
     /// </param>
-    /// <param name="countFailures">
-    /// False when nothing listening is not worth counting: the probe has just seen something
-    /// listening, and a socket that went away in between is not a thing to put a popup on.
-    /// <see cref="TooOldFailures"/> is counted whoever asked, because a build that answers and will
-    /// not name itself is not "nothing is there" and is the user's to hear about.
-    /// </param>
-    public void Start(string host, int port, bool retry = true, bool countFailures = true)
+    public void Start(string host, int port, bool quiet = false)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -310,10 +332,11 @@ public sealed class LiveSplitClient : IDisposable
             // been told, and this attempt gets to reach its own conclusion.
             _tooOld = false;
             _version = null;
+            _quiet = quiet;
             _queue = NewQueue();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
-            _worker = Task.Run(() => WorkerAsync(token, retry, countFailures), token);
+            _worker = Task.Run(() => WorkerAsync(token, quiet), token);
         }
     }
 
@@ -449,103 +472,83 @@ public sealed class LiveSplitClient : IDisposable
 
     // ---------------------------------------------------------------- worker
 
-    private async Task WorkerAsync(CancellationToken token, bool retry, bool countFailures)
+    /// <summary>
+    /// One attempt: connect, shake hands, pump until the socket dies or the token is cancelled.
+    /// There is no loop around any of it. What comes back for a connection that was there and is
+    /// not any more is <see cref="LiveSplitProbe"/>, quietly and only while the user has it
+    /// switched on; what comes back for an attempt that never connected is the user.
+    /// </summary>
+    private async Task WorkerAsync(CancellationToken token, bool quiet)
     {
-        int attempt = 0;
-
-        while (!token.IsCancellationRequested)
+        TcpClient? client = null;
+        bool established = false;
+        try
         {
-            TcpClient? client = null;
-            bool established = false;
-            try
+            // A quiet attempt is not announced: the status stays where it was until there is
+            // a connection to report, which is the only outcome anybody has to see.
+            if (!quiet) _status = LiveSplitStatus.Connecting;
+            client = new TcpClient { NoDelay = true };
+            await client.ConnectAsync(Host, Port, token).ConfigureAwait(false);
+
+            var stream = client.GetStream();
+            lock (_gate)
             {
-                _status = LiveSplitStatus.Connecting;
-                client = new TcpClient { NoDelay = true };
-                await client.ConnectAsync(Host, Port, token).ConfigureAwait(false);
-
-                var stream = client.GetStream();
-                lock (_gate)
-                {
-                    _pendingBytes.Clear();
-                    _unanswered.Clear();
-                }
-
-                attempt = 0;
-                LastError = null;
-                LastNote = null;
-                established = true;
-                _status = LiveSplitStatus.Connected;
-
-                // The handshake, and the one place a build is turned away. Every command this
-                // client goes on to send belongs to the development build, so the version query
-                // going unanswered means there is nothing here worth driving: the socket is closed
-                // by hand and the reconnect loop is not asked to try again, because the build on
-                // the other end will not have changed by the time it came round.
-                string? version = await AskAsync(stream, GetLiveSplitVersion, token).ConfigureAwait(false);
-                if (string.IsNullOrWhiteSpace(version))
-                {
-                    NoteTooOld();
-                    break;
-                }
-
-                _version = version.Trim();
-
-                // The phase is asked straight after, so the engine knows whether a run is under way
-                // before the first console event lands.
-                await AskAsync(stream, GetCurrentTimerPhase, token).ConfigureAwait(false);
-                Established?.Invoke();
-
-                await PumpAsync(stream, token).ConfigureAwait(false);
+                _pendingBytes.Clear();
+                _unanswered.Clear();
             }
-            catch (OperationCanceledException)
+
+            LastError = null;
+            LastNote = null;
+            established = true;
+            _status = LiveSplitStatus.Connected;
+
+            // The handshake, and the one place a build is turned away. Every command this
+            // client goes on to send belongs to the development build, so the version query
+            // going unanswered means there is nothing here worth driving: the socket is closed
+            // by hand and nothing tries again, because the build on the other end will not have
+            // changed by the time anything came round.
+            string? version = await AskAsync(stream, GetLiveSplitVersion, token).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(version))
             {
-                break;
+                NoteTooOld(quiet);
+                return;
             }
-            catch (Exception ex)
+
+            _version = version.Trim();
+
+            // The phase is asked straight after, so the engine knows whether a run is under way
+            // before the first console event lands.
+            await AskAsync(stream, GetCurrentTimerPhase, token).ConfigureAwait(false);
+            Established?.Invoke();
+
+            await PumpAsync(stream, token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Stop or Dispose, which is nobody's failure.
+        }
+        catch (Exception ex)
+        {
+            // Nothing was listening: the one failure the user can do something about, and the
+            // one the panel puts a popup on. Once, because this attempt is the whole of it. A
+            // quiet attempt neither names its error nor counts it, so a probe that keeps finding
+            // and losing a server keeps its silence.
+            if (!quiet)
             {
                 LastError = ex is SocketException socket ? socket.SocketErrorCode.ToString() : ex.Message;
-
-                // Nothing was listening: the one failure the user can do something about, and the
-                // one the panel puts a popup on. A probe's attempt is not counted, because the
-                // probe has already seen something listening and says nothing when it is wrong.
-                if (!established && countFailures) Interlocked.Increment(ref _connectFailures);
-            }
-            finally
-            {
-                OrphanPendingRead();
-                client?.Dispose();
-                _status = LiveSplitStatus.Disconnected;
-                DrainQueue();
-            }
-
-            if (token.IsCancellationRequested) break;
-
-            // One attempt was all that was asked for: whoever started this one is the one that
-            // will look again, and it does that without a word.
-            if (!retry) break;
-
-            // 1 s, 2 s, 4 s, then every 5 s: LiveSplit's server is usually started by hand, and
-            // the panel says so, so retrying forever at a calm rate is the right behaviour.
-            attempt++;
-            int seconds = attempt >= 4 ? 5 : 1 << (attempt - 1);
-            try
-            {
-                await Task.Delay(TimeSpan.FromSeconds(seconds), token).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                break;
+                if (!established) Interlocked.Increment(ref _connectFailures);
             }
         }
-
-        _status = LiveSplitStatus.Disconnected;
-        DrainQueue();
-
-        // A single attempt has done all it was asked to do, so the client stops wanting a
-        // connection: the status line goes back to a plain "Not connected" rather than naming a
-        // socket error nobody pressed anything to cause, and the next Start is a fresh one.
-        if (!retry)
+        finally
         {
+            OrphanPendingRead();
+            client?.Dispose();
+            _status = LiveSplitStatus.Disconnected;
+            DrainQueue();
+
+            // The attempt has done all it was asked to do, so the client stops wanting a
+            // connection: the status line goes back to a plain "Not connected" rather than naming
+            // a socket error nobody pressed anything to cause, and the next Start is a fresh one.
             lock (_gate) Enabled = false;
         }
     }
@@ -666,13 +669,18 @@ public sealed class LiveSplitClient : IDisposable
     /// <summary>
     /// This build cannot be driven. The connection is left for the worker's own <c>finally</c> to
     /// close, and the client is switched off rather than left retrying a build that is what it is.
+    /// <para>
+    /// The wall itself is latched whoever walked into it, because it is what the status line goes
+    /// on explaining and what stops the probe looking again. Only the <b>count</b> is the user's
+    /// press: a quiet attempt moves nothing the popup watches.
+    /// </para>
     /// </summary>
-    private void NoteTooOld()
+    private void NoteTooOld(bool quiet)
     {
         _tooOld = true;
         LastError = TooOldStatus;
         LastNote = $"LiveSplit did not answer \"{GetLiveSplitVersion}\"; this build is too old.";
-        Interlocked.Increment(ref _tooOldFailures);
+        if (!quiet) Interlocked.Increment(ref _tooOldFailures);
         lock (_gate) Enabled = false;
     }
 

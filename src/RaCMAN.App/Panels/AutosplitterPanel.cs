@@ -92,15 +92,16 @@ public static class AutosplitterPanel
     /// Points the client at LiveSplit, and says the attempt was the user's: a failure from here
     /// earns its popup, not found or too old, even if that one has already been shown once.
     /// <para>
-    /// One attempt while the automatic switch is on, because the probe is what carries on looking
-    /// afterwards and two loops on the same port would only race each other; the whole reconnect
-    /// loop while it is off, which is what a user connecting by hand is left with.
+    /// One attempt, whatever the automatic switch says, and then it is over. A press against a
+    /// LiveSplit whose server nobody has started is answered once, in the popup, rather than
+    /// retried until it works: a loop would say the same thing again every few seconds. Looking
+    /// again is the switch's job, and the button is here for the people who have it off.
     /// </para>
     /// </summary>
     private static void Connect(AppState state, AutosplitSettings autosplit)
     {
         LiveSplitModal.ArmForAttempt();
-        state.LiveSplit.Start(autosplit.Host, autosplit.Port, retry: !autosplit.ConnectsAutomatically);
+        state.LiveSplit.Start(autosplit.Host, autosplit.Port);
     }
 
     private static string DescribeTimer(LiveSplitView view)

@@ -656,10 +656,10 @@ public sealed class AutosplitSettings
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// The stored answer to "look for LiveSplit's server yourself". Null only in a file written
-    /// before this switch existed, which is what tells such a file from one whose user turned the
-    /// switch off; <see cref="Migrate"/> answers for those and nothing reads it null afterwards.
-    /// Everything else uses <see cref="ConnectsAutomatically"/>.
+    /// The stored answer to "look for LiveSplit's server yourself". Null in a file written before
+    /// this switch existed and in one this build has not saved yet; both read as off, and
+    /// <see cref="Migrate"/> and <see cref="Settle"/> write that answer down so nothing has to work
+    /// it out twice. Everything else uses <see cref="ConnectsAutomatically"/>.
     /// </summary>
     [JsonPropertyName("autoConnect")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -667,14 +667,16 @@ public sealed class AutosplitSettings
 
     /// <summary>
     /// Whether the client looks for LiveSplit's server on its own while the autosplitter is on and
-    /// connects the moment it answers, rather than waiting for the Connect button. On for a file
-    /// this build wrote and for a fresh one: finding the server is the client's job, and a look
-    /// that finds nothing is silent, so there is nothing to be spared from.
+    /// connects the moment it answers, rather than waiting for the Connect button. <b>Off until
+    /// somebody ticks it</b>, in a fresh file, in one this build wrote and in one from before the
+    /// switch whatever its autosplitter said: a client that opens a socket on this PC every few
+    /// seconds for as long as it runs is a thing to be asked for, and the Connect button on the
+    /// Autosplitter panel is what everybody else has.
     /// </summary>
     [JsonIgnore]
     public bool ConnectsAutomatically
     {
-        get => AutoConnect ?? true;
+        get => AutoConnect ?? false;
         set => AutoConnect = value;
     }
 
@@ -742,25 +744,24 @@ public sealed class AutosplitSettings
     /// Brings an older file forward: the automatic connection, and then every game's entry, so a
     /// file is migrated even if nothing reads it.
     /// <para>
-    /// A file written before the automatic connection existed answers for itself. One whose
-    /// autosplitter was on already pointed the client at LiveSplit at every start and retried for
-    /// as long as the client ran, which is what the switch does now, so it keeps doing it. One
-    /// whose autosplitter was off has never asked this client to go looking for LiveSplit, and
-    /// looking every few seconds is not something to take up on somebody's behalf; their Connect
-    /// button and their switch are both on the panel.
+    /// A file written before the automatic connection existed gets it switched off, whatever its
+    /// autosplitter said. Reading "the autosplitter is on" as "go looking for LiveSplit's server
+    /// every few seconds" was a decision taken on the user's behalf out of a setting that was
+    /// about something else, and it is what put a connection attempt on people's screens every few
+    /// seconds; their Connect button and their switch are both on the Autosplitter panel.
     /// </para>
     /// </summary>
     public void Migrate()
     {
-        AutoConnect ??= Enabled;
+        AutoConnect ??= false;
         foreach (var settings in Games.Values) settings.Migrate();
     }
 
     /// <summary>
     /// Writes the switch down rather than leaving it to be worked out again. An unanswered
-    /// <see cref="AutoConnect"/> means "this file is older than the switch", and the moment this
-    /// build writes the file that is no longer true: what goes in is what the panel has been
-    /// showing, which on a file nobody had to migrate is on. Called on the way into
+    /// <see cref="AutoConnect"/> means "nobody has touched this switch", and the moment this build
+    /// writes the file the answer belongs in it: what goes in is what the panel has been showing,
+    /// which on a file nobody has ticked anything in is off. Called on the way into
     /// <see cref="Settings.Save"/>, so a first save is as definite as every one after it.
     /// </summary>
     public void Settle() => AutoConnect ??= ConnectsAutomatically;
