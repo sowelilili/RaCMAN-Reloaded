@@ -111,6 +111,12 @@ public sealed class AppState : IDisposable
         Rpcs3 = new Rpcs3Host(rootFolder: AppPaths.Rpcs3Root);
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
+
+        // Nothing is pointed at LiveSplit at startup any more. Whether this client goes looking
+        // for the server is the probe's question, it is asked every frame rather than once here,
+        // and it is answered without a popup while the answer is "not yet"; the Connect button on
+        // the Autosplitter panel is the other way in, for a user who has the switch off.
+        LiveSplitProbe = new LiveSplitProbe(settings, LiveSplit, Post);
         Updates = new UpdateService(settings, Post, AddToast, updatesAllowed);
         ObsPad = new ObsPadServer(new SettingsPadSkins(settings));
 
@@ -127,8 +133,6 @@ public sealed class AppState : IDisposable
         // this hook is before each attempt, and in webMAN mode that is the check-and-load that
         // brings a crashed module back.
         Client.BeforeReconnect = (_, token) => BeforeReconnectAsync(token);
-
-        if (settings.Autosplit.Enabled) LiveSplit.Start(settings.Autosplit.Host, settings.Autosplit.Port);
 
         Client.SessionEstablished += info => Post(() =>
         {
@@ -205,6 +209,13 @@ public sealed class AppState : IDisposable
 
     /// <summary>Turns the console's run events into LiveSplit commands, per the user's settings.</summary>
     public Autosplitter Autosplitter { get; }
+
+    /// <summary>
+    /// Finds LiveSplit's server by itself while the autosplitter is on and the switch for it is
+    /// ticked, and says nothing at all while it is not there. It is the only thing that connects
+    /// on nobody's press; see <see cref="LiveSplitProbe"/> for why it is quiet.
+    /// </summary>
+    public LiveSplitProbe LiveSplitProbe { get; }
 
     /// <summary>
     /// Looks for a newer RaCMAN Reloaded on GitHub and installs it. Inert unless this copy was
@@ -606,6 +617,11 @@ public sealed class AppState : IDisposable
         // and the resume that comes back has to be judged by the game that opened it.
         Autosplitter.Game = DescribedGame;
         Autosplitter.Tick(deltaSeconds);
+
+        // Looking for LiveSplit is about this PC and not about the console, so it runs whether or
+        // not a console is connected — a runner who opens LiveSplit before the game finds the link
+        // already up when the game arrives.
+        LiveSplitProbe.Tick(deltaSeconds);
 
         // With autosplitting off nothing acts on a run event, so the console is not polled for one.
         // When the ring can be read at all — INGAME, and a game the module knows — is QwarkClient's

@@ -427,7 +427,7 @@ public sealed class Settings
                 if (loaded is not null)
                 {
                     loaded.Path = path;
-                    loaded.Autosplit.MigrateAll();
+                    loaded.Autosplit.Migrate();
                     loaded.Firewall.MigrateFrom(loaded.FirewallOffered);
                     return loaded;
                 }
@@ -446,6 +446,10 @@ public sealed class Settings
         try
         {
             if (string.IsNullOrEmpty(Path)) Path = DefaultPath;
+
+            // Everything this build knows its own answer to is written down before the file is,
+            // so that nothing has to be guessed from the file again the next time it is read.
+            Autosplit.Settle();
 
             // The data folder may not exist yet: this is the first thing written into it.
             if (System.IO.Path.GetDirectoryName(Path) is { Length: > 0 } folder) Directory.CreateDirectory(folder);
@@ -643,8 +647,36 @@ public sealed class AutosplitGameSettings
 /// </summary>
 public sealed class AutosplitSettings
 {
+    /// <summary>
+    /// Whether the run events the console reports are allowed to move the timer. It says nothing
+    /// about the connection: turning it off leaves LiveSplit connected, and turning it on connects
+    /// to nothing by itself. That is <see cref="ConnectsAutomatically"/>, or the panel's button.
+    /// </summary>
     [JsonPropertyName("enabled")]
     public bool Enabled { get; set; }
+
+    /// <summary>
+    /// The stored answer to "look for LiveSplit's server yourself". Null only in a file written
+    /// before this switch existed, which is what tells such a file from one whose user turned the
+    /// switch off; <see cref="Migrate"/> answers for those and nothing reads it null afterwards.
+    /// Everything else uses <see cref="ConnectsAutomatically"/>.
+    /// </summary>
+    [JsonPropertyName("autoConnect")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? AutoConnect { get; set; }
+
+    /// <summary>
+    /// Whether the client looks for LiveSplit's server on its own while the autosplitter is on and
+    /// connects the moment it answers, rather than waiting for the Connect button. On for a file
+    /// this build wrote and for a fresh one: finding the server is the client's job, and a look
+    /// that finds nothing is silent, so there is nothing to be spared from.
+    /// </summary>
+    [JsonIgnore]
+    public bool ConnectsAutomatically
+    {
+        get => AutoConnect ?? true;
+        set => AutoConnect = value;
+    }
 
     [JsonPropertyName("host")]
     public string Host { get; set; } = LiveSplitClient.DefaultHost;
@@ -706,11 +738,32 @@ public sealed class AutosplitSettings
         return created;
     }
 
-    /// <summary>Migrates every game's entry, so a file is brought forward even if nothing reads it.</summary>
-    public void MigrateAll()
+    /// <summary>
+    /// Brings an older file forward: the automatic connection, and then every game's entry, so a
+    /// file is migrated even if nothing reads it.
+    /// <para>
+    /// A file written before the automatic connection existed answers for itself. One whose
+    /// autosplitter was on already pointed the client at LiveSplit at every start and retried for
+    /// as long as the client ran, which is what the switch does now, so it keeps doing it. One
+    /// whose autosplitter was off has never asked this client to go looking for LiveSplit, and
+    /// looking every few seconds is not something to take up on somebody's behalf; their Connect
+    /// button and their switch are both on the panel.
+    /// </para>
+    /// </summary>
+    public void Migrate()
     {
+        AutoConnect ??= Enabled;
         foreach (var settings in Games.Values) settings.Migrate();
     }
+
+    /// <summary>
+    /// Writes the switch down rather than leaving it to be worked out again. An unanswered
+    /// <see cref="AutoConnect"/> means "this file is older than the switch", and the moment this
+    /// build writes the file that is no longer true: what goes in is what the panel has been
+    /// showing, which on a file nobody had to migrate is on. Called on the way into
+    /// <see cref="Settings.Save"/>, so a first save is as definite as every one after it.
+    /// </summary>
+    public void Settle() => AutoConnect ??= ConnectsAutomatically;
 }
 
 /// <summary>One saved watch name, so a watchlist survives a restart even though qwark owns the watch.</summary>

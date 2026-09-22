@@ -20,9 +20,16 @@ namespace RaCMAN.App.Panels;
 /// <para>
 /// An attempt the user started (the Autosplitter panel's Connect button, the endpoint on the
 /// Settings panel) always gets the popup. The reconnect loop's own retries get it once per run of
-/// the client and never again: it retries every five seconds for as long as the autosplitter is on,
-/// and a popup every five seconds is worse than no popup at all. The two messages are counted
-/// apart, so a user who starts the server and then meets the version wall sees both.
+/// the client and never again: it retries every five seconds for as long as it is on, and a popup
+/// every five seconds is worse than no popup at all. The two messages are counted apart, so a user
+/// who starts the server and then meets the version wall sees both.
+/// </para>
+/// <para>
+/// <see cref="LiveSplitProbe"/> is on neither of those roads. Looking for a server that is not
+/// running yet is the everyday case rather than a failure, so a look that finds nothing counts no
+/// failure at all and there is nothing here to watch: see <see cref="LiveSplitClient.Start"/>. The
+/// version wall is still counted whoever walked into it, because a LiveSplit that answers and
+/// cannot be driven is the user's to hear about however the connection was made.
 /// </para>
 /// </summary>
 public static class LiveSplitModal

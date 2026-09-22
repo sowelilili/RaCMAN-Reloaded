@@ -27,28 +27,38 @@ public static class AutosplitterPanel
         DrawLog(state);
     }
 
+    /// <summary>
+    /// The link to LiveSplit and nothing else: the button, the switch that has the client find the
+    /// server on its own, and the line that says where the link stands. Whether the run events do
+    /// anything is a different question, and it is asked under Settings below.
+    /// </summary>
     private static void DrawConnection(AppState state, AutosplitSettings autosplit)
     {
         var settings = state.Settings;
 
-        bool enabled = autosplit.Enabled;
-        if (ImGui.Checkbox("Enable autosplitting", ref enabled))
-        {
-            autosplit.Enabled = enabled;
-            settings.Save();
-            if (enabled) Connect(state, autosplit);
-            else state.LiveSplit.Stop();
-        }
-
-        ImGui.SameLine();
-        ImGui.BeginDisabled(!autosplit.Enabled);
+        // Never greyed out: the connection no longer hangs off the autosplitter, so the link can
+        // be put up and proved at any time, before a run and before a console.
         if (ImGui.Button(state.LiveSplit.IsConnected ? "Reconnect" : "Connect"))
         {
             state.LiveSplit.Stop();
             Connect(state, autosplit);
         }
 
-        ImGui.EndDisabled();
+        ImGui.SameLine();
+
+        bool automatic = autosplit.ConnectsAutomatically;
+        if (ImGui.Checkbox("Connect automatically", ref automatic))
+        {
+            autosplit.ConnectsAutomatically = automatic;
+            settings.Save();
+        }
+
+        // Nothing is connected or disconnected by the switch itself: the next look does that, and
+        // a link that is already up is left alone.
+        Ui.Tooltip("Look for LiveSplit's server every few seconds while autosplitting is on, and "
+                   + "connect as soon as it answers, whichever of the two was started first. A look "
+                   + "that finds nothing says nothing, and a connection that drops is picked up the "
+                   + "same way. With this off, the Connect button is the only way in.");
 
         var colour = state.LiveSplit.Status switch
         {
@@ -84,11 +94,16 @@ public static class AutosplitterPanel
     /// <summary>
     /// Points the client at LiveSplit, and says the attempt was the user's: a failure from here
     /// earns its popup, not found or too old, even if that one has already been shown once.
+    /// <para>
+    /// One attempt while the automatic switch is on, because the probe is what carries on looking
+    /// afterwards and two loops on the same port would only race each other; the whole reconnect
+    /// loop while it is off, which is what a user connecting by hand is left with.
+    /// </para>
     /// </summary>
     private static void Connect(AppState state, AutosplitSettings autosplit)
     {
         LiveSplitModal.ArmForAttempt();
-        state.LiveSplit.Start(autosplit.Host, autosplit.Port);
+        state.LiveSplit.Start(autosplit.Host, autosplit.Port, retry: !autosplit.ConnectsAutomatically);
     }
 
     private static string DescribeTimer(LiveSplitView view)
@@ -101,6 +116,23 @@ public static class AutosplitterPanel
 
     private static void DrawGameSection(AppState state, AutosplitSettings autosplit)
     {
+        var settings = state.Settings;
+        Ui.Heading("Settings");
+
+        // The master switch, and the first thing under the heading because it covers everything
+        // below it. It is one click and nothing else: it neither connects nor disconnects, the run
+        // events simply stop being acted on, and the link above is left exactly as it is.
+        bool enabled = autosplit.Enabled;
+        if (ImGui.Checkbox("Enable autosplitting", ref enabled))
+        {
+            autosplit.Enabled = enabled;
+            settings.Save();
+        }
+
+        Ui.Tooltip("Whether the run events the console reports move LiveSplit's timer. Off, they are "
+                   + "still received and still logged, and nothing is sent. The connection to "
+                   + "LiveSplit is the line above and is not touched by this.");
+
         // The described game, so the rows and their checkboxes are still here between sessions:
         // a Deadlocked quit is part of a run, not the end of one.
         var game = state.DescribedGame;
@@ -111,7 +143,6 @@ public static class AutosplitterPanel
         }
 
         var descriptors = state.AutosplitEvents;
-        Ui.Heading("Settings");
 
         if (descriptors.Length == 0)
         {
@@ -122,7 +153,6 @@ public static class AutosplitterPanel
         }
 
         var options = autosplit.For(game);
-        var settings = state.Settings;
 
         // The subsplits the user picks on the left, the three "does this kind of event do
         // anything at all" masters on the right. Timing rows are on neither: they are not a
