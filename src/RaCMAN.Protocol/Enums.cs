@@ -144,6 +144,13 @@ public enum SaveFileError : byte
 
     /// <summary>The aside buffer was already spoken for by another transfer or request.</summary>
     BufferBusy = 5,
+
+    /// <summary>
+    /// The game was not sitting still when the request was made (build 43): a planet load, a
+    /// cutscene, a lobby or a mode change in flight. Deadlocked only; the console refused before
+    /// touching the game or a file.
+    /// </summary>
+    NotIdle = 6,
 }
 
 public static class SaveFileErrorExtensions
@@ -157,6 +164,7 @@ public static class SaveFileErrorExtensions
         SaveFileError.ShortFile => "the file is not the size this game's save has to be",
         SaveFileError.HelperMissing => "the game stopped while the console was copying",
         SaveFileError.BufferBusy => "the console was already busy with another save",
+        SaveFileError.NotIdle => "the game is not sitting still: wait for the load, cutscene or menu to finish",
         _ => $"error {(byte)error}",
     };
 }
