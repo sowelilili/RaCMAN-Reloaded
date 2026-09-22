@@ -270,7 +270,19 @@ public sealed class LiveSplitClient : IDisposable
     /// Points the client at a server and keeps it there: it reconnects with a backoff for as long
     /// as it is enabled, because LiveSplit's server is often started after the game is.
     /// </summary>
-    public void Start(string host, int port)
+    /// <param name="retry">
+    /// False for one attempt and no loop behind it, which is what <see cref="LiveSplitProbe"/>
+    /// asks for: the probe is what keeps looking, on its own clock and without saying anything, so
+    /// a second loop here would only race it for the same port. A worker that is not the loop stops
+    /// wanting a connection when it ends, so the status line goes back to a plain "Not connected".
+    /// </param>
+    /// <param name="countFailures">
+    /// False when nothing listening is not worth counting: the probe has just seen something
+    /// listening, and a socket that went away in between is not a thing to put a popup on.
+    /// <see cref="TooOldFailures"/> is counted whoever asked, because a build that answers and will
+    /// not name itself is not "nothing is there" and is the user's to hear about.
+    /// </param>
+    public void Start(string host, int port, bool retry = true, bool countFailures = true)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
@@ -301,7 +313,7 @@ public sealed class LiveSplitClient : IDisposable
             _queue = NewQueue();
             _cts = new CancellationTokenSource();
             var token = _cts.Token;
-            _worker = Task.Run(() => WorkerAsync(token), token);
+            _worker = Task.Run(() => WorkerAsync(token, retry, countFailures), token);
         }
     }
 
@@ -437,7 +449,7 @@ public sealed class LiveSplitClient : IDisposable
 
     // ---------------------------------------------------------------- worker
 
-    private async Task WorkerAsync(CancellationToken token)
+    private async Task WorkerAsync(CancellationToken token, bool retry, bool countFailures)
     {
         int attempt = 0;
 
@@ -494,8 +506,9 @@ public sealed class LiveSplitClient : IDisposable
                 LastError = ex is SocketException socket ? socket.SocketErrorCode.ToString() : ex.Message;
 
                 // Nothing was listening: the one failure the user can do something about, and the
-                // one the panel puts a popup on.
-                if (!established) Interlocked.Increment(ref _connectFailures);
+                // one the panel puts a popup on. A probe's attempt is not counted, because the
+                // probe has already seen something listening and says nothing when it is wrong.
+                if (!established && countFailures) Interlocked.Increment(ref _connectFailures);
             }
             finally
             {
@@ -506,6 +519,10 @@ public sealed class LiveSplitClient : IDisposable
             }
 
             if (token.IsCancellationRequested) break;
+
+            // One attempt was all that was asked for: whoever started this one is the one that
+            // will look again, and it does that without a word.
+            if (!retry) break;
 
             // 1 s, 2 s, 4 s, then every 5 s: LiveSplit's server is usually started by hand, and
             // the panel says so, so retrying forever at a calm rate is the right behaviour.
@@ -523,6 +540,14 @@ public sealed class LiveSplitClient : IDisposable
 
         _status = LiveSplitStatus.Disconnected;
         DrainQueue();
+
+        // A single attempt has done all it was asked to do, so the client stops wanting a
+        // connection: the status line goes back to a plain "Not connected" rather than naming a
+        // socket error nobody pressed anything to cause, and the next Start is a fresh one.
+        if (!retry)
+        {
+            lock (_gate) Enabled = false;
+        }
     }
 
     private async Task PumpAsync(NetworkStream stream, CancellationToken token)

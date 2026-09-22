@@ -228,6 +228,10 @@ if (exitAfter > 0)
                       $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}" +
                       $"+{state.Autosplitter.Adjustments}adj " +
                       $"livesplit={state.LiveSplit.Status} version=\"{state.LiveSplit.Version ?? "(none)"}\" " +
+
+                      // What the automatic connection did, which is otherwise invisible: it says
+                      // nothing while it looks, so a headless run has no other trace of it.
+                      $"livesplitlooks={state.LiveSplitProbe.Looks}/{state.LiveSplitProbe.Found} " +
                       $"tooold={state.LiveSplit.TooOld} sent={state.LiveSplit.CommandsSent} " +
                       $"unanswered=[{string.Join(" ", state.LiveSplit.Unanswered)}]");
 

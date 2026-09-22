@@ -330,11 +330,13 @@ public class BootQuietTests
         server.Start();
         using var state = await ConnectedStateAsync(server);
 
-        // After the state is built, so nothing goes looking for a LiveSplit to talk to: the switch
-        // is read every frame, and all this test needs from it is the safety poll the catch-up
-        // rides on. Every event is logged as "ignored: LiveSplit is not connected", which is the
-        // truth here and still proves the event reached the engine.
+        // All this test needs from the autosplitter is the safety poll the catch-up rides on, so
+        // the automatic connection is switched off with it: the probe would otherwise look for a
+        // LiveSplit on this machine every few seconds, and a test never touches one. Every event is
+        // logged as "ignored: LiveSplit is not connected", which is the truth here and still proves
+        // the event reached the engine.
         state.Settings.Autosplit.Enabled = true;
+        state.Settings.Autosplit.ConnectsAutomatically = false;
 
         Assert.True(await PumpAsync(state, () => state.AutosplitEvents.Length > 0));
         int before = state.Autosplitter.Received;

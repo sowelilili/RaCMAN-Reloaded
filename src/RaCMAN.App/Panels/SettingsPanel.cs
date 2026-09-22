@@ -306,7 +306,7 @@ public static class SettingsPanel
         Ui.Hint($"Where to look for LiveSplit server (default: {LiveSplitClient.DefaultHost}:{LiveSplitClient.DefaultPort})");
     }
 
-    /// <summary>Saves the LiveSplit endpoint and, while the autosplitter is on, points it at the new one.</summary>
+    /// <summary>Saves the LiveSplit endpoint and moves a connection that is pointed at the old one.</summary>
     private static void ApplyLiveSplit(AppState state, AutosplitSettings autosplit)
     {
         string host = _liveSplitHost.Trim();
@@ -315,12 +315,15 @@ public static class SettingsPanel
         _liveSplitHost = autosplit.Host;
         state.Settings.Save();
 
-        if (!autosplit.Enabled) return;
+        // Nothing is pointed anywhere, so there is nothing to move: the automatic probe looks at
+        // the new endpoint on its own, and the Autosplitter panel's Connect button is there for a
+        // user who has that switched off.
+        if (!state.LiveSplit.IsConnected && !state.LiveSplit.Enabled) return;
 
         // Start only restarts a connection that is now pointed somewhere else, and a failure there
         // is one the user asked for, so it earns the popup.
         LiveSplitModal.ArmForAttempt();
-        state.LiveSplit.Start(autosplit.Host, autosplit.Port);
+        state.LiveSplit.Start(autosplit.Host, autosplit.Port, retry: !autosplit.ConnectsAutomatically);
     }
 
     // ---------------------------------------------------------------- import
