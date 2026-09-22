@@ -8,7 +8,8 @@ namespace RaCMAN.Protocol.Testing;
 /// <summary>
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
-/// memory primitives, POS_LIST, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
+/// memory primitives, POS_LIST with the POS_EDIT and POS_STORE of revision 1.13 over slots it
+/// really keeps, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
 /// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND/ENABLE, the two AUTOSPLIT ops
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
 /// ops of revision 1.10 over the same in-memory filesystem the file ops use. Everything else
@@ -302,6 +303,56 @@ public sealed class FakeQwarkServer : IDisposable
             if (AutosplitPush && !_launching) _autosplitPushes.Add((ev, AutosplitPushCopies));
             return ev;
         }
+    }
+
+    // ------------------------------------------- 5.5, the position slots
+
+    /// <summary>How many slots a planet has, section 5.5.</summary>
+    public const int PositionSlotCount = 8;
+
+    /// <summary>
+    /// How long this "game's" position blob is. POS_STORE takes exactly this many bytes and refuses
+    /// every other length, the way each of qwark's games refuses anything but its own; the first
+    /// twelve are the three coordinates POS_LIST reports and POS_EDIT rewrites.
+    /// </summary>
+    public int PositionBlobLength { get; set; } = 30;
+
+    private readonly Dictionary<byte, byte[]?[]> _positions = new();
+
+    /// <summary>The blob a slot of a planet holds, or null when the slot is empty.</summary>
+    public byte[]? PositionBlob(byte planet, byte slot)
+    {
+        lock (_gate)
+        {
+            var slots = PositionSlotsFor(planet);
+            return slot < slots.Length ? slots[slot] : null;
+        }
+    }
+
+    /// <summary>
+    /// The eight slots of one planet, made on first use with the two the client has always seen
+    /// filled, so a planet nothing has been stored into lists exactly as it did before there were
+    /// slots to keep. Callers hold <see cref="_gate"/>.
+    /// </summary>
+    private byte[]?[] PositionSlotsFor(byte planet)
+    {
+        if (_positions.TryGetValue(planet, out var slots)) return slots;
+
+        slots = new byte[]?[PositionSlotCount];
+        for (int i = 0; i < 2; i++) slots[i] = NewPositionBlob(i * 10f, i * 20f, i * 30f);
+        _positions[planet] = slots;
+        return slots;
+    }
+
+    /// <summary>A blob of the running length whose first three floats are the coordinates given.</summary>
+    private byte[] NewPositionBlob(float x, float y, float z)
+    {
+        var blob = new byte[Math.Max(12, PositionBlobLength)];
+        var w = new SpanWriter(blob);
+        w.WriteF32(x);
+        w.WriteF32(y);
+        w.WriteF32(z);
+        return blob;
     }
 
     public List<WatchEntry> Watches { get; } = new();
@@ -701,6 +752,7 @@ public sealed class FakeQwarkServer : IDisposable
         or Opcode.FeatureOptions
         or Opcode.PreviousList or Opcode.PreviousReapply or Opcode.PreviousDismiss
         or Opcode.PosSelect or Opcode.PosSave or Opcode.PosLoad or Opcode.PosList or Opcode.PosClear
+        or Opcode.PosEdit or Opcode.PosStore
         or Opcode.PlanetList or Opcode.PlanetSelect or Opcode.PlanetLoad or Opcode.Die or Opcode.MobyTable
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
@@ -740,6 +792,18 @@ public sealed class FakeQwarkServer : IDisposable
     public void ClearRequestLog()
     {
         lock (_gate) _requests.Clear();
+    }
+
+    private readonly Dictionary<Opcode, byte[]> _lastPayload = new();
+
+    /// <summary>
+    /// The payload of the last request of an opcode, refusals included, or null when none has
+    /// arrived. What a round trip cannot show on its own: that the bytes are laid out the way
+    /// section 5 spells them, padding and all, rather than the way this server happens to read them.
+    /// </summary>
+    public byte[]? LastPayload(Opcode opcode)
+    {
+        lock (_gate) return _lastPayload.TryGetValue(opcode, out var payload) ? payload : null;
     }
 
     /// <summary>
@@ -862,6 +926,7 @@ public sealed class FakeQwarkServer : IDisposable
     private static bool TouchesGameMemory(Opcode opcode) => opcode is
         Opcode.MemRead or Opcode.MemWrite or Opcode.MobyTable
         or Opcode.PosList or Opcode.PosSave or Opcode.PosLoad or Opcode.PosClear
+        or Opcode.PosEdit or Opcode.PosStore
         or Opcode.PlanetLoad or Opcode.Die
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
@@ -875,6 +940,7 @@ public sealed class FakeQwarkServer : IDisposable
             // nobody reads should not grow for the whole of it.
             _requests.Add(opcode);
             if (_requests.Count > 4096) _requests.RemoveRange(0, _requests.Count - 4096);
+            _lastPayload[opcode] = payload;
 
             // Section 1.1. A game is starting or ending, so there are no request buffers to put a
             // bulk reply in: the payload is drained and the answer is BUSY until INGAME.
@@ -1098,20 +1164,69 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.PosList:
                 {
-                    var buffer = new byte[2 + 8 * 16];
+                    var slots = PositionSlotsFor(_session.CurrentPlanet);
+                    var buffer = new byte[2 + slots.Length * 16];
                     var w = new SpanWriter(buffer);
                     w.WriteU8(_session.CurrentPlanet);
-                    w.WriteU8(8);
-                    for (int i = 0; i < 8; i++)
+                    w.WriteU8((byte)slots.Length);
+                    foreach (var blob in slots)
                     {
-                        w.WriteU8(i < 2 ? (byte)1 : (byte)0);
+                        w.WriteU8(blob is null ? (byte)0 : (byte)1);
                         w.WriteZeros(3);
-                        w.WriteF32(i * 10f);
-                        w.WriteF32(i * 20f);
-                        w.WriteF32(i * 30f);
+                        if (blob is null)
+                        {
+                            w.WriteZeros(12);
+                            continue;
+                        }
+
+                        var r = new SpanReader(blob);
+                        w.WriteF32(r.ReadF32());
+                        w.WriteF32(r.ReadF32());
+                        w.WriteF32(r.ReadF32());
                     }
 
                     return (Status.Ok, buffer);
+                }
+
+                case Opcode.PosEdit:
+                {
+                    if (payload.Length < 16) return (Status.BadArg, null);
+
+                    var r = new SpanReader(payload);
+                    byte slot = r.ReadU8();
+                    r.Skip(3);
+                    float x = r.ReadF32();
+                    float y = r.ReadF32();
+                    float z = r.ReadF32();
+
+                    var slots = PositionSlotsFor(_session.CurrentPlanet);
+                    if (slot >= slots.Length) return (Status.BadArg, null);
+
+                    // Only the coordinates: the rest of the blob is the game's and is left alone.
+                    if (slots[slot] is not { } blob) return (Status.NotFound, null);
+
+                    var w = new SpanWriter(blob);
+                    w.WriteF32(x);
+                    w.WriteF32(y);
+                    w.WriteF32(z);
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.PosStore:
+                {
+                    if (payload.Length < 4) return (Status.BadArg, null);
+
+                    byte slot = payload[0];
+                    int length = payload[1];
+                    var slots = PositionSlotsFor(_session.CurrentPlanet);
+                    if (slot >= slots.Length) return (Status.BadArg, null);
+
+                    // The running game's blob is one length, and a client that sends another is
+                    // sending another game's position.
+                    if (length != PositionBlobLength || payload.Length < 4 + length) return (Status.BadArg, null);
+
+                    slots[slot] = payload.AsSpan(4, length).ToArray();
+                    return (Status.Ok, null);
                 }
 
                 case Opcode.FreezeList:

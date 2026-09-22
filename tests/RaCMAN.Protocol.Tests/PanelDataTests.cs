@@ -861,6 +861,91 @@ public class SlotPickerTests
         // Outside INGAME there is no POS_LIST to draw, and a blank box would say less than this.
         Assert.Equal(new[] { "Slot 3" }, PositionsPanel.SlotLabels(PositionList.Empty, selected: 3));
     }
+
+    /// <summary>
+    /// A name the user gave a slot is what the slot is called from then on, wherever it is picked.
+    /// The slot number stays in the label, because the console knows the slot by its number and a
+    /// picker that hid it would be hiding what the request carries.
+    /// </summary>
+    [Fact]
+    public void ANameTakesTheLabelOverAndKeepsTheSlotNumberInIt()
+    {
+        Assert.Equal("Ledge skip (slot 3)", PositionsPanel.SlotLabel(3, filled: true, "Ledge skip"));
+        Assert.Equal("Ledge skip (slot 3)", PositionsPanel.SlotLabel(3, filled: false, "  Ledge skip  "));
+
+        // A slot with no name is what it always was, and says whether it holds anything.
+        Assert.Equal("Slot 3 (saved)", PositionsPanel.SlotLabel(3, filled: true, null));
+        Assert.Equal("Slot 3", PositionsPanel.SlotLabel(3, filled: false, "   "));
+    }
+
+    [Fact]
+    public void ThePickerAsksForEverySlotsNameAndPrefersIt()
+    {
+        var names = new Dictionary<byte, string> { [1] = "Ledge skip" };
+
+        Assert.Equal(
+            new[] { "Slot 0 (saved)", "Ledge skip (slot 1)", "Slot 2 (saved)" },
+            PositionsPanel.SlotLabels(Slots(true, false, true), selected: 1,
+                slot => names.TryGetValue(slot, out var name) ? name : null));
+
+        // And the one entry a box with no slots behind it draws is named too.
+        Assert.Equal(
+            new[] { "Start of run (slot 3)" },
+            PositionsPanel.SlotLabels(PositionList.Empty, selected: 3, _ => "Start of run"));
+    }
+}
+
+/// <summary>
+/// The slot table's own clock: it re-reads itself on the Settings panel's interval, and nothing
+/// else about the panel can be checked without a window.
+/// </summary>
+public class PositionRefreshTests
+{
+    [Fact]
+    public void NothingReadsWhileTheIntervalIsZero()
+    {
+        var tick = PositionsPanel.NextRefresh(9f, 0.5f, period: 0f, allowed: true, reading: false);
+
+        Assert.False(tick.Read);
+        Assert.Equal(0f, tick.Elapsed);
+    }
+
+    [Fact]
+    public void NothingReadsWhileTheConsoleCannotAnswerAndTheClockGoesBack()
+    {
+        var tick = PositionsPanel.NextRefresh(0.9f, 0.5f, period: 1f, allowed: false, reading: false);
+
+        Assert.False(tick.Read);
+        Assert.Equal(0f, tick.Elapsed);
+    }
+
+    [Fact]
+    public void ThePeriodIsWhatFiresAndTheClockStartsAgain()
+    {
+        var waiting = PositionsPanel.NextRefresh(0f, 0.4f, period: 1f, allowed: true, reading: false);
+        Assert.False(waiting.Read);
+        Assert.Equal(0.4f, waiting.Elapsed);
+
+        var fires = PositionsPanel.NextRefresh(0.8f, 0.4f, period: 1f, allowed: true, reading: false);
+        Assert.True(fires.Read);
+        Assert.Equal(0f, fires.Elapsed);
+    }
+
+    /// <summary>
+    /// A read still on the wire means the interval is shorter than the round trip. The clock is
+    /// left where it is rather than reset, so the next read goes out the moment the last one is
+    /// answered instead of a whole period later, and reads are never queued up behind each other.
+    /// </summary>
+    [Fact]
+    public void AReadStillOnTheWireSkipsTheTickWithoutLosingTheClock()
+    {
+        var held = PositionsPanel.NextRefresh(0.8f, 0.4f, period: 1f, allowed: true, reading: true);
+        Assert.False(held.Read);
+        Assert.Equal(1.2f, held.Elapsed, 3);
+
+        var freed = PositionsPanel.NextRefresh(held.Elapsed, 0.016f, period: 1f, allowed: true, reading: false);
+        Assert.True(freed.Read);
+    }
 }
 
 /// <summary>Which boxes the Positions panel offers beside "Load planet", and for which games.</summary>
@@ -950,6 +1035,136 @@ public class PositionFormatTests
     {
         // Padding never truncates: an impossible coordinate is still readable, it just pushes.
         Assert.Equal("1234567.00", PositionsPanel.Coordinate(1234567f));
+    }
+
+    /// <summary>A box in the table is its own column, so what it shows carries no padding.</summary>
+    [Fact]
+    public void ABoxShowsTheSameTwoDecimalsWithoutThePadding()
+    {
+        Assert.Equal("1.23", PositionsPanel.CoordinateText(1.2345f));
+        Assert.Equal("-1234.57", PositionsPanel.CoordinateText(-1234.567f));
+    }
+
+    [Fact]
+    public void ATypedCoordinateIsReadInvariantlyAndInTheFormsABoxShows()
+    {
+        Assert.True(PositionsPanel.TryParseCoordinate("-1234.57", out float typed));
+        Assert.Equal(-1234.57f, typed);
+
+        Assert.True(PositionsPanel.TryParseCoordinate("  12  ", out float plain));
+        Assert.Equal(12f, plain);
+
+        // The box takes scientific notation because the flags on it let one be typed.
+        Assert.True(PositionsPanel.TryParseCoordinate("1.5e3", out float scientific));
+        Assert.Equal(1500f, scientific);
+    }
+
+    [Fact]
+    public void TextThatIsNotACoordinateIsRefusedRatherThanSentAsZero()
+    {
+        foreach (var text in new string?[] { null, "", "   ", "-", "over there", "1,5", "NaN", "Infinity" })
+        {
+            Assert.False(PositionsPanel.TryParseCoordinate(text, out float value));
+            Assert.Equal(0f, value);
+        }
+    }
+}
+
+/// <summary>
+/// The names the Positions panel keeps for the console's slots: one file per game under
+/// <c>positions/</c>, keyed by the planet's own index and the slot.
+/// </summary>
+public class PositionNameStoreTests : IDisposable
+{
+    private readonly string _folder = Path.Combine(Path.GetTempPath(), "racman-positions-" + Guid.NewGuid().ToString("N"));
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_folder)) Directory.Delete(_folder, recursive: true);
+        GC.SuppressFinalize(this);
+    }
+
+    [Fact]
+    public void ANameComesBackForThePlanetAndSlotItWasGivenAndForNoOther()
+    {
+        var store = new PositionNameStore(_folder);
+        store.Set(GameId.Rac4, planet: 4, slot: 3, "Ledge skip");
+
+        Assert.Equal("Ledge skip", store.Name(GameId.Rac4, 4, 3));
+        Assert.Equal(string.Empty, store.Name(GameId.Rac4, 4, 2));
+        Assert.Equal(string.Empty, store.Name(GameId.Rac4, 5, 3));
+        Assert.Equal(string.Empty, store.Name(GameId.Rac1, 4, 3));
+    }
+
+    /// <summary>It is a file, so it outlives the run that wrote it.</summary>
+    [Fact]
+    public void ANameIsOnDiskUnderTheGamesOwnFile()
+    {
+        var store = new PositionNameStore(_folder);
+        store.Set(GameId.Rac4, planet: 4, slot: 3, "  Ledge skip  ");
+
+        Assert.Equal("rac4.json", Path.GetFileName(store.FileFor(GameId.Rac4)));
+        Assert.Contains("Ledge skip", File.ReadAllText(store.FileFor(GameId.Rac4)));
+
+        // Trimmed on the way in, and read back by a store that never saw the first one.
+        Assert.Equal("Ledge skip", new PositionNameStore(_folder).Name(GameId.Rac4, 4, 3));
+    }
+
+    [Fact]
+    public void NamingASlotAgainReplacesItAndClearingTheBoxTakesTheNameAway()
+    {
+        var store = new PositionNameStore(_folder);
+        store.Set(GameId.Rac2, planet: 1, slot: 0, "first");
+        store.Set(GameId.Rac2, planet: 1, slot: 0, "second");
+
+        var only = Assert.Single(store.List(GameId.Rac2));
+        Assert.Equal("second", only.Name);
+
+        store.Set(GameId.Rac2, planet: 1, slot: 0, "   ");
+        Assert.Empty(store.List(GameId.Rac2));
+        Assert.Equal(string.Empty, store.Name(GameId.Rac2, 1, 0));
+    }
+
+    [Fact]
+    public void TheListIsPlanetOrderThenSlotOrder()
+    {
+        var store = new PositionNameStore(_folder);
+        store.Set(GameId.Rac3, planet: 5, slot: 1, "c");
+        store.Set(GameId.Rac3, planet: 1, slot: 7, "b");
+        store.Set(GameId.Rac3, planet: 1, slot: 2, "a");
+
+        Assert.Equal(new[] { "a", "b", "c" }, store.List(GameId.Rac3).Select(n => n.Name));
+    }
+
+    /// <summary>
+    /// A file that cannot be read is a table with no names in it, which still draws: the slots
+    /// themselves are the console's and have nothing to do with this file.
+    /// </summary>
+    [Fact]
+    public void AMissingOrBrokenFileIsSimplyNoNames()
+    {
+        Assert.Empty(new PositionNameStore(Path.Combine(_folder, "not-there")).List(GameId.Rac1));
+
+        Directory.CreateDirectory(_folder);
+        var store = new PositionNameStore(_folder);
+        File.WriteAllText(store.FileFor(GameId.Rac1), "{ not the list it should be");
+
+        Assert.Empty(store.List(GameId.Rac1));
+        Assert.Equal(string.Empty, store.Name(GameId.Rac1, 0, 0));
+    }
+
+    /// <summary>The file is read once and kept, so a hand edit is picked up by forgetting it.</summary>
+    [Fact]
+    public void ForgettingReadsTheFileAgain()
+    {
+        var store = new PositionNameStore(_folder);
+        store.Set(GameId.Rac4, planet: 1, slot: 0, "mine");
+
+        new PositionNameStore(_folder).Set(GameId.Rac4, planet: 1, slot: 0, "yours");
+        Assert.Equal("mine", store.Name(GameId.Rac4, 1, 0));
+
+        store.Forget();
+        Assert.Equal("yours", store.Name(GameId.Rac4, 1, 0));
     }
 }
 

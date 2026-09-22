@@ -839,6 +839,45 @@ public sealed class QwarkClient : IDisposable
     public Task PosClearAsync(byte slot, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.PosClear, new[] { slot }, cancellationToken);
 
+    /// <summary>The most a slot's blob may be, section 5.5: the contents are opaque and capped here.</summary>
+    public const int MaxPositionBlob = 64;
+
+    /// <summary>
+    /// POS_EDIT, revision 1.13: the three coordinates of a slot that already holds a position, on
+    /// the current planet, with the rest of its blob left exactly as it is. An empty slot is
+    /// NOT_FOUND and a slot past the eighth is BAD_ARG; like POS_LIST it needs INGAME.
+    /// </summary>
+    public Task PosEditAsync(byte slot, float x, float y, float z, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.PosEdit, Bytes(16, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8(slot);
+            w.WriteZeros(3);
+            w.WriteF32(x);
+            w.WriteF32(y);
+            w.WriteF32(z);
+        }), cancellationToken);
+
+    /// <summary>
+    /// POS_STORE, revision 1.13: a whole blob into a slot, which is then filled. The console knows
+    /// how long the running game's blob is and refuses any other length with BAD_ARG, so a caller
+    /// sends what it has and reads the status rather than guessing at the game.
+    /// </summary>
+    public Task PosStoreAsync(byte slot, ReadOnlyMemory<byte> blob, CancellationToken cancellationToken = default)
+    {
+        if (blob.Length is 0 or > MaxPositionBlob)
+        {
+            throw new ArgumentOutOfRangeException(nameof(blob), $"a position blob is 1 to {MaxPositionBlob} bytes");
+        }
+
+        var payload = new byte[4 + blob.Length];
+        var w = new SpanWriter(payload);
+        w.WriteU8(slot);
+        w.WriteU8((byte)blob.Length);
+        w.WriteZeros(2);
+        w.WriteBytes(blob.Span);
+        return RequestAsync(Opcode.PosStore, payload, cancellationToken);
+    }
+
     public async Task<string[]> PlanetListAsync(CancellationToken cancellationToken = default)
     {
         var payload = await RequestAsync(Opcode.PlanetList, null, cancellationToken).ConfigureAwait(false);

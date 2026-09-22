@@ -116,6 +116,9 @@ public static class AppPaths
 
     public static string Watchlists => Path.Combine(Root, "watchlists");
 
+    /// <summary>What the user calls each position slot, one file per game. The console owns the slots.</summary>
+    public static string Positions => Path.Combine(Root, "positions");
+
     public static string SaveFiles => Path.Combine(Root, "savefiles");
 
     /// <summary>The mods the user installed. A ZIP install lands here, never in the shipped library.</summary>

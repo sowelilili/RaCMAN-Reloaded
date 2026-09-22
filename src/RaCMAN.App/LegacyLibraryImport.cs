@@ -20,8 +20,13 @@ namespace RaCMAN.App;
 /// mod that quietly did not arrive is a mod the user goes looking for.
 /// </para>
 /// <para>
-/// No ImGui and no console: this is a file copy, so it runs off the render thread and works with
-/// nothing plugged in.
+/// The saved positions are the exception to "beside the config.txt": they were <em>in</em> it, and
+/// they belong on the console now, so the block at the bottom of this class only reads them and
+/// works out what would be sent. The Settings panel is what sends it, the way it sends the combos.
+/// </para>
+/// <para>
+/// No ImGui and no console: the copy runs off the render thread and works with nothing plugged in,
+/// and so does the reading of the positions.
 /// </para>
 /// </summary>
 public static class LegacyLibraryImport
@@ -671,5 +676,243 @@ public static class LegacyLibraryImport
         {
             CopyTree(child, new DirectoryInfo(Path.Combine(destination.FullName, child.Name)));
         }
+    }
+
+    // ---------------------------------------------------------------- saved positions
+
+    /// <summary>
+    /// One position the old client saved, as its config.txt holds it and as POS_STORE takes it:
+    /// the planet's own index, the slot, the name the key was built from, and the blob itself.
+    /// </summary>
+    public sealed record LegacyPosition(byte Planet, byte Slot, string PlanetName, byte[] Blob);
+
+    /// <summary>How many slots the old client's dropdown offered per planet. qwark has eight.</summary>
+    public const int LegacySlotCount = 10;
+
+    /// <summary>
+    /// What <c>IGame.SavePosition</c> read for RaC1, RaC2 and RaC3: thirty bytes at the player
+    /// coordinates, which is byte for byte the blob qwark keeps for those three games today.
+    /// </summary>
+    public const int PlainBlobLength = 30;
+
+    /// <summary>
+    /// Deadlocked's, which <c>rac4.cs</c> wrote as three keys: 0x20 of position and rotation under
+    /// <c>SavedPos</c>, then the two camera floats under <c>SavedCamLR</c> and <c>SavedCamUD</c>.
+    /// qwark's blob is the three of them end to end, in that order.
+    /// </summary>
+    public const int Rac4MainLength = 0x20;
+
+    public const int Rac4BlobLength = Rac4MainLength + 8;
+
+    /// <summary>
+    /// The old client's planet names, in the order the games number their own planets: what
+    /// <c>planetsList</c> held in each of the four game classes, which is what
+    /// <c>&lt;PlanetName&gt;SavedPos&lt;slot&gt;</c> was built from. This is the shape of the old
+    /// file and not an address table: nothing here is read out of a running game, and the index is
+    /// the one the console reports for the planet it has loaded.
+    /// </summary>
+    public static string[] LegacyPlanets(GameId game) => game switch
+    {
+        GameId.Rac1 => Rac1Planets,
+        GameId.Rac2 => Rac2Planets,
+        GameId.Rac3 => Rac3Planets,
+        GameId.Rac4 => Rac4Planets,
+        _ => Array.Empty<string>(),
+    };
+
+    private static readonly string[] Rac1Planets =
+    {
+        "Veldin", "Novalis", "Aridia", "Kerwan", "Eudora", "Rilgar", "Blarg", "Umbris", "Batalia",
+        "Gaspar", "Orxon", "Pokitaru", "Hoven", "Gemlik", "Oltanis", "Quartu", "Kalebo3", "Fleet",
+        "Veldin2",
+    };
+
+    private static readonly string[] Rac2Planets =
+    {
+        "Aranos", "Oozla", "Maktar", "Endako", "Barlow", "Feltzin", "Notak", "Siberius", "Tabora",
+        "Dobbo", "Hrugis", "Joba", "Todano", "Boldan", "Aranos2", "Gorn", "Snivelak", "Smolg",
+        "Damosel", "Grelbin", "Yeedil", "InsomniacMuseum", "DobboOrbit", "DamoselOrbit",
+        "SlimCognito", "Wupash", "JammingArray",
+    };
+
+    private static readonly string[] Rac3Planets =
+    {
+        "Rac3Veldin", "Florana", "StarshipPhoenix", "Marcadia", "Daxx", "PhoenixRescue",
+        "AnnihilationNation", "Aquatos", "Tyhrranosis", "ZeldrinStarport", "ObaniGemini",
+        "BlackwaterCity", "Holostar", "Koros", "Unknown", "Rac3Metropolis", "CrashSite",
+        "Rac3Aridia", "QwarksHideout", "LaunchSite", "ObaniDraco", "CommandCenter", "Holostar2",
+        "InsomniacMuseum", "Unknown2", "MetropolisRangers", "AquatosClank", "AquatosSewers",
+        "TyhrranosisRangers", "VidComic6", "VidComic1", "VidComic4", "VidComic2", "VidComic3",
+        "VidComic5", "VidComic1SpecialEdition",
+    };
+
+    private static readonly string[] Rac4Planets =
+    {
+        "UNUSED", "DreadZone", "Catacrom", "INFLOOP", "Sarathos", "Kronos", "Shaar", "Valix",
+        "Orxon", "INFLOOP", "Torval", "Stygia", "INFLOOP", "Maraxus", "GhostStation", "Interior",
+    };
+
+    /// <summary>
+    /// Every position the file holds for a game, planet order then slot order. A value that is not
+    /// the hex the old client wrote, or is the wrong length for the game asked about, is not one of
+    /// its positions and is left out: the old client keyed on the planet's name alone, so RaC1's
+    /// Orxon and Deadlocked's shared one line of the file, and the length is what tells them apart.
+    /// A planet whose name the game repeats — Deadlocked's three INFLOOP entries — is counted once,
+    /// under the first index that carries it.
+    /// </summary>
+    public static IReadOnlyList<LegacyPosition> Positions(LegacyConfig config, GameId game)
+    {
+        var planets = LegacyPlanets(game);
+        var found = new List<LegacyPosition>();
+
+        for (int planet = 0; planet < planets.Length; planet++)
+        {
+            string name = planets[planet];
+            if (Array.IndexOf(planets, name) != planet) continue;
+
+            for (int slot = 0; slot < LegacySlotCount; slot++)
+            {
+                if (TryPosition(config, game, name, slot, out var blob))
+                {
+                    found.Add(new LegacyPosition((byte)planet, (byte)slot, name, blob));
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// What one import would do to the slots of the planet the console has loaded, and what it
+    /// would leave behind. POS_STORE writes the current planet's slots and carries no planet of its
+    /// own, so that planet is the only one a connected import can reach; the rest of the file waits
+    /// for the planet it belongs to. A slot that already holds a position is never written over,
+    /// and the old client's ninth and tenth slots have nowhere to go.
+    /// </summary>
+    public sealed record PositionPlan(
+        byte Planet,
+        string PlanetName,
+        int SlotCount,
+        IReadOnlyList<LegacyPosition> Store,
+        int Occupied,
+        int PastTheEnd)
+    {
+        public static readonly PositionPlan Nothing =
+            new(0, string.Empty, 0, Array.Empty<LegacyPosition>(), 0, 0);
+
+        public bool Anything => Store.Count > 0;
+
+        /// <summary>Every position the file holds for this planet, whatever became of it.</summary>
+        public int Found => Store.Count + Occupied + PastTheEnd;
+
+        /// <summary>"Sarathos: 3 to import, 2 whose slot is already filled", as the panel prints it.</summary>
+        public string Describe()
+        {
+            if (PlanetName.Length == 0) return "no planet to import into";
+            if (Found == 0) return $"{PlanetName}: no saved positions in the file";
+
+            var parts = new List<string>(3);
+            if (Store.Count > 0) parts.Add($"{Store.Count} to import");
+            if (Occupied > 0) parts.Add($"{Occupied} whose slot is already filled");
+            if (PastTheEnd > 0) parts.Add($"{PastTheEnd} past the {SlotCount} slots a planet has now");
+
+            return $"{PlanetName}: {string.Join(", ", parts)}";
+        }
+    }
+
+    /// <summary>
+    /// <paramref name="slots"/> is the console's own POS_LIST for the planet it has loaded, which
+    /// says both which planet that is and which of its slots are taken. Nothing at all without one:
+    /// a client that has not read the slots cannot know what it would be writing over.
+    /// </summary>
+    public static PositionPlan PlanPositions(LegacyConfig config, GameId game, PositionList slots)
+    {
+        var rows = slots.Slots;
+        if (rows.Length == 0) return PositionPlan.Nothing;
+
+        var planets = LegacyPlanets(game);
+        byte planet = slots.Planet;
+        if (planet >= planets.Length) return PositionPlan.Nothing;
+
+        string name = planets[planet];
+        if (Array.IndexOf(planets, name) != planet) return PositionPlan.Nothing;
+
+        var store = new List<LegacyPosition>();
+        int occupied = 0;
+        int past = 0;
+
+        for (int slot = 0; slot < LegacySlotCount; slot++)
+        {
+            if (!TryPosition(config, game, name, slot, out var blob)) continue;
+
+            int row = Array.FindIndex(rows, r => r.Slot == slot);
+            if (row < 0)
+            {
+                past++;
+            }
+            else if (rows[row].Filled)
+            {
+                occupied++;
+            }
+            else
+            {
+                store.Add(new LegacyPosition(planet, (byte)slot, name, blob));
+            }
+        }
+
+        return new PositionPlan(planet, name, rows.Length, store, occupied, past);
+    }
+
+    /// <summary>One <c>&lt;PlanetName&gt;SavedPos&lt;slot&gt;</c>, assembled into the game's own blob.</summary>
+    private static bool TryPosition(LegacyConfig config, GameId game, string planet, int slot, out byte[] blob)
+    {
+        blob = Array.Empty<byte>();
+
+        int main = game == GameId.Rac4 ? Rac4MainLength : PlainBlobLength;
+        if (!TryHex(Value(config, $"{planet}SavedPos{slot}"), main, out var snapshot)) return false;
+
+        if (game != GameId.Rac4)
+        {
+            blob = snapshot;
+            return true;
+        }
+
+        // The two camera floats were keys of their own, and a file from before rac4.cs saved them
+        // has neither. qwark stores the camera and never restores it, so the four bytes each are
+        // left at zero rather than the position being refused for want of them.
+        blob = new byte[Rac4BlobLength];
+        snapshot.CopyTo(blob, 0);
+        if (TryHex(Value(config, $"{planet}SavedCamLR{slot}"), 4, out var lr)) lr.CopyTo(blob, Rac4MainLength);
+        if (TryHex(Value(config, $"{planet}SavedCamUD{slot}"), 4, out var ud)) ud.CopyTo(blob, Rac4MainLength + 4);
+        return true;
+    }
+
+    private static string? Value(LegacyConfig config, string key) =>
+        config.Values.TryGetValue(key, out var text) ? text : null;
+
+    /// <summary>
+    /// The lower-case hex <c>ReadMemoryStr</c> produced, and exactly <paramref name="length"/>
+    /// bytes of it. A shorter or longer value belongs to another game, or to a file somebody has
+    /// edited, and either way it is not a position this one can store.
+    /// </summary>
+    public static bool TryHex(string? text, int length, out byte[] bytes)
+    {
+        bytes = Array.Empty<byte>();
+
+        var hex = (text ?? string.Empty).Trim();
+        if (hex.Length != length * 2) return false;
+
+        var buffer = new byte[length];
+        for (int i = 0; i < length; i++)
+        {
+            if (!byte.TryParse(hex.AsSpan(i * 2, 2), System.Globalization.NumberStyles.HexNumber,
+                    System.Globalization.CultureInfo.InvariantCulture, out buffer[i]))
+            {
+                return false;
+            }
+        }
+
+        bytes = buffer;
+        return true;
     }
 }
