@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(41, true)]     // the build before the one this client ships with
-    [InlineData(42, false)]    // exactly the expected build: protocol 1.13 with the position edit and store ops
-    [InlineData(43, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(42, true)]     // the build before the one this client ships with
+    [InlineData(43, false)]    // exactly the expected build: the rescan fix and the Deadlocked savefile guard
+    [InlineData(44, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(42, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(43, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
