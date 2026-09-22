@@ -99,7 +99,7 @@ public class AppPathsTests
         foreach (var folder in new[]
                  {
                      AppPaths.SettingsFile, AppPaths.Colours, AppPaths.Watchlists, AppPaths.SaveFiles,
-                     AppPaths.Mods, AppPaths.Rpcs3Root, AppPaths.GameLayoutOverride,
+                     AppPaths.Positions, AppPaths.Mods, AppPaths.Rpcs3Root, AppPaths.GameLayoutOverride,
                  })
         {
             Assert.StartsWith(AppPaths.Root, folder, StringComparison.Ordinal);

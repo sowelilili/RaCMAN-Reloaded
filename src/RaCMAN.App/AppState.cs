@@ -106,6 +106,7 @@ public sealed class AppState : IDisposable
         Mods = new ModLibrary(AppPaths.InData(settings.ModsPath), AppPaths.ShippedMods);
         Watchlists = new WatchlistStore(AppPaths.Watchlists);
         ColourPresets = new ColourPresetStore(AppPaths.Colours);
+        PositionNames = new PositionNameStore(AppPaths.Positions);
         SaveFiles = new SaveFileLibrary(AppPaths.InData(settings.SaveFilesPath));
         WebMan = new WebManLoader();
         Rpcs3 = new Rpcs3Host(rootFolder: AppPaths.Rpcs3Root);
@@ -188,6 +189,9 @@ public sealed class AppState : IDisposable
 
     /// <summary>Named colour presets for the games' COLOR features, one file per game.</summary>
     public ColourPresetStore ColourPresets { get; }
+
+    /// <summary>What this PC calls the console's position slots, one file per game.</summary>
+    public PositionNameStore PositionNames { get; }
 
     /// <summary>The PC-side savefile library, <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c>.</summary>
     public SaveFileLibrary SaveFiles { get; }
@@ -1039,11 +1043,34 @@ public sealed class AppState : IDisposable
         });
     }
 
+    /// <summary>
+    /// True while a POS_LIST this client sent has not been answered. The Positions panel re-reads
+    /// the slot table on a timer, and an interval shorter than the round trip would otherwise
+    /// queue reads for ever; this is what it skips a tick on.
+    /// </summary>
+    public bool PositionsPending => Volatile.Read(ref _positionsInFlight) > 0;
+
+    private int _positionsInFlight;
+
     public void RefreshPositions(bool quiet = false)
     {
         if (UnknownGame) return;
         if (quiet && HoldsBackgroundWork()) return;
-        if (Connected) Run(() => Client.PosListAsync(), positions => Positions = positions, quiet);
+        if (!Connected) return;
+
+        Interlocked.Increment(ref _positionsInFlight);
+        Run(async () =>
+        {
+            try
+            {
+                return await Client.PosListAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                // In a finally, so a refused read does not stop the next one from ever starting.
+                Interlocked.Decrement(ref _positionsInFlight);
+            }
+        }, positions => Positions = positions, quiet);
     }
 
     /// <summary>

@@ -21,6 +21,22 @@ public static class SettingsPanel
     /// <summary>The two libraries beside the config.txt, counted when the path last changed.</summary>
     private static LegacyLibraryImport.Survey _found = LegacyLibraryImport.Survey.Nothing;
 
+    /// <summary>
+    /// The saved positions the file holds for the running game, counted when the file or the game
+    /// last changed: that walks every planet the game has, which is not a once-a-frame job.
+    /// </summary>
+    private static IReadOnlyList<LegacyLibraryImport.LegacyPosition> _positionsFound =
+        Array.Empty<LegacyLibraryImport.LegacyPosition>();
+
+    /// <summary>What was counted for, so the count above happens once.</summary>
+    private static (string Path, GameId Game) _positionsCountedFor;
+
+    /// <summary>
+    /// What pressing Import would do to the planet the console has loaded. Worked out every frame,
+    /// because it is ten lookups for one planet and it has to follow the slots filling up.
+    /// </summary>
+    private static LegacyLibraryImport.PositionPlan _positionPlan = LegacyLibraryImport.PositionPlan.Nothing;
+
     /// <summary>The LiveSplit endpoint while it is being typed; committed when the boxes are left.</summary>
     private static string _liveSplitHost = string.Empty;
     private static int _liveSplitPort;
@@ -327,9 +343,10 @@ public static class SettingsPanel
 
     /// <summary>
     /// Point it at the old RaCMAN's config.txt, see what it holds, import. The IP goes into this
-    /// client's settings; the combos and the mod auto-apply list go to the console, so those two
-    /// need a connection (and the mod list needs the matching game running, since the console
-    /// keeps that list per title).
+    /// client's settings; the combos, the mod auto-apply list and the saved positions go to the
+    /// console, so those three need a connection (the mod list needs the matching game running,
+    /// since the console keeps that list per title, and the positions need it running and standing
+    /// on the planet they were saved on, since POS_STORE writes the current planet's slots).
     /// <para>
     /// The file's own folder is the old RaCMAN folder, and the old client kept its save files and
     /// its mods in it, so those come across at the same time. They are files on this PC and need
@@ -362,7 +379,9 @@ public static class SettingsPanel
         }
 
         var config = _parsed;
-        if (!config.HasAnything && !_found.Anything)
+        CountPositions(state, config);
+
+        if (!config.HasAnything && !config.HasSavedPositions && !_found.Anything)
         {
             Ui.Hint("That file has nothing this client can use, and there are no save files or mods beside it.");
             return;
@@ -409,6 +428,8 @@ public static class SettingsPanel
             }
         }
 
+        DrawPositionSurvey(state, config);
+
         // What is in the folder the file sits in, which is the old RaCMAN folder itself.
         if (_found.Anything || _found.Excluded > 0)
         {
@@ -417,16 +438,66 @@ public static class SettingsPanel
             if (LegacyModExclusions.Shipped.Problem is { } problem) Ui.DebugHint(problem);
         }
 
-        if (!state.Connected && config.HasAnything)
+        if (!state.Connected && (config.HasAnything || config.HasSavedPositions))
         {
             Ui.Warning("Not connected: the IP, the colour slots, the save files and the mods are imported now. "
-                       + "Connect to import the combos and mod flags.");
+                       + "Connect to import the combos, the mod flags and the saved positions.");
         }
 
         ImGui.Spacing();
         ImGui.BeginDisabled(_importing);
         if (ImGui.Button("Import")) Import(state, config);
         ImGui.EndDisabled();
+    }
+
+    /// <summary>
+    /// Counts the saved positions in the file, which is a walk of every planet the running game
+    /// has, and works out what a press would do to the planet the console is on, which is not.
+    /// </summary>
+    private static void CountPositions(AppState state, LegacyConfig config)
+    {
+        var game = state.DescribedGame;
+        var counted = (_parsedPath, game);
+        if (counted != _positionsCountedFor)
+        {
+            _positionsCountedFor = counted;
+            _positionsFound = game == GameId.None
+                ? Array.Empty<LegacyLibraryImport.LegacyPosition>()
+                : LegacyLibraryImport.Positions(config, game);
+        }
+
+        _positionPlan = game == GameId.None
+            ? LegacyLibraryImport.PositionPlan.Nothing
+            : LegacyLibraryImport.PlanPositions(config, game, state.Positions);
+    }
+
+    /// <summary>
+    /// The saved positions, which were in the config.txt itself rather than beside it. They belong
+    /// on the console now, and POS_STORE writes the slots of the planet the console has loaded and
+    /// carries no planet of its own, so this half needs a connection, the game the positions belong
+    /// to, and that planet: the rest of the file waits for the planet it was saved on.
+    /// </summary>
+    private static void DrawPositionSurvey(AppState state, LegacyConfig config)
+    {
+        if (!config.HasSavedPositions) return;
+
+        var game = state.DescribedGame;
+        if (game == GameId.None)
+        {
+            Ui.Hint("Saved positions: start one of the four games to see what the file holds for it.");
+            return;
+        }
+
+        int planets = _positionsFound.Select(p => p.Planet).Distinct().Count();
+        ImGui.TextUnformatted($"Saved positions for {game.DisplayName()}: {_positionsFound.Count} "
+                              + $"on {planets} planet{(planets == 1 ? string.Empty : "s")}");
+
+        Ui.Hint(state.Ingame && state.Positions.Slots.Length > 0
+            ? "Only the planet the console has loaded is imported, and a slot that already holds a "
+              + $"position is left alone. {_positionPlan.Describe()}. Load another planet and import "
+              + "again for the rest."
+            : "They are imported into the planet the console has loaded, so connect, start the game "
+              + "and go to the planet they were saved on.");
     }
 
     private static void ParseIfChanged()
@@ -521,6 +592,12 @@ public static class SettingsPanel
         var flagged = wanted.Where(known.Contains).ToArray();
         var missing = wanted.Where(f => !known.Contains(f)).ToArray();
 
+        // The planet the console is on, as the last POS_LIST described it. Without a game running
+        // there is no planet to write into and the positions stay in the file for next time.
+        var positions = connected && state.Ingame
+            ? _positionPlan
+            : LegacyLibraryImport.PositionPlan.Nothing;
+
         _importing = true;
         state.Run(async () =>
         {
@@ -550,10 +627,43 @@ public static class SettingsPanel
                         await state.Client.ModSetAutoAsync(dir, true).ConfigureAwait(false);
                     }
 
+                    // One slot at a time, and a refusal is counted rather than thrown: a blob the
+                    // running game will not take says nothing about the next slot, and the file
+                    // keyed its positions by planet name alone, so another game's Orxon can land
+                    // in here and be refused for its length.
+                    int stored = 0;
+                    Status? refused = null;
+                    foreach (var position in positions.Store)
+                    {
+                        try
+                        {
+                            await state.Client.PosStoreAsync(position.Slot, position.Blob).ConfigureAwait(false);
+                            stored++;
+                        }
+                        catch (QwarkStatusException ex)
+                        {
+                            refused ??= ex.Status;
+                        }
+                    }
+
                     state.Post(() =>
                     {
                         if (combos.Count > 0) done.Add($"{combos.Count} combos");
                         if (flagged.Length > 0) done.Add($"{flagged.Length} mod auto flag(s)");
+                        if (stored > 0)
+                        {
+                            done.Add($"{stored} saved position(s) into {positions.PlanetName}");
+                            state.RefreshPositions();
+                        }
+
+                        int left = positions.Store.Count - stored;
+                        if (left > 0)
+                        {
+                            state.AddToast(
+                                $"The console refused {left} saved position(s) for {positions.PlanetName}: {refused}",
+                                ToastKind.Error);
+                        }
+
                         state.RefreshCombos();
                         state.RefreshMods();
                     });

@@ -16,6 +16,7 @@ public static class PanelState
         UnlocksPanel.ClearData();
         LevelFlagsPanel.ClearData();
         MemoryPanel.ClearGameData();
+        PositionsPanel.ClearData();
         SaveFilesPanel.ClearTransfer();
     }
 
@@ -37,6 +38,7 @@ public static class PanelState
         UnlocksPanel.Reset();
         LevelFlagsPanel.Reset();
         MemoryPanel.Reset();
+        PositionsPanel.Reset(state);
         CombosPanel.Reset(state);
         SaveFilesPanel.Reset();
     }

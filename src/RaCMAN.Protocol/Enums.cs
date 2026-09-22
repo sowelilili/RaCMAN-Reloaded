@@ -48,6 +48,8 @@ public enum Opcode : ushort
     PlanetLoad = 0x0047,
     Die = 0x0048,
     MobyTable = 0x0049,
+    PosEdit = 0x004A,    // revision 1.13
+    PosStore = 0x004B,   // revision 1.13
 
     // 5.6 Unlocks and level flags
     UnlockList = 0x0050,

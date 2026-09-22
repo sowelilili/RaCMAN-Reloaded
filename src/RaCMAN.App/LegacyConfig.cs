@@ -7,12 +7,13 @@ namespace RaCMAN.App;
 /// <summary>
 /// The old RaCMAN's <c>config.txt</c>, the flat "key = value" file it kept beside racman.exe.
 /// This client reads it once, on the user's request, to carry over what still means something
-/// here: the console's IP, the five controller combos, the per-title auto-apply mod lists, and the
-/// chargeboot colour picker's saved slots.
+/// here: the console's IP, the five controller combos, the per-title auto-apply mod lists, the
+/// chargeboot colour picker's saved slots, and the saved positions, which
+/// <see cref="LegacyLibraryImport"/> reads out of <see cref="Values"/> and sends to the console.
 /// <para>
-/// What is not carried over, and why: the saved positions (only Deadlocked and ToD ever wrote
-/// them, as opaque snapshots, and positions now live on the console), the Lua "run script" combo
-/// (no Lua), and the ToS flag.
+/// What is not carried over, and why: the Lua "run script" combo (no Lua), the ToS flag, and the
+/// Tools of Destruction positions, which that game's own code wrote under "ToDSavedPos" and which
+/// qwark has no game module for.
 /// </para>
 /// </summary>
 public sealed class LegacyConfig
@@ -162,6 +163,17 @@ public sealed class LegacyConfig
 
     /// <summary>Anything worth importing at all: an IP, a combo the user set, a mod list or a colour slot.</summary>
     public bool HasAnything => Ip is not null || HasComboKeys || ModAutoByTitle.Count > 0 || ColourSlots.Count > 0;
+
+    /// <summary><c>&lt;PlanetName&gt;SavedPos&lt;slot&gt;</c>, as every game's save-position wrote it.</summary>
+    private static readonly Regex PositionKey = new(@"^\w+SavedPos\d+$", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Whether the file holds a saved position for any game at all. Deliberately not part of
+    /// <see cref="HasAnything"/>: that one decides whether the file is an instruction to set the
+    /// old combo defaults on the console, and a folder full of positions is not one. The positions
+    /// themselves need a game running before they can go anywhere, so they are reported apart.
+    /// </summary>
+    public bool HasSavedPositions => Values.Keys.Any(key => PositionKey.IsMatch(key));
 
     /// <summary>The old client stored the mask as a decimal int; a hand-edited file may say 0x.</summary>
     public static bool TryParseMask(string text, out uint mask)

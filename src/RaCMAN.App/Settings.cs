@@ -818,6 +818,129 @@ public sealed class WatchlistStore
 }
 
 /// <summary>
+/// What this PC calls one of the console's position slots: the planet's own index, the slot, and
+/// the name. The slot itself is qwark's and is never in here.
+/// </summary>
+public sealed class PositionName
+{
+    [JsonPropertyName("planet")]
+    public byte Planet { get; set; }
+
+    [JsonPropertyName("slot")]
+    public byte Slot { get; set; }
+
+    [JsonPropertyName("name")]
+    public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// The names the user gave the position slots, one JSON file per game under <c>positions/</c>, and
+/// keyed by game for the reason the colour presets are: the BCES01503 disc hosts three of the four
+/// games, and a planet's slots are the same slots whichever release they are reached through.
+/// <para>
+/// Only the names are here. The eight slots, what is in them and which one is selected are all
+/// qwark's, so a name is a label over a slot number and nothing more: clearing a slot on the
+/// console leaves its name, which is what lets somebody label a slot before saving into it.
+/// </para>
+/// <para>
+/// A missing or broken file reads as "no names", because a panel that drew nothing rather than the
+/// slots would be worse than a slot with no name. A write throws its IO error for the panel to
+/// report. The file is kept in memory once read, since every row of the table asks for its name on
+/// every frame.
+/// </para>
+/// </summary>
+public sealed class PositionNameStore
+{
+    private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+
+    private readonly Dictionary<GameId, List<PositionName>> _loaded = new();
+
+    public PositionNameStore(string folder)
+    {
+        Folder = folder;
+    }
+
+    public string Folder { get; }
+
+    /// <summary>The file's stem: the GameId's own name in lower case, "rac1" to "rac4".</summary>
+    public static string KeyFor(GameId game) => game.ToString().ToLowerInvariant();
+
+    public string FileFor(GameId game) => System.IO.Path.Combine(Folder, KeyFor(game) + ".json");
+
+    /// <summary>Every name a game has, planet order then slot order. The store's own list, so read only.</summary>
+    public IReadOnlyList<PositionName> List(GameId game) => Load(game);
+
+    /// <summary>
+    /// What to call one slot, or an empty string when it has no name. A game with no file at all
+    /// answers the same way, which is what every slot looks like before anybody names one.
+    /// </summary>
+    public string Name(GameId game, byte planet, byte slot)
+    {
+        foreach (var entry in Load(game))
+        {
+            if (entry.Planet == planet && entry.Slot == slot) return entry.Name;
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// Names one slot and writes the game's file. An empty or blank name takes the name away rather
+    /// than storing one made of spaces, so a slot can be un-named by clearing its box.
+    /// </summary>
+    public void Set(GameId game, byte planet, byte slot, string? name)
+    {
+        var names = Load(game);
+        names.RemoveAll(entry => entry.Planet == planet && entry.Slot == slot);
+
+        var trimmed = (name ?? string.Empty).Trim();
+        if (trimmed.Length > 0)
+        {
+            names.Add(new PositionName { Planet = planet, Slot = slot, Name = trimmed });
+        }
+
+        Sort(names);
+        Directory.CreateDirectory(Folder);
+        File.WriteAllText(FileFor(game), JsonSerializer.Serialize(names, SerializerOptions));
+    }
+
+    /// <summary>Drops what has been read, so the next question goes back to the files.</summary>
+    public void Forget() => _loaded.Clear();
+
+    private List<PositionName> Load(GameId game)
+    {
+        if (_loaded.TryGetValue(game, out var cached)) return cached;
+
+        var names = new List<PositionName>();
+        try
+        {
+            var path = FileFor(game);
+            if (File.Exists(path))
+            {
+                var read = JsonSerializer.Deserialize<List<PositionName>>(File.ReadAllText(path));
+                if (read is not null)
+                {
+                    names.AddRange(read.Where(entry => !string.IsNullOrWhiteSpace(entry.Name)));
+                    Sort(names);
+                }
+            }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        {
+            // A file that cannot be read is a table with no names in it, which still draws.
+        }
+
+        _loaded[game] = names;
+        return names;
+    }
+
+    private static void Sort(List<PositionName> names) =>
+        names.Sort((left, right) => left.Planet != right.Planet
+            ? left.Planet.CompareTo(right.Planet)
+            : left.Slot.CompareTo(right.Slot));
+}
+
+/// <summary>
 /// One named set of COLOR feature values: the feature's exact DESCRIBE label against its colour as
 /// a six-digit "RRGGBB" string, because a preset file is something people hand-edit.
 /// </summary>
