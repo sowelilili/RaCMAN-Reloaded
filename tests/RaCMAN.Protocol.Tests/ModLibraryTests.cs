@@ -307,6 +307,55 @@ public class ShippedModLibraryTests
         Assert.Equal(534, new FileInfo(Path.Combine(folder, "rack.bin")).Length);
     }
 
+    /// <summary>
+    /// Deadlocked's "Force start cutscenes" has to nop two branches, not one: the intro chooser
+    /// that gives up when the mission's "started" status bit is set, and the one in mission start
+    /// that withholds the "first start of this mission" byte the cutscene camera looks for. Both
+    /// words are plain nops, and pinning them here is what keeps a later edit from quietly
+    /// dropping one of the pair.
+    /// </summary>
+    [Fact]
+    public void TheDeadlockedIntroCutsceneModNopsBothBranchesThatGateTheIntro()
+    {
+        string folder = Path.Combine(LibraryPath(), "NPEA00423", "force-misson-cutscenes");
+        var mod = ModLibrary.Read(folder, shipped: true);
+
+        Assert.NotNull(mod);
+        Assert.Equal("Force start cutscenes", mod!.Name);
+        Assert.Equal("robo", mod.Author);
+        Assert.Equal("2", mod.Version);
+        Assert.Empty(mod.BinFiles);
+        Assert.Equal(2, mod.PatchWordCount);
+
+        Assert.Equal(
+            new[] { (0x001D75E8u, 0x60000000u), (0x001D7DA0u, 0x60000000u) },
+            PatchWords(mod.PatchFile));
+    }
+
+    /// <summary>The address/word pairs of a patch.txt, in file order, ignoring comments and caves.</summary>
+    private static (uint Address, uint Word)[] PatchWords(string patchFile)
+    {
+        var words = new List<(uint, uint)>();
+
+        foreach (var rawLine in File.ReadAllLines(patchFile))
+        {
+            var line = rawLine.Trim();
+            if (line.Length < 2 || line[0] == '#') continue;
+
+            var fields = line.Split(':', 2);
+            if (fields.Length < 2) continue;
+
+            var key = fields[0].Trim();
+            var value = fields[1].Trim();
+            if (!key.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) continue;
+
+            words.Add((Convert.ToUInt32(key[2..], 16), Convert.ToUInt32(value[2..], 16)));
+        }
+
+        return words.ToArray();
+    }
+
     [Fact]
     public void TheFreecamIsNotShippedBecauseItFightsTheSavefileHelper()
     {

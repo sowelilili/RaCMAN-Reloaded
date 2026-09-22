@@ -1,4 +1,20 @@
 #- name: Force start cutscenes
-#- version: 1
+#- version: 2
 #- author: robo
-0x1d75d0: 0x38800003
+#- description: Plays a mission's intro cutscene every time the mission starts, not only the first time.
+
+# Deadlocked records "this mission has been started" as bit 2 (0x4) of the mission's
+# status byte in the level save data, at 0xb27ff8 + (level - 1) % 20 * 0x304 + mission * 0xc.
+# Two branches read that bit to keep the intro from playing again, and both are nopped
+# here, which leaves the game in the state it is in on a first visit to the mission.
+
+# Was 0x408202f0, "bne 0x1d78d8": the intro chooser at 0x1d7550 returns without asking
+# for the cutscene when the status bit is already set. nop, so it always asks.
+0x1d75e8: 0x60000000
+
+# Was 0x40820010, "bne 0x1d7db0": mission start at 0x1d7ad0 only sets the byte at
+# 0x00c763b1, "this is the first start of this mission", while the status bit is still
+# clear, and the cutscene camera at 0x12ed24 refuses the intro without it once the bit
+# is set. nop, so the byte is always set. The camera clears it again when it takes over,
+# so the intro still runs once per mission start, exactly as it does on a first visit.
+0x1d7da0: 0x60000000
