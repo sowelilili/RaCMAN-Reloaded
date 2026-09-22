@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(42, true)]     // the build before the one this client ships with
-    [InlineData(43, false)]    // exactly the expected build: the rescan fix and the Deadlocked savefile guard
-    [InlineData(44, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(43, true)]     // the build before the one this client ships with
+    [InlineData(44, false)]    // exactly the expected build: the Deadlocked load waits for its pause
+    [InlineData(45, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(43, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(44, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
