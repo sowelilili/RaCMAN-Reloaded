@@ -55,10 +55,7 @@ public static class AutosplitterPanel
 
         // Nothing is connected or disconnected by the switch itself: the next look does that, and
         // a link that is already up is left alone.
-        Ui.Tooltip("Look for LiveSplit's server every few seconds while autosplitting is on, and "
-                   + "connect as soon as it answers, whichever of the two was started first. A look "
-                   + "that finds nothing says nothing, and a connection that drops is picked up the "
-                   + "same way. With this off, the Connect button is the only way in.");
+        Ui.Tooltip("Look for LiveSplit's server every few seconds while autosplitting is on.");
 
         var colour = state.LiveSplit.Status switch
         {
@@ -128,10 +125,6 @@ public static class AutosplitterPanel
             autosplit.Enabled = enabled;
             settings.Save();
         }
-
-        Ui.Tooltip("Whether the run events the console reports move LiveSplit's timer. Off, they are "
-                   + "still received and still logged, and nothing is sent. The connection to "
-                   + "LiveSplit is the line above and is not touched by this.");
 
         // The described game, so the rows and their checkboxes are still here between sessions:
         // a Deadlocked quit is part of a run, not the end of one.

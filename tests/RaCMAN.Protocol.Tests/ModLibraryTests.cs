@@ -323,7 +323,7 @@ public class ShippedModLibraryTests
         Assert.NotNull(mod);
         Assert.Equal("Force start cutscenes", mod!.Name);
         Assert.Equal("robo", mod.Author);
-        Assert.Equal("2", mod.Version);
+        Assert.Equal("2.0", mod.Version);
         Assert.Empty(mod.BinFiles);
         Assert.Equal(2, mod.PatchWordCount);
 

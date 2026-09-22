@@ -387,7 +387,7 @@ public static class PositionsPanel
 
         ImGui.EndTable();
 
-        Ui.Hint("Double-click a row to select its slot. The names are kept on this PC; the slots are the console's.");
+        Ui.Hint("Double-click to select.");
     }
 
     /// <summary>

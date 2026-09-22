@@ -1,5 +1,5 @@
 #- name: Force start cutscenes
-#- version: 2
+#- version: 2.0
 #- author: robo
 #- description: Plays a mission's intro cutscene every time the mission starts, not only the first time.
 
