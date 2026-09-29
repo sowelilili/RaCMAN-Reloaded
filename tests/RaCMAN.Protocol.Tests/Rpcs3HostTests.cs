@@ -27,7 +27,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -49,7 +49,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -68,7 +68,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -88,7 +88,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -123,7 +123,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -151,7 +151,7 @@ public class Rpcs3HostTests
         finally
         {
             listener.Stop();
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -179,7 +179,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -208,7 +208,7 @@ public class Rpcs3HostTests
         }
         finally
         {
-            Directory.Delete(folder, recursive: true);
+            DeleteFolder(folder);
         }
     }
 
@@ -291,5 +291,27 @@ public class Rpcs3HostTests
         var folder = Path.Combine(Path.GetTempPath(), "racman-rpcs3-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(folder);
         return folder;
+    }
+
+    /// <summary>
+    /// Removes a test folder. A helper these tests start, or the stub that stands in for one, can
+    /// hold the folder for a moment after it has been seen to exit, and on a busy machine that is
+    /// long enough for a single delete to fail; the cleanup is not what these tests test, so it
+    /// retries for a couple of seconds before it gives up.
+    /// </summary>
+    private static void DeleteFolder(string folder)
+    {
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(folder)) Directory.Delete(folder, recursive: true);
+                return;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException && attempt < 40)
+            {
+                Thread.Sleep(50);
+            }
+        }
     }
 }
