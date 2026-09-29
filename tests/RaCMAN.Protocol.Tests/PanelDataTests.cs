@@ -1325,6 +1325,46 @@ public class ModNameWrapTests
         Assert.Equal("Incremental RNG", ModsPanel.WrapName("Incremental RNG", 0f, Measure));
         Assert.Equal("Incremental RNG", ModsPanel.WrapName("Incremental RNG", -5f, Measure));
     }
+
+    // ---------------------------------------------------------------- the RPCS3 table's Mod column
+
+    private static readonly string[] Names = { "Lock RNG", "Incremental RNG", "Hardcore Mode" };
+
+    [Fact]
+    public void UnderRpcs3TheModColumnIsAsWideAsItsLongestNameAndStatusHasTheRest()
+    {
+        // 15 for "Incremental RNG", with 100 shared and Status needing 25 ("Disabled - restart needed").
+        float width = ModsPanel.Rpcs3ModColumnWidth(Names, 100f, 25f, Measure);
+        Assert.Equal(15f, width);
+
+        // Which is exactly what the name needs not to wrap.
+        Assert.Equal("Incremental RNG", ModsPanel.WrapName("Incremental RNG", width, Measure));
+
+        // The widest name decides, spaces round it do not, and the header counts as an entry.
+        Assert.Equal(8f, ModsPanel.Rpcs3ModColumnWidth(new[] { "  Lock RNG  " }, 100f, 25f, Measure));
+        Assert.Equal(3f, ModsPanel.Rpcs3ModColumnWidth(new[] { "X", null }, 100f, 25f, Measure));
+        Assert.Equal(3f, ModsPanel.Rpcs3ModColumnWidth(Array.Empty<string>(), 100f, 25f, Measure));
+    }
+
+    [Fact]
+    public void AFractionOfAPixelIsRoundedUpSoTheNameStillFits()
+    {
+        Assert.Equal(16f, ModsPanel.Rpcs3ModColumnWidth(Names, 100f, 25f, text => text.Length + 0.3f));
+    }
+
+    [Fact]
+    public void WhereBothDoNotFitStatusKeepsItsTextAndTheNamesWrapButModKeepsHalf()
+    {
+        // 30 shared: Status keeps its 25 only down to half of it; Mod takes 15, and wraps below that.
+        const string longest = "Black Label movement re-patch";
+        Assert.Equal(15f, ModsPanel.Rpcs3ModColumnWidth(new[] { longest }, 30f, 25f, Measure));
+
+        // With a little more room, Status gets its whole longest text and Mod the rest.
+        Assert.Equal(25f, ModsPanel.Rpcs3ModColumnWidth(new[] { longest }, 50f, 25f, Measure));
+
+        // A window dragged shut still gets a column of some width.
+        Assert.Equal(1f, ModsPanel.Rpcs3ModColumnWidth(Names, -40f, 25f, Measure));
+    }
 }
 
 /// <summary>What the Memory panel's patch table calls each row.</summary>

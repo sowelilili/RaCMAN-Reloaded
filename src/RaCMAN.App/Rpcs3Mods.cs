@@ -14,8 +14,11 @@ public enum ModRpcs3State
     /// <summary>qwark-rpcs3 has not looked for it yet this session.</summary>
     Checking,
 
-    /// <summary>Enabled, and not in the game yet: RPCS3 applies it at the next boot of the game.</summary>
-    RestartGame,
+    /// <summary>
+    /// Enabled, and not in the game yet, or written this session: RPCS3 applies it at the next boot
+    /// of the game.
+    /// </summary>
+    EnabledRestartNeeded,
 
     /// <summary>Enabled from an older copy than the one in the library.</summary>
     UpdateAvailable,
@@ -23,8 +26,14 @@ public enum ModRpcs3State
     /// <summary>RPCS3 applied it at this boot and qwark-rpcs3 does not find it: something wrote over it.</summary>
     NotInGameMemory,
 
-    /// <summary>Not switched on in RPCS3.</summary>
+    /// <summary>Not switched on in RPCS3, and not in the game.</summary>
     Disabled,
+
+    /// <summary>
+    /// Switched off in RPCS3, and qwark-rpcs3 still finds it in game memory: RPCS3 takes it out
+    /// when the game is restarted.
+    /// </summary>
+    DisabledRestartNeeded,
 
     /// <summary>A Lua automation, which qwark cannot run.</summary>
     NeedsLua,
@@ -362,9 +371,10 @@ public sealed class Rpcs3ModsController
 
     /// <summary>
     /// The whole decision for one row, from the facts alone. What makes a mod impossible to enable
-    /// comes first, then whether it is enabled at all, then, for an enabled one, what qwark-rpcs3
-    /// says about the game: a rewrite waiting for a restart, a newer copy in the library, still
-    /// looking, found, applied and yet not found, or simply not there until the game boots again.
+    /// comes first, then whether it is enabled at all: a disabled one that qwark-rpcs3 still finds
+    /// in the game waits for a restart to leave it. Then, for an enabled one, what qwark-rpcs3 says
+    /// about the game: a rewrite waiting for a restart, a newer copy in the library, still looking,
+    /// found, applied and yet not found, or simply not there until the game boots again.
     /// </summary>
     public static ModRpcs3Status Decide(ModRpcs3Facts facts)
     {
@@ -411,16 +421,24 @@ public sealed class Rpcs3ModsController
 
         if (!enabled)
         {
-            string tooltip = console is { Loaded: true, Checking: false }
-                ? "Switched off in RPCS3. It stays in the game until the game is restarted in RPCS3."
-                : "Not switched on in RPCS3. Tick Enabled to add it as an RPCS3 patch.";
-            return new(ModRpcs3State.Disabled, "Disabled", ModRpcs3Tone.Quiet, tooltip,
+            // The box says off, the game says on: RPCS3 only ever changes the patches in the game
+            // when it boots it, so this one is in memory until the game is restarted.
+            if (console is { Loaded: true, Checking: false })
+            {
+                return new(ModRpcs3State.DisabledRestartNeeded, "Disabled - restart needed", ModRpcs3Tone.Pending,
+                    "Switched off in RPCS3, but still in the game: RPCS3 applies patch changes when the game boots, "
+                    + "so it stays in the game until the game is restarted in RPCS3.",
+                    false, enableBlocked.Length == 0, enableBlocked);
+            }
+
+            return new(ModRpcs3State.Disabled, "Disabled", ModRpcs3Tone.Quiet,
+                "Not switched on in RPCS3. Tick Enabled to add it as an RPCS3 patch.",
                 false, enableBlocked.Length == 0, enableBlocked);
         }
 
         if (facts.RewrittenThisBoot)
         {
-            return Enabled(ModRpcs3State.RestartGame, "Restart the game", ModRpcs3Tone.Pending,
+            return Enabled(ModRpcs3State.EnabledRestartNeeded, "Enabled - restart needed", ModRpcs3Tone.Pending,
                 "Its RPCS3 patch was written this session. RPCS3 applies patches when the game boots, "
                 + "so restart the game in RPCS3 to load it.");
         }
@@ -459,8 +477,8 @@ public sealed class Rpcs3ModsController
                 + "something else wrote over them. Another patch for this game in RPCS3 is the likely cause.");
         }
 
-        return Enabled(ModRpcs3State.RestartGame, "Restart the game", ModRpcs3Tone.Pending,
-            "Enabled. RPCS3 applies patches when the game boots, so restart the game in RPCS3 to load it.");
+        return Enabled(ModRpcs3State.EnabledRestartNeeded, "Enabled - restart needed", ModRpcs3Tone.Pending,
+            "Enabled, and not in the game yet. RPCS3 applies patches when the game boots, so restart the game in RPCS3 to load it.");
     }
 
     private static ModRpcs3Status Enabled(ModRpcs3State state, string text, ModRpcs3Tone tone, string tooltip) =>

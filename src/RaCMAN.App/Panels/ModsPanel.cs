@@ -54,18 +54,25 @@ public static class ModsPanel
         // The library is a button that opens the folder rather than the path printed out: the path
         // is absolute and long enough to need wrapping, and reading it was never the point.
         if (ImGui.SmallButton("Rescan library")) state.RescanLocalMods();
-        ImGui.SameLine();
-        ImGui.BeginDisabled(!state.Connected);
-        if (ImGui.SmallButton("Rescan console folder"))
+
+        // Under RPCS3 there is no console, and the folder qwark-rpcs3 keeps its copies in is one the
+        // client uploads to and rescans by itself whenever a mod is enabled.
+        if (!rpcs3)
         {
-            state.Run(async () =>
+            ImGui.SameLine();
+            ImGui.BeginDisabled(!state.Connected);
+            if (ImGui.SmallButton("Rescan console folder"))
             {
-                await state.Client.ModRescanAsync();
-                state.Post(() => state.RefreshMods());
-            }, "Console rescanned its mod folder");
+                state.Run(async () =>
+                {
+                    await state.Client.ModRescanAsync();
+                    state.Post(() => state.RefreshMods());
+                }, "Console rescanned its mod folder");
+            }
+
+            ImGui.EndDisabled();
         }
 
-        ImGui.EndDisabled();
         ImGui.SameLine();
         Ui.OpenFolderButton(state, Path.Combine(state.Mods.RootPath, title));
 
@@ -90,7 +97,7 @@ public static class ModsPanel
         }
         else if (rpcs3)
         {
-            DrawRpcs3Table(state, title, locals, console);
+            DrawRpcs3Table(state, title, locals);
         }
         else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -211,33 +218,71 @@ public static class ModsPanel
         if (mods.FolderProblem) Ui.Hint("Set RPCS3's folder on the Connection panel, then press Check again.");
     }
 
+    /// <summary>What a row's Status cell says while its write is under way.</summary>
+    private const string WritingText = "Writing...";
+
+    private const int Rpcs3Columns = 5;
+
     /// <summary>
     /// The RPCS3 table: Status in place of the console column, Enabled in place of Auto, and no
     /// Load or Unload, since RPCS3 is what loads a mod, when the game boots. Auto has no meaning
     /// here: an enabled mod goes in at every boot.
+    /// <para>
+    /// Status is the column that stretches, since its texts are the long ones ("Disabled - restart
+    /// needed"); Mod is as wide as the longest name in it (<see cref="Rpcs3ModColumnWidth"/>) and
+    /// the rest are as wide as what they hold, so no band of empty name column is left over.
+    /// </para>
     /// </summary>
-    private static void DrawRpcs3Table(AppState state, string title, IReadOnlyList<LocalMod> locals,
-        Dictionary<string, ModEntry> console)
+    private static void DrawRpcs3Table(AppState state, string title, IReadOnlyList<LocalMod> locals)
     {
-        if (!ImGui.BeginTable("mods-rpcs3", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        var controller = state.Rpcs3Mods;
+
+        // Decided before the table, so the Status column's longest text is known when the columns
+        // are set up; each row is still decided once a frame, as it was.
+        var statuses = new ModRpcs3Status[locals.Count];
+        var writing = new bool[locals.Count];
+        float statusNeeds = MeasureText("Status");
+        for (int i = 0; i < locals.Count; i++)
+        {
+            statuses[i] = controller.StatusFor(locals[i]);
+            writing[i] = controller.IsBusy(locals[i]);
+            statusNeeds = MathF.Max(statusNeeds, MeasureText(writing[i] ? WritingText : statuses[i].Text));
+        }
+
+        // The buttons column holds Update, and in debug Upload beside it, and nothing else.
+        var style = ImGui.GetStyle();
+        float actions = MeasureText("Update") + (style.FramePadding.X * 2f);
+        if (Ui.Debug) actions += style.ItemSpacing.X + MeasureText("Upload") + (style.FramePadding.X * 2f);
+        actions = MathF.Ceiling(actions);
+
+        const float version = 60f;
+        const float enabled = 55f;
+
+        // What Mod and Status share: the table's width, less the fixed columns and what the table
+        // puts around every column (cell padding each side, a border between two, one down each edge).
+        float overhead = (style.CellPadding.X * 2f * Rpcs3Columns) + (Rpcs3Columns - 1) + 2f;
+        float room = ImGui.GetContentRegionAvail().X - overhead - version - enabled - actions;
+        float name = Rpcs3ModColumnWidth(locals.Select(m => m.Name), room, statusNeeds, MeasureText);
+
+        if (!ImGui.BeginTable("mods-rpcs3", Rpcs3Columns, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             return;
         }
 
-        var controller = state.Rpcs3Mods;
-
-        ImGui.TableSetupColumn("Mod");
-        ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 60);
-        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 140);
-        ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, 55);
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 110);
+        // A fixed width the table is not resizable over is applied afresh every frame, so the
+        // column follows a new mod, a new font size and a resized window.
+        ImGui.TableSetupColumn("Mod", ImGuiTableColumnFlags.WidthFixed, name);
+        ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, version);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch);
+        ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, enabled);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, actions);
         ImGui.TableHeadersRow();
 
-        foreach (var mod in locals)
+        for (int i = 0; i < locals.Count; i++)
         {
-            console.TryGetValue(mod.DirName, out var remote);
-            var status = controller.StatusFor(mod);
-            bool busy = controller.IsBusy(mod);
+            var mod = locals[i];
+            var status = statuses[i];
+            bool busy = writing[i];
 
             ImGui.TableNextRow();
             ImGui.PushID(mod.DirName);
@@ -252,7 +297,7 @@ public static class ModsPanel
                 ModRpcs3Tone.Pending => Ui.Yellow,
                 _ => Ui.Grey,
             };
-            Ui.Text(busy ? Ui.Yellow : colour, busy ? "Writing..." : status.Text);
+            Ui.Text(busy ? Ui.Yellow : colour, busy ? WritingText : status.Text);
             Ui.Tooltip(busy ? "Writing to RPCS3's folder..." : status.Tooltip);
 
             ImGui.TableNextColumn();
@@ -349,6 +394,27 @@ public static class ModsPanel
 
     /// <summary>How wide a piece of text is on screen. The measure WrapName uses in the panel.</summary>
     private static float MeasureText(string text) => ImGui.CalcTextSize(text).X;
+
+    /// <summary>
+    /// How wide the RPCS3 table's Mod column is: its longest entry, header included, so no name is
+    /// wrapped while there is room for it and the Status column beside it gets everything else.
+    /// <paramref name="room"/> is what Mod and Status share, and <paramref name="statusNeeds"/> is
+    /// Status's own longest entry. Where the two do not both fit, Status keeps its longest text
+    /// and the names wrap, as <see cref="WrapName"/> does in either table, but Mod never drops
+    /// below half of the room.
+    /// <para>
+    /// Rounded up, since the table hands a column whole pixels and a name a fraction of a pixel too
+    /// wide for its column is a name that wraps.
+    /// </para>
+    /// </summary>
+    public static float Rpcs3ModColumnWidth(IEnumerable<string?> names, float room, float statusNeeds, Func<string, float> measure)
+    {
+        float longest = measure("Mod");
+        foreach (string? name in names) longest = MathF.Max(longest, measure((name ?? string.Empty).Trim()));
+
+        float width = MathF.Min(longest, MathF.Max(room - statusNeeds, room / 2f));
+        return MathF.Max(1f, MathF.Ceiling(width));
+    }
 
     /// <summary>
     /// A mod name as the table draws it: one line while it fits, two when it does not, and never a

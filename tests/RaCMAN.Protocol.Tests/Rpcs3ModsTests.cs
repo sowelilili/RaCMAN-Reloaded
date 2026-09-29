@@ -925,16 +925,45 @@ public class Rpcs3ModsTests : IDisposable
     {
         var none = Decide(Disk(), Row());
         Assert.Equal(ModRpcs3State.Disabled, none.State);
+        Assert.Equal("Disabled", none.Text);
+        Assert.Equal(ModRpcs3Tone.Quiet, none.Tone);
         Assert.False(none.Enabled);
         Assert.True(none.CanToggle);
 
         Assert.Equal(ModRpcs3State.Disabled, Decide(Disk(LockRng(), enabled: false), Row()).State);
 
-        // Switched off and still in the game until the restart: the tooltip says so.
-        Assert.Contains("stays in the game", Decide(Disk(LockRng(), enabled: false), Row(ModFlags.Loaded)).Tooltip);
+        // Not uploaded, or still being looked for, is not in the game either.
+        Assert.Equal(ModRpcs3State.Disabled, Decide(Disk(LockRng(), enabled: false), null).State);
+        Assert.Equal(ModRpcs3State.Disabled, Decide(Disk(LockRng(), enabled: false), Row(ModFlags.Checking)).State);
 
         // Another executable's entry is not this one's.
         Assert.Equal(ModRpcs3State.Disabled, Decide(Disk(LockRng(OtherHash), enabled: true), Row()).State);
+    }
+
+    [Fact]
+    public void ASwitchedOffModQwarkStillFindsInTheGameIsDisabledAndWaitsForTheRestart()
+    {
+        var stillIn = Decide(Disk(LockRng(), enabled: false), Row(ModFlags.Loaded));
+        Assert.Equal(ModRpcs3State.DisabledRestartNeeded, stillIn.State);
+        Assert.Equal("Disabled - restart needed", stillIn.Text);
+        Assert.Equal(ModRpcs3Tone.Pending, stillIn.Tone);
+        Assert.Contains("stays in the game until the game is restarted in RPCS3", stillIn.Tooltip);
+        Assert.Contains("when the game boots", stillIn.Tooltip);
+        Assert.False(stillIn.Enabled);
+        Assert.False(stillIn.CanUpdate);
+
+        // It can be ticked again as any disabled mod can, and for the same reasons not.
+        Assert.True(stillIn.CanToggle);
+        var offline = Decide(Disk(LockRng(), enabled: false), Row(ModFlags.Loaded), connected: false);
+        Assert.Equal(ModRpcs3State.DisabledRestartNeeded, offline.State);
+        Assert.False(offline.CanToggle);
+        Assert.Contains("Connect", offline.ToggleReason);
+
+        // With no entry left for it at all, it is just as much still in the game.
+        Assert.Equal(ModRpcs3State.DisabledRestartNeeded, Decide(Disk(), Row(ModFlags.Loaded)).State);
+
+        // What makes a mod impossible to enable still comes first.
+        Assert.Equal(ModRpcs3State.ParseError, Decide(Disk(), Row(ModFlags.Loaded | ModFlags.ParseError)).State);
     }
 
     [Fact]
@@ -1011,8 +1040,11 @@ public class Rpcs3ModsTests : IDisposable
         Assert.Equal("Checking...", checking.Text);
 
         var restart = Decide(disk, Row());
-        Assert.Equal(ModRpcs3State.RestartGame, restart.State);
-        Assert.Equal("Restart the game", restart.Text);
+        Assert.Equal(ModRpcs3State.EnabledRestartNeeded, restart.State);
+        Assert.Equal("Enabled - restart needed", restart.Text);
+        Assert.Equal(ModRpcs3Tone.Pending, restart.Tone);
+        Assert.True(restart.Enabled);
+        Assert.Contains("restart the game in RPCS3", restart.Tooltip);
 
         var notUploaded = Decide(disk, null);
         Assert.Equal(ModRpcs3State.NotUploaded, notUploaded.State);
@@ -1038,7 +1070,8 @@ public class Rpcs3ModsTests : IDisposable
     {
         var status = Decide(Disk(LockRng(), enabled: true), Row(ModFlags.Loaded), rewritten: true);
 
-        Assert.Equal(ModRpcs3State.RestartGame, status.State);
+        Assert.Equal(ModRpcs3State.EnabledRestartNeeded, status.State);
+        Assert.Equal("Enabled - restart needed", status.Text);
         Assert.Contains("written this session", status.Tooltip);
     }
 
@@ -1053,6 +1086,51 @@ public class Rpcs3ModsTests : IDisposable
 
         // A switched-off one is simply rewritten when it is enabled again.
         Assert.Equal(ModRpcs3State.Disabled, Decide(Disk(LockRng(libraryHash: 0x0BADF00D)), Row()).State);
+    }
+
+    [Fact]
+    public void EveryStateHasItsWordsItsColourAndItsTick()
+    {
+        var on = Disk(LockRng(), enabled: true);
+        var off = Disk(LockRng(), enabled: false);
+        var noFolder = new Rpcs3PatchDisk(Title, new Rpcs3FolderLookup(null, "RPCS3 is not running"), null, null, false, string.Empty);
+
+        var cases = new (ModRpcs3Status Status, ModRpcs3State State, string Text, ModRpcs3Tone Tone, bool Ticked)[]
+        {
+            (Decide(null, Row()), ModRpcs3State.Waiting, "...", ModRpcs3Tone.Quiet, false),
+            (Decide(noFolder, Row()), ModRpcs3State.Unknown, "Unknown", ModRpcs3Tone.Quiet, false),
+            (Decide(on, Row(ModFlags.Loaded)), ModRpcs3State.Loaded, "Loaded", ModRpcs3Tone.Good, true),
+            (Decide(on, Row(ModFlags.Checking)), ModRpcs3State.Checking, "Checking...", ModRpcs3Tone.Pending, true),
+            (Decide(on, Row()), ModRpcs3State.EnabledRestartNeeded, "Enabled - restart needed", ModRpcs3Tone.Pending, true),
+            (Decide(Disk(LockRng(libraryHash: 0x0BADF00D), enabled: true), Row()), ModRpcs3State.UpdateAvailable,
+                "Update available", ModRpcs3Tone.Pending, true),
+            (Decide(Disk(LockRng(), enabled: true, applied: new[] { LockRng().Description }), Row()), ModRpcs3State.NotInGameMemory,
+                "Not in game memory", ModRpcs3Tone.Bad, true),
+            (Decide(on, null), ModRpcs3State.NotUploaded, "Not uploaded", ModRpcs3Tone.Quiet, true),
+            (Decide(off, Row()), ModRpcs3State.Disabled, "Disabled", ModRpcs3Tone.Quiet, false),
+            (Decide(off, Row(ModFlags.Loaded)), ModRpcs3State.DisabledRestartNeeded, "Disabled - restart needed", ModRpcs3Tone.Pending, false),
+            (Decide(Disk(), Row(ModFlags.NeedsLua)), ModRpcs3State.NeedsLua, "Needs Lua", ModRpcs3Tone.Quiet, false),
+            (Decide(Disk(), Row(ModFlags.ParseError)), ModRpcs3State.ParseError, "Parse error", ModRpcs3Tone.Bad, false),
+            (Decide(Disk(), Row(), refusal: ModPatchRefusal.TooLarge), ModRpcs3State.TooLarge, "Too large for RPCS3", ModRpcs3Tone.Quiet, false),
+            (Decide(Disk(), Row(), refusal: ModPatchRefusal.NothingToPatch), ModRpcs3State.NothingToPatch,
+                "Nothing to patch", ModRpcs3Tone.Quiet, false),
+        };
+
+        foreach (var (status, state, text, tone, ticked) in cases)
+        {
+            Assert.Equal(state, status.State);
+            Assert.Equal(text, status.Text);
+            Assert.Equal(tone, status.Tone);
+            Assert.Equal(ticked, status.Enabled);
+            Assert.False(string.IsNullOrWhiteSpace(status.Tooltip));
+        }
+
+        // Both states waiting on a restart say that it is RPCS3 that applies the change when the game boots.
+        Assert.All(cases.Where(c => c.Text.EndsWith("restart needed", StringComparison.Ordinal)),
+            c => Assert.Contains("when the game boots", c.Status.Tooltip));
+
+        // And there is no state the Status column can be in that is not one of the above.
+        Assert.Equal(Enum.GetValues<ModRpcs3State>().OrderBy(s => s), cases.Select(c => c.State).OrderBy(s => s));
     }
 
     // ================================================================ end to end
@@ -1139,7 +1217,7 @@ public class Rpcs3ModsTests : IDisposable
             Assert.Equal(mod.Hash, Rpcs3Patches.LibraryHashIn(entry.Notes));
             Assert.True(Rpcs3Patches.IsEnabled(File.ReadAllText(folder.PatchConfigFile), entry.Key(Title), "x"));
 
-            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.RestartGame));
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.EnabledRestartNeeded));
             Assert.True(mods.StatusFor(mod).Enabled);
 
             // The game restarts in RPCS3: qwark-rpcs3 looks, and then finds it.
@@ -1150,12 +1228,19 @@ public class Rpcs3ModsTests : IDisposable
             server.SetModPresence("lock_rng", loaded: true, checking: false);
             Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.Loaded));
 
-            // Unticking switches it off and leaves the words in the file.
+            // Unticking switches it off and leaves the words in the file. The game keeps them until
+            // it is restarted, and the row says so.
             mods.Toggle(mod, false);
             Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Text.StartsWith("Disabled Lock RNG", StringComparison.Ordinal))));
-            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.Disabled));
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.DisabledRestartNeeded));
+            Assert.False(mods.StatusFor(mod).Enabled);
             Assert.False(Rpcs3Patches.IsEnabled(File.ReadAllText(folder.PatchConfigFile), entry.Key(Title), "x"));
             Assert.NotNull(Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).ModEntryFor(Hash, "lock_rng"));
+
+            // The game restarts in RPCS3 without it.
+            server.SetModPresence("lock_rng", loaded: false, checking: false);
+            server.Session = server.Session with { Generation = server.Session.Generation + 1 };
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.Disabled));
         }
     }
 
@@ -1339,7 +1424,7 @@ public class Rpcs3ModsTests : IDisposable
 
             var entry = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).ModEntryFor(Hash, "lock_rng")!;
             Assert.Equal(new[] { new PatchWord(0x005C8318, 0x806D9001) }, entry.Words);
-            Assert.True(await PumpAsync(state, () => mods.StatusFor(newer).State == ModRpcs3State.RestartGame));
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(newer).State == ModRpcs3State.EnabledRestartNeeded));
         }
     }
 
