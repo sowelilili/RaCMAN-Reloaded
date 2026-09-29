@@ -63,6 +63,12 @@ public static class Ui
     /// <summary>Something that is broken and needs the user to act.</summary>
     public static void Error(string text) => Wrapped(Red, text);
 
+    /// <summary>Something that is set up and working.</summary>
+    public static void Success(string text) => Wrapped(Green, text);
+
+    /// <summary>Plain body text in the theme's own colour, wrapped, for a dialog's explanation.</summary>
+    public static void Paragraph(string text) => Wrapped(ImGui.GetStyle().Colors[(int)ImGuiCol.Text], text);
+
     /// <summary>A hint that only exists when the user asked to see the wire-level detail.</summary>
     public static void DebugHint(string text)
     {

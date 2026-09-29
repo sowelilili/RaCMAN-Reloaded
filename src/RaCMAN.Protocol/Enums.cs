@@ -109,6 +109,13 @@ public enum Opcode : ushort
     SaveFileStore = 0x00B5,
     SaveFileRestore = 0x00B6,
     SaveFileCategory = 0x00B7,
+
+    /// <summary>
+    /// Revision 1.15: the savefile helper as address and value words, for a platform that cannot
+    /// write it into the game itself. RPCS3 applies patch files when it loads the executable, before
+    /// it recompiles anything, so the client puts these words into an RPCS3 patch.
+    /// </summary>
+    SaveFilePatch = 0x00B8,
 }
 
 /// <summary>

@@ -17,7 +17,7 @@ namespace RaCMAN.App;
 public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, "
-                                + "unknown, drop, combos-off, combos-on, start, split[:code[:arg]], reset, "
+                                + "unknown, drop, combos-off, combos-on, sfpatch, start, split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
 
     public static IReadOnlyList<(double At, string Step)> Parse(string script)
@@ -168,6 +168,13 @@ public static class FakeScript
 
             case "combos-on":
                 fake.CombosEnabled = true;
+                break;
+
+            // The game started again in RPCS3 with the savefile helper patch applied: a new boot
+            // of the same title, and qwark now finds its helper in the game.
+            case "sfpatch":
+                fake.SaveFileHelperInstalled = true;
+                fake.Session = session with { Generation = session.Generation + 1 };
                 break;
 
             case "drop":

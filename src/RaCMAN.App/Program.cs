@@ -216,6 +216,7 @@ if (exitAfter > 0)
                       $"mobyrows={MemoryPanel.MobyRowCount} skins={SkinLibrary.List().Length} " +
                       $"mobylayouts={MobyLayouts.All.Count} skin='{InputDisplayPanel.Status}' " +
                       $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
+                      $"sfinstalled={state.SaveFile.Installed} sfpatch={state.Rpcs3Patch.LastStatus.State} " +
                       $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"obspad={state.ObsPad.State}/{state.ObsPad.Port} " +

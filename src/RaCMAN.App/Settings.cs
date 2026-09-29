@@ -78,6 +78,14 @@ public sealed class Settings
     [JsonPropertyName("rpcs3QwarkPath")]
     public string Rpcs3QwarkPath { get; set; } = string.Empty;
 
+    /// <summary>
+    /// RPCS3's own folder, where the savefile helper patch goes: the folder rpcs3.exe runs from on
+    /// Windows, <c>~/.config/rpcs3</c> on Linux. Empty is the normal case, and then the client finds
+    /// it by itself (<see cref="Rpcs3Patches.Locate"/>); set, it wins over anything found.
+    /// </summary>
+    [JsonPropertyName("rpcs3Folder")]
+    public string Rpcs3Folder { get; set; } = string.Empty;
+
     [JsonPropertyName("autoReconnect")]
     public bool AutoReconnect { get; set; } = true;
 

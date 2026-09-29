@@ -26,6 +26,10 @@
     <PackageReference Include="OpenTK" Version="4.9.4" />
     <PackageReference Include="StbImageSharp" Version="2.30.16" />
     <PackageReference Include="Velopack" Version="1.2.0" />
+
+    <!-- RPCS3's patch_config.yml is the user's file and RPCS3's, and the savefile helper patch only
+         adds its own switch to it: a real YAML reader is what leaves every other entry as it was. -->
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
   </ItemGroup>
 
   <PropertyGroup>

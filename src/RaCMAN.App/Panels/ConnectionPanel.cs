@@ -16,8 +16,16 @@ public static class ConnectionPanel
     private static string _notifyText = "Hello from RaCMAN Reloaded";
     private static int _slot = 5;
     private static int _pinePort = Rpcs3Host.DefaultPinePort;
+    private static string _rpcs3Folder = string.Empty;
+    private static bool _rpcs3FolderRead;
     private static bool _confirmBootInstall;
     private static bool _initialised;
+
+    private const string PatchDialogTitle = "Install the savefile helper patch";
+
+    /// <summary>Set by the button, taken by the next frame's dialog: the folder the confirmation names.</summary>
+    private static Rpcs3Folder? _patchDialogFolder;
+    private static bool _patchDialogRequested;
 
     /// <summary>Puts a host into the address box (the settings import uses it), whether or not the panel has been drawn yet.</summary>
     public static void UseHost(string host)
@@ -500,11 +508,179 @@ public static class ConnectionPanel
         Ui.Warning("Code patches do not work on RPCS3: cheats that patch game code, mods and client "
                    + "patches are greyed out. Everything that reads and writes values still works.");
 
+        DrawSaveFilePatch(state);
+
         if (Ui.Debug)
         {
             Ui.DebugHint(host.Find(state.Settings.Rpcs3QwarkPath) ?? $"{Rpcs3Host.ExeName} not found");
             foreach (var line in host.Lines) Ui.DebugHint(line);
         }
+    }
+
+    /// <summary>
+    /// The savefile helper as an RPCS3 patch. qwark cannot write the helper into a game RPCS3 has
+    /// recompiled, but RPCS3 applies patch files when it loads the game, so the helper goes in as
+    /// one: a status line, the button that installs it behind a confirmation, and the RPCS3 folder
+    /// for when the client cannot find it by itself. Nothing is written without the confirmation.
+    /// </summary>
+    private static void DrawSaveFilePatch(AppState state)
+    {
+        var patch = state.Rpcs3Patch;
+        var status = patch.Update();
+        if (status.State == SaveFilePatchState.Hidden) return;
+
+        ImGui.Spacing();
+        ImGui.TextUnformatted("Savefile helper patch");
+
+        string message = patch.Installing ? "Writing the patch into RPCS3's folder..." : status.Message;
+        switch (status.State)
+        {
+            case SaveFilePatchState.Active:
+                Ui.Success(message);
+                break;
+
+            case SaveFilePatchState.RestartGame:
+            case SaveFilePatchState.Install:
+                Ui.Warning(message);
+                break;
+
+            case SaveFilePatchState.Unavailable:
+                Ui.Error(message);
+                break;
+
+            default:
+                Ui.Hint(message);
+                break;
+        }
+
+        // Only a folder that has been found can be named in the confirmation, and only a named
+        // folder is written to.
+        var folder = patch.Folder;
+        if (status.CanInstall)
+        {
+            ImGui.BeginDisabled(patch.Installing || folder is null);
+            if (ImGui.Button("Install savefile helper patch..."))
+            {
+                _patchDialogFolder = folder;
+                _patchDialogRequested = true;
+            }
+
+            ImGui.EndDisabled();
+            ImGui.SameLine();
+        }
+
+        ImGui.BeginDisabled(patch.Installing);
+        if (ImGui.Button("Check again")) patch.Recheck();
+        ImGui.EndDisabled();
+
+        DrawRpcs3Folder(state, status, folder);
+        DrawPatchDialog(state);
+
+        if (Ui.Debug && patch.Reply.Patch is { } words)
+        {
+            Ui.DebugHint($"SAVEFILE_PATCH: {words.Words.Length} words, {words.Bytes.Length} bytes, stamp 0x{words.Stamp:x8}");
+        }
+
+        if (Ui.Debug && patch.Disk?.Hash is { Hash: { } hash } lookup)
+        {
+            Ui.DebugHint($"Executable {hash} from {lookup.Log}{(lookup.PatchApplied ? ", patch applied at this boot" : string.Empty)}");
+        }
+    }
+
+    /// <summary>
+    /// The folder setting. Empty means "find it", which is the normal case; a folder typed here is
+    /// used whatever is found. Enter saves it, as in the other boxes on this panel.
+    /// </summary>
+    private static void DrawRpcs3Folder(AppState state, SaveFilePatchStatus status, Rpcs3Folder? folder)
+    {
+        if (!_rpcs3FolderRead)
+        {
+            _rpcs3Folder = state.Settings.Rpcs3Folder;
+            _rpcs3FolderRead = true;
+        }
+
+        ImGui.SetNextItemWidth(360);
+        if (Ui.SubmitTextWithHint("RPCS3 folder", "found by itself", ref _rpcs3Folder, 512))
+        {
+            state.Settings.Rpcs3Folder = _rpcs3Folder.Trim();
+            state.Settings.Save();
+            state.Rpcs3Patch.Recheck();
+        }
+
+        if (folder is not null)
+        {
+            Ui.Hint($"RPCS3 folder: {folder.Root} ({folder.FoundBy})");
+        }
+        else if (status.FolderProblem)
+        {
+            Ui.Hint(OperatingSystem.IsWindows()
+                ? "Enter the folder rpcs3.exe is in, then press Enter."
+                : "Enter RPCS3's configuration folder (usually ~/.config/rpcs3), then press Enter.");
+        }
+    }
+
+    /// <summary>
+    /// The confirmation: which two files are written where, and that the game has to start again.
+    /// No is the easy answer, as with every change this client makes that nobody asked for yet.
+    /// </summary>
+    private static void DrawPatchDialog(AppState state)
+    {
+        if (_patchDialogRequested)
+        {
+            _patchDialogRequested = false;
+            ImGui.OpenPopup(PatchDialogTitle);
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new System.Numerics.Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new System.Numerics.Vector2(600, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(PatchDialogTitle, ref open, ImGuiWindowFlags.AlwaysAutoResize)) return;
+
+        var folder = _patchDialogFolder;
+        string title = state.Session.TitleId;
+        if (folder is null || !Rpcs3Patches.IsTitleId(title))
+        {
+            Ui.Error("There is no RPCS3 folder or game to write the patch for any more.");
+            if (ImGui.Button("Close")) ImGui.CloseCurrentPopup();
+            ImGui.EndPopup();
+            return;
+        }
+
+        string patchFile = folder.PatchFile(title);
+        string configFile = folder.PatchConfigFile;
+
+        Ui.Paragraph($"RaCMAN will write qwark's savefile helper for {state.Session.GameName} into RPCS3 as a patch. "
+                     + "It writes two files:");
+        ImGui.Spacing();
+        Ui.Paragraph($"{patchFile}\n    "
+                     + (File.Exists(patchFile) ? "Replaced. RaCMAN wrote this file before." : "New.")
+                     + " The helper for this game, as patch lines.");
+        ImGui.Spacing();
+        Ui.Paragraph($"{configFile}\n    "
+                     + (File.Exists(configFile)
+                         ? $"Changed. It switches the patch on and keeps every other entry. The old file is kept as {Path.GetFileName(configFile)}{Rpcs3Patches.BackupSuffix}."
+                         : "New. It switches the patch on."));
+        ImGui.Spacing();
+        Ui.Warning("RPCS3 applies patches only when a game starts. After this, restart the game in RPCS3: "
+                   + "stop it and boot it again.");
+        ImGui.Separator();
+
+        if (ImGui.Button("Write the files", new System.Numerics.Vector2(160, 0)))
+        {
+            state.Rpcs3Patch.Install(folder);
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new System.Numerics.Vector2(120, 0));
+
+        // Enter on a dialog that has just opened answers no.
+        ImGui.SetItemDefaultFocus();
+        if (cancel || !open) ImGui.CloseCurrentPopup();
+
+        ImGui.EndPopup();
     }
 
     private static void DrawFirewallButton(AppState state)

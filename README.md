@@ -45,7 +45,9 @@ In standalone mode the client also keeps that copy current. If the console runs 
 2. Start the game.
 3. In the client, select **RPCS3** on the Connection panel.
 
-The client starts `qwark-rpcs3.exe` beside it and connects to it on this PC. The panels behave as they do on a console, with one difference: RPCS3 recompiles the game code, so it cannot accept code patches. The client therefore switches off the mods, the save file manager and the patch cheats. Everything that writes data continues to work.
+The client starts `qwark-rpcs3.exe` beside it and connects to it on this PC. The panels behave as they do on a console, with one difference: RPCS3 recompiles the game code, so it cannot accept code patches. The client therefore switches off the mods and the patch cheats. Everything that writes data continues to work.
+
+To save and load save files under RPCS3, install the savefile helper patch for each game. Press **Install savefile helper patch...** in the RPCS3 part of the Connection panel, then restart the game in RPCS3. The client asks before it writes to RPCS3's folder.
 
 RPCS3 accepts one IPC client at a time. If another program holds the port, the client says so and waits for the port. RPCS3 support is for Windows at the moment.
 

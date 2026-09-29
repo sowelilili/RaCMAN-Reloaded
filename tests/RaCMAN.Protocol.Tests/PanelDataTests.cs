@@ -446,12 +446,17 @@ public class ComboCaptureTests
 public class PanelNavTests
 {
     [Fact]
-    public void ModsAndSaveFilesAreGreyedOutWhenTheConsoleRefusesCodePatches()
+    public void ModsAreGreyedOutWhenTheConsoleRefusesCodePatches()
     {
         Assert.Equal(Ui.ModsAreCodePatches, PanelNav.DisabledReason(PanelNav.Mods, true));
+    }
 
-        // The savefile helper is a mod, so the panel that drives it goes the same way.
-        Assert.Equal(Ui.NoCodePatches, PanelNav.DisabledReason(PanelNav.SaveFiles, true));
+    [Fact]
+    public void SaveFilesStayOpenUnderRpcs3()
+    {
+        // Since build 47 the savefile helper reaches an RPCS3 game as an RPCS3 patch, and the
+        // panel says itself whether that patch is in.
+        Assert.Null(PanelNav.DisabledReason(PanelNav.SaveFiles, true));
     }
 
     [Fact]
@@ -466,7 +471,7 @@ public class PanelNavTests
     {
         for (int panel = 0; panel < PanelNav.Count; panel++)
         {
-            if (panel == PanelNav.Mods || panel == PanelNav.SaveFiles) continue;
+            if (panel == PanelNav.Mods) continue;
             Assert.Null(PanelNav.DisabledReason(panel, true));
         }
     }

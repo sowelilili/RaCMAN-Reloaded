@@ -138,10 +138,14 @@ public static class PanelNav
 
     /// <summary>
     /// Why the nav greys a panel out, or null when the panel is usable. Every mod is patch words
-    /// or code caves, and the savefile helper the Save files panel works through is a code cave
-    /// and a branch into it, so a console that refuses code patches (RPCS3) leaves both with
-    /// nothing they can do. They stay in the list, greyed out with this as their tooltip, because
-    /// a panel that vanished would read as a client that had lost a feature.
+    /// or code caves, so a console that refuses code patches (RPCS3) leaves the Mods panel with
+    /// nothing it can do. It stays in the list, greyed out with this as its tooltip, because a
+    /// panel that vanished would read as a client that had lost a feature.
+    /// <para>
+    /// The Save files panel used to go the same way, its helper being a code cave. Since qwark
+    /// build 47 the helper reaches an RPCS3 game as an RPCS3 patch, so the panel stays open and
+    /// says itself whether that patch is in and where to install it.
+    /// </para>
     /// </summary>
     public static string? DisabledReason(int panel, bool codePatchesUnsupported)
     {
@@ -150,7 +154,6 @@ public static class PanelNav
         return panel switch
         {
             Mods => Ui.ModsAreCodePatches,
-            SaveFiles => Ui.NoCodePatches,
             _ => null,
         };
     }

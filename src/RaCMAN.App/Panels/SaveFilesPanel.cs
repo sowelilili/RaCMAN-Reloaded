@@ -110,12 +110,20 @@ public static class SaveFilesPanel
         // The console is the authority on whether it has a helper for this game: the flagged
         // ACTIONs say a game asks for one, SAVEFILE_INFO says whether there is one to ask.
         bool hasHelper = info.Supported && save is not null && load is not null;
-        bool enabled = state.Ingame && hasHelper && !_busy;
+
+        // On a console qwark writes the helper in on first use. Under RPCS3 it cannot, and the
+        // helper is in the game only when the RPCS3 patch put it there at this boot, which is what
+        // `installed` says there; without it saving and loading are refused, so they are greyed out.
+        bool rpcs3 = state.CodePatchesUnsupported;
+        bool helperIn = !rpcs3 || info.Installed;
+        bool enabled = state.Ingame && hasHelper && helperIn && !_busy;
 
         // INFO only observes the helper. An action installs it on demand; transfers poll INFO
         // themselves without updating this snapshot. Refresh until the helper is running so
-        // an action's installation and first game frame are reflected here too.
-        if (hasHelper && state.Ingame && !info.Running && !_busy)
+        // an action's installation and first game frame are reflected here too. A helper that
+        // RPCS3 has not put in cannot arrive without the game starting again, and that re-reads
+        // INFO by itself.
+        if (hasHelper && helperIn && state.Ingame && !info.Running && !_busy)
         {
             _sinceInfo += ImGui.GetIO().DeltaTime;
             if (_sinceInfo >= NotRunningPollSeconds)
@@ -129,13 +137,7 @@ public static class SaveFilesPanel
             _sinceInfo = 0;
         }
 
-        if (state.CodePatchesUnsupported)
-        {
-            Ui.Warning("The savefile helper is a code cave the console branches the game into, and " +
-                       "RPCS3 cannot apply one, so saving and loading are not available here.");
-                       ImGui.Spacing();
-        }
-        else if (!hasHelper)
+        if (!hasHelper)
         {
             Ui.Warning("This game has no savefile helper, so saving and loading are not available.");
             ImGui.Spacing();
@@ -143,6 +145,12 @@ public static class SaveFilesPanel
         else if (!state.Ingame)
         {
             Ui.Warning($"Saving and loading need INGAME (state is {session.State.DisplayName()}).");
+            ImGui.Spacing();
+        }
+        else if (!helperIn)
+        {
+            Ui.Warning("Under RPCS3, saving and loading need the savefile helper patch. Install it with the "
+                       + "button in the RPCS3 part of the Connection panel, then restart the game in RPCS3.");
             ImGui.Spacing();
         }
         else if (info.Installed && !info.Running)

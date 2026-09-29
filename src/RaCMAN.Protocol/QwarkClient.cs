@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 45;
+    public const byte ExpectedQwarkBuild = 47;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -1096,12 +1096,26 @@ public sealed class QwarkClient : IDisposable
     public const int SaveFileChunkSize = 16000;
 
     /// <summary>
-    /// SAVEFILE_INFO, revision 1.9. Answers UNSUPPORTED where code cannot be patched (RPCS3) and
-    /// NOT_INGAME outside a game; a game qwark simply has no helper for is an OK answer with
-    /// <see cref="SaveFileInfo.Supported"/> false.
+    /// SAVEFILE_INFO, revision 1.9. Answers NOT_INGAME outside a game; a game qwark simply has no
+    /// helper for is an OK answer with <see cref="SaveFileInfo.Supported"/> false.
+    /// <para>
+    /// Where code cannot be patched (RPCS3) a module before revision 1.15 answered UNSUPPORTED.
+    /// Since then it answers OK there too, and <see cref="SaveFileInfo.Installed"/> says whether the
+    /// RPCS3 patch put qwark's own helper into the game at this boot, byte for byte: with it every
+    /// savefile op works as on a console, and without it the ones that need the helper answer
+    /// UNSUPPORTED.
+    /// </para>
     /// </summary>
     public async Task<SaveFileInfo> SaveFileInfoAsync(CancellationToken cancellationToken = default) =>
         SaveFileInfo.Parse(await RequestAsync(Opcode.SaveFileInfo, null, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// SAVEFILE_PATCH, revision 1.15: the running game's savefile helper as words and single bytes
+    /// for an RPCS3 patch. NOT_INGAME outside a game; UNSUPPORTED when the game has no helper or it
+    /// is switched off. A reply that stops short of either list throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<SaveFilePatch> SaveFilePatchAsync(CancellationToken cancellationToken = default) =>
+        SaveFilePatch.Parse(await RequestAsync(Opcode.SaveFilePatch, null, cancellationToken).ConfigureAwait(false));
 
     public Task<byte[]> SaveFileReadAsync(uint offset, uint length, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.SaveFileRead,

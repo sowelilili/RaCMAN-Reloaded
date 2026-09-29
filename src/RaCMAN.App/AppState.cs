@@ -110,6 +110,7 @@ public sealed class AppState : IDisposable
         SaveFiles = new SaveFileLibrary(AppPaths.InData(settings.SaveFilesPath));
         WebMan = new WebManLoader();
         Rpcs3 = new Rpcs3Host(rootFolder: AppPaths.Rpcs3Root);
+        Rpcs3Patch = new Rpcs3PatchController(this, Rpcs3Environment.Current);
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
 
@@ -207,6 +208,12 @@ public sealed class AppState : IDisposable
     /// panel (or the startup path) asks for it, so a PS3 session never spawns a process.
     /// </summary>
     public Rpcs3Host Rpcs3 { get; }
+
+    /// <summary>
+    /// The savefile helper as an RPCS3 patch: what the Connection panel says about it, and the
+    /// install behind its confirmation. Inert until that panel is drawn with the RPCS3 target.
+    /// </summary>
+    public Rpcs3PatchController Rpcs3Patch { get; }
 
     /// <summary>The connection to LiveSplit's TCP server. Only the autosplitter drives it.</summary>
     public LiveSplitClient LiveSplit { get; }
@@ -330,7 +337,8 @@ public sealed class AppState : IDisposable
     /// SAVEFILE_INFO for the running game, revision 1.9: whether the console has a savefile
     /// helper for it, whether that helper is in and running, and how big a save is.
     /// <see cref="SaveFileInfo.None"/> until it has been asked, and again for a game with no
-    /// helper or a console that refuses code patches.
+    /// helper or a module that refuses the block. Under RPCS3 (revision 1.15) <c>installed</c> is
+    /// whether the RPCS3 patch put the helper in at this boot, which nothing else can.
     /// </summary>
     public SaveFileInfo SaveFile { get; private set; } = SaveFileInfo.None;
 
@@ -723,6 +731,13 @@ public sealed class AppState : IDisposable
                     RefreshAutosplitEvents();
                     RefreshSaveFileInfo();
                 }
+                else if (CodePatchesUnsupported)
+                {
+                    // Under RPCS3 the helper is in the game only if the RPCS3 patch was applied when
+                    // this boot loaded the executable, so every boot has its own answer, and the
+                    // restart the patch asks for is exactly this branch.
+                    RefreshSaveFileInfo();
+                }
             }
         }
         else if (UnknownGame && _liveStale)
@@ -1035,9 +1050,9 @@ public sealed class AppState : IDisposable
     }
 
     /// <summary>
-    /// Re-reads SAVEFILE_INFO, revision 1.9. UNSUPPORTED is the normal answer on a console that
-    /// refuses code patches, and for a module older than this revision the op is unknown; both
-    /// mean the Save files panel has nothing to drive, and neither is worth a toast.
+    /// Re-reads SAVEFILE_INFO, revision 1.9. UNSUPPORTED is what a module before revision 1.15
+    /// answers where code cannot be patched, and for a module older than 1.9 the op is unknown;
+    /// both mean the Save files panel has nothing to drive, and neither is worth a toast.
     /// </summary>
     public void RefreshSaveFileInfo()
     {

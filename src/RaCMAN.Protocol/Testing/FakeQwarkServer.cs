@@ -414,10 +414,57 @@ public sealed class FakeQwarkServer : IDisposable
     public bool SaveFileSupported { get; set; } = true;
 
     /// <summary>
-    /// True makes all three savefile ops answer UNSUPPORTED, which is what a platform that
-    /// cannot patch code does (section 5.12).
+    /// True makes every savefile op answer UNSUPPORTED, which is what a module before revision 1.15
+    /// did on a platform that cannot patch code (section 5.12).
     /// </summary>
     public bool SaveFileUnsupported { get; set; }
+
+    /// <summary>
+    /// Whether the RPCS3 patch put qwark's helper into the game at this boot (revision 1.15). Only
+    /// read while <see cref="NoCodePatches"/> is on, where it is SAVEFILE_INFO's <c>installed</c>
+    /// byte and the ops that need the helper answer UNSUPPORTED without it. On a console the fake
+    /// helper is always in, as the real one is after its first use.
+    /// </summary>
+    public bool SaveFileHelperInstalled { get; set; }
+
+    /// <summary>
+    /// The words SAVEFILE_PATCH hands out for the running game: made up, and only ever copied into
+    /// an RPCS3 patch file by the client, which is all a test needs of them.
+    /// </summary>
+    public PatchWord[] SaveFilePatchWords { get; set; } =
+    {
+        new(0x000F0000, 0x9421FFF0),
+        new(0x000F0004, 0x7C0802A6),
+        new(0x000F0008, 0x4E800020),
+        new(0x0004A2C8, 0x480A5D39),
+    };
+
+    /// <summary>The single bytes SAVEFILE_PATCH hands out: three request bytes cleared, as qwark's are.</summary>
+    public PatchByte[] SaveFilePatchBytes { get; set; } =
+    {
+        new(0x010CD71D, 0x00),
+        new(0x010CD71E, 0x00),
+        new(0x010CD71F, 0x00),
+    };
+
+    /// <summary>
+    /// The stamp SAVEFILE_PATCH carries: a CRC-32 over every reply byte after the stamp field, the
+    /// word pairs, the byte list's header and its entries, as qwark computes it.
+    /// </summary>
+    public uint SaveFilePatchStamp
+    {
+        get
+        {
+            var reply = new SaveFilePatch(0, SaveFilePatchWords, SaveFilePatchBytes).ToBytes();
+            return Crc32.Compute(reply.AsSpan(SaveFilePatch.HeaderSize));
+        }
+    }
+
+    /// <summary>
+    /// True while the ops that run the game's helper have none to run: a platform that cannot patch
+    /// code, before revision 1.15 at all and since then until the RPCS3 patch has put it in.
+    /// </summary>
+    private bool SaveFileHelperMissing => SaveFileUnsupported || (NoCodePatches && !SaveFileHelperInstalled);
 
     /// <summary>What SAVEFILE_INFO reports for the helper's own byte.</summary>
     public bool SaveFileRunning { get; set; } = true;
@@ -762,7 +809,7 @@ public sealed class FakeQwarkServer : IDisposable
         or Opcode.AutosplitEvents or Opcode.AutosplitDescribe
         or Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
         or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
-        or Opcode.SaveFileRestore or Opcode.SaveFileCategory;
+        or Opcode.SaveFileRestore or Opcode.SaveFileCategory or Opcode.SaveFilePatch;
 
     /// <summary>
     /// How many requests have been refused with BUSY because a game was starting or ending. A
@@ -1054,14 +1101,14 @@ public sealed class FakeQwarkServer : IDisposable
                     // Both stay "pending" for a poll or two, as the console's helper does.
                     if (action.SavesAside)
                     {
-                        if (SaveFileUnsupported) return (Status.Unsupported, null);
+                        if (SaveFileHelperMissing) return (Status.Unsupported, null);
                         SaveFileBuffer = (byte[])SaveAsideContent.Clone();
                         _setAsidePending = SaveFilePendingPolls;
                         SaveFileOrder.Add("set-aside");
                     }
                     else if (action.LoadsAside)
                     {
-                        if (SaveFileUnsupported) return (Status.Unsupported, null);
+                        if (SaveFileHelperMissing) return (Status.Unsupported, null);
                         LoadedSaveFile = (byte[])SaveFileBuffer.Clone();
                         _loadPending = SaveFilePendingPolls;
                         SaveFileOrder.Add("load");
@@ -1567,10 +1614,14 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.SaveFileInfo:
                 {
-                    // A platform that cannot patch code refuses the block outright; a game with
-                    // no helper is an OK answer with `supported` 0.
+                    // A module before revision 1.15 on a platform that cannot patch code refuses
+                    // the block outright; a game with no helper is an OK answer with `supported` 0.
                     if (SaveFileUnsupported) return (Status.Unsupported, null);
                     if (!SaveFileSupported) return (Status.Ok, SaveFileInfo.None.ToBytes());
+
+                    // Revision 1.15: where code cannot be patched, `installed` is whether the RPCS3
+                    // patch put the helper in at this boot, and a helper that is not in never runs.
+                    bool installed = !NoCodePatches || SaveFileHelperInstalled;
 
                     byte pending = 0;
                     if (_setAsidePending > 0) pending |= SaveFileInfo.PendingSetAside;
@@ -1583,15 +1634,27 @@ public sealed class FakeQwarkServer : IDisposable
                     if (_loadPending > 0) _loadPending--;
                     AdvanceTransfer();
 
-                    var info = new SaveFileInfo(true, true, SaveFileRunning, pending,
+                    var info = new SaveFileInfo(true, installed, installed && SaveFileRunning, pending,
                                                 (uint)SaveFileBuffer.Length,
                                                 _transferDone, _transferTotal, _transferError);
                     return (Status.Ok, info.ToBytes());
                 }
 
+                // Revision 1.15: the helper as words and bytes, for the RPCS3 patch the client
+                // writes. A module from before it does not know the op at all.
+                case Opcode.SaveFilePatch:
+                {
+                    if (SaveFileUnsupported) return (Status.UnknownOp, null);
+                    if (EnforceIngame && _session.State != SessionState.Ingame) return (Status.NotIngame, null);
+                    if (!SaveFileSupported) return (Status.Unsupported, null);
+
+                    return (Status.Ok,
+                        new SaveFilePatch(SaveFilePatchStamp, SaveFilePatchWords, SaveFilePatchBytes).ToBytes());
+                }
+
                 case Opcode.SaveFileRead:
                 {
-                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (SaveFileHelperMissing || !SaveFileSupported) return (Status.Unsupported, null);
                     if (payload.Length < 8) return (Status.BadArg, null);
 
                     var r = new SpanReader(payload);
@@ -1614,7 +1677,7 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.SaveFileWrite:
                 {
-                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (SaveFileHelperMissing || !SaveFileSupported) return (Status.Unsupported, null);
                     if (payload.Length < 5) return (Status.BadArg, null);
 
                     var r = new SpanReader(payload);
@@ -1664,7 +1727,7 @@ public sealed class FakeQwarkServer : IDisposable
                 case Opcode.SaveFileStore:
                 case Opcode.SaveFileRestore:
                 {
-                    if (SaveFileUnsupported || !SaveFileSupported) return (Status.Unsupported, null);
+                    if (SaveFileHelperMissing || !SaveFileSupported) return (Status.Unsupported, null);
                     if (payload.Length < 2 * ConsoleSaveFile.NameLength) return (Status.BadArg, null);
 
                     var r = new SpanReader(payload);

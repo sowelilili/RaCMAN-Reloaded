@@ -858,6 +858,120 @@ public readonly record struct SaveFileInfo(
     }
 }
 
+/// <summary>One single-byte write of a patch.</summary>
+public readonly record struct PatchByte(uint Address, byte Value);
+
+/// <summary>
+/// SAVEFILE_PATCH, revision 1.15: the savefile helper for the running game as a patch. The words
+/// are the caves in address order and then the hook words; the bytes are single bytes the patch
+/// sets at load, which today are the helper's request bytes cleared to 0 (RaC2's sit in the code
+/// segment and are not 0 at load, and a console install clears them before it hooks).
+/// <see cref="Stamp"/> is qwark's CRC-32 over every reply byte after the stamp field, and changes
+/// exactly when the helper does. The client never looks inside any of it: it copies it into an
+/// RPCS3 patch file, and qwark says through SAVEFILE_INFO whether it reached the game.
+/// </summary>
+public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] Bytes)
+{
+    /// <summary><c>u16 n, u16 pad, u32 stamp</c>.</summary>
+    public const int HeaderSize = 8;
+
+    /// <summary><c>u32 addr, u32 value</c>.</summary>
+    public const int WordSize = 8;
+
+    /// <summary><c>u16 nb, u16 pad</c>, after the words.</summary>
+    public const int ByteHeaderSize = 4;
+
+    /// <summary><c>u32 addr, u8 value, u8 pad[3]</c>.</summary>
+    public const int ByteSize = 8;
+
+    /// <summary>A patch with no single bytes in it.</summary>
+    public SaveFilePatch(uint stamp, PatchWord[] words) : this(stamp, words, Array.Empty<PatchByte>()) { }
+
+    /// <summary>
+    /// A reply that stops short of either list is a truncated reply, and a patch built from part of
+    /// the helper would branch the game into half a cave: it throws rather than hand that over.
+    /// </summary>
+    public static SaveFilePatch Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < HeaderSize)
+        {
+            throw new ProtocolException($"SAVEFILE_PATCH needs {HeaderSize} bytes of header, got {payload.Length}");
+        }
+
+        var r = new SpanReader(payload);
+        int count = r.ReadU16();
+        r.Skip(2);
+        uint stamp = r.ReadU32();
+
+        if (r.Remaining < count * WordSize)
+        {
+            throw new ProtocolException(
+                $"SAVEFILE_PATCH names {count} words but carries {r.Remaining} bytes, {count * WordSize} were needed");
+        }
+
+        var words = new PatchWord[count];
+        for (int i = 0; i < count; i++) words[i] = new PatchWord(r.ReadU32(), r.ReadU32());
+
+        if (r.Remaining < ByteHeaderSize)
+        {
+            throw new ProtocolException($"SAVEFILE_PATCH stops after its {count} words, before the byte list");
+        }
+
+        int byteCount = r.ReadU16();
+        r.Skip(2);
+
+        if (r.Remaining < byteCount * ByteSize)
+        {
+            throw new ProtocolException(
+                $"SAVEFILE_PATCH names {byteCount} bytes but carries {r.Remaining} bytes of them, {byteCount * ByteSize} were needed");
+        }
+
+        var bytes = new PatchByte[byteCount];
+        for (int i = 0; i < byteCount; i++)
+        {
+            uint address = r.ReadU32();
+            byte value = r.ReadU8();
+            r.Skip(3);
+            bytes[i] = new PatchByte(address, value);
+        }
+
+        return new SaveFilePatch(stamp, words, bytes);
+    }
+
+    /// <summary>The other direction, for the fake console the tests drive.</summary>
+    public byte[] ToBytes()
+    {
+        var bytes = new byte[HeaderSize + Words.Length * WordSize + ByteHeaderSize + Bytes.Length * ByteSize];
+        var w = new SpanWriter(bytes);
+        w.WriteU16((ushort)Words.Length);
+        w.WriteZeros(2);
+        w.WriteU32(Stamp);
+        foreach (var word in Words)
+        {
+            w.WriteU32(word.Address);
+            w.WriteU32(word.Word);
+        }
+
+        w.WriteU16((ushort)Bytes.Length);
+        w.WriteZeros(2);
+        foreach (var single in Bytes)
+        {
+            w.WriteU32(single.Address);
+            w.WriteU8(single.Value);
+            w.WriteZeros(3);
+        }
+
+        return bytes;
+    }
+
+    /// <summary>
+    /// The same words and the same bytes, in the same order. Two replies that agree on those are
+    /// the same helper whatever their stamps say, and they are what an RPCS3 patch file holds.
+    /// </summary>
+    public bool SameHelper(IReadOnlyList<PatchWord> words, IReadOnlyList<PatchByte> bytes) =>
+        Words.SequenceEqual(words) && Bytes.SequenceEqual(bytes);
+}
+
 /// <summary>
 /// One row of SAVEFILE_LIST, section 5.13: a save on the console, its size and the CRC32 the
 /// console keeps beside it. <see cref="Name"/> is the file name, <c>.sav</c> and all.

@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(44, true)]     // the build before the one this client ships with
-    [InlineData(45, false)]    // exactly the expected build: the Deadlocked load and cancel wait for the game
-    [InlineData(46, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(46, true)]     // the build before the one this client ships with (a parked test build)
+    [InlineData(47, false)]    // exactly the expected build: the savefile helper works under RPCS3 through a patch
+    [InlineData(48, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(45, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(47, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
