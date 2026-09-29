@@ -34,8 +34,63 @@ public static class GamePanel
     {
         Drafts.Clear();
         LastSet.Clear();
+        CodeFeaturesDrawn.Clear();
+        AsideButtonsDrawn.Clear();
         SubPageNav.Open = null;
         ResetPresets();
+    }
+
+    /// <summary>
+    /// Whether a feature is greyed out because it patches game code: on a platform that refuses code
+    /// patches (RPCS3) while qwark's code switches are not in the game. On a console, and under
+    /// RPCS3 once the switches are in, such a feature is drawn and sent like any other. Every place
+    /// that draws a feature asks this, so the Game page, the Unlocks tabs and the previous-session
+    /// prompt agree.
+    /// </summary>
+    public static bool CodeFeatureBlocked(Feature feature, SessionInfo session) =>
+        feature.WritesCode && session.CodeFeaturesUnavailable;
+
+    /// <summary>
+    /// What each code-patching feature was last drawn as, by label: true when it could be pressed.
+    /// For the summary line of a headless run, which has no other way to see a greyed-out box.
+    /// </summary>
+    private static readonly SortedDictionary<string, bool> CodeFeaturesDrawn = new(StringComparer.Ordinal);
+
+    /// <summary>"Label:enabled" or "Label:greyed" for every code-patching feature drawn this session.</summary>
+    public static string CodeFeatureSummary =>
+        string.Join(" ", CodeFeaturesDrawn.Select(pair => $"{pair.Key.Replace(' ', '_')}:{(pair.Value ? "enabled" : "greyed")}"));
+
+    /// <summary>
+    /// The greyed-out look for a code-patching feature, with the tooltip that says how to get it:
+    /// true when the control is to be greyed. Called before the control is drawn, and
+    /// <see cref="EndCodeFeature"/> after it.
+    /// </summary>
+    private static bool BeginCodeFeature(AppState state, Feature feature)
+    {
+        bool blocked = CodeFeatureBlocked(feature, state.Session);
+        if (feature.WritesCode) CodeFeaturesDrawn[feature.Label] = !blocked;
+        ImGui.BeginDisabled(blocked);
+        return blocked;
+    }
+
+    private static void EndCodeFeature(bool blocked)
+    {
+        ImGui.EndDisabled();
+
+        // AllowWhenDisabled: a greyed-out control is exactly the one whose tooltip is the point.
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NeedsQwarkPatches);
+    }
+
+    /// <summary>
+    /// A button for an ACTION, greyed with the reason when it patches game code and cannot now.
+    /// The Unlocks panel draws its section actions with this too.
+    /// </summary>
+    public static bool ActionButton(AppState state, Feature feature, Vector2 size)
+    {
+        bool blocked = BeginCodeFeature(state, feature);
+        bool pressed = ImGui.Button(feature.Label, size);
+        EndCodeFeature(blocked);
+        return pressed && !blocked;
     }
 
     /// <summary>The feature's current value: its readout when it names one, else what we last sent.</summary>
@@ -689,9 +744,11 @@ public static class GamePanel
             state.Run(() => state.Client.PosLoadAsync());
         }
 
-        // The savefile helper is a code cave the console branches the game into, which is the one
-        // thing RPCS3 cannot do: the buttons stay where they are and say why instead.
-        bool blocked = state.CodePatchesUnsupported;
+        // The savefile helper is a code cave the console branches the game into. qwark writes it in
+        // itself on a console; under RPCS3 it is there only when qwark's patches put it in at this
+        // boot, which SAVEFILE_INFO says, the same test the Save files panel makes. Without it the
+        // buttons stay where they are and say how to get it.
+        bool blocked = AsideBlocked(state.Session, state.SaveFile);
         ImGui.BeginDisabled(blocked);
         DrawAsideButton(state, describe.SaveAsideAction, blocked, wide);
         DrawAsideButton(state, describe.LoadAsideAction, blocked, wide);
@@ -706,13 +763,28 @@ public static class GamePanel
         }
     }
 
+    /// <summary>
+    /// Whether the two flagged savefile ACTIONs are greyed out: under RPCS3 while the savefile
+    /// helper is not in the game (<see cref="SaveFilesPanel.HelperIn"/>). Never on a console.
+    /// </summary>
+    public static bool AsideBlocked(SessionInfo session, SaveFileInfo info) => !SaveFilesPanel.HelperIn(session, info);
+
+    /// <summary>What each set-aside button was last drawn as, by label: true when it could be pressed. For the headless summary.</summary>
+    private static readonly SortedDictionary<string, bool> AsideButtonsDrawn = new(StringComparer.Ordinal);
+
+    /// <summary>"Label:enabled" or "Label:greyed" for each set-aside button drawn this session.</summary>
+    public static string AsideButtonSummary =>
+        string.Join(" ", AsideButtonsDrawn.Select(pair => $"{pair.Key.Replace(' ', '_')}:{(pair.Value ? "enabled" : "greyed")}"));
+
     /// <summary>One of the two flagged savefile ACTIONs, or nothing for a game that has no helper.</summary>
     private static void DrawAsideButton(AppState state, Feature? feature, bool blocked, Vector2 size)
     {
         if (feature is not { } action) return;
 
+        AsideButtonsDrawn[action.Label] = !blocked;
+
         ImGui.PushID(action.Id);
-        if (ImGui.Button(action.Label, size))
+        if (ImGui.Button(action.Label, size) && !blocked)
         {
             byte id = action.Id;
             state.Run(() => state.Client.FeatureTriggerAsync(id));
@@ -721,7 +793,7 @@ public static class GamePanel
         ImGui.PopID();
 
         // AllowWhenDisabled: the greyed-out button is the one whose tooltip is the point.
-        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NoCodePatches);
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NeedsSaveFileHelper);
     }
 
     /// <summary>The gap between the widest label in a column and that column's "on boot" boxes.</summary>
@@ -776,29 +848,25 @@ public static class GamePanel
             ulong bit = 1UL << feature.Id;
             bool on = (session.ToggleState & bit) != 0;
 
-            // A cheat that patches instructions is nothing this platform can do (RPCS3), and
-            // qwark would answer UNSUPPORTED: the box is drawn, so the cheat is still listed
-            // where it belongs, but it cannot be pressed and the tooltip says why.
-            bool blocked = feature.WritesCode && state.CodePatchesUnsupported;
-
-            ImGui.BeginDisabled(blocked);
-            if (ImGui.Checkbox(feature.Label, ref on))
+            // A cheat that patches instructions is nothing RPCS3 can take while the game runs,
+            // and qwark answers UNSUPPORTED, until qwark's code switches are in the game: then its
+            // flag byte is what qwark writes, and it works like any other toggle. Until then the
+            // box is drawn, so the cheat is still listed where it belongs, but it cannot be
+            // pressed and the tooltip says how to get it.
+            bool blocked = BeginCodeFeature(state, feature);
+            if (ImGui.Checkbox(feature.Label, ref on) && !blocked)
             {
                 byte id = feature.Id;
                 uint value = on ? 1u : 0u;
                 state.Run(() => state.Client.FeatureSetAsync(id, value));
             }
 
-            ImGui.EndDisabled();
+            EndCodeFeature(blocked);
 
-            // AllowWhenDisabled: a greyed-out box is exactly the one whose tooltip is the point. A
-            // LIVE toggle gets none: that the console reads it back out of the game is how every
-            // toggle here behaves as far as the user is concerned, so saying so was noise.
-            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-            {
-                if (blocked) ImGui.SetTooltip(Ui.NoCodePatches);
-                else if (feature.WritesCode) ImGui.SetTooltip("Patches game code");
-            }
+            // A code-patching toggle that can be pressed says what it is. A LIVE toggle gets no
+            // tooltip: that the console reads it back out of the game is how every toggle here
+            // behaves as far as the user is concerned, so saying so was noise.
+            if (!blocked && feature.WritesCode && ImGui.IsItemHovered()) ImGui.SetTooltip("Patches game code");
 
             // A live toggle is a game-memory byte qwark polls: there is nothing to apply on boot
             // and FEATURE_SET_AUTO is refused for it, so the box is left out. The column offsets
@@ -820,7 +888,7 @@ public static class GamePanel
                 }
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 {
-                    ImGui.SetTooltip(blocked ? Ui.NoCodePatches : "Auto-apply this toggle when the game boots");
+                    ImGui.SetTooltip(blocked ? Ui.NeedsQwarkPatches : "Auto-apply this toggle when the game boots");
                 }
             }
 
@@ -830,7 +898,7 @@ public static class GamePanel
         ImGui.EndTable();
     }
 
-    /// <summary>Actions as a grid of equal-width buttons.</summary>
+    /// <summary>Actions as a grid of equal-width buttons, one that patches game code greyed as a toggle would be.</summary>
     private static void DrawActionGrid(AppState state, Feature[] actions)
     {
         if (actions.Length == 0) return;
@@ -842,7 +910,7 @@ public static class GamePanel
         {
             ImGui.TableNextColumn();
             ImGui.PushID(feature.Id);
-            if (ImGui.Button(feature.Label, new Vector2(-1, 0)))
+            if (ActionButton(state, feature, new Vector2(-1, 0)))
             {
                 byte id = feature.Id;
                 state.Run(() => state.Client.FeatureTriggerAsync(id));

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
@@ -16,6 +17,23 @@ public readonly record struct PatchRange(uint Start, ulong End)
 /// </summary>
 public static class PatchRanges
 {
+    /// <summary>
+    /// What each entry read out of a patch file covers, worked out once per entry. The Connection
+    /// panel asks every frame whether a mod stands in the way of qwark's own patches, and an entry
+    /// is never changed once read (a changed one is a new record), so the answer is kept with it.
+    /// </summary>
+    private static readonly ConditionalWeakTable<PatchFileEntry, IReadOnlyList<PatchRange>> EntryRanges = new();
+
+    private static readonly ConditionalWeakTable<PatchReply, IReadOnlyList<PatchRange>> ReplyRanges = new();
+
+    /// <summary>The stretches one patch file entry covers.</summary>
+    public static IReadOnlyList<PatchRange> Of(PatchFileEntry entry) =>
+        EntryRanges.GetValue(entry, e => Of(e.Words, e.Bytes));
+
+    /// <summary>The stretches a patch qwark handed out covers.</summary>
+    public static IReadOnlyList<PatchRange> Of(PatchReply reply) =>
+        ReplyRanges.GetValue(reply, r => Of(r.Words, r.Bytes));
+
     /// <summary>The stretches <paramref name="words"/> and <paramref name="bytes"/> cover, sorted and with touching ones joined.</summary>
     public static IReadOnlyList<PatchRange> Of(IReadOnlyList<PatchWord> words, IReadOnlyList<PatchByte> bytes)
     {

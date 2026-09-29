@@ -23,6 +23,15 @@ public enum Opcode : ushort
     FeatureSetAuto = 0x0023,
     FeatureOptions = 0x0024,
 
+    /// <summary>
+    /// Revision 1.17: the running game's code switches as address and value words, for a platform
+    /// that cannot patch code. Each instruction a WRITES_CODE feature patches becomes a branch to a
+    /// trampoline that reads a flag byte of that feature, so with the switches in the game those
+    /// features are toggled by writing data. The reply is laid out exactly as SAVEFILE_PATCH's,
+    /// and the client puts it into the same RPCS3 patch file.
+    /// </summary>
+    SwitchPatch = 0x0025,
+
     // 5.4 Memory
     MemRead = 0x0030,
     MemWrite = 0x0031,
@@ -373,6 +382,15 @@ public enum SessionFlags : byte
     /// from. The capture-time hold of COMBO_SUSPEND is a different thing and does not show here.
     /// </summary>
     CombosOff = 1 << 3,
+
+    /// <summary>
+    /// The running game's code switches are in memory (revision 1.17): the RPCS3 patch SWITCH_PATCH
+    /// describes was applied when the game booted, and qwark-rpcs3 has found it there, byte for byte.
+    /// It looks once per session. With this set every WRITES_CODE feature works under
+    /// <see cref="NoCodePatches"/> exactly as any other one does. Never set on a console, where qwark
+    /// patches the instructions itself.
+    /// </summary>
+    CodeSwitches = 1 << 4,
 }
 
 /// <summary>

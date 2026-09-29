@@ -214,6 +214,7 @@ if (exitAfter > 0)
                       $"target={target}{helper} panel=\"{panelOnExit}\" " +
                       $"connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
                       $"emulator={sess?.IsEmulator ?? false} nocodepatches={sess?.CodePatchesUnsupported ?? false} " +
+                      $"codeswitches={sess?.CodeSwitches ?? false} " +
                       $"features={state.Describe.Features.Length} planets={state.Planets.Length} " +
                       $"slots={state.Positions.Slots.Length} mods={state.ConsoleMods.Length} " +
                       $"watches={state.Watches.Length} combos={state.Combos.Length} " +
@@ -221,7 +222,15 @@ if (exitAfter > 0)
                       $"mobyrows={MemoryPanel.MobyRowCount} skins={SkinLibrary.List().Length} " +
                       $"mobylayouts={MobyLayouts.All.Count} skin='{InputDisplayPanel.Status}' " +
                       $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
-                      $"sfinstalled={state.SaveFile.Installed} sfpatch={state.Rpcs3Patch.LastStatus.State} " +
+                      $"sfinstalled={state.SaveFile.Installed} sfpatch={state.Rpcs3Patch.LastStatus.Helper.State} " +
+                      $"switchpatch={state.Rpcs3Patch.LastStatus.Switches.State} " +
+
+                      // What the Connection panel's RPCS3 section said about qwark's patches, and
+                      // what the Game page drew each code-patching feature and each set-aside
+                      // button as, the last time each was drawn.
+                      $"qwarkpatches=\"{state.Rpcs3Patch.LastStatus.Message}\" " +
+                      $"writescode=[{GamePanel.CodeFeatureSummary}] " +
+                      $"asidebuttons=[{GamePanel.AsideButtonSummary}] " +
 
                       // What the Mods panel's Status column said for each mod under RPCS3, the last
                       // time it was drawn: empty unless the run ended on that panel.

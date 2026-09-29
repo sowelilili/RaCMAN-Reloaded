@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using RaCMAN.App;
+using RaCMAN.App.Panels;
 using RaCMAN.Protocol.Testing;
 using YamlDotNet.RepresentationModel;
 
@@ -41,7 +42,7 @@ public class Rpcs3PatchTests : IDisposable
         new(0x0004A2C8, 0x480A5D39),
     };
 
-    /// <summary>A request byte cleared at load, as RaC2's have to be.</summary>
+    /// <summary>A request byte cleared at load, as a console install clears the helper's before it hooks.</summary>
     private static readonly PatchByte[] Bytes = { new(0x010CD71D, 0x00) };
 
     private static PatchReply Patch(uint stamp = 0x1A2B3C4D, PatchWord[]? words = null, PatchByte[]? bytes = null) =>
@@ -531,7 +532,7 @@ public class Rpcs3PatchTests : IDisposable
     // ================================================================ the patch file
 
     private const string ExpectedPatchFile =
-        "# RaCMAN Reloaded writes this file: qwark's savefile helper and the mods enabled in RaCMAN. Edits made here are lost.\n"
+        "# RaCMAN Reloaded writes this file: qwark's savefile helper and code switches, and the mods enabled in RaCMAN. Edits made here are lost.\n"
         + "Version: 1.2\n"
         + "\n"
         + "PPU-ec77eaf73a4f55d1c4ece532c3be6db0011e49ca:\n"
@@ -886,9 +887,13 @@ public class Rpcs3PatchTests : IDisposable
 
     // ================================================================ the decision
 
-    private static SaveFilePatchSession Session(bool connected = true, bool rpcs3 = true, bool ingame = true,
-        bool known = true, bool installed = false) =>
-        new(connected, rpcs3, ingame, known, Title, 47, new SaveFileInfo(true, installed, installed, 0, 0x1000));
+    private const QwarkPatchPart HelperPart = QwarkPatchPart.SaveFileHelper;
+
+    private const QwarkPatchPart SwitchesPart = QwarkPatchPart.CodeSwitches;
+
+    private static QwarkPatchSession Session(bool connected = true, bool rpcs3 = true, bool ingame = true,
+        bool known = true, bool installed = false, bool switches = false) =>
+        new(connected, rpcs3, ingame, known, Title, 50, new SaveFileInfo(true, installed, installed, 0, 0x1000), switches);
 
     private static Rpcs3PatchDisk Disk(PatchFileEntry? entry = null, bool enabled = false, bool applied = false,
         PatchFileKind kind = PatchFileKind.Ours, string problem = "")
@@ -901,61 +906,93 @@ public class Rpcs3PatchTests : IDisposable
             new ExecutableHashLookup(Hash, string.Empty, applied), file, enabled, problem);
     }
 
-    private static readonly SaveFilePatchReply Words47 = SaveFilePatchReply.Ok(Patch());
+    /// <summary>
+    /// A look at RPCS3's folder that finds these entries for the running executable, the ones named
+    /// in <paramref name="enabled"/> switched on and the ones in <paramref name="applied"/> applied
+    /// by RPCS3 at this boot, all by description.
+    /// </summary>
+    private static Rpcs3PatchDisk DiskWith(IEnumerable<PatchFileEntry> entries, IEnumerable<string>? enabled = null,
+        IEnumerable<string>? applied = null)
+    {
+        var folder = Rpcs3Patches.Build(@"C:\rpcs3", Windows(), "test");
+        var on = (enabled ?? Array.Empty<string>()).ToArray();
+        var file = new PatchFileState("C:\\rpcs3\\patches\\x", PatchFileKind.Ours, entries.ToList(), string.Empty);
+        var appliedAtBoot = (applied ?? Array.Empty<string>()).ToArray();
+        return new Rpcs3PatchDisk(Title, new Rpcs3FolderLookup(folder, string.Empty),
+            new ExecutableHashLookup(Hash, string.Empty, appliedAtBoot.Contains(Rpcs3Patches.Description), Applied: appliedAtBoot),
+            file, on.Contains(Rpcs3Patches.Description), string.Empty, on);
+    }
 
-    private static SaveFilePatchState Decide(SaveFilePatchSession session, SaveFilePatchReply reply, Rpcs3PatchDisk? disk) =>
-        Rpcs3PatchController.Decide(session, reply, disk).State;
+    private static readonly QwarkPatchReply Words47 = QwarkPatchReply.Ok(Patch());
+
+    /// <summary>Code switches as SWITCH_PATCH hands them out: a trampoline, the branch at its site, and a flag byte cleared.</summary>
+    private static readonly PatchWord[] SwitchWords =
+    {
+        new(0x000F2000, 0x3D60010D),
+        new(0x000F2004, 0x896BE000),
+        new(0x0004B000, 0x480A7000),
+    };
+
+    private static readonly PatchByte[] SwitchBytes = { new(0x010CE000, 0x00) };
+
+    private static readonly QwarkPatchReply Switches50 = QwarkPatchReply.Ok(new PatchReply(0x5EED5EED, SwitchWords, SwitchBytes));
+
+    private static PatchFileEntry SwitchesEntry(PatchWord[]? words = null, string hash = Hash, string game = "RaC1") =>
+        new(hash, game, words ?? SwitchWords, SwitchBytes, Rpcs3Patches.NotesForSwitches(50, 0x5EED5EED), Rpcs3Patches.SwitchesDescription);
+
+    private static QwarkPatchState Decide(QwarkPatchSession session, QwarkPatchReply reply, Rpcs3PatchDisk? disk) =>
+        Rpcs3PatchController.Decide(HelperPart, session, reply, disk).State;
 
     [Fact]
     public void BeforeThereIsAGameThereIsOnlyWaiting()
     {
-        Assert.Equal(SaveFilePatchState.Waiting, Decide(Session(connected: false), Words47, Disk()));
-        Assert.Equal(SaveFilePatchState.Waiting, Decide(Session(ingame: false), Words47, Disk()));
-        Assert.Equal(SaveFilePatchState.Waiting, Decide(Session(), SaveFilePatchReply.Pending, Disk()));
-        Assert.Equal(SaveFilePatchState.Waiting, Decide(Session(), Words47, null));
+        Assert.Equal(QwarkPatchState.Waiting, Decide(Session(connected: false), Words47, Disk()));
+        Assert.Equal(QwarkPatchState.Waiting, Decide(Session(ingame: false), Words47, Disk()));
+        Assert.Equal(QwarkPatchState.Waiting, Decide(Session(), QwarkPatchReply.Pending, Disk()));
+        Assert.Equal(QwarkPatchState.Waiting, Decide(Session(), Words47, null));
     }
 
     [Fact]
     public void AConsoleThatPatchesCodeItselfHasNothingToShow()
     {
-        Assert.Equal(SaveFilePatchState.Hidden, Decide(Session(rpcs3: false), Words47, Disk()));
+        Assert.Equal(QwarkPatchState.Hidden, Decide(Session(rpcs3: false), Words47, Disk()));
     }
 
     [Fact]
     public void TheHelperInTheGameIsActiveWhateverTheFilesSay()
     {
-        Assert.Equal(SaveFilePatchState.Active, Decide(Session(installed: true), SaveFilePatchReply.NotAsked, null));
+        Assert.Equal(QwarkPatchState.Active, Decide(Session(installed: true), QwarkPatchReply.NotAsked, null));
     }
 
     [Fact]
     public void NotInstalledOutOfDateAndSwitchedOffAllOfferTheButton()
     {
-        var missing = Rpcs3PatchController.Decide(Session(), Words47, Disk());
-        Assert.Equal(SaveFilePatchState.Install, missing.State);
+        var missing = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk());
+        Assert.Equal(QwarkPatchState.Install, missing.State);
         Assert.True(missing.CanInstall);
         Assert.StartsWith("Not installed", missing.Message);
 
-        var stale = Rpcs3PatchController.Decide(Session(), Words47, Disk(Entry(words: new[] { new PatchWord(1, 2) }), enabled: true));
-        Assert.Equal(SaveFilePatchState.Install, stale.State);
+        var stale = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk(Entry(words: new[] { new PatchWord(1, 2) }), enabled: true));
+        Assert.Equal(QwarkPatchState.Install, stale.State);
         Assert.StartsWith("Out of date", stale.Message);
 
         // A file from before the byte list, with the right words and no bytes, is out of date too.
-        var noBytes = Rpcs3PatchController.Decide(Session(), Words47,
+        var noBytes = Rpcs3PatchController.Decide(HelperPart, Session(), Words47,
             Disk(Entry(bytes: Array.Empty<PatchByte>()), enabled: true));
-        Assert.Equal(SaveFilePatchState.Install, noBytes.State);
+        Assert.Equal(QwarkPatchState.Install, noBytes.State);
         Assert.StartsWith("Out of date", noBytes.Message);
 
-        var off = Rpcs3PatchController.Decide(Session(), Words47, Disk(Entry(), enabled: false));
-        Assert.Equal(SaveFilePatchState.Install, off.State);
+        var off = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk(Entry(), enabled: false));
+        Assert.Equal(QwarkPatchState.Install, off.State);
         Assert.Contains("switch it off", off.Message);
     }
 
     [Fact]
     public void TheCurrentWordsSwitchedOnMeanRestartTheGame()
     {
-        var restart = Rpcs3PatchController.Decide(Session(), Words47, Disk(Entry(), enabled: true));
+        var restart = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk(Entry(), enabled: true));
 
-        Assert.Equal(SaveFilePatchState.RestartGame, restart.State);
+        Assert.Equal(QwarkPatchState.RestartGame, restart.State);
         Assert.False(restart.CanInstall);
         Assert.Contains("Restart the game in RPCS3", restart.Message);
     }
@@ -963,48 +1000,49 @@ public class Rpcs3PatchTests : IDisposable
     [Fact]
     public void APatchRpcs3AppliedThatQwarkDoesNotFindIsSaid()
     {
-        var odd = Rpcs3PatchController.Decide(Session(), Words47, Disk(Entry(), enabled: true, applied: true));
+        var odd = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk(Entry(), enabled: true, applied: true));
 
-        Assert.Equal(SaveFilePatchState.Unavailable, odd.State);
-        Assert.Contains("qwark does not find the helper", odd.Message);
+        Assert.Equal(QwarkPatchState.Unavailable, odd.State);
+        Assert.Contains("qwark does not find the savefile helper", odd.Message);
     }
 
     [Fact]
     public void EveryReasonItCannotBeInstalledIsSaid()
     {
-        var noHelper = Rpcs3PatchController.Decide(Session(), new SaveFilePatchReply(SaveFilePatchReplyKind.NoHelper), Disk());
-        Assert.Equal(SaveFilePatchState.Unavailable, noHelper.State);
+        // A game with no helper leaves the helper out of the panel altogether.
+        var noHelper = Rpcs3PatchController.Decide(HelperPart, Session(), new QwarkPatchReply(QwarkPatchReplyKind.NotSupported), Disk());
+        Assert.Equal(QwarkPatchState.Absent, noHelper.State);
         Assert.Contains("no savefile helper", noHelper.Message);
 
-        var old = Rpcs3PatchController.Decide(Session(), new SaveFilePatchReply(SaveFilePatchReplyKind.TooOld), Disk());
+        var old = Rpcs3PatchController.Decide(HelperPart, Session(), new QwarkPatchReply(QwarkPatchReplyKind.TooOld), Disk());
         Assert.Contains($"It needs build {QwarkClient.ExpectedQwarkBuild}", old.Message);
 
-        var failed = Rpcs3PatchController.Decide(Session(),
-            new SaveFilePatchReply(SaveFilePatchReplyKind.Failed, Problem: "the link went away"), Disk());
+        var failed = Rpcs3PatchController.Decide(HelperPart, Session(),
+            new QwarkPatchReply(QwarkPatchReplyKind.Failed, Problem: "the link went away"), Disk());
         Assert.Equal("the link went away", failed.Message);
 
-        var unknown = Rpcs3PatchController.Decide(Session(known: false), Words47, Disk());
-        Assert.Equal(SaveFilePatchState.Unavailable, unknown.State);
+        var unknown = Rpcs3PatchController.Decide(HelperPart, Session(known: false), Words47, Disk());
+        Assert.Equal(QwarkPatchState.Unavailable, unknown.State);
 
-        var noFolder = Rpcs3PatchController.Decide(Session(), Words47,
+        var noFolder = Rpcs3PatchController.Decide(HelperPart, Session(), Words47,
             new Rpcs3PatchDisk(Title, new Rpcs3FolderLookup(null, "RPCS3 is not running"), null, null, false, string.Empty));
-        Assert.Equal(SaveFilePatchState.Unavailable, noFolder.State);
+        Assert.Equal(QwarkPatchState.Unavailable, noFolder.State);
         Assert.True(noFolder.FolderProblem);
         Assert.Equal("RPCS3 is not running", noFolder.Message);
 
         var folder = Rpcs3Patches.Build(@"C:\rpcs3", Windows(), "test");
-        var noHash = Rpcs3PatchController.Decide(Session(), Words47,
+        var noHash = Rpcs3PatchController.Decide(HelperPart, Session(), Words47,
             new Rpcs3PatchDisk(Title, new Rpcs3FolderLookup(folder, string.Empty),
                 new ExecutableHashLookup(null, "Boot NPEA00385 in RPCS3 first."), null, false, string.Empty));
-        Assert.Equal(SaveFilePatchState.Unavailable, noHash.State);
+        Assert.Equal(QwarkPatchState.Unavailable, noHash.State);
         Assert.False(noHash.FolderProblem);
         Assert.Equal("Boot NPEA00385 in RPCS3 first.", noHash.Message);
 
-        var foreign = Rpcs3PatchController.Decide(Session(), Words47, Disk(kind: PatchFileKind.Foreign));
-        Assert.Equal(SaveFilePatchState.Unavailable, foreign.State);
+        var foreign = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk(kind: PatchFileKind.Foreign));
+        Assert.Equal(QwarkPatchState.Unavailable, foreign.State);
         Assert.Contains("not written by RaCMAN", foreign.Message);
 
-        var config = Rpcs3PatchController.Decide(Session(), Words47, Disk(problem: "patch_config.yml is not a YAML map"));
+        var config = Rpcs3PatchController.Decide(HelperPart, Session(), Words47, Disk(problem: "patch_config.yml is not a YAML map"));
         Assert.Equal("patch_config.yml is not a YAML map", config.Message);
     }
 
@@ -1012,7 +1050,302 @@ public class Rpcs3PatchTests : IDisposable
     public void ALookAtAnotherTitlesFolderIsNotTakenForThisOne()
     {
         var elsewhere = Disk(Entry(), enabled: true) with { TitleId = "NPEA00386" };
-        Assert.Equal(SaveFilePatchState.Waiting, Decide(Session(), Words47, elsewhere));
+        Assert.Equal(QwarkPatchState.Waiting, Decide(Session(), Words47, elsewhere));
+    }
+
+    // ================================================================ the code switches, part by part
+
+    private static QwarkPatchStatus DecideSwitches(QwarkPatchSession session, Rpcs3PatchDisk? disk, QwarkPatchReply? reply = null) =>
+        Rpcs3PatchController.Decide(SwitchesPart, session, reply ?? Switches50, disk);
+
+    [Fact]
+    public void TheSwitchesAreActiveFromTheSessionFlagWhateverTheFilesSay()
+    {
+        var active = DecideSwitches(Session(switches: true), null, QwarkPatchReply.NotAsked);
+        Assert.Equal(QwarkPatchState.Active, active.State);
+        Assert.Contains("cheats that patch game code work", active.Message);
+
+        // The helper's own byte says nothing about the switches, and the other way round.
+        Assert.Equal(QwarkPatchState.Waiting, DecideSwitches(Session(installed: true), null, QwarkPatchReply.NotAsked).State);
+        Assert.Equal(QwarkPatchState.Waiting, Decide(Session(switches: true), QwarkPatchReply.NotAsked, null));
+    }
+
+    [Fact]
+    public void TheSwitchesGoFromNotInstalledToRestartTheGameByTheirOwnEntry()
+    {
+        var helperOnly = DiskWith(new[] { Entry() }, enabled: new[] { Rpcs3Patches.Description });
+        var missing = DecideSwitches(Session(), helperOnly);
+        Assert.Equal(QwarkPatchState.Install, missing.State);
+        Assert.StartsWith("Not installed", missing.Message);
+        Assert.Contains("cheats that patch game code need it", missing.Message);
+
+        var stale = DecideSwitches(Session(), DiskWith(new[] { SwitchesEntry(new[] { new PatchWord(0x0004B000, 0x60000000) }) },
+            enabled: new[] { Rpcs3Patches.SwitchesDescription }));
+        Assert.Equal(QwarkPatchState.Install, stale.State);
+        Assert.StartsWith("Out of date", stale.Message);
+
+        // The helper switched on is not the switches switched on.
+        var off = DecideSwitches(Session(), DiskWith(new[] { Entry(), SwitchesEntry() }, enabled: new[] { Rpcs3Patches.Description }));
+        Assert.Equal(QwarkPatchState.Install, off.State);
+        Assert.Contains("switch it off", off.Message);
+
+        var on = DiskWith(new[] { Entry(), SwitchesEntry() }, enabled: new[] { Rpcs3Patches.SwitchesDescription });
+        Assert.Equal(QwarkPatchState.RestartGame, DecideSwitches(Session(), on).State);
+
+        var applied = DiskWith(new[] { SwitchesEntry() }, enabled: new[] { Rpcs3Patches.SwitchesDescription },
+            applied: new[] { Rpcs3Patches.SwitchesDescription });
+        var odd = DecideSwitches(Session(), applied);
+        Assert.Equal(QwarkPatchState.Unavailable, odd.State);
+        Assert.Contains("qwark does not find the code switches", odd.Message);
+    }
+
+    [Fact]
+    public void EveryReasonTheSwitchesCannotBeInstalledIsSaid()
+    {
+        var none = DecideSwitches(Session(), Disk(), new QwarkPatchReply(QwarkPatchReplyKind.NotSupported));
+        Assert.Equal(QwarkPatchState.Absent, none.State);
+        Assert.Equal("This game has no code switches.", none.Message);
+
+        var old = DecideSwitches(Session(), Disk(), new QwarkPatchReply(QwarkPatchReplyKind.TooOld));
+        Assert.Equal(QwarkPatchState.Unavailable, old.State);
+        Assert.Equal($"qwark-rpcs3 build 50 cannot supply the code switches. It needs build {QwarkClient.ExpectedQwarkBuild}.", old.Message);
+
+        // The reasons that belong to the folder are the helper's, word for word, so the panel says them once.
+        var foreign = Disk(kind: PatchFileKind.Foreign);
+        Assert.Equal(Rpcs3PatchController.Decide(HelperPart, Session(), Words47, foreign), DecideSwitches(Session(), foreign));
+        Assert.Equal(Rpcs3PatchController.Decide(HelperPart, Session(connected: false), Words47, null),
+            DecideSwitches(Session(connected: false), null));
+    }
+
+    [Fact]
+    public void AnEnabledModOverTheSwitchesIsNamedAndADisabledOneIsNot()
+    {
+        var crash = new PatchFileEntry(Hash, "Deadlocked", new[] { new PatchWord(0x0004B000, 0x38600000) }, Array.Empty<PatchByte>(),
+            Rpcs3Patches.NotesForMod(1, 49, 2), Rpcs3Patches.ModDescription("DL Crash Patches", "dl-cs"), "someone");
+
+        var enabled = DecideSwitches(Session(), DiskWith(new[] { crash }, enabled: new[] { crash.Description }));
+        Assert.Equal(QwarkPatchState.Unavailable, enabled.State);
+        Assert.Equal("DL Crash Patches is enabled on the Mods panel and writes to the same addresses as the code switches. "
+                     + "Disable it there first, then install.", enabled.Message);
+
+        // In the file and switched off, RPCS3 applies nothing of it.
+        Assert.Equal(QwarkPatchState.Install, DecideSwitches(Session(), DiskWith(new[] { crash })).State);
+
+        // And it is not in the helper's way.
+        Assert.Equal(QwarkPatchState.Install,
+            Rpcs3PatchController.Decide(HelperPart, Session(), Words47, DiskWith(new[] { crash }, enabled: new[] { crash.Description })).State);
+    }
+
+    // ================================================================ both parts, as the panel says them
+
+    private static QwarkPatchesStatus Both(QwarkPatchSession session, Rpcs3PatchDisk? disk,
+        QwarkPatchReply? helper = null, QwarkPatchReply? switches = null) =>
+        Rpcs3PatchController.Decide(session, helper ?? Words47, switches ?? Switches50, disk);
+
+    [Fact]
+    public void AReasonBothPartsShareIsSaidOnce()
+    {
+        var offline = Both(Session(connected: false), null);
+        Assert.Equal("Connect to see whether qwark's patches are installed.", Assert.Single(offline.Lines).Text);
+        Assert.Equal(QwarkPatchState.Waiting, offline.State);
+
+        var nothing = Both(Session(), Disk());
+        Assert.Equal(2, nothing.Lines.Count);
+        Assert.Equal("Savefile helper: Not installed. Under RPCS3, saving and loading need it.", nothing.Lines[0].Text);
+        Assert.Equal("Code switches: Not installed. Under RPCS3, the cheats that patch game code need it.", nothing.Lines[1].Text);
+        Assert.Equal(new[] { HelperPart, SwitchesPart }, nothing.Installable);
+
+        var noFolder = Both(Session(), new Rpcs3PatchDisk(Title, new Rpcs3FolderLookup(null, "RPCS3 is not running"), null, null, false, string.Empty));
+        Assert.Equal("RPCS3 is not running", Assert.Single(noFolder.Lines).Text);
+        Assert.True(noFolder.FolderProblem);
+        Assert.False(noFolder.CanInstall);
+
+        Assert.Empty(Both(Session(rpcs3: false), Disk()).Lines);
+        Assert.Equal(QwarkPatchState.Hidden, Both(Session(rpcs3: false), Disk()).State);
+    }
+
+    [Fact]
+    public void EachPartIsReportedByItsOwnState()
+    {
+        var both = new[] { Entry(), SwitchesEntry() };
+
+        // The helper is in the game; the switches were just written and wait for the restart.
+        var mixed = Both(Session(installed: true), DiskWith(both, enabled: new[] { Rpcs3Patches.Description, Rpcs3Patches.SwitchesDescription }));
+        Assert.Equal("Savefile helper: Active. Saving and loading work. Code switches: Installed. Restart the game in RPCS3 to apply changes.",
+            mixed.Message);
+        Assert.Equal(QwarkPatchState.Active, mixed.Lines[0].State);
+        Assert.Equal(QwarkPatchState.RestartGame, mixed.Lines[1].State);
+        Assert.Equal(QwarkPatchState.RestartGame, mixed.State);
+        Assert.False(mixed.CanInstall);
+
+        // Only the part that needs it is offered.
+        var one = Both(Session(installed: true), DiskWith(new[] { Entry() }, enabled: new[] { Rpcs3Patches.Description }));
+        Assert.Equal(new[] { SwitchesPart }, one.Installable);
+        Assert.Equal(QwarkPatchState.Install, one.State);
+
+        var active = Both(Session(installed: true, switches: true), null, QwarkPatchReply.NotAsked, QwarkPatchReply.NotAsked);
+        Assert.Equal(QwarkPatchState.Active, active.State);
+        Assert.Equal(2, active.Lines.Count);
+    }
+
+    [Fact]
+    public void AGameWithOnlyOnePartReportsThatPartAlone()
+    {
+        var helperOnly = Both(Session(), Disk(), switches: new QwarkPatchReply(QwarkPatchReplyKind.NotSupported));
+        Assert.Equal("Savefile helper: Not installed. Under RPCS3, saving and loading need it.", Assert.Single(helperOnly.Lines).Text);
+        Assert.Equal(new[] { HelperPart }, helperOnly.Installable);
+
+        var switchesOnly = Both(Session(), Disk(), helper: new QwarkPatchReply(QwarkPatchReplyKind.NotSupported));
+        Assert.StartsWith("Code switches: Not installed", Assert.Single(switchesOnly.Lines).Text);
+        Assert.Equal(new[] { SwitchesPart }, switchesOnly.Installable);
+
+        var neither = Both(Session(), Disk(), new QwarkPatchReply(QwarkPatchReplyKind.NotSupported),
+            new QwarkPatchReply(QwarkPatchReplyKind.NotSupported));
+        Assert.Equal(QwarkPatchState.Unavailable, neither.State);
+        Assert.Contains("nothing to install", Assert.Single(neither.Lines).Text);
+    }
+
+    [Fact]
+    public void ThePartsAreNamedTheWayTheToastAndTheDialogSayThem()
+    {
+        Assert.Equal("qwark's savefile helper and code switches", QwarkPatchParts.Names(QwarkPatchParts.All.ToList()));
+        Assert.Equal("qwark's code switches", QwarkPatchParts.Names(new[] { SwitchesPart }));
+        Assert.Equal("qwark's savefile helper", QwarkPatchParts.Names(new[] { HelperPart }));
+        Assert.Equal(Rpcs3Patches.SwitchesDescription, SwitchesPart.Description());
+        Assert.Equal("qwark code switches", Rpcs3Patches.SwitchesDescription);
+    }
+
+    // ================================================================ the combined install
+
+    [Fact]
+    public void OneInstallWritesBothEntriesAndSwitchesBothOnKeepingEveryModEntry()
+    {
+        string root = MakeRpcs3();
+        var folder = FolderAt(root);
+        File.WriteAllText(folder.PatchConfigFile, UsersConfig);
+
+        // A mod already enabled for this executable, and another executable's helper from an older build.
+        var mod = new PatchFileEntry(Hash, "RaC1", new[] { new PatchWord(0x005C8318, 0x806D9000) }, Array.Empty<PatchByte>(),
+            Rpcs3Patches.NotesForMod(0x11111111, 49, 0x22222222), Rpcs3Patches.ModDescription("Lock RNG", "lock_rng"), "someone");
+        Rpcs3Patches.Write(Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { mod }), new HashSet<string>());
+        Rpcs3Patches.Write(Rpcs3Patches.Plan(folder, Title, "RaC1", OtherHash, Patch(words: new[] { new PatchWord(1, 2) }), 49),
+            new HashSet<string>());
+
+        var plan = Rpcs3Patches.PlanQwark(folder, Title, "RaC1", Hash, Patch(), Switches50.Patch, 50);
+        Rpcs3Patches.Write(plan, new HashSet<string>());
+
+        var file = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title));
+        Assert.Equal(Words, file.EntryFor(Hash)!.Words);
+        Assert.Equal(SwitchWords, file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!.Words);
+        Assert.Equal(SwitchBytes, file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!.Bytes);
+        Assert.Equal("qwark build 50, switches stamp 0x5eed5eed", file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!.Notes);
+        Assert.Equal(mod.Words, file.ModEntryFor(Hash, "lock_rng")!.Words);
+
+        // The other executable's helper is brought up to date, as it always was. The switches go in
+        // for the running executable and spread only to where they already are, as the helper does.
+        Assert.Equal(Words, file.EntryFor(OtherHash)!.Words);
+        Assert.Null(file.EntryFor(OtherHash, Rpcs3Patches.SwitchesDescription));
+        Assert.True(Rpcs3Patches.IsEnabled(File.ReadAllText(folder.PatchConfigFile), Key(OtherHash), "x"));
+
+        string config = File.ReadAllText(folder.PatchConfigFile);
+        Assert.StartsWith(UsersConfig, config);
+        Assert.True(Rpcs3Patches.IsEnabled(config, Key(), "x"));
+        Assert.True(Rpcs3Patches.IsEnabled(config, file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!.Key(Title), "x"));
+        Assert.True(Rpcs3Patches.IsEnabled(config, file.ModEntryFor(Hash, "lock_rng")!.Key(Title), "x"));
+    }
+
+    [Fact]
+    public void TheSwitchesSpreadToTheGamesOtherExecutablesLikeTheHelper()
+    {
+        var oldSwitches = SwitchesEntry(new[] { new PatchWord(0x0004B000, 0x60000000) }, OtherHash);
+        var rac2Switches = SwitchesEntry(new[] { new PatchWord(0x0014C000, 0x60000000) }, "PPU-2222", "RaC2");
+
+        var merged = Rpcs3Patches.MergeEntries(new[] { oldSwitches, rac2Switches, Entry(OtherHash) }, SwitchesEntry());
+
+        Assert.Equal(SwitchWords, merged[0].Words);
+        Assert.Equal(OtherHash, merged[0].Hash);
+        Assert.Same(rac2Switches, merged[1]);
+
+        // The helper there is not the switches' to touch.
+        Assert.Equal(Entry(OtherHash), merged[2]);
+        Assert.Equal(Hash, merged[3].Hash);
+        Assert.True(merged[3].IsSwitches);
+    }
+
+    [Fact]
+    public void TheSwitchesEntryReadsBackAsOurs()
+    {
+        string text = Rpcs3Patches.BuildPatchFile(Title, new[] { Entry(), SwitchesEntry() });
+
+        Assert.Contains("  \"qwark code switches\":\n", text);
+        var state = Rpcs3Patches.ParsePatchFile(text, "x");
+        Assert.Equal(2, state.Entries.Count);
+        Assert.True(state.Entries[1].IsSwitches);
+        Assert.True(state.Entries[1].IsQwarks);
+        Assert.Null(state.Entries[1].ModDir);
+        Assert.Equal(SwitchWords, state.Entries[1].Words);
+        Assert.Equal(SwitchBytes, state.Entries[1].Bytes);
+        Assert.Equal(SwitchesEntry().Notes, state.Entries[1].Notes);
+        Assert.Equal(Rpcs3Patches.Author, state.Entries[1].Author);
+        Assert.True(state.Entries[1].Holds(Switches50.Patch!));
+        Assert.Equal("the qwark code switches", Rpcs3Patches.NameOf(Rpcs3Patches.SwitchesDescription));
+    }
+
+    [Fact]
+    public void AnInstallRefusesAPartUnderAnEnabledModAndWritesNothing()
+    {
+        string root = MakeRpcs3();
+        var folder = FolderAt(root);
+        var crash = new PatchFileEntry(Hash, "RaC1", new[] { new PatchWord(0x0004B000, 0x38600000) }, Array.Empty<PatchByte>(),
+            Rpcs3Patches.NotesForMod(1, 49, 2), Rpcs3Patches.ModDescription("DL Crash Patches", "dl-cs"), "someone");
+        Rpcs3Patches.Write(Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { crash }), new HashSet<string>());
+        string before = File.ReadAllText(folder.PatchFile(Title));
+
+        var refused = Assert.Throws<Rpcs3PatchException>(() =>
+            Rpcs3Patches.PlanQwark(folder, Title, "RaC1", Hash, Patch(), Switches50.Patch, 50));
+        Assert.StartsWith("The qwark code switches cannot be installed: DL Crash Patches is enabled on the Mods panel", refused.Message);
+        Assert.Contains("0x0004b000", refused.Message);
+        Assert.Contains("Disable DL Crash Patches on the Mods panel first.", refused.Message);
+        Assert.Equal(before, File.ReadAllText(folder.PatchFile(Title)));
+
+        // Switched off, it is in nobody's way.
+        Rpcs3Patches.Write(Rpcs3Patches.PlanDisable(folder, Title, Hash, new[] { "dl-cs" })!, new HashSet<string>());
+        Rpcs3Patches.Write(Rpcs3Patches.PlanQwark(folder, Title, "RaC1", Hash, Patch(), Switches50.Patch, 50), new HashSet<string>());
+        Assert.NotNull(Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).EntryFor(Hash, Rpcs3Patches.SwitchesDescription));
+    }
+
+    [Fact]
+    public void AHelperWhoseRequestBytesMovedReadsAsOutOfDateAndTheInstallRewritesIt()
+    {
+        // Build 50 moved RaC2's request bytes out of the code segment, so the helper's words and its
+        // byte rows are not the ones a build 49 install wrote.
+        var build49Bytes = new[] { new PatchByte(0x0014C3A0, 0x00), new PatchByte(0x0014C3A1, 0x00) };
+        var build49 = Entry(game: "RaC2", bytes: build49Bytes, notes: Rpcs3Patches.NotesFor(49, 0x0BADF00D));
+        var build50 = Patch(bytes: new[] { new PatchByte(0x01AB0000, 0x00), new PatchByte(0x01AB0001, 0x00) });
+
+        var stale = Rpcs3PatchController.Decide(HelperPart, Session(), QwarkPatchReply.Ok(build50), Disk(build49, enabled: true));
+        Assert.Equal(QwarkPatchState.Install, stale.State);
+        Assert.StartsWith("Out of date", stale.Message);
+
+        var folder = FolderAt(MakeRpcs3());
+        Rpcs3Patches.Write(Rpcs3Patches.PlanQwark(folder, Title, "RaC2", Hash, Patch(bytes: build49Bytes), null, 49), new HashSet<string>());
+        Rpcs3Patches.Write(Rpcs3Patches.PlanQwark(folder, Title, "RaC2", Hash, build50, Switches50.Patch, 50), new HashSet<string>());
+
+        var file = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title));
+        Assert.Equal(2, file.Entries.Count);
+        Assert.True(file.EntryFor(Hash)!.Holds(build50));
+        Assert.Equal("qwark build 50, helper stamp 0x1a2b3c4d", file.EntryFor(Hash)!.Notes);
+    }
+
+    [Fact]
+    public void AnInstallOfNothingOrOfEmptySwitchesIsRefused()
+    {
+        var folder = FolderAt(MakeRpcs3());
+
+        Assert.Throws<Rpcs3PatchException>(() => Rpcs3Patches.PlanQwark(folder, Title, "RaC1", Hash, null, null, 50));
+        Assert.Throws<Rpcs3PatchException>(() =>
+            Rpcs3Patches.PlanQwark(folder, Title, "RaC1", Hash, null, new PatchReply(1, Array.Empty<PatchWord>()), 50));
+        Assert.False(File.Exists(folder.PatchFile(Title)));
     }
 
     // ================================================================ end to end
@@ -1031,6 +1364,17 @@ public class Rpcs3PatchTests : IDisposable
         return condition();
     }
 
+    /// <summary>A client on the RPCS3 target, connected to <paramref name="server"/>, whose RPCS3 folder is the temporary one.</summary>
+    private static async Task<AppState> ConnectRpcs3Async(FakeQwarkServer server, string root)
+    {
+        // The folder is set, so the search never looks at this PC's own RPCS3.
+        var state = new AppState(new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = root });
+        state.Rpcs3Patch.Environment = Windows();
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        return state;
+    }
+
     [Fact]
     public async Task FromNotInstalledToActiveAgainstTheFakeRpcs3()
     {
@@ -1039,32 +1383,56 @@ public class Rpcs3PatchTests : IDisposable
 
         using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
         server.Start();
-
-        // The folder is set, so the search never looks at this PC's own RPCS3.
-        var settings = new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = root };
-        using var state = new AppState(settings);
-        state.Rpcs3Patch.Environment = Windows();
-        state.Client.AutoReconnect = false;
-        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        using var state = await ConnectRpcs3Async(server, root);
 
         var patch = state.Rpcs3Patch;
-        Assert.True(await PumpAsync(state, () => patch.Update().State == SaveFilePatchState.Install));
+        Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Install && patch.LastStatus.Installable.Count == 2
+                                                 && state.Describe.Features.Length > 0));
         Assert.Equal(root, patch.Folder!.Root);
+        Assert.Contains("Savefile helper: Not installed", patch.LastStatus.Message);
+        Assert.Contains("Code switches: Not installed", patch.LastStatus.Message);
 
-        patch.Install(patch.Folder);
-        Assert.True(await PumpAsync(state, () => !patch.Installing && patch.Update().State == SaveFilePatchState.RestartGame));
-        Assert.Contains(state.Toasts, toast => toast.Kind == ToastKind.Success && toast.Text.Contains("Restart the game"));
+        // The code-patching cheat is greyed until the switches are in the game.
+        var jump = Array.Find(state.Describe.Features, f => f.WritesCode)!;
+        Assert.True(GamePanel.CodeFeatureBlocked(jump, state.Session));
 
+        patch.Install(patch.Folder, patch.LastStatus.Installable);
+        Assert.True(await PumpAsync(state, () => !patch.Installing && patch.Update().State == QwarkPatchState.RestartGame));
+        Assert.Contains(state.Toasts, toast => toast.Kind == ToastKind.Success
+                                               && toast.Text.Contains("savefile helper and code switches")
+                                               && toast.Text.Contains("Restart the game"));
+
+        // Both went in, in one write, and both are switched on.
         var written = Rpcs3Patches.ReadPatchFile(patch.Folder.PatchFile(Title));
         Assert.Equal(server.SaveFilePatchWords, written.EntryFor(Hash)!.Words);
         Assert.Equal(server.SaveFilePatchBytes, written.EntryFor(Hash)!.Bytes);
         Assert.Equal(Rpcs3Patches.NotesFor(server.Session.QwarkVersion, server.SaveFilePatchStamp), written.Entries[0].Notes);
 
-        // The game starts again in RPCS3 with the patch applied: a new boot, and the helper is in.
+        var switches = FakeQwarkServer.SwitchPatchFor(GameId.Rac1, server.Describe.Features);
+        var switchEntry = written.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!;
+        Assert.Equal(switches.Words, switchEntry.Words);
+        Assert.Equal(switches.Bytes, switchEntry.Bytes);
+        Assert.Equal(Rpcs3Patches.NotesForSwitches(server.Session.QwarkVersion, switches.Stamp), switchEntry.Notes);
+
+        string config = File.ReadAllText(patch.Folder.PatchConfigFile);
+        Assert.True(Rpcs3Patches.IsEnabled(config, written.EntryFor(Hash)!.Key(Title), "x"));
+        Assert.True(Rpcs3Patches.IsEnabled(config, switchEntry.Key(Title), "x"));
+        Assert.Equal("Installed. Restart the game in RPCS3 to apply changes.", patch.LastStatus.Lines.Single().Text);
+
+        // The game starts again in RPCS3 with the patches applied: a new boot, and both are in.
         server.SaveFileHelperInstalled = true;
-        server.Session = server.Session with { Generation = server.Session.Generation + 1 };
-        Assert.True(await PumpAsync(state, () => patch.Update().State == SaveFilePatchState.Active));
+        FakeScript.Apply(server, "switchesin");
+        Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Active));
         Assert.True(state.SaveFile.Installed);
+        Assert.True(state.CodeSwitches);
+        Assert.Equal("Savefile helper: Active. Saving and loading work. Code switches: Active. The cheats that patch game code work.",
+            patch.LastStatus.Message);
+
+        // And the cheat works like any other toggle now: it is drawn enabled, and qwark takes it.
+        Assert.False(GamePanel.CodeFeatureBlocked(jump, state.Session));
+        await state.Client.FeatureSetAsync(jump.Id, 1);
+        await state.Client.FeatureSetAutoAsync(jump.Id, true);
+        Assert.True(await PumpAsync(state, () => (state.Session.ToggleState & (1UL << jump.Id)) != 0));
     }
 
     [Fact]
@@ -1077,15 +1445,13 @@ public class Rpcs3PatchTests : IDisposable
 
         using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
         server.Start();
-        using var state = new AppState(new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = root });
-        state.Client.AutoReconnect = false;
-        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        using var state = await ConnectRpcs3Async(server, root);
 
-        state.Rpcs3Patch.Install(FolderAt(root));
+        state.Rpcs3Patch.Install(FolderAt(root), QwarkPatchParts.All);
         Assert.True(await PumpAsync(state, () => state.Toasts.Any(toast => toast.Kind == ToastKind.Error)));
 
         var toast = state.Toasts.Last(t => t.Kind == ToastKind.Error);
-        Assert.Contains("was not installed", toast.Text);
+        Assert.Contains("were not installed", toast.Text);
         Assert.Contains("NPEA00386", toast.Text);
         Assert.False(File.Exists(FolderAt(root).PatchFile(Title)));
         Assert.False(File.Exists(FolderAt(root).PatchConfigFile));
@@ -1096,18 +1462,167 @@ public class Rpcs3PatchTests : IDisposable
     {
         string root = MakeRpcs3();
 
-        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true, SaveFileUnsupported = true };
+        // Build 46: neither op exists.
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true, SaveFileUnsupported = true, SwitchPatchUnknown = true };
         server.Start();
-        using var state = new AppState(new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = root });
-        state.Client.AutoReconnect = false;
-        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        using var state = await ConnectRpcs3Async(server, root);
 
-        Assert.True(await PumpAsync(state, () => state.Rpcs3Patch.Update().State == SaveFilePatchState.Unavailable));
-        Assert.Equal(SaveFilePatchReplyKind.TooOld, state.Rpcs3Patch.Reply.Kind);
+        Assert.True(await PumpAsync(state, () => state.Rpcs3Patch.Update().State == QwarkPatchState.Unavailable
+                                                 && state.Rpcs3Patch.SwitchesReply.Kind == QwarkPatchReplyKind.TooOld));
+        Assert.Equal(QwarkPatchReplyKind.TooOld, state.Rpcs3Patch.HelperReply.Kind);
         Assert.Contains($"It needs build {QwarkClient.ExpectedQwarkBuild}", state.Rpcs3Patch.LastStatus.Message);
+        Assert.Contains("cannot supply the code switches", state.Rpcs3Patch.LastStatus.Message);
+        Assert.False(state.Rpcs3Patch.LastStatus.CanInstall);
 
         // Nothing was written, and nothing was asked of the folder beyond looking.
         Assert.Empty(Directory.GetFiles(root, "*.yml", SearchOption.AllDirectories));
+    }
+
+    [Fact]
+    public async Task AQwarkRpcs3WithoutSwitchesInstallsTheHelperAlone()
+    {
+        string root = MakeRpcs3();
+        File.WriteAllText(Path.Combine(root, "log", Rpcs3Patches.LogName), BootLog((Title, Hash)));
+
+        // Build 49: SAVEFILE_PATCH answers, SWITCH_PATCH is unknown.
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true, SwitchPatchUnknown = true };
+        server.Start();
+        using var state = await ConnectRpcs3Async(server, root);
+
+        var patch = state.Rpcs3Patch;
+        Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Install
+                                                 && patch.SwitchesReply.Kind == QwarkPatchReplyKind.TooOld));
+        Assert.Equal(new[] { QwarkPatchPart.SaveFileHelper }, patch.LastStatus.Installable);
+        Assert.Contains("Code switches: qwark-rpcs3 build", patch.LastStatus.Message);
+
+        patch.Install(patch.Folder!, patch.LastStatus.Installable);
+        Assert.True(await PumpAsync(state, () => !patch.Installing && patch.Update().Helper.State == QwarkPatchState.RestartGame));
+
+        var written = Rpcs3Patches.ReadPatchFile(patch.Folder!.PatchFile(Title));
+        Assert.NotNull(written.EntryFor(Hash));
+        Assert.Null(written.EntryFor(Hash, Rpcs3Patches.SwitchesDescription));
+        Assert.Contains(state.Toasts, toast => toast.Kind == ToastKind.Success && toast.Text.StartsWith("Wrote qwark's savefile helper for"));
+    }
+
+    [Fact]
+    public async Task AGameWithoutSwitchesReportsTheHelperAlone()
+    {
+        string root = MakeRpcs3();
+        File.WriteAllText(Path.Combine(root, "log", Rpcs3Patches.LogName), BootLog((Title, Hash)));
+
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true, CodeSwitchesSupported = false };
+        server.Start();
+        using var state = await ConnectRpcs3Async(server, root);
+
+        var patch = state.Rpcs3Patch;
+        Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Install
+                                                 && patch.SwitchesReply.Kind == QwarkPatchReplyKind.NotSupported));
+        Assert.Equal(QwarkPatchState.Absent, patch.LastStatus.Switches.State);
+        Assert.Equal(new[] { QwarkPatchPart.SaveFileHelper }, patch.LastStatus.Installable);
+        var line = Assert.Single(patch.LastStatus.Lines);
+        Assert.StartsWith("Savefile helper: Not installed", line.Text);
+    }
+
+    [Fact]
+    public async Task AnEnabledModOverTheSwitchesKeepsThemOutAndTheHelperGoesInAlone()
+    {
+        string root = MakeRpcs3();
+        File.WriteAllText(Path.Combine(root, "log", Rpcs3Patches.LogName), BootLog((Title, Hash)));
+
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
+        server.Start();
+
+        // A crash-patch mod enabled before the switches existed, over the switches' patched site.
+        var site = FakeQwarkServer.SwitchPatchFor(GameId.Rac1, server.Describe.Features).Words[^1];
+        var mod = new PatchFileEntry(Hash, "RaC1", new[] { new PatchWord(site.Address, 0x60000000) }, Array.Empty<PatchByte>(),
+            Rpcs3Patches.NotesForMod(1, 49, 2), Rpcs3Patches.ModDescription("DL Crash Patches", "dl-cs"), "someone");
+        var folder = FolderAt(root);
+        Rpcs3Patches.Write(Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { mod }), new HashSet<string>());
+
+        using var state = await ConnectRpcs3Async(server, root);
+        var patch = state.Rpcs3Patch;
+        Assert.True(await PumpAsync(state, () => patch.Update().Switches.State == QwarkPatchState.Unavailable
+                                                 && patch.LastStatus.Helper.State == QwarkPatchState.Install));
+        Assert.Contains("DL Crash Patches is enabled on the Mods panel", patch.LastStatus.Switches.Message);
+        Assert.Equal(new[] { QwarkPatchPart.SaveFileHelper }, patch.LastStatus.Installable);
+
+        // Asked for both anyway, the write refuses the whole install and names the mod.
+        patch.Install(folder, QwarkPatchParts.All);
+        Assert.True(await PumpAsync(state, () => state.Toasts.Any(toast => toast.Kind == ToastKind.Error)));
+        Assert.Contains("the qwark code switches cannot be installed: DL Crash Patches",
+            state.Toasts.Last(t => t.Kind == ToastKind.Error).Text, StringComparison.OrdinalIgnoreCase);
+        Assert.Null(Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).EntryFor(Hash));
+    }
+
+    // ================================================================ the set-aside buttons and combo
+
+    [Fact]
+    public void TheSetAsideButtonsFollowTheHelperUnderRpcs3AndNeverGreyOnAConsole()
+    {
+        var console = SessionInfo.Empty;
+        var rpcs3 = SessionInfo.Empty with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
+        var missing = new SaveFileInfo(true, false, false, 0, 0x1000);
+        var installed = new SaveFileInfo(true, true, true, 0, 0x1000);
+
+        // On a console qwark writes the helper in on first use, so installed=0 greys nothing.
+        Assert.False(GamePanel.AsideBlocked(console, missing));
+        Assert.False(GamePanel.AsideBlocked(console, installed));
+
+        // Under RPCS3 they go by SAVEFILE_INFO, exactly as the Save files panel does.
+        Assert.True(GamePanel.AsideBlocked(rpcs3, missing));
+        Assert.False(GamePanel.AsideBlocked(rpcs3, installed));
+        Assert.Equal(!SaveFilesPanel.HelperIn(rpcs3, missing), GamePanel.AsideBlocked(rpcs3, missing));
+
+        // The code switches are not the helper.
+        Assert.True(GamePanel.AsideBlocked(rpcs3 with { Flags = rpcs3.Flags | SessionFlags.CodeSwitches }, missing));
+
+        // The set-aside combo follows the same rule; every other combo is the console's own.
+        Assert.True(CombosPanel.SetAsideComboBlocked(ComboAction.LoadSetAsideFile, rpcs3, missing));
+        Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadSetAsideFile, rpcs3, installed));
+        Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadSetAsideFile, console, missing));
+        Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadPosition, rpcs3, missing));
+
+        // The tooltip is the Save files panel's own warning, which says where the helper comes from.
+        Assert.Contains("\"Install qwark patches...\"", Ui.NeedsSaveFileHelper);
+        Assert.Contains("restart the game in RPCS3", Ui.NeedsSaveFileHelper);
+    }
+
+    [Fact]
+    public async Task TheSetAsideButtonsComeBackWhenTheHelperIsInTheGame()
+    {
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
+        server.Start();
+        using var state = new AppState(new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = MakeRpcs3() });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+
+        Assert.True(await PumpAsync(state, () => state.Describe.SaveAsideAction is not null && state.SaveFile.Supported));
+        Assert.True(GamePanel.AsideBlocked(state.Session, state.SaveFile));
+        var setAside = state.Describe.SaveAsideAction!;
+        var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => state.Client.FeatureTriggerAsync(setAside.Id));
+        Assert.Equal(Status.Unsupported, refused.Status);
+
+        // The game starts again with qwark's patches applied: SAVEFILE_INFO says installed, and
+        // the buttons work as on a console.
+        FakeScript.Apply(server, "sfpatch");
+        Assert.True(await PumpAsync(state, () => state.SaveFile.Installed));
+        Assert.False(GamePanel.AsideBlocked(state.Session, state.SaveFile));
+        Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadSetAsideFile, state.Session, state.SaveFile));
+        await state.Client.FeatureTriggerAsync(setAside.Id);
+    }
+
+    [Fact]
+    public async Task OnAConsoleTheSetAsideButtonsAreNeverGreyed()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var state = new AppState(new Settings { AutoReconnect = false });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+
+        Assert.True(await PumpAsync(state, () => state.Describe.SaveAsideAction is not null && state.Telemetry is not null));
+        Assert.False(state.CodePatchesUnsupported);
+        Assert.False(GamePanel.AsideBlocked(state.Session, state.SaveFile));
     }
 
     [Fact]
@@ -1120,10 +1635,11 @@ public class Rpcs3PatchTests : IDisposable
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 
         Assert.True(await PumpAsync(state, () => state.Telemetry is not null));
-        Assert.Equal(SaveFilePatchState.Hidden, state.Rpcs3Patch.Update().State);
+        Assert.Equal(QwarkPatchState.Hidden, state.Rpcs3Patch.Update().State);
         await Task.Delay(100);
         state.Tick(1f / 60f);
         Assert.DoesNotContain(Opcode.SaveFilePatch, server.RequestLog());
+        Assert.DoesNotContain(Opcode.SwitchPatch, server.RequestLog());
     }
 
     // ================================================================ the setting

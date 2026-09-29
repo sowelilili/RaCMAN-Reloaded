@@ -137,6 +137,7 @@ public class ParsingTests
         Assert.Equal(2, (byte)SessionFlags.Emulator);
         Assert.Equal(4, (byte)SessionFlags.NoCodePatches);
         Assert.Equal(8, (byte)SessionFlags.CombosOff);
+        Assert.Equal(16, (byte)SessionFlags.CodeSwitches);
     }
 
     [Fact]

@@ -58,6 +58,14 @@ public static class CombosPanel
         state.Run(() => state.Client.ComboSuspendAsync(on));
     }
 
+    /// <summary>
+    /// Whether a combo's action is out of reach: the set-aside load goes through the savefile
+    /// helper, so it follows <see cref="SaveFilesPanel.HelperIn"/>. Every other combo is the
+    /// console's own and always works.
+    /// </summary>
+    public static bool SetAsideComboBlocked(ComboAction action, SessionInfo session, SaveFileInfo info) =>
+        action == ComboAction.LoadSetAsideFile && !SaveFilesPanel.HelperIn(session, info);
+
     public static string Label(ComboAction action) => action switch
     {
         ComboAction.SavePosition => "Save position",
@@ -145,7 +153,20 @@ public static class CombosPanel
             ImGui.PushID((int)action);
 
             ImGui.TableNextColumn();
-            ImGui.TextUnformatted(Label(action));
+
+            // The set-aside combo runs the savefile helper on the console, which qwark refuses under
+            // RPCS3 until qwark's patches have put the helper in the game. The row says so, greyed
+            // with the Save files panel's reason, and stays editable, as the list does while the
+            // combos are switched off: a combo recorded now fires once the helper is in.
+            if (SetAsideComboBlocked(action, state.Session, state.SaveFile))
+            {
+                ImGui.TextDisabled(Label(action));
+                if (ImGui.IsItemHovered()) ImGui.SetTooltip(Ui.NeedsSaveFileHelper);
+            }
+            else
+            {
+                ImGui.TextUnformatted(Label(action));
+            }
 
             ImGui.TableNextColumn();
             uint mask = current.GetValueOrDefault(action);

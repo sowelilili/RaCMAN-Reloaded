@@ -248,7 +248,10 @@ public static class UnlocksPanel
             {
                 ImGui.TableNextColumn();
                 ImGui.PushID(feature.Id);
-                if (ImGui.Button(feature.Label, new Vector2(-1, 0)))
+
+                // One that patches game code is greyed under RPCS3 until qwark's code switches are
+                // in the game, by the Game page's own rule.
+                if (GamePanel.ActionButton(state, feature, new Vector2(-1, 0)))
                 {
                     byte id = feature.Id;
                     state.Run(async () =>

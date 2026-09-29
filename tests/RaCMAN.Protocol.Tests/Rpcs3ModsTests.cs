@@ -294,7 +294,7 @@ public class Rpcs3ModsTests : IDisposable
         + "      - [ byte, 0x00662004, 0xab ]\n";
 
     private const string FileHead =
-        "# RaCMAN Reloaded writes this file: qwark's savefile helper and the mods enabled in RaCMAN. Edits made here are lost.\n"
+        "# RaCMAN Reloaded writes this file: qwark's savefile helper and code switches, and the mods enabled in RaCMAN. Edits made here are lost.\n"
         + "Version: 1.2\n";
 
     [Fact]
@@ -726,6 +726,72 @@ public class Rpcs3ModsTests : IDisposable
         Assert.Contains("Lock RNG cannot be enabled", refused.Message);
         Assert.Contains("qwark's savefile helper", refused.Message);
         Assert.Contains("0x000f0000", refused.Message);
+    }
+
+    /// <summary>qwark's code switches for this executable: a trampoline word, the branch at its site, a flag byte.</summary>
+    private static PatchFileEntry Switches(string hash = Hash) =>
+        new(hash, "RaC1", new[] { new PatchWord(0x000F2000, 0x3D60010D), new PatchWord(0x0004B000, 0x480A7000) },
+            new[] { new PatchByte(0x010CE000, 0x00) }, Rpcs3Patches.NotesForSwitches(50, 0x5EED5EED), Rpcs3Patches.SwitchesDescription);
+
+    [Fact]
+    public void AModOverTheCodeSwitchesIsRefusedNamingThem()
+    {
+        // Deadlocked's DL Crash Patches writes the very words its code switches turn into branches.
+        // The switches are in the way whenever they are in the file, switched on or not, as the
+        // helper is: they are switched on by their own button.
+        var folder = Folder(Rpcs3Patches.BuildPatchFile(Title, new[] { Helper(), Switches() }), config: null);
+        var crash = LockRng() with
+        {
+            Description = Rpcs3Patches.ModDescription("DL Crash Patches", "dl-cs"),
+            Words = new[] { new PatchWord(0x0004B000, 0x38600000) },
+        };
+
+        var refused = Assert.Throws<Rpcs3PatchException>(() => Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { crash }));
+
+        Assert.Equal("DL Crash Patches cannot be enabled: it writes to the same addresses as the qwark code switches "
+                     + "(from 0x0004b000), and RPCS3 would apply one over the other. It cannot be used together with the "
+                     + "qwark code switches. It patches the same code as a cheat on the Game panel, which works through the "
+                     + "switches instead.", refused.Message);
+        Assert.DoesNotContain(Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).Entries, entry => entry.ModDir == "dl-cs");
+
+        // Another executable's switches are not this one's business.
+        var elsewhere = Folder(Rpcs3Patches.BuildPatchFile(Title, new[] { Switches(OtherHash) }), config: null);
+        Rpcs3Patches.Write(Rpcs3Patches.PlanMods(elsewhere, Title, Hash, new[] { crash }), new HashSet<string>());
+    }
+
+    [Fact]
+    public void AModOverBothOfQwarksPatchesNamesBoth()
+    {
+        var folder = Folder(Rpcs3Patches.BuildPatchFile(Title, new[] { Helper(), Switches() }), config: null);
+        var both = LockRng() with { Words = new[] { new PatchWord(0x000F0000, 0x60000000), new PatchWord(0x000F2000, 0x60000000) } };
+
+        var refused = Assert.Throws<Rpcs3PatchException>(() => Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { both }));
+
+        Assert.Contains("the same addresses as qwark's savefile helper and the qwark code switches", refused.Message);
+        Assert.Contains("It cannot be used together with qwark's savefile helper and the qwark code switches.", refused.Message);
+    }
+
+    [Fact]
+    public void TheModsPanelKeepsTheCodeSwitchesAndTheirSwitchWhateverItWrites()
+    {
+        string config = Rpcs3Patches.EnablePatches(null, new[] { Key(Switches()) }, "x");
+        var folder = Folder(Rpcs3Patches.BuildPatchFile(Title, new[] { Helper(), Switches() }), config);
+
+        Rpcs3Patches.Write(Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { LockRng() }), new HashSet<string>());
+        Rpcs3Patches.Write(Rpcs3Patches.PlanDisable(folder, Title, Hash, new[] { "lock_rng" })!, new HashSet<string>());
+
+        var file = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title));
+        Assert.Equal(Switches().Words, file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!.Words);
+        Assert.Equal(HelperWords, file.EntryFor(Hash)!.Words);
+        Assert.NotNull(file.ModEntryFor(Hash, "lock_rng"));
+
+        string after = File.ReadAllText(folder.PatchConfigFile);
+        Assert.True(Rpcs3Patches.IsEnabled(after, Key(Switches()), "x"));
+        Assert.False(Rpcs3Patches.IsEnabled(after, Key(LockRng()), "x"));
+        Assert.False(Rpcs3Patches.IsEnabled(after, Key(Helper()), "x"));
+
+        // And a mod is never written in the switches' place.
+        Assert.Throws<Rpcs3PatchException>(() => Rpcs3Patches.PlanMods(folder, Title, Hash, new[] { Switches() }));
     }
 
     [Fact]
@@ -1429,7 +1495,7 @@ public class Rpcs3ModsTests : IDisposable
     }
 
     [Fact]
-    public async Task TheConnectionPanelsHelperInstallKeepsTheModsAndTheModsPanelKeepsTheHelper()
+    public async Task TheConnectionPanelsInstallKeepsTheModsAndTheModsPanelKeepsQwarksPatches()
     {
         AddToLibrary("lock_rng", "#- name: Lock RNG\n0x5C8318: 0x806D9000\n");
         AddToLibrary("bot", "#- name: Bot Info\n0x662000: 0x60000000\n");
@@ -1445,13 +1511,15 @@ public class Rpcs3ModsTests : IDisposable
             mods.Toggle(Local(state, "lock_rng"), true);
             Assert.True(await PumpAsync(state, () => mods.IsEnabled(Local(state, "lock_rng"))));
 
-            // The helper goes in the way the Connection panel puts it in.
-            Assert.True(await PumpAsync(state, () => helper.Update().State == SaveFilePatchState.Install));
-            helper.Install(helper.Folder!);
-            Assert.True(await PumpAsync(state, () => !helper.Installing && helper.Update().State == SaveFilePatchState.RestartGame));
+            // qwark's patches go in the way the Connection panel puts them in: both parts, in one write.
+            Assert.True(await PumpAsync(state, () => helper.Update().State == QwarkPatchState.Install
+                                                     && helper.LastStatus.Installable.Count == 2));
+            helper.Install(helper.Folder!, helper.LastStatus.Installable);
+            Assert.True(await PumpAsync(state, () => !helper.Installing && helper.Update().State == QwarkPatchState.RestartGame));
 
             var file = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title));
             Assert.NotNull(file.EntryFor(Hash));
+            Assert.NotNull(file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription));
             Assert.NotNull(file.ModEntryFor(Hash, "lock_rng"));
             mods.Recheck();
             Assert.True(await PumpAsync(state, () => mods.IsEnabled(Local(state, "lock_rng"))));
@@ -1464,9 +1532,10 @@ public class Rpcs3ModsTests : IDisposable
             Assert.Equal(server.SaveFilePatchWords, file.EntryFor(Hash)!.Words);
             string config = File.ReadAllText(folder.PatchConfigFile);
             Assert.True(Rpcs3Patches.IsEnabled(config, file.EntryFor(Hash)!.Key(Title), "x"));
+            Assert.True(Rpcs3Patches.IsEnabled(config, file.EntryFor(Hash, Rpcs3Patches.SwitchesDescription)!.Key(Title), "x"));
             Assert.True(Rpcs3Patches.IsEnabled(config, file.ModEntryFor(Hash, "lock_rng")!.Key(Title), "x"));
             Assert.True(Rpcs3Patches.IsEnabled(config, file.ModEntryFor(Hash, "bot")!.Key(Title), "x"));
-            Assert.Equal(SaveFilePatchState.RestartGame, helper.Update().State);
+            Assert.Equal(QwarkPatchState.RestartGame, helper.Update().State);
         }
     }
 }

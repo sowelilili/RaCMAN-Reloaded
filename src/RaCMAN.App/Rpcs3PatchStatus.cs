@@ -2,71 +2,201 @@ using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
 
-/// <summary>Where the savefile helper patch stands for the game running under RPCS3.</summary>
-public enum SaveFilePatchState
+/// <summary>
+/// qwark's own patches for a game under RPCS3. Both are the game's rather than the user's, both go
+/// into the same patch file as RPCS3 patches, and the Connection panel installs them together.
+/// </summary>
+public enum QwarkPatchPart
 {
-    /// <summary>Nothing to say: not an RPCS3 session, or a qwark that writes the helper itself.</summary>
+    /// <summary>The savefile helper (build 47): saving and loading through the client.</summary>
+    SaveFileHelper,
+
+    /// <summary>The code switches (build 50): the features that patch game code, toggled through flag bytes.</summary>
+    CodeSwitches,
+}
+
+/// <summary>What each of qwark's patches is called, where it is filed, and how to say it.</summary>
+public static class QwarkPatchParts
+{
+    public static readonly IReadOnlyList<QwarkPatchPart> All = new[] { QwarkPatchPart.SaveFileHelper, QwarkPatchPart.CodeSwitches };
+
+    /// <summary>The description the part is filed under, in the patch file and in RPCS3's Patch Manager.</summary>
+    public static string Description(this QwarkPatchPart part) =>
+        part == QwarkPatchPart.SaveFileHelper ? Rpcs3Patches.Description : Rpcs3Patches.SwitchesDescription;
+
+    /// <summary>What the Connection panel's line about the part begins with.</summary>
+    public static string Title(this QwarkPatchPart part) =>
+        part == QwarkPatchPart.SaveFileHelper ? "Savefile helper" : "Code switches";
+
+    /// <summary>The part in the middle of a sentence.</summary>
+    public static string Noun(this QwarkPatchPart part) =>
+        part == QwarkPatchPart.SaveFileHelper ? "the savefile helper" : "the code switches";
+
+    /// <summary>What the part is for, in the confirmation's list.</summary>
+    public static string Purpose(this QwarkPatchPart part) =>
+        part == QwarkPatchPart.SaveFileHelper
+            ? "saving and loading save files from RaCMAN"
+            : "the cheats that patch game code, such as fast loads and infinite ammo";
+
+    /// <summary>"qwark's savefile helper", "qwark's code switches", or "qwark's savefile helper and code switches".</summary>
+    public static string Names(IReadOnlyCollection<QwarkPatchPart> parts)
+    {
+        bool helper = parts.Contains(QwarkPatchPart.SaveFileHelper);
+        bool switches = parts.Contains(QwarkPatchPart.CodeSwitches);
+        return helper && switches ? "qwark's savefile helper and code switches"
+            : switches ? "qwark's code switches"
+            : "qwark's savefile helper";
+    }
+}
+
+/// <summary>Where one of qwark's patches stands for the game running under RPCS3.</summary>
+public enum QwarkPatchState
+{
+    /// <summary>Nothing to say: not an RPCS3 session, or a qwark that patches the game itself.</summary>
     Hidden,
 
     /// <summary>Waiting for a connection, a game, qwark's words or the look at RPCS3's folder.</summary>
     Waiting,
 
-    /// <summary>qwark finds its helper in the game: saving and loading work.</summary>
+    /// <summary>qwark finds the patch in the game: what it is for works.</summary>
     Active,
 
     /// <summary>The patch is in RPCS3 and switched on; the game has to start again to take it.</summary>
     RestartGame,
 
-    /// <summary>Not installed, out of date or switched off: the button is offered.</summary>
+    /// <summary>Not installed, out of date or switched off: the install is offered.</summary>
     Install,
 
-    /// <summary>Cannot be installed from here, and <see cref="SaveFilePatchStatus.Message"/> says why.</summary>
+    /// <summary>Cannot be installed from here, and <see cref="QwarkPatchStatus.Message"/> says why.</summary>
     Unavailable,
+
+    /// <summary>qwark has no such patch for this game, so the Connection panel leaves it out.</summary>
+    Absent,
 }
 
-/// <summary>The line the Connection panel shows, and whether it offers the button.</summary>
-public sealed record SaveFilePatchStatus(SaveFilePatchState State, string Message, bool FolderProblem = false)
+/// <summary>What the Connection panel says about one of qwark's patches, and whether it can be installed.</summary>
+public sealed record QwarkPatchStatus(QwarkPatchState State, string Message, bool FolderProblem = false)
 {
-    public static readonly SaveFilePatchStatus Hidden = new(SaveFilePatchState.Hidden, string.Empty);
+    public static readonly QwarkPatchStatus Hidden = new(QwarkPatchState.Hidden, string.Empty);
 
-    public bool CanInstall => State == SaveFilePatchState.Install;
+    public bool CanInstall => State == QwarkPatchState.Install;
 }
 
-public enum SaveFilePatchReplyKind
+/// <summary>One line of the Connection panel's status, coloured by its state.</summary>
+public sealed record QwarkPatchLine(QwarkPatchState State, string Text);
+
+/// <summary>
+/// Both of qwark's patches, as the Connection panel reports them. A reason that holds for both —
+/// no connection, no game, no RPCS3 folder — is said once; otherwise each part has a line of its
+/// own that begins with its name. A part the game does not have is left out, so a game with only
+/// one of them reports that one alone.
+/// </summary>
+public sealed record QwarkPatchesStatus(QwarkPatchStatus Helper, QwarkPatchStatus Switches)
+{
+    public static readonly QwarkPatchesStatus Hidden = new(QwarkPatchStatus.Hidden, QwarkPatchStatus.Hidden);
+
+    public QwarkPatchStatus For(QwarkPatchPart part) => part == QwarkPatchPart.SaveFileHelper ? Helper : Switches;
+
+    /// <summary>The parts there is something to say about: neither hidden nor absent from the game.</summary>
+    public IReadOnlyList<QwarkPatchPart> Shown =>
+        QwarkPatchParts.All.Where(part => For(part).State is not (QwarkPatchState.Hidden or QwarkPatchState.Absent)).ToList();
+
+    /// <summary>The parts the install would write: each one not installed, out of date or switched off.</summary>
+    public IReadOnlyList<QwarkPatchPart> Installable => Shown.Where(part => For(part).CanInstall).ToList();
+
+    public bool CanInstall => Installable.Count > 0;
+
+    /// <summary>Whether the RPCS3 folder setting is the fix for what a line says.</summary>
+    public bool FolderProblem => Shown.Any(part => For(part).FolderProblem);
+
+    /// <summary>What the panel draws, one line each.</summary>
+    public IReadOnlyList<QwarkPatchLine> Lines
+    {
+        get
+        {
+            if (Helper.State == QwarkPatchState.Hidden && Switches.State == QwarkPatchState.Hidden) return Array.Empty<QwarkPatchLine>();
+
+            var shown = Shown;
+            if (shown.Count == 0)
+            {
+                return new[] { new QwarkPatchLine(QwarkPatchState.Unavailable, "qwark has no patches for this game, so there is nothing to install.") };
+            }
+
+            if (shown.Count == 2 && Helper == Switches) return new[] { new QwarkPatchLine(Helper.State, Helper.Message) };
+
+            return shown.Select(part => new QwarkPatchLine(For(part).State, $"{part.Title()}: {For(part).Message}")).ToList();
+        }
+    }
+
+    /// <summary>The lines as one, for a toast, a test or the summary of a headless run.</summary>
+    public string Message => string.Join(" ", Lines.Select(line => line.Text));
+
+    /// <summary>
+    /// The one state that sums both up, by what the user has to do next: install, restart the game,
+    /// wait, read why not, or nothing at all.
+    /// </summary>
+    public QwarkPatchState State
+    {
+        get
+        {
+            if (Lines.Count == 0) return QwarkPatchState.Hidden;
+
+            var states = Shown.Select(part => For(part).State).ToList();
+            if (states.Count == 0) return QwarkPatchState.Unavailable;
+
+            foreach (var state in new[] { QwarkPatchState.Install, QwarkPatchState.RestartGame, QwarkPatchState.Waiting, QwarkPatchState.Unavailable })
+            {
+                if (states.Contains(state)) return state;
+            }
+
+            return QwarkPatchState.Active;
+        }
+    }
+}
+
+public enum QwarkPatchReplyKind
 {
     NotAsked,
     Pending,
     Ok,
 
-    /// <summary>UNSUPPORTED: the game has no helper, or it is switched off.</summary>
-    NoHelper,
+    /// <summary>UNSUPPORTED: the game has no such patch, or it is switched off.</summary>
+    NotSupported,
 
-    /// <summary>UNKNOWN_OP: a qwark from before SAVEFILE_PATCH.</summary>
+    /// <summary>UNKNOWN_OP: a qwark from before the op (SAVEFILE_PATCH in build 47, SWITCH_PATCH in build 50).</summary>
     TooOld,
 
     /// <summary>Anything else, with the reason.</summary>
     Failed,
 }
 
-/// <summary>What qwark said to SAVEFILE_PATCH for the running game.</summary>
-public sealed record SaveFilePatchReply(SaveFilePatchReplyKind Kind, PatchReply? Patch = null, string Problem = "")
+/// <summary>What qwark said to SAVEFILE_PATCH or SWITCH_PATCH for the running game.</summary>
+public sealed record QwarkPatchReply(QwarkPatchReplyKind Kind, PatchReply? Patch = null, string Problem = "")
 {
-    public static readonly SaveFilePatchReply NotAsked = new(SaveFilePatchReplyKind.NotAsked);
+    public static readonly QwarkPatchReply NotAsked = new(QwarkPatchReplyKind.NotAsked);
 
-    public static readonly SaveFilePatchReply Pending = new(SaveFilePatchReplyKind.Pending);
+    public static readonly QwarkPatchReply Pending = new(QwarkPatchReplyKind.Pending);
 
-    public static SaveFilePatchReply Ok(PatchReply patch) => new(SaveFilePatchReplyKind.Ok, patch);
+    public static QwarkPatchReply Ok(PatchReply patch) => new(QwarkPatchReplyKind.Ok, patch);
 }
 
-/// <summary>What the session says, as far as the savefile helper patch is concerned.</summary>
-public sealed record SaveFilePatchSession(
+/// <summary>
+/// What the session says, as far as qwark's patches are concerned: SAVEFILE_INFO's
+/// <c>installed</c> for the helper, and flags.CODE_SWITCHES for the switches.
+/// </summary>
+public sealed record QwarkPatchSession(
     bool Connected,
     bool CodePatchesUnsupported,
     bool Ingame,
     bool KnownGame,
     string TitleId,
     byte QwarkBuild,
-    SaveFileInfo Info);
+    SaveFileInfo Info,
+    bool CodeSwitches = false)
+{
+    /// <summary>Whether qwark finds the part in the game this session.</summary>
+    public bool IsActive(QwarkPatchPart part) => part == QwarkPatchPart.SaveFileHelper ? Info.Installed : CodeSwitches;
+}
 
 /// <summary>
 /// What RPCS3's folder says about the running game's patches: where the folder is, the executable's
@@ -89,6 +219,13 @@ public sealed record Rpcs3PatchDisk(
         EnabledEntries is not null
             ? EnabledEntries.Contains(description, StringComparer.Ordinal)
             : Enabled && description == Rpcs3Patches.Description;
+
+    /// <summary>The running executable's mod entries that patch_config.yml switches on: what RPCS3 applies at the next boot besides qwark's.</summary>
+    public IReadOnlyList<PatchFileEntry> EnabledMods()
+    {
+        if (Hash?.Hash is not { } hash || File is not { Kind: PatchFileKind.Ours } file) return Array.Empty<PatchFileEntry>();
+        return file.EntriesFor(hash).Where(entry => entry.ModDir is not null && IsEnabled(entry.Description)).ToList();
+    }
 
     public static Rpcs3PatchDisk Inspect(string? overrideFolder, Rpcs3Environment environment, string titleId)
     {
@@ -135,9 +272,10 @@ public sealed record Rpcs3PatchDisk(
 }
 
 /// <summary>
-/// The savefile helper patch for the RPCS3 target: asks qwark for the helper's words, looks at
-/// RPCS3's folder, decides what the Connection panel says, and does the install the user confirmed.
-/// No ImGui: the panel calls <see cref="Update"/> once a frame and draws what comes back.
+/// qwark's own patches for the RPCS3 target, the savefile helper and the code switches: asks qwark
+/// for their words, looks at RPCS3's folder, decides what the Connection panel says about each, and
+/// does the install the user confirmed, both parts in one write. No ImGui: the panel calls
+/// <see cref="Update"/> once a frame and draws what comes back.
 /// <para>
 /// Nothing here runs unless the panel is drawn with the RPCS3 target, and nothing is ever written
 /// without <see cref="Install"/>, which only the confirmation dialog calls. The file work happens
@@ -149,10 +287,18 @@ public sealed class Rpcs3PatchController
     /// <summary>How long a refusal that only means "not now" (BUSY, NOT_INGAME) waits before the words are asked for again.</summary>
     private const long RetryMs = 1000;
 
-    private readonly AppState _state;
+    /// <summary>The words of one part: what was asked for, for which game, and when to ask again.</summary>
+    private sealed class Ask
+    {
+        public string Key = string.Empty;
+        public long RetryAtMs;
+        public QwarkPatchReply Reply = QwarkPatchReply.NotAsked;
+    }
 
-    private string _replyKey = string.Empty;
-    private long _retryAtMs;
+    private readonly AppState _state;
+    private readonly Ask _helper = new();
+    private readonly Ask _switches = new();
+
     private string _diskKey = string.Empty;
     private int _diskSequence;
     private int _bump;
@@ -166,7 +312,15 @@ public sealed class Rpcs3PatchController
     /// <summary>The machine RPCS3 is looked for on. Tests set the folder in the settings instead, which wins.</summary>
     public Rpcs3Environment Environment { get; set; }
 
-    public SaveFilePatchReply Reply { get; private set; } = SaveFilePatchReply.NotAsked;
+    /// <summary>What qwark said to SAVEFILE_PATCH for the running game.</summary>
+    public QwarkPatchReply HelperReply => _helper.Reply;
+
+    /// <summary>What qwark said to SWITCH_PATCH for the running game.</summary>
+    public QwarkPatchReply SwitchesReply => _switches.Reply;
+
+    public QwarkPatchReply ReplyFor(QwarkPatchPart part) => AskFor(part).Reply;
+
+    private Ask AskFor(QwarkPatchPart part) => part == QwarkPatchPart.SaveFileHelper ? _helper : _switches;
 
     public Rpcs3PatchDisk? Disk { get; private set; }
 
@@ -174,104 +328,118 @@ public sealed class Rpcs3PatchController
     public bool Installing { get; private set; }
 
     /// <summary>What the last <see cref="Update"/> decided, for the summary line of a headless run.</summary>
-    public SaveFilePatchStatus LastStatus { get; private set; } = SaveFilePatchStatus.Hidden;
+    public QwarkPatchesStatus LastStatus { get; private set; } = QwarkPatchesStatus.Hidden;
 
     /// <summary>The folder the last look found, which is where an install writes.</summary>
     public Rpcs3Folder? Folder => Disk is { } disk && disk.TitleId == _state.Session.TitleId ? disk.Folder.Folder : null;
 
     /// <summary>
     /// Once a frame, from the panel: asks for whatever the answer is still missing, then decides.
-    /// The words are asked for once per game and qwark build, and the folder is looked at again when
-    /// the game boots again, when the folder setting changes, and on <see cref="Recheck"/>.
+    /// Each part's words are asked for once per game and qwark build while qwark does not find that
+    /// part in the game, and the folder is looked at again when the game boots again, when the
+    /// folder setting changes, and on <see cref="Recheck"/>.
     /// </summary>
-    public SaveFilePatchStatus Update()
+    public QwarkPatchesStatus Update()
     {
-        if (!_state.Settings.Rpcs3Target) return LastStatus = SaveFilePatchStatus.Hidden;
+        if (!_state.Settings.Rpcs3Target) return LastStatus = QwarkPatchesStatus.Hidden;
 
         var session = _state.Session;
-        var facts = new SaveFilePatchSession(
+        var facts = new QwarkPatchSession(
             _state.Connected,
             _state.CodePatchesUnsupported,
             _state.Ingame,
             !_state.UnknownGame,
             session.TitleId,
             _state.Hello?.QwarkVersion ?? session.QwarkVersion,
-            _state.SaveFile);
+            _state.SaveFile,
+            session.CodeSwitches);
 
-        bool wanted = facts.Connected && facts.CodePatchesUnsupported && facts.Ingame && facts.KnownGame
-                      && !facts.Info.Installed && !_state.ConsoleBusy;
+        bool wanted = facts.Connected && facts.CodePatchesUnsupported && facts.Ingame && facts.KnownGame && !_state.ConsoleBusy;
         if (wanted)
         {
-            EnsureReply(session);
-            EnsureDisk(session);
+            bool any = false;
+            foreach (var part in QwarkPatchParts.All)
+            {
+                if (facts.IsActive(part)) continue;
+
+                EnsureReply(part, session);
+                any = true;
+            }
+
+            if (any) EnsureDisk(session);
         }
 
-        return LastStatus = Decide(facts, Reply, Disk);
+        return LastStatus = Decide(facts, _helper.Reply, _switches.Reply, Disk);
     }
 
     /// <summary>"Check again": the words, the folder and SAVEFILE_INFO are all read afresh.</summary>
     public void Recheck()
     {
         _bump++;
-        _retryAtMs = 0;
+        _helper.RetryAtMs = 0;
+        _switches.RetryAtMs = 0;
         _state.RefreshSaveFileInfo();
     }
 
-    private void EnsureReply(SessionInfo session)
+    private void EnsureReply(QwarkPatchPart part, SessionInfo session)
     {
+        var ask = AskFor(part);
         string key = $"{session.TitleId}|{session.Game}|{session.QwarkVersion}|{_bump}";
-        if (key != _replyKey)
+        if (key != ask.Key)
         {
-            _replyKey = key;
-            Reply = SaveFilePatchReply.NotAsked;
+            ask.Key = key;
+            ask.Reply = QwarkPatchReply.NotAsked;
         }
 
-        if (Reply.Kind != SaveFilePatchReplyKind.NotAsked || System.Environment.TickCount64 < _retryAtMs) return;
+        if (ask.Reply.Kind != QwarkPatchReplyKind.NotAsked || System.Environment.TickCount64 < ask.RetryAtMs) return;
 
-        Reply = SaveFilePatchReply.Pending;
+        ask.Reply = QwarkPatchReply.Pending;
         var client = _state.Client;
         _ = Task.Run(async () =>
         {
-            var (reply, retry) = await AskAsync(client).ConfigureAwait(false);
+            var (reply, retry) = await AskAsync(client, part).ConfigureAwait(false);
             _state.Post(() =>
             {
-                if (_replyKey != key) return;
+                if (ask.Key != key) return;
 
-                Reply = reply;
-                if (retry) _retryAtMs = System.Environment.TickCount64 + RetryMs;
+                ask.Reply = reply;
+                if (retry) ask.RetryAtMs = System.Environment.TickCount64 + RetryMs;
             });
         });
     }
 
-    /// <summary>SAVEFILE_PATCH, with every answer turned into something the panel can say.</summary>
-    private static async Task<(SaveFilePatchReply Reply, bool Retry)> AskAsync(QwarkClient client)
+    private static Task<PatchReply> Fetch(QwarkClient client, QwarkPatchPart part) =>
+        part == QwarkPatchPart.SaveFileHelper ? client.SaveFilePatchAsync() : client.SwitchPatchAsync();
+
+    /// <summary>SAVEFILE_PATCH or SWITCH_PATCH, with every answer turned into something the panel can say.</summary>
+    private static async Task<(QwarkPatchReply Reply, bool Retry)> AskAsync(QwarkClient client, QwarkPatchPart part)
     {
         try
         {
-            return (SaveFilePatchReply.Ok(await client.SaveFilePatchAsync().ConfigureAwait(false)), false);
+            return (QwarkPatchReply.Ok(await Fetch(client, part).ConfigureAwait(false)), false);
         }
         catch (QwarkStatusException ex) when (ex.Status == Status.Unsupported)
         {
-            return (new SaveFilePatchReply(SaveFilePatchReplyKind.NoHelper), false);
+            return (new QwarkPatchReply(QwarkPatchReplyKind.NotSupported), false);
         }
         catch (QwarkStatusException ex) when (ex.Status == Status.UnknownOp)
         {
-            return (new SaveFilePatchReply(SaveFilePatchReplyKind.TooOld), false);
+            return (new QwarkPatchReply(QwarkPatchReplyKind.TooOld), false);
         }
         catch (QwarkStatusException ex) when (ex.Status is Status.NotIngame or Status.Busy)
         {
             // The game is starting or ending under the question; the next frame asks again.
-            return (SaveFilePatchReply.NotAsked, true);
+            return (QwarkPatchReply.NotAsked, true);
         }
         catch (QwarkStatusException ex)
         {
-            return (new SaveFilePatchReply(SaveFilePatchReplyKind.Failed,
-                Problem: $"qwark refused to send the savefile helper ({ex.Status})."), false);
+            return (new QwarkPatchReply(QwarkPatchReplyKind.Failed,
+                Problem: $"qwark refused to send {part.Noun()} ({ex.Status})."), false);
         }
         catch (Exception ex)
         {
-            return (new SaveFilePatchReply(SaveFilePatchReplyKind.Failed,
-                Problem: $"Asking qwark for the savefile helper failed: {ex.Message}"), false);
+            return (new QwarkPatchReply(QwarkPatchReplyKind.Failed,
+                Problem: $"Asking qwark for {part.Noun()} failed: {ex.Message}"), false);
         }
     }
 
@@ -305,13 +473,15 @@ public sealed class Rpcs3PatchController
     }
 
     /// <summary>
-    /// Writes the patch into <paramref name="folder"/>, which is the folder the confirmation named.
-    /// The words and the hash are fetched again first, so what is written is what is running now.
-    /// The outcome is a toast either way, and the status is looked at again afterwards.
+    /// Writes <paramref name="parts"/> into <paramref name="folder"/>, which is the folder the
+    /// confirmation named, in one write, and switches them on. The words and the hash are fetched
+    /// again first, so what is written is what is running now; a part qwark will not hand over
+    /// stops the whole install, and nothing is written. The outcome is a toast either way, and the
+    /// status is looked at again afterwards.
     /// </summary>
-    public void Install(Rpcs3Folder folder)
+    public void Install(Rpcs3Folder folder, IReadOnlyCollection<QwarkPatchPart> parts)
     {
-        if (Installing) return;
+        if (Installing || parts.Count == 0) return;
 
         var session = _state.Session;
         string title = session.TitleId;
@@ -319,29 +489,43 @@ public sealed class Rpcs3PatchController
         byte build = _state.Hello?.QwarkVersion ?? session.QwarkVersion;
         var client = _state.Client;
         var writer = _state.Rpcs3Writer;
+        var wanted = QwarkPatchParts.All.Where(parts.Contains).ToList();
+        string names = QwarkPatchParts.Names(wanted);
 
         Installing = true;
         _ = Task.Run(async () =>
         {
             string? error = null;
+            var asking = wanted[0];
             try
             {
-                var patch = await client.SaveFilePatchAsync().ConfigureAwait(false);
+                PatchReply? helper = null;
+                PatchReply? switches = null;
+                foreach (var part in wanted)
+                {
+                    asking = part;
+                    var words = await Fetch(client, part).ConfigureAwait(false);
+                    if (part == QwarkPatchPart.SaveFileHelper) helper = words;
+                    else switches = words;
+                }
+
                 var hash = Rpcs3Patches.FindExecutableHash(folder, title);
                 string executable = hash.Hash ?? throw new Rpcs3PatchException(hash.Problem);
 
                 // Planned under the writer's lock, from the files as they are then, so a mod the
                 // Mods panel is writing at the same moment is kept rather than written away.
-                writer.Commit(() => Rpcs3Patches.Plan(folder, title, game, executable, patch, build));
+                writer.Commit(() => Rpcs3Patches.PlanQwark(folder, title, game, executable, helper, switches, build));
             }
             catch (QwarkStatusException ex)
             {
                 error = ex.Status switch
                 {
-                    Status.Unsupported => "this game has no savefile helper",
+                    Status.Unsupported => asking == QwarkPatchPart.SaveFileHelper
+                        ? "this game has no savefile helper"
+                        : "this game has no code switches",
                     Status.NotIngame => "the game is not running",
-                    Status.UnknownOp => "this qwark-rpcs3 cannot supply the helper",
-                    _ => $"qwark answered {ex.Status}",
+                    Status.UnknownOp => $"this qwark-rpcs3 cannot supply {asking.Noun()}",
+                    _ => $"qwark answered {ex.Status} to {ex.Opcode}",
                 };
             }
             catch (Exception ex)
@@ -354,8 +538,8 @@ public sealed class Rpcs3PatchController
                 Installing = false;
                 if (error is null)
                 {
-                    _state.AddToast($"Savefile helper patch written for {game}. Restart the game in RPCS3 to load it.",
-                        ToastKind.Success);
+                    _state.AddToast($"Wrote {names} for {game}. Restart the game in RPCS3 to load "
+                                    + $"{(wanted.Count == 1 ? "it" : "them")}.", ToastKind.Success);
 
                     // The files have changed and the words have not: only the folder is looked at
                     // again, and what it said before the install is not shown in the meantime.
@@ -364,101 +548,126 @@ public sealed class Rpcs3PatchController
                 }
                 else
                 {
-                    _state.AddToast($"The savefile helper patch was not installed: {error}", ToastKind.Error);
+                    _state.AddToast($"{names} {(wanted.Count == 1 ? "was" : "were")} not installed: {error}", ToastKind.Error);
                     Recheck();
                 }
             });
         });
     }
 
+    /// <summary>Both parts, from the facts alone: <see cref="Decide(QwarkPatchPart, QwarkPatchSession, QwarkPatchReply, Rpcs3PatchDisk?)"/> for each.</summary>
+    public static QwarkPatchesStatus Decide(QwarkPatchSession session, QwarkPatchReply helper, QwarkPatchReply switches, Rpcs3PatchDisk? disk) =>
+        new(Decide(QwarkPatchPart.SaveFileHelper, session, helper, disk),
+            Decide(QwarkPatchPart.CodeSwitches, session, switches, disk));
+
     /// <summary>
-    /// The whole decision, from the facts alone. The order is the order of what has to be true
-    /// first: a connection, a game, qwark's words, RPCS3's folder, the hash, the files.
+    /// The whole decision for one part, from the facts alone. The order is the order of what has
+    /// to be true first: a connection, a game, qwark's words, RPCS3's folder, the hash, the files.
+    /// Everything up to the words and after them up to the files is the same for both parts and is
+    /// said in the same words, so the panel can say it once.
     /// </summary>
-    public static SaveFilePatchStatus Decide(SaveFilePatchSession session, SaveFilePatchReply reply, Rpcs3PatchDisk? disk)
+    public static QwarkPatchStatus Decide(QwarkPatchPart part, QwarkPatchSession session, QwarkPatchReply reply, Rpcs3PatchDisk? disk)
     {
+        bool helper = part == QwarkPatchPart.SaveFileHelper;
+
         if (!session.Connected)
         {
-            return new(SaveFilePatchState.Waiting, "Connect to see whether the savefile helper patch is installed.");
+            return new(QwarkPatchState.Waiting, "Connect to see whether qwark's patches are installed.");
         }
 
-        // qwark writes the helper into the game itself here; there is nothing for RPCS3 to do.
-        if (!session.CodePatchesUnsupported) return SaveFilePatchStatus.Hidden;
+        // qwark patches the game itself here; there is nothing for RPCS3 to do.
+        if (!session.CodePatchesUnsupported) return QwarkPatchStatus.Hidden;
 
         if (!session.Ingame)
         {
-            return new(SaveFilePatchState.Waiting, "Start the game in RPCS3 to see whether the savefile helper patch is installed.");
+            return new(QwarkPatchState.Waiting, "Start the game in RPCS3 to see whether qwark's patches are installed.");
         }
 
         if (!session.KnownGame)
         {
-            return new(SaveFilePatchState.Unavailable, "qwark does not know this game, so it has no savefile helper for it.");
+            return new(QwarkPatchState.Unavailable, "qwark does not know this game, so it has no patches for it.");
         }
 
-        if (session.Info.Installed)
+        if (session.IsActive(part))
         {
-            return new(SaveFilePatchState.Active, "Active: the savefile helper is in the game, so saving and loading work.");
+            return new(QwarkPatchState.Active,
+                helper ? "Active. Saving and loading work." : "Active. The cheats that patch game code work.");
         }
 
         switch (reply.Kind)
         {
-            case SaveFilePatchReplyKind.NotAsked:
-            case SaveFilePatchReplyKind.Pending:
-                return new(SaveFilePatchState.Waiting, "Asking qwark for the savefile helper...");
+            case QwarkPatchReplyKind.NotAsked:
+            case QwarkPatchReplyKind.Pending:
+                return new(QwarkPatchState.Waiting, "Asking qwark for its patches...");
 
-            case SaveFilePatchReplyKind.NoHelper:
-                return new(SaveFilePatchState.Unavailable, "This game has no savefile helper, so there is nothing to install.");
+            case QwarkPatchReplyKind.NotSupported:
+                return new(QwarkPatchState.Absent, helper ? "This game has no savefile helper." : "This game has no code switches.");
 
-            case SaveFilePatchReplyKind.TooOld:
-                return new(SaveFilePatchState.Unavailable,
-                    $"qwark-rpcs3 build {session.QwarkBuild} cannot supply the savefile helper patch. "
+            case QwarkPatchReplyKind.TooOld:
+                return new(QwarkPatchState.Unavailable,
+                    $"qwark-rpcs3 build {session.QwarkBuild} cannot supply {part.Noun()}. "
                     + $"It needs build {QwarkClient.ExpectedQwarkBuild}.");
 
-            case SaveFilePatchReplyKind.Failed:
-                return new(SaveFilePatchState.Unavailable, reply.Problem);
+            case QwarkPatchReplyKind.Failed:
+                return new(QwarkPatchState.Unavailable, reply.Problem);
         }
 
         var patch = reply.Patch!;
 
         if (disk is null || !string.Equals(disk.TitleId, session.TitleId, StringComparison.Ordinal))
         {
-            return new(SaveFilePatchState.Waiting, "Looking at RPCS3's folder...");
+            return new(QwarkPatchState.Waiting, "Looking at RPCS3's folder...");
         }
 
-        if (disk.Folder.Folder is null) return new(SaveFilePatchState.Unavailable, disk.Folder.Problem, FolderProblem: true);
-        if (disk.Hash is not { Hash: { } hash }) return new(SaveFilePatchState.Unavailable, disk.Hash?.Problem ?? string.Empty);
+        if (disk.Folder.Folder is null) return new(QwarkPatchState.Unavailable, disk.Folder.Problem, FolderProblem: true);
+        if (disk.Hash is not { Hash: { } hash }) return new(QwarkPatchState.Unavailable, disk.Hash?.Problem ?? string.Empty);
 
         var file = disk.File!;
-        if (file.Kind is PatchFileKind.Foreign or PatchFileKind.Broken) return new(SaveFilePatchState.Unavailable, file.Problem);
-        if (disk.Problem.Length > 0) return new(SaveFilePatchState.Unavailable, disk.Problem);
+        if (file.Kind is PatchFileKind.Foreign or PatchFileKind.Broken) return new(QwarkPatchState.Unavailable, file.Problem);
+        if (disk.Problem.Length > 0) return new(QwarkPatchState.Unavailable, disk.Problem);
 
-        var entry = file.EntryFor(hash);
+        // A mod RPCS3 applies over the same words would leave neither whole, so the install would
+        // refuse; the line says so first. DL Crash Patches writes exactly the words Deadlocked's
+        // code switches do.
+        var clashes = Rpcs3Patches.ModsOver(PatchRanges.Of(patch), disk.EnabledMods());
+        if (clashes.Count > 0)
+        {
+            string names = Rpcs3Patches.JoinNames(clashes.Select(clash => clash.Name).ToList());
+            bool one = clashes.Count == 1;
+            return new(QwarkPatchState.Unavailable,
+                $"{names} {(one ? "is" : "are")} enabled on the Mods panel and {(one ? "writes" : "write")} to the same "
+                + $"addresses as {part.Noun()}. Disable {(one ? "it" : "them")} there first, then install.");
+        }
+
+        string description = part.Description();
+        var entry = file.EntryFor(hash, description);
         if (entry is null)
         {
-            return new(SaveFilePatchState.Install,
-                "Not installed. Under RPCS3, saving and loading need the savefile helper as an RPCS3 patch.");
+            return new(QwarkPatchState.Install,
+                helper
+                    ? "Not installed. Under RPCS3, saving and loading need it."
+                    : "Not installed. Under RPCS3, the cheats that patch game code need it.");
         }
 
         if (!entry.Holds(patch))
         {
-            return new(SaveFilePatchState.Install,
-                "Out of date: the patch in RPCS3 is not the helper this qwark build supplies. Install the new one.");
+            return new(QwarkPatchState.Install,
+                "Out of date: the patch in RPCS3 is not the one this qwark build supplies. Install the new one.");
         }
 
-        if (!disk.Enabled)
+        if (!disk.IsEnabled(description))
         {
-            return new(SaveFilePatchState.Install,
+            return new(QwarkPatchState.Install,
                 "The patch is in RPCS3's patches folder, but RPCS3's patch settings switch it off. Install it again to switch it on.");
         }
 
-        if (disk.Hash.PatchApplied)
+        if (disk.Hash.AppliedAtBoot(description))
         {
-            return new(SaveFilePatchState.Unavailable,
-                "RPCS3 applied the patch when this game started, but qwark does not find the helper in the game. "
+            return new(QwarkPatchState.Unavailable,
+                $"RPCS3 applied the patch when this game started, but qwark does not find {part.Noun()} in the game. "
                 + "Press Check again. If this stays, restart the game in RPCS3.");
         }
 
-        return new(SaveFilePatchState.RestartGame,
-            "Installed. Restart the game in RPCS3 to apply changes.");
+        return new(QwarkPatchState.RestartGame, "Installed. Restart the game in RPCS3 to apply changes.");
     }
 }

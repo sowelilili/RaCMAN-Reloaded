@@ -43,6 +43,16 @@ public static class SaveFilesPanel
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
     /// <summary>
+    /// Whether the savefile helper can be asked to do anything this session. On a console qwark
+    /// writes the helper in on first use, so it always can. Under RPCS3 (a platform that refuses
+    /// code patches) it cannot, and the helper is in the game only when the RPCS3 patch put it there
+    /// at this boot, which is what SAVEFILE_INFO's <c>installed</c> says there; without it saving and
+    /// loading are refused. This panel, the Game page's set-aside buttons and the Combos panel's
+    /// set-aside combo all go by this.
+    /// </summary>
+    public static bool HelperIn(SessionInfo session, SaveFileInfo info) => !session.CodePatchesUnsupported || info.Installed;
+
+    /// <summary>
     /// The library changed under the panel — an import put files in it — so read it again on the
     /// next frame. Render thread only, like everything else here.
     /// </summary>
@@ -111,11 +121,9 @@ public static class SaveFilesPanel
         // ACTIONs say a game asks for one, SAVEFILE_INFO says whether there is one to ask.
         bool hasHelper = info.Supported && save is not null && load is not null;
 
-        // On a console qwark writes the helper in on first use. Under RPCS3 it cannot, and the
-        // helper is in the game only when the RPCS3 patch put it there at this boot, which is what
-        // `installed` says there; without it saving and loading are refused, so they are greyed out.
-        bool rpcs3 = state.CodePatchesUnsupported;
-        bool helperIn = !rpcs3 || info.Installed;
+        // Under RPCS3 the helper is in the game only when the RPCS3 patch put it there at this
+        // boot; without it saving and loading are refused, so they are greyed out.
+        bool helperIn = HelperIn(session, info);
         bool enabled = state.Ingame && hasHelper && helperIn && !_busy;
 
         // INFO only observes the helper. An action installs it on demand; transfers poll INFO
@@ -149,8 +157,7 @@ public static class SaveFilesPanel
         }
         else if (!helperIn)
         {
-            Ui.Warning("Under RPCS3, saving and loading need the savefile helper patch. Install it with the "
-                       + "button in the RPCS3 part of the Connection panel, then restart the game in RPCS3.");
+            Ui.Warning(Ui.NeedsSaveFileHelper);
             ImGui.Spacing();
         }
         else if (info.Installed && !info.Running)

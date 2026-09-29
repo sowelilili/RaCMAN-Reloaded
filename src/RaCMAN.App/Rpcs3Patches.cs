@@ -86,7 +86,7 @@ public sealed record Rpcs3FolderLookup(Rpcs3Folder? Folder, string Problem);
 /// The PPU executable hash of the running game, read out of RPCS3's log, or why it could not be.
 /// <see cref="PatchApplied"/> says the log also shows RPCS3 applying the savefile helper at that
 /// boot, and <see cref="Applied"/> names every patch of this executable the log shows RPCS3
-/// applying at that boot, by its description.
+/// applying at that boot, by its description: the helper, the code switches and the mods alike.
 /// </summary>
 public sealed record ExecutableHashLookup(
     string? Hash,
@@ -119,9 +119,10 @@ public enum PatchFileKind
 
 /// <summary>
 /// One of this client's entries in RaCMAN's patch file: the executable's hash, the description it
-/// is filed under (the savefile helper's, or one mod's), the game it is for, the words and the
-/// single bytes, and the three lines RPCS3's Patch Manager shows about it. What is read back is
-/// everything that is written, so an entry that is kept is written back exactly as it was.
+/// is filed under (the savefile helper's, the code switches' or one mod's), the game it is for,
+/// the words and the single bytes, and the three lines RPCS3's Patch Manager shows about it. What
+/// is read back is everything that is written, so an entry that is kept is written back exactly as
+/// it was.
 /// </summary>
 public sealed record PatchFileEntry(
     string Hash,
@@ -139,7 +140,16 @@ public sealed record PatchFileEntry(
     /// <summary>qwark's savefile helper.</summary>
     public bool IsHelper => Description == Rpcs3Patches.Description;
 
-    /// <summary>The folder name of the mod this entry is, or null for the savefile helper.</summary>
+    /// <summary>qwark's code switches (build 50).</summary>
+    public bool IsSwitches => Description == Rpcs3Patches.SwitchesDescription;
+
+    /// <summary>
+    /// One of qwark's own patches, the savefile helper or the code switches: the game's rather than
+    /// the user's, installed from the Connection panel, and never switched off from the Mods panel.
+    /// </summary>
+    public bool IsQwarks => IsHelper || IsSwitches;
+
+    /// <summary>The folder name of the mod this entry is, or null for one of qwark's own patches.</summary>
     public string? ModDir => Rpcs3Patches.ModDirOf(Description);
 
     /// <summary>Where patch_config.yml switches this entry on for <paramref name="serial"/>.</summary>
@@ -147,8 +157,8 @@ public sealed record PatchFileEntry(
 
     /// <summary>
     /// Whether this and <paramref name="other"/> are the same patch of the same executable, so that
-    /// writing one replaces the other: the helper and the helper, or two entries of one mod folder
-    /// even when the mod has been renamed since.
+    /// writing one replaces the other: the helper and the helper, the switches and the switches, or
+    /// two entries of one mod folder even when the mod has been renamed since.
     /// </summary>
     public bool SameSlot(PatchFileEntry other)
     {
@@ -199,27 +209,36 @@ public sealed class Rpcs3PatchException : Exception
 }
 
 /// <summary>
-/// qwark's savefile helper and the mods as RPCS3 patches: finding RPCS3's folder, reading the
-/// running game's executable hash out of its log, writing the per-title patch file and switching
-/// its entries on and off in patch_config.yml. Nothing here draws anything and nothing here knows
-/// an address: the words come from qwark (SAVEFILE_PATCH, MOD_PATCH) and are copied into the file
-/// as they are, and the only thing ever worked out from them is which addresses they cover.
+/// qwark's savefile helper, qwark's code switches and the mods as RPCS3 patches: finding RPCS3's
+/// folder, reading the running game's executable hash out of its log, writing the per-title patch
+/// file and switching its entries on and off in patch_config.yml. Nothing here draws anything and
+/// nothing here knows an address: the words come from qwark (SAVEFILE_PATCH, SWITCH_PATCH,
+/// MOD_PATCH) and are copied into the file as they are, and the only thing ever worked out from
+/// them is which addresses they cover.
 /// <para>
-/// Why a file at all: RPCS3 recompiles the game's code, so qwark cannot write the helper or a mod
-/// into a running game the way it does on a console. RPCS3 does apply patch files when it loads the
-/// executable, before it compiles anything, so they go in as patches and the game has to be started
-/// again to take them.
+/// Why a file at all: RPCS3 recompiles the game's code, so qwark cannot write the helper, a code
+/// switch or a mod into a running game the way it does on a console. RPCS3 does apply patch files
+/// when it loads the executable, before it compiles anything, so they go in as patches and the game
+/// has to be started again to take them.
 /// </para>
 /// <para>
 /// The file holds any number of this client's entries, per executable hash: the helper, filed
-/// under <see cref="Description"/>, and one per mod, filed under <see cref="ModDescription"/>.
-/// Every write reads the file first and writes every entry it is not about back exactly as it was.
+/// under <see cref="Description"/>, the code switches, filed under <see cref="SwitchesDescription"/>,
+/// and one per mod, filed under <see cref="ModDescription"/>. Every write reads the file first and
+/// writes every entry it is not about back exactly as it was.
 /// </para>
 /// </summary>
 public static class Rpcs3Patches
 {
     /// <summary>The description the savefile helper is filed under, in the file and in RPCS3's Patch Manager.</summary>
     public const string Description = "qwark savefile helper";
+
+    /// <summary>
+    /// The description the code switches are filed under (qwark build 50): every instruction a
+    /// WRITES_CODE feature patches, turned into a branch to a trampoline that reads that feature's
+    /// flag byte, so qwark-rpcs3 toggles those features by writing data.
+    /// </summary>
+    public const string SwitchesDescription = "qwark code switches";
 
     /// <summary>How the description of a mod's entry begins; <see cref="ModDescription"/> has the rest.</summary>
     public const string ModDescriptionPrefix = "RaCMAN mod: ";
@@ -251,10 +270,11 @@ public static class Rpcs3Patches
     public const string Marker = "# RaCMAN Reloaded writes this file";
 
     /// <summary>
-    /// The first line of the file. Older builds wrote a line about the helper alone; it begins with
-    /// <see cref="Marker"/> too, so their files are still this client's.
+    /// The first line of the file. Older builds wrote other words after the marker; theirs begin
+    /// with <see cref="Marker"/> too, so their files are still this client's.
     /// </summary>
-    public const string MarkerLine = Marker + ": qwark's savefile helper and the mods enabled in RaCMAN. Edits made here are lost.";
+    public const string MarkerLine = Marker + ": qwark's savefile helper and code switches, and the mods enabled in RaCMAN. "
+                                     + "Edits made here are lost.";
 
     /// <summary>
     /// A mod's description: its name, and its folder in brackets, which is what makes two mods of
@@ -278,10 +298,15 @@ public static class Rpcs3Patches
         return dir.Length == 0 ? null : dir;
     }
 
-    /// <summary>What to call the patch filed under <paramref name="description"/> in a sentence.</summary>
+    /// <summary>
+    /// What to call the patch filed under <paramref name="description"/> in a sentence. The code
+    /// switches go by the name RPCS3's Patch Manager lists them under, which is the name a user
+    /// who looks there will find.
+    /// </summary>
     public static string NameOf(string description)
     {
         if (description == Description) return "qwark's savefile helper";
+        if (description == SwitchesDescription) return "the " + SwitchesDescription;
         if (ModDirOf(description) is null) return description;
 
         int open = description.LastIndexOf(" [", StringComparison.Ordinal);
@@ -289,7 +314,8 @@ public static class Rpcs3Patches
     }
 
     /// <summary>Whether this client wrote the entry filed under <paramref name="description"/>.</summary>
-    public static bool IsOurs(string description) => description == Description || ModDirOf(description) is not null;
+    public static bool IsOurs(string description) =>
+        description == Description || description == SwitchesDescription || ModDirOf(description) is not null;
 
     /// <summary>The Flatpak's application id, whose sandbox keeps RPCS3's folders under ~/.var/app.</summary>
     public const string FlatpakId = "net.rpcs3.RPCS3";
@@ -820,6 +846,10 @@ public static class Rpcs3Patches
     public static string NotesFor(byte qwarkBuild, uint stamp) =>
         $"qwark build {qwarkBuild}, helper stamp 0x{stamp:x8}";
 
+    /// <summary>What the Notes line of the code switches' entry says, the same way.</summary>
+    public static string NotesForSwitches(byte qwarkBuild, uint stamp) =>
+        $"qwark build {qwarkBuild}, switches stamp 0x{stamp:x8}";
+
     private const string LibraryHashLabel = "library hash ";
 
     /// <summary>
@@ -850,13 +880,13 @@ public static class Rpcs3Patches
     /// same executable and the same patch — is replaced where it stands, or <paramref name="current"/>
     /// goes at the end; every entry of any other patch is kept exactly as it was, for every hash.
     /// <para>
-    /// The savefile helper is the one patch that spreads: every other executable of the same game
-    /// gets the same helper words, because the helper is the game's, and somebody who runs two
-    /// EBOOTs of one game gets both brought up to date. A helper entry for another game is kept as
-    /// it was. That only happens on a title that hosts more than one game (BCES01503 hosts RaC1 to
-    /// RaC3), where each game's executable has its own helper and one game's words written into
-    /// another's would break it. A mod is written for the running executable only: its words are
-    /// that executable's addresses.
+    /// qwark's own patches, the savefile helper and the code switches, are the ones that spread:
+    /// every other executable of the same game gets the same words, because the patch is the
+    /// game's, and somebody who runs two EBOOTs of one game gets both brought up to date. Such an
+    /// entry for another game is kept as it was. That only happens on a title that hosts more than
+    /// one game (BCES01503 hosts RaC1 to RaC3), where each game's executable has its own helper and
+    /// its own switches, and one game's words written into another's would break it. A mod is
+    /// written for the running executable only: its words are that executable's addresses.
     /// </para>
     /// </summary>
     public static IReadOnlyList<PatchFileEntry> MergeEntries(IReadOnlyList<PatchFileEntry> existing, PatchFileEntry current)
@@ -873,7 +903,8 @@ public static class Rpcs3Patches
                 merged.Add(current);
                 placed = true;
             }
-            else if (current.IsHelper && entry.IsHelper && string.Equals(entry.Game, current.Game, StringComparison.Ordinal))
+            else if (current.IsQwarks && entry.Description == current.Description
+                                      && string.Equals(entry.Game, current.Game, StringComparison.Ordinal))
             {
                 merged.Add(current with { Hash = entry.Hash });
             }
@@ -1216,33 +1247,105 @@ public static class Rpcs3Patches
 
     // ---------------------------------------------------------------- the writes
 
-    /// <summary>
-    /// Works out both files for the savefile helper's install, reading what is there now: the
-    /// helper's entry goes in beside every other entry the file holds, and patch_config.yml switches
-    /// every helper entry on and leaves every mod's switch as it was. Throws
-    /// <see cref="Rpcs3PatchException"/> with the reason when it cannot go ahead: somebody else's
-    /// patch file, a broken one of ours, a patch_config.yml that is not a map, a reply with no words.
-    /// </summary>
+    /// <summary>The savefile helper's install alone: <see cref="PlanQwark"/> with no code switches.</summary>
     public static Rpcs3PatchPlan Plan(Rpcs3Folder folder, string titleId, string game, string hash,
-        PatchReply patch, byte qwarkBuild)
+        PatchReply patch, byte qwarkBuild) =>
+        PlanQwark(folder, titleId, game, hash, patch, null, qwarkBuild);
+
+    /// <summary>
+    /// Works out both files for installing qwark's own patches, reading what is there now: the
+    /// savefile helper's entry, the code switches' entry, or both, go in beside every other entry
+    /// the file holds, and patch_config.yml switches on every entry of the kinds written, for every
+    /// executable of the game, and leaves every mod's switch as it was. Both go in one write, so the
+    /// Connection panel's one confirmation covers both.
+    /// <para>
+    /// Throws <see cref="Rpcs3PatchException"/> with the reason when it cannot go ahead: somebody
+    /// else's patch file, a broken one of ours, a patch_config.yml that is not a map, a reply with no
+    /// words, or a mod switched on for this executable that writes an address one of them writes.
+    /// RPCS3 would apply one over the other, and qwark would find neither whole.
+    /// </para>
+    /// </summary>
+    public static Rpcs3PatchPlan PlanQwark(Rpcs3Folder folder, string titleId, string game, string hash,
+        PatchReply? helper, PatchReply? switches, byte qwarkBuild)
     {
         CheckNames(titleId, hash);
-        if (patch.Words.Length == 0) throw new Rpcs3PatchException("qwark sent a savefile helper with no words in it.");
+        if (helper is null && switches is null) throw new Rpcs3PatchException("There is none of qwark's patches to write.");
+        if (helper is { Words.Length: 0 }) throw new Rpcs3PatchException("qwark sent a savefile helper with no words in it.");
+        if (switches is { Words.Length: 0 }) throw new Rpcs3PatchException("qwark sent code switches with no words in them.");
 
         var file = ReadOwnFile(folder, titleId);
+        var (configFile, configExists, configText) = ReadConfig(folder);
 
         string name = string.IsNullOrWhiteSpace(game) ? titleId : game;
-        var current = new PatchFileEntry(hash, name, patch.Words, patch.Bytes, NotesFor(qwarkBuild, patch.Stamp));
-        var entries = MergeEntries(file.Entries, current);
+        var parts = new List<PatchFileEntry>();
+        if (helper is not null)
+        {
+            parts.Add(new PatchFileEntry(hash, name, helper.Words, helper.Bytes, NotesFor(qwarkBuild, helper.Stamp)));
+        }
+
+        if (switches is not null)
+        {
+            parts.Add(new PatchFileEntry(hash, name, switches.Words, switches.Bytes, NotesForSwitches(qwarkBuild, switches.Stamp),
+                SwitchesDescription));
+        }
+
+        var mods = EnabledMods(file, hash, titleId, configText, configFile);
+        foreach (var part in parts)
+        {
+            var clashes = ModsOver(PatchRanges.Of(part), mods);
+            if (clashes.Count == 0) continue;
+
+            string names = JoinNames(clashes.Select(clash => clash.Name).ToList());
+            throw new Rpcs3PatchException(
+                $"{SentenceStart(NameOf(part.Description))} cannot be installed: {names} "
+                + $"{(clashes.Count == 1 ? "is" : "are")} enabled on the Mods panel and "
+                + $"{(clashes.Count == 1 ? "writes" : "write")} to the same addresses (from 0x{clashes[0].Address:x8}), "
+                + $"and RPCS3 would apply one over the other. Disable {names} on the Mods panel first.");
+        }
+
+        IReadOnlyList<PatchFileEntry> entries = file.Entries;
+        foreach (var part in parts) entries = MergeEntries(entries, part);
         string patchText = BuildPatchFile(titleId, entries);
 
-        var (configFile, configExists, configText) = ReadConfig(folder);
         string newConfig = EnablePatches(configText,
-            entries.Where(entry => entry.IsHelper).Select(entry => entry.Key(titleId)), configFile);
+            entries.Where(entry => parts.Any(part => part.Description == entry.Description)).Select(entry => entry.Key(titleId)),
+            configFile);
 
         return new Rpcs3PatchPlan(file.Path, patchText, file.Kind == PatchFileKind.Ours, configFile, newConfig,
             configExists, entries);
     }
+
+    /// <summary>
+    /// The mods patch_config.yml switches on for this executable: what RPCS3 puts into the game at
+    /// the next boot besides qwark's own patches.
+    /// </summary>
+    private static IReadOnlyList<PatchFileEntry> EnabledMods(PatchFileState file, string hash, string titleId,
+        string? configText, string configFile)
+    {
+        var mods = file.EntriesFor(hash).Where(entry => entry.ModDir is not null).ToList();
+        var on = EnabledAmong(configText, mods.Select(entry => entry.Key(titleId)), configFile);
+        return mods.Where(entry => on.Contains(entry.Key(titleId))).ToList();
+    }
+
+    /// <summary>
+    /// Every one of <paramref name="mods"/> that writes an address in <paramref name="ranges"/>, by
+    /// name, with the first address they share. What stands between one of qwark's own patches and
+    /// the game, since RPCS3 would apply one over the other.
+    /// </summary>
+    public static IReadOnlyList<(string Name, uint Address)> ModsOver(IReadOnlyList<PatchRange> ranges, IEnumerable<PatchFileEntry> mods)
+    {
+        var found = new List<(string, uint)>();
+        foreach (var mod in mods)
+        {
+            if (PatchRanges.FirstShared(ranges, PatchRanges.Of(mod)) is { } address) found.Add((NameOf(mod.Description), address));
+        }
+
+        return found;
+    }
+
+    /// <summary>A name from <see cref="NameOf"/> at the start of a sentence: "the" is capitalised, qwark never is.</summary>
+    private static string SentenceStart(string name) =>
+        name.StartsWith("the ", StringComparison.Ordinal) ? "The" + name[3..] : name;
 
     /// <summary>
     /// Works out both files for writing mods' entries for the running executable and switching them
@@ -1252,10 +1355,10 @@ public static class Rpcs3Patches
     /// other switch is kept exactly as it was.
     /// <para>
     /// Refused, with every other mod named, when one of them writes an address that the savefile
-    /// helper's entry for this executable, an enabled mod's, or another of these writes: RPCS3
-    /// would apply one over the other when the game boots and leave neither whole. This is checked
-    /// here, against the files as they are when the write happens, rather than against a look taken
-    /// earlier.
+    /// helper's or the code switches' entry for this executable, an enabled mod's, or another of
+    /// these writes: RPCS3 would apply one over the other when the game boots and leave neither
+    /// whole. This is checked here, against the files as they are when the write happens, rather
+    /// than against a look taken earlier.
     /// </para>
     /// </summary>
     public static Rpcs3PatchPlan PlanMods(Rpcs3Folder folder, string titleId, string hash, IReadOnlyList<PatchFileEntry> mods)
@@ -1280,12 +1383,13 @@ public static class Rpcs3Patches
         var file = ReadOwnFile(folder, titleId);
         var (configFile, configExists, configText) = ReadConfig(folder);
 
-        // What is already going into the game at the next boot: the helper whenever it is in the
-        // file (it is switched on by its own button, and nothing may sit under it meanwhile), and
-        // every mod whose switch is on. An entry these writes replace is not in the way of itself.
+        // What is already going into the game at the next boot: qwark's own patches, the helper
+        // and the code switches, whenever they are in the file (they are switched on by their own
+        // button, and nothing may sit under them meanwhile), and every mod whose switch is on. An
+        // entry these writes replace is not in the way of itself.
         var present = file.EntriesFor(hash).Where(entry => !mods.Any(mod => mod.SameSlot(entry))).ToList();
-        var enabled = EnabledAmong(configText, present.Where(entry => !entry.IsHelper).Select(entry => entry.Key(titleId)), configFile);
-        var inTheWay = present.Where(entry => entry.IsHelper || enabled.Contains(entry.Key(titleId))).ToList();
+        var enabled = EnabledAmong(configText, present.Where(entry => !entry.IsQwarks).Select(entry => entry.Key(titleId)), configFile);
+        var inTheWay = present.Where(entry => entry.IsQwarks || enabled.Contains(entry.Key(titleId))).ToList();
 
         CheckOverlaps(mods, inTheWay);
 
@@ -1337,40 +1441,37 @@ public static class Rpcs3Patches
     /// </summary>
     public static void CheckOverlaps(IReadOnlyList<PatchFileEntry> mods, IReadOnlyList<PatchFileEntry> present)
     {
-        var ranges = new Dictionary<PatchFileEntry, IReadOnlyList<PatchRange>>(ReferenceEqualityComparer.Instance);
-        IReadOnlyList<PatchRange> RangesOf(PatchFileEntry entry)
-        {
-            if (!ranges.TryGetValue(entry, out var found))
-            {
-                found = PatchRanges.Of(entry.Words, entry.Bytes);
-                ranges[entry] = found;
-            }
-
-            return found;
-        }
-
         for (int i = 0; i < mods.Count; i++)
         {
             var mod = mods[i];
-            var clashes = new List<(string Name, uint Address)>();
+            var clashes = new List<(PatchFileEntry Other, uint Address)>();
 
             foreach (var other in present.Concat(mods.Take(i)))
             {
-                if (PatchRanges.FirstShared(RangesOf(mod), RangesOf(other)) is { } address)
+                if (PatchRanges.FirstShared(PatchRanges.Of(mod), PatchRanges.Of(other)) is { } address)
                 {
-                    clashes.Add((NameOf(other.Description), address));
+                    clashes.Add((other, address));
                 }
             }
 
             if (clashes.Count == 0) continue;
 
-            string names = JoinNames(clashes.Select(clash => clash.Name).Distinct().ToList());
+            string names = JoinNames(clashes.Select(clash => NameOf(clash.Other.Description)).Distinct().ToList());
+
+            // qwark's own patches are never switched off from the Mods panel, so a mod under one of
+            // them cannot be used at all, whatever else is in its way; a mod under other mods can,
+            // once they are switched off.
+            var qwarks = clashes.Where(clash => clash.Other.IsQwarks).Select(clash => NameOf(clash.Other.Description)).Distinct().ToList();
+
+            string advice = qwarks.Count == 0 ? $"Disable {names} first."
+                : $"It cannot be used together with {JoinNames(qwarks)}."
+                  + (clashes.Any(clash => clash.Other.IsSwitches)
+                      ? " It patches the same code as a cheat on the Game panel, which works through the switches instead."
+                      : string.Empty);
+
             throw new Rpcs3PatchException(
                 $"{NameOf(mod.Description)} cannot be enabled: it writes to the same addresses as {names} "
-                + $"(from 0x{clashes[0].Address:x8}), and RPCS3 would apply one over the other. "
-                + (clashes.Count == 1 && clashes[0].Name == NameOf(Description)
-                    ? "It cannot be used together with the savefile helper."
-                    : $"Disable {names} first."));
+                + $"(from 0x{clashes[0].Address:x8}), and RPCS3 would apply one over the other. " + advice);
         }
     }
 
@@ -1457,7 +1558,7 @@ public static class Rpcs3Patches
 }
 
 /// <summary>
-/// The one way this client writes RPCS3's files. The savefile helper's install and the Mods panel
+/// The one way this client writes RPCS3's files. The install of qwark's patches and the Mods panel
 /// both read the patch file and patch_config.yml, change their own part and write the whole of each
 /// back, so two of them at once would each write the other's change away: every write is worked out
 /// and written under one lock, from the files as they are at that moment. It also remembers which

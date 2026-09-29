@@ -59,6 +59,15 @@ public static class PreviousSessionModal
                 if ((previous.Toggles & (1UL << i)) == 0) continue;
                 var feature = describe.Features.FirstOrDefault(f => f.Id == i);
                 ImGui.BulletText(feature?.Label ?? $"feature {i}");
+
+                // A cheat that patches game code comes back only through qwark's code switches
+                // under RPCS3, by the Game page's rule: the row says so while they are not in.
+                if (feature is not null && GamePanel.CodeFeatureBlocked(feature, state.Session))
+                {
+                    ImGui.SameLine();
+                    ImGui.TextColored(Ui.Grey, "needs qwark's patches in RPCS3");
+                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(Ui.NeedsQwarkPatches);
+                }
             }
         }, previous.Toggles != 0);
 

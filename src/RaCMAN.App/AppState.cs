@@ -211,8 +211,9 @@ public sealed class AppState : IDisposable
     public Rpcs3Host Rpcs3 { get; }
 
     /// <summary>
-    /// The savefile helper as an RPCS3 patch: what the Connection panel says about it, and the
-    /// install behind its confirmation. Inert until that panel is drawn with the RPCS3 target.
+    /// qwark's own patches under RPCS3, the savefile helper and the code switches: what the
+    /// Connection panel says about them, and the install behind its confirmation. Inert until that
+    /// panel is drawn with the RPCS3 target.
     /// </summary>
     public Rpcs3PatchController Rpcs3Patch { get; }
 
@@ -223,8 +224,8 @@ public sealed class AppState : IDisposable
     public Rpcs3ModsController Rpcs3Mods { get; }
 
     /// <summary>
-    /// The one way RPCS3's patch file and patch_config.yml are written, shared by the savefile
-    /// helper's install and the Mods panel so neither writes the other's change away.
+    /// The one way RPCS3's patch file and patch_config.yml are written, shared by the install of
+    /// qwark's patches and the Mods panel so neither writes the other's change away.
     /// </summary>
     public Rpcs3PatchWriter Rpcs3Writer { get; } = new();
 
@@ -294,6 +295,12 @@ public sealed class AppState : IDisposable
     /// panel that greys a control out agrees with every other one and with the module.
     /// </summary>
     public bool CodePatchesUnsupported => Session.CodePatchesUnsupported;
+
+    /// <summary>
+    /// qwark-rpcs3 finds the running game's code switches in memory (build 50), so the features
+    /// that patch game code work under RPCS3 too. Off the session flags, like the one above.
+    /// </summary>
+    public bool CodeSwitches => Session.CodeSwitches;
 
     /// <summary>qwark reports it is driving an emulator rather than a console.</summary>
     public bool IsEmulator => Session.IsEmulator;

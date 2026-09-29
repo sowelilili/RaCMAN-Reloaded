@@ -18,10 +18,28 @@ public static class Ui
 
     /// <summary>
     /// Why a control is greyed out when the session carries flags.NO_CODE_PATCHES. One spelling,
-    /// because it is the same reason on a cheat, on a mod and on a client patch, and the user
-    /// meets it in three panels.
+    /// because it is the same reason on a mod's Load, on a client patch and on the savefile
+    /// buttons, and the user meets it in several panels. The cheats that patch game code have
+    /// <see cref="NeedsQwarkPatches"/> instead, since qwark's code switches bring them back.
     /// </summary>
     public const string NoCodePatches = "Needs a code patch, which RPCS3 cannot apply";
+
+    /// <summary>
+    /// Why a cheat that patches game code is greyed out under RPCS3 (qwark build 50): qwark's code
+    /// switches are not in the game. Unlike <see cref="NoCodePatches"/> this one has a way out, and
+    /// says what it is.
+    /// </summary>
+    public const string NeedsQwarkPatches = "Under RPCS3 this needs qwark's patches. Install them on the Connection panel, "
+                                            + "then restart the game in RPCS3.";
+
+    /// <summary>
+    /// Why saving and loading are greyed out under RPCS3: qwark's savefile helper is not in the
+    /// game. The Save files panel says it as its warning, and the Game page's set-aside buttons and
+    /// the Combos panel's set-aside combo say it as their tooltip, in the same words.
+    /// </summary>
+    public const string NeedsSaveFileHelper = "Under RPCS3, saving and loading need qwark's savefile helper. Install it with "
+                                              + "\"Install qwark patches...\" in the RPCS3 part of the Connection panel, "
+                                              + "then restart the game in RPCS3.";
 
     /// <summary>
     /// The Mods panel's banner under RPCS3. Mods are code patches, which qwark cannot write into a

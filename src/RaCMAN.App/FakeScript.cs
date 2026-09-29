@@ -17,7 +17,8 @@ namespace RaCMAN.App;
 public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, "
-                                + "unknown, drop, combos-off, combos-on, sfpatch, start, split[:code[:arg]], reset, "
+                                + "unknown, drop, combos-off, combos-on, sfpatch, switchesin, switchesout, start, "
+                                + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir]";
 
@@ -190,6 +191,26 @@ public static class FakeScript
             case "sfpatch":
                 fake.SaveFileHelperInstalled = true;
                 fake.Session = session with { Generation = session.Generation + 1 };
+                break;
+
+            // The same for qwark's code switches (revision 1.17): a new boot with them applied, and
+            // qwark-rpcs3 now reports them in the game, so the code-writing cheats work. The flag is
+            // set in the same change as the new generation, as the real one reports it.
+            case "switchesin":
+                fake.Session = session with
+                {
+                    Generation = session.Generation + 1,
+                    Flags = session.Flags | SessionFlags.CodeSwitches,
+                };
+                break;
+
+            // And a new boot without them: RPCS3 did not apply them, or they were switched off.
+            case "switchesout":
+                fake.Session = session with
+                {
+                    Generation = session.Generation + 1,
+                    Flags = session.Flags & ~SessionFlags.CodeSwitches,
+                };
                 break;
 
             case "drop":

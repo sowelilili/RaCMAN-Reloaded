@@ -662,6 +662,81 @@ public sealed class FakeQwarkServer : IDisposable
         get => PatchReply.StampFor(SaveFilePatchWords, SaveFilePatchBytes);
     }
 
+    // ------------------------------------------- 5.3, code switches (revision 1.17)
+
+    /// <summary>
+    /// flags.CODE_SWITCHES: qwark-rpcs3 has found the running game's code switches in memory, so the
+    /// WRITES_CODE features work under <see cref="NoCodePatches"/> through their flag bytes. The
+    /// real one only ever sets it there; a test is free to set it anywhere.
+    /// </summary>
+    public bool CodeSwitches
+    {
+        get => (Session.Flags & SessionFlags.CodeSwitches) != 0;
+        set => SetSessionFlag(SessionFlags.CodeSwitches, value);
+    }
+
+    /// <summary>False makes SWITCH_PATCH answer UNSUPPORTED, as for a game that has no switches.</summary>
+    public bool CodeSwitchesSupported { get; set; } = true;
+
+    /// <summary>True makes SWITCH_PATCH answer UNKNOWN_OP, as a module from before revision 1.17 does.</summary>
+    public bool SwitchPatchUnknown { get; set; }
+
+    /// <summary>What SWITCH_PATCH hands out instead of the made-up switches of <see cref="SwitchPatchFor"/>.</summary>
+    public PatchReply? SwitchPatch { get; set; }
+
+    /// <summary>The raw payload SWITCH_PATCH answers with instead of a well-formed reply, for a test of a truncated one.</summary>
+    public byte[]? SwitchPatchPayload { get; set; }
+
+    /// <summary>How many SWITCH_PATCH requests were answered with words.</summary>
+    public int SwitchPatchCount { get; private set; }
+
+    /// <summary>
+    /// Made-up code switches for <paramref name="game"/>, shaped the way qwark's are: for every
+    /// WRITES_CODE feature a six-word trampoline in a cave (load the feature's flag byte, test it,
+    /// the patched instruction, the branch back), then the branch word at each patched site, then
+    /// one flag byte per feature cleared at load. Every game gets its own addresses, so switching
+    /// games changes the words. Nothing reads them but the client, which copies them into a file.
+    /// </summary>
+    public static PatchReply SwitchPatchFor(GameId game, IEnumerable<Feature> features)
+    {
+        (uint cave, uint site, uint flags) = game switch
+        {
+            GameId.Rac2 => (0x001A8000u, 0x0014C000u, 0x0147F000u),
+            GameId.Rac3 => (0x0022C000u, 0x0019A000u, 0x014A2000u),
+            GameId.Rac4 => (0x00672000u, 0x00215000u, 0x00B4C000u),
+            _ => (0x000F2000u, 0x0004B000u, 0x010CE000u),
+        };
+
+        var trampolines = new List<PatchWord>();
+        var branches = new List<PatchWord>();
+        var bytes = new List<PatchByte>();
+        uint n = 0;
+        foreach (var feature in features.Where(f => f.WritesCode))
+        {
+            uint at = cave + n * 0x18;
+            uint patched = site + n * 0x100;
+            uint flag = flags + n;
+            uint high = (flag + 0x8000) >> 16;
+
+            trampolines.Add(new PatchWord(at, 0x3D600000 | high));                  // lis r11, flag@ha
+            trampolines.Add(new PatchWord(at + 4, 0x896B0000 | (flag & 0xFFFF)));   // lbz r11, flag@l(r11)
+            trampolines.Add(new PatchWord(at + 8, 0x2C0B0000));                     // cmpwi r11, 0
+            trampolines.Add(new PatchWord(at + 12, 0x41820008));                    // beq +8
+            trampolines.Add(new PatchWord(at + 16, 0x60000000));                    // the cheat's instruction
+            trampolines.Add(new PatchWord(at + 20, Branch(at + 20, patched + 4)));  // b back
+
+            branches.Add(new PatchWord(patched, Branch(patched, at)));
+            bytes.Add(new PatchByte(flag, 0));
+            n++;
+        }
+
+        var words = trampolines.Concat(branches).ToArray();
+        var cleared = bytes.ToArray();
+        return new PatchReply(PatchReply.StampFor(words, cleared), words, cleared);
+    }
+
+    private static uint Branch(uint from, uint to) => 0x48000000u | ((to - from) & 0x03FFFFFCu);
+
     /// <summary>
     /// True while the ops that run the game's helper have none to run: a platform that cannot patch
     /// code, before revision 1.15 at all and since then until the RPCS3 patch has put it in.
@@ -1001,7 +1076,7 @@ public sealed class FakeQwarkServer : IDisposable
     /// </summary>
     public static bool IsGameOp(Opcode opcode) => opcode is
         Opcode.Describe or Opcode.FeatureSet or Opcode.FeatureTrigger or Opcode.FeatureSetAuto
-        or Opcode.FeatureOptions
+        or Opcode.FeatureOptions or Opcode.SwitchPatch
         or Opcode.PreviousList or Opcode.PreviousReapply or Opcode.PreviousDismiss
         or Opcode.PosSelect or Opcode.PosSave or Opcode.PosLoad or Opcode.PosList or Opcode.PosClear
         or Opcode.PosEdit or Opcode.PosStore
@@ -1071,8 +1146,10 @@ public sealed class FakeQwarkServer : IDisposable
         if (!NoCodePatches) return false;
         if (opcode is Opcode.PatchApply or Opcode.ModLoad) return true;
 
-        // A FEATURE_SET only fails for the features that patch instructions; a data cheat is fine.
-        if (opcode != Opcode.FeatureSet || payload.Length < 1) return false;
+        // A FEATURE_SET or FEATURE_TRIGGER only fails for the features that patch instructions; a
+        // data cheat is fine. With the code switches in the game (revision 1.17) those are data
+        // cheats too: their flag bytes are what qwark writes.
+        if (opcode is not (Opcode.FeatureSet or Opcode.FeatureTrigger) || payload.Length < 1 || CodeSwitches) return false;
         return Array.Find(Describe.Features, f => f.Id == payload[0])?.WritesCode ?? false;
     }
 
@@ -1886,6 +1963,20 @@ public sealed class FakeQwarkServer : IDisposable
 
                     return (Status.Ok,
                         new PatchReply(SaveFilePatchStamp, SaveFilePatchWords, SaveFilePatchBytes).ToBytes());
+                }
+
+                // Revision 1.17: the running game's code switches, for the same RPCS3 patch file.
+                case Opcode.SwitchPatch:
+                {
+                    if (SwitchPatchUnknown) return (Status.UnknownOp, null);
+                    if (EnforceIngame && _session.State != SessionState.Ingame) return (Status.NotIngame, null);
+                    if (!CodeSwitchesSupported) return (Status.Unsupported, null);
+
+                    if (SwitchPatchPayload is { } raw) return (Status.Ok, raw);
+
+                    var reply = SwitchPatch ?? SwitchPatchFor(_session.Game, Describe.Features);
+                    SwitchPatchCount++;
+                    return (Status.Ok, reply.ToBytes());
                 }
 
                 case Opcode.SaveFileRead:

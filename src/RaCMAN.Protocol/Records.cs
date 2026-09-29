@@ -50,6 +50,20 @@ public sealed record SessionInfo(
     public bool CodePatchesUnsupported => (Flags & SessionFlags.NoCodePatches) != 0;
 
     /// <summary>
+    /// The running game's code switches are in memory (revision 1.17): an RPCS3 patch put them there
+    /// when the game booted, so the WRITES_CODE features work on a platform that refuses code
+    /// patches, through their flag bytes. Never set on a console.
+    /// </summary>
+    public bool CodeSwitches => (Flags & SessionFlags.CodeSwitches) != 0;
+
+    /// <summary>
+    /// Whether a WRITES_CODE feature is out of reach this session: the platform refuses code patches
+    /// and the code switches are not in the game. On a console, and under RPCS3 once the switches
+    /// are in, those features work like any other.
+    /// </summary>
+    public bool CodeFeaturesUnavailable => CodePatchesUnsupported && !CodeSwitches;
+
+    /// <summary>
     /// The console is holding every combo off until COMBO_ENABLE turns them back on (revision
     /// 1.12). The switch is the console's, kept in its config, so this is what the checkbox on the
     /// Combos panel draws itself from rather than anything the client remembers.
@@ -869,13 +883,14 @@ public readonly record struct PatchByte(uint Address, byte Value);
 
 /// <summary>
 /// A patch as qwark hands it out for an RPCS3 patch file: the reply of SAVEFILE_PATCH (revision
-/// 1.15) and of MOD_PATCH (revision 1.16), which share one layout.
+/// 1.15), of MOD_PATCH (revision 1.16) and of SWITCH_PATCH (revision 1.17), which share one layout.
 /// <para>
 /// For the savefile helper the words are the caves in address order and then the hook words; the
 /// bytes are single bytes the patch sets at load, which today are the helper's request bytes
-/// cleared to 0 (RaC2's sit in the code segment and are not 0 at load, and a console install
-/// clears them before it hooks). For a mod the words are its caves as consecutive words and then
-/// its own patch words, and the bytes are the tails of caves whose length is not a multiple of four.
+/// cleared to 0 (a console install clears them before it hooks). For a mod the words are its caves
+/// as consecutive words and then its own patch words, and the bytes are the tails of caves whose
+/// length is not a multiple of four. For the code switches the words are the trampolines and then
+/// the branch words at each patched site, and the bytes zero the game's flag bytes at load.
 /// </para>
 /// <para>
 /// <see cref="Stamp"/> is qwark's CRC-32 over every reply byte after the stamp field, and changes

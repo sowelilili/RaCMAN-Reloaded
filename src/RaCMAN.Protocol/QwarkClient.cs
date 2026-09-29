@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 49;
+    public const byte ExpectedQwarkBuild = 50;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -738,6 +738,15 @@ public sealed class QwarkClient : IDisposable
         var payload = await RequestAsync(Opcode.FeatureOptions, new[] { id }, cancellationToken).ConfigureAwait(false);
         return ParseNameList(payload);
     }
+
+    /// <summary>
+    /// SWITCH_PATCH, revision 1.17: the running game's code switches as words and single bytes for
+    /// an RPCS3 patch, laid out as SAVEFILE_PATCH's reply. NOT_INGAME outside a game; UNSUPPORTED
+    /// for a game that has none. A reply that stops short of either list throws
+    /// <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<PatchReply> SwitchPatchAsync(CancellationToken cancellationToken = default) =>
+        PatchReply.Parse(await RequestAsync(Opcode.SwitchPatch, null, cancellationToken).ConfigureAwait(false), "SWITCH_PATCH");
 
     // ---------------------------------------------------------------- 5.4 memory
 
