@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(49, true)]     // the build before the one this client ships with
-    [InlineData(50, false)]    // exactly the expected build: the code-writing checkboxes work under RPCS3 through qwark's code switches
-    [InlineData(51, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(50, true)]     // the build before the one this client ships with
+    [InlineData(51, false)]    // exactly the expected build: the RPCS3-only code is compiled out of the PS3 module
+    [InlineData(52, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(50, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(51, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
