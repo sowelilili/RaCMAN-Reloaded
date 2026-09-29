@@ -28,8 +28,8 @@ public static class Ui
     /// game RPCS3 has recompiled, so they go in as RPCS3 patches instead, and those only ever take
     /// effect when the game boots.
     /// </summary>
-    public const string ModsAreRpcs3Patches = "Under RPCS3 a mod goes in as an RPCS3 patch. RPCS3 applies the enabled "
-                                              + "ones when the game boots, so a change takes effect once you restart the game in RPCS3.";
+    public const string ModsAreRpcs3Patches = "On RPCS3, mods are loaded as patches. A reboot is required "
+                                             + "to load and unload mods.";
 
     public const string PatchesAreCodePatches = "Client patches are code patches, which RPCS3 cannot apply";
 
@@ -39,7 +39,7 @@ public static class Ui
     /// words on the Connection panel and on the Memory panel, which are the two places to look.
     /// </summary>
     public const string NoGameModule = "qwark has no game module for this title, so nothing about the "
-                                      + "game itself can be read. The memory tools work as they always do.";
+                                      + "game itself can be read. The memory tools work as normal.";
 
     public static Vector4 Green => Light ? new(0.10f, 0.55f, 0.15f, 1f) : new(0.45f, 0.85f, 0.45f, 1f);
     public static Vector4 Red => Light ? new(0.80f, 0.15f, 0.15f, 1f) : new(0.95f, 0.45f, 0.45f, 1f);
