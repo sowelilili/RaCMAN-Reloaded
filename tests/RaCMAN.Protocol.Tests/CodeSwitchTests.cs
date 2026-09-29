@@ -183,7 +183,7 @@ public class CodeSwitchTests
 
         // And the tooltip says where the switches come from, not that RPCS3 cannot do it.
         Assert.Contains("Install them on the Connection panel", Ui.NeedsQwarkPatches);
-        Assert.Contains("restart the game in RPCS3", Ui.NeedsQwarkPatches);
+        Assert.Contains("restart", Ui.NeedsQwarkPatches);
     }
 
     [Fact]

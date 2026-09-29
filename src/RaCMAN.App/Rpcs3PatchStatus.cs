@@ -106,6 +106,19 @@ public sealed record QwarkPatchesStatus(QwarkPatchStatus Helper, QwarkPatchStatu
 
     public bool CanInstall => Installable.Count > 0;
 
+    /// <summary>
+    /// Every part the game has is in the game: what the patches are for all works, so the panel has
+    /// nothing to warn about. False while nothing is known yet, or when the game has no parts.
+    /// </summary>
+    public bool AllActive
+    {
+        get
+        {
+            var shown = Shown;
+            return shown.Count > 0 && shown.All(part => For(part).State == QwarkPatchState.Active);
+        }
+    }
+
     /// <summary>Whether the RPCS3 folder setting is the fix for what a line says.</summary>
     public bool FolderProblem => Shown.Any(part => For(part).FolderProblem);
 

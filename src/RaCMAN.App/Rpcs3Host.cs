@@ -136,6 +136,19 @@ public sealed class Rpcs3Host : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether the helper last said it is talking to RPCS3: "pine: connected to ...", or a game
+    /// starting or stopping, which it only sees over a working link. Anything else ("no server
+    /// ... yet", "has not answered", "lost ...", or nothing yet) is not connected.
+    /// </summary>
+    public bool PineConnected => IsPineConnectedLine(LastPineLine);
+
+    /// <summary>The rule <see cref="PineConnected"/> applies, on its own for the tests.</summary>
+    public static bool IsPineConnectedLine(string? line) =>
+        line is not null
+        && (line.StartsWith("pine: connected", StringComparison.Ordinal)
+            || line.StartsWith("pine: game ", StringComparison.Ordinal));
+
     /// <summary>The tail of the helper's stdout and stderr, oldest first.</summary>
     public string[] Lines
     {

@@ -100,6 +100,24 @@ public class Rpcs3PatchTests : IDisposable
 
     private static Rpcs3Folder FolderAt(string root) => Rpcs3Patches.Build(root, Windows(), "test");
 
+    // ================================================================ the panel's warning
+
+    [Theory]
+    [InlineData(QwarkPatchState.Active, QwarkPatchState.Active, true)]
+    [InlineData(QwarkPatchState.Active, QwarkPatchState.Absent, true)]
+    [InlineData(QwarkPatchState.Absent, QwarkPatchState.Active, true)]
+    [InlineData(QwarkPatchState.Active, QwarkPatchState.RestartGame, false)]
+    [InlineData(QwarkPatchState.Install, QwarkPatchState.Active, false)]
+    [InlineData(QwarkPatchState.Waiting, QwarkPatchState.Waiting, false)]
+    [InlineData(QwarkPatchState.Absent, QwarkPatchState.Absent, false)]
+    [InlineData(QwarkPatchState.Hidden, QwarkPatchState.Hidden, false)]
+    public void TheCodePatchWarningGoesOnlyWhenEveryPartTheGameHasIsActive(
+        QwarkPatchState helper, QwarkPatchState switches, bool allActive)
+    {
+        var status = new QwarkPatchesStatus(new QwarkPatchStatus(helper, "helper"), new QwarkPatchStatus(switches, "switches"));
+        Assert.Equal(allActive, status.AllActive);
+    }
+
     // ================================================================ the wire
 
     [Fact]

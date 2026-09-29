@@ -183,6 +183,19 @@ public class Rpcs3HostTests
         }
     }
 
+    [Theory]
+    [InlineData("pine: connected to 127.0.0.1:28012", true)]
+    [InlineData("pine: game NPEA00423 running", true)]
+    [InlineData("pine: game stopped", true)]
+    [InlineData("pine: no server on 127.0.0.1:28012 yet, retrying every second", false)]
+    [InlineData("pine: RPCS3 accepted the connection but has not answered in 5 s; another program may be on the port", false)]
+    [InlineData("pine: lost (RPCS3 closed the connection)", false)]
+    [InlineData(null, false)]
+    public void ThePineLineSaysWhetherRpcs3IsReached(string? line, bool reached)
+    {
+        Assert.Equal(reached, Rpcs3Host.IsPineConnectedLine(line));
+    }
+
     [Fact]
     public void TheMissingDllExitCodeIsDecoded()
     {

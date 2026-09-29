@@ -29,8 +29,7 @@ public static class Ui
     /// switches are not in the game. Unlike <see cref="NoCodePatches"/> this one has a way out, and
     /// says what it is.
     /// </summary>
-    public const string NeedsQwarkPatches = "Under RPCS3 this needs qwark's patches. Install them on the Connection panel, "
-                                            + "then restart the game in RPCS3.";
+    public const string NeedsQwarkPatches = "RPCS3 patches required. Install them on the Connection panel, then restart.";
 
     /// <summary>
     /// Why saving and loading are greyed out under RPCS3: qwark's savefile helper is not in the

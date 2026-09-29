@@ -485,7 +485,8 @@ public static class ConnectionPanel
         ImGui.Separator();
         Ui.Heading("RPCS3");
 
-        Ui.Hint($"qwark-rpcs3: {host.Status}"
+        if (Ui.Debug) 
+            Ui.DebugHint($"qwark-rpcs3: {host.Status}"
                 + (host.Adopted && !host.IsRunning ? $" (something else is serving port {host.QwarkPort})" : string.Empty));
 
         // The helper's own words about RPCS3, not this client's: being connected to the helper says
@@ -501,17 +502,29 @@ public static class ConnectionPanel
         }
         else
         {
-            Ui.Hint(pine);
+            // Hidden if it's functioning correctly, unless debug is enabled.
+            if (Ui.Debug) Ui.DebugHint(pine);
         }
 
         if (host.Problem is { } problem) Ui.Error(problem);
 
-        int port = state.Settings.Rpcs3PinePort;
-        Ui.Hint($"Turn RPCS3's IPC server on (Settings, the \"IPC server\" option) and leave it on port {port}. "
-                + "Start the game in RPCS3, then Connect. The port is on this client's Settings panel.");
-        Ui.Warning("RPCS3 cannot patch game code while the game runs. The cheats that patch game code need qwark's "
-                   + "patches below, and mods are enabled on the Mods panel; both take effect when the game restarts. "
-                   + "Client patches do not work on RPCS3. Everything that reads and writes values works.");
+        // How to reach RPCS3, only while it is not reached: once the helper is talking to it (or a
+        // game is running through it) the instructions have done their job.
+        bool rpcs3Reached = state.Connected && (state.Ingame || host.PineConnected);
+        if (!rpcs3Reached)
+        {
+            int port = state.Settings.Rpcs3PinePort;
+            Ui.Hint($"Turn RPCS3's IPC server on (Manage/Network Services/IPC) and leave it on port {port}. "
+                    + "Start the game in RPCS3, then Connect. The port is on this client's Settings panel.");
+        }
+
+        // The warning is about what needs qwark's patches, so it goes once every part the game has
+        // is in the game. Last frame's status is fine for that: DrawQwarkPatches refreshes it below.
+        if (!state.Rpcs3Patch.LastStatus.AllActive)
+        {
+            Ui.Warning("RPCS3 cannot patch game code while the game runs. Mods and certain other features "
+                     + "require game patches, which can be installed below.");
+        }
 
         DrawQwarkPatches(state);
 
@@ -538,7 +551,6 @@ public static class ConnectionPanel
         if (status.State == QwarkPatchState.Hidden) return;
 
         ImGui.Spacing();
-        ImGui.TextUnformatted("qwark's patches");
 
         if (patch.Installing)
         {
@@ -630,7 +642,7 @@ public static class ConnectionPanel
         }
 
         ImGui.SetNextItemWidth(360);
-        if (Ui.SubmitTextWithHint("RPCS3 folder", "found by itself", ref _rpcs3Folder, 512))
+        if (Ui.SubmitTextWithHint("RPCS3 folder", "found automatically", ref _rpcs3Folder, 512))
         {
             state.Settings.Rpcs3Folder = _rpcs3Folder.Trim();
             state.Settings.Save();
