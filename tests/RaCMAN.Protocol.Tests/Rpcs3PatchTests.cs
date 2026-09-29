@@ -977,7 +977,7 @@ public class Rpcs3PatchTests : IDisposable
         Assert.Contains("no savefile helper", noHelper.Message);
 
         var old = Rpcs3PatchController.Decide(Session(), new SaveFilePatchReply(SaveFilePatchReplyKind.TooOld), Disk());
-        Assert.Contains("It needs build 47", old.Message);
+        Assert.Contains($"It needs build {QwarkClient.ExpectedQwarkBuild}", old.Message);
 
         var failed = Rpcs3PatchController.Decide(Session(),
             new SaveFilePatchReply(SaveFilePatchReplyKind.Failed, Problem: "the link went away"), Disk());
