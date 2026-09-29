@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 48;
+    public const byte ExpectedQwarkBuild = 49;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -958,6 +958,20 @@ public sealed class QwarkClient : IDisposable
         return Encoding.UTF8.GetString(payload).TrimEnd('\0');
     }
 
+    /// <summary>
+    /// MOD_PATCH, revision 1.16: the mod at <paramref name="index"/> in MOD_LIST, parsed out of the
+    /// console's copy, as words and single bytes for an RPCS3 patch. Its dependencies are not in
+    /// it. NOT_FOUND for an index MOD_LIST does not have, IO_ERROR for a mod that does not parse or
+    /// misses a .bin, UNSUPPORTED for a Lua mod and FULL for one too large for one reply. A reply
+    /// that stops short of either list throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<PatchReply> ModPatchAsync(byte index, CancellationToken cancellationToken = default)
+    {
+        var payload = await RequestAsync(Opcode.ModPatch, new byte[] { index, 0, 0, 0 }, cancellationToken)
+            .ConfigureAwait(false);
+        return PatchReply.Parse(payload, "MOD_PATCH");
+    }
+
     // ---------------------------------------------------------------- 5.8 files
 
     public async Task<uint> FileOpenAsync(string path, FileMode mode, CancellationToken cancellationToken = default)
@@ -1114,8 +1128,8 @@ public sealed class QwarkClient : IDisposable
     /// for an RPCS3 patch. NOT_INGAME outside a game; UNSUPPORTED when the game has no helper or it
     /// is switched off. A reply that stops short of either list throws <see cref="ProtocolException"/>.
     /// </summary>
-    public async Task<SaveFilePatch> SaveFilePatchAsync(CancellationToken cancellationToken = default) =>
-        SaveFilePatch.Parse(await RequestAsync(Opcode.SaveFilePatch, null, cancellationToken).ConfigureAwait(false));
+    public async Task<PatchReply> SaveFilePatchAsync(CancellationToken cancellationToken = default) =>
+        PatchReply.Parse(await RequestAsync(Opcode.SaveFilePatch, null, cancellationToken).ConfigureAwait(false));
 
     public Task<byte[]> SaveFileReadAsync(uint offset, uint length, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.SaveFileRead,

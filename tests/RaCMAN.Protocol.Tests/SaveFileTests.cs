@@ -93,7 +93,7 @@ public class SaveFileTests : IDisposable
 
             var written = new List<long>();
             server.ClearRequestLog();
-            await client.WriteFileAsync(path, data, new Progress<long>(written.Add));
+            await client.WriteFileAsync(path, data, new InlineProgress<long>(written.Add));
 
             Assert.Equal(data, server.Files[path]);
 
@@ -296,11 +296,11 @@ public class SaveFileTests : IDisposable
 
             var written = new List<long>();
             server.ClearRequestLog();
-            await client.SaveFileUploadAsync(data, new Progress<long>(written.Add));
+            await client.SaveFileUploadAsync(data, new InlineProgress<long>(written.Add));
             Assert.Equal(data, server.SaveFileBuffer);
 
             var read = new List<long>();
-            var back = await client.SaveFileDownloadAsync((uint)data.Length, new Progress<long>(read.Add));
+            var back = await client.SaveFileDownloadAsync((uint)data.Length, new InlineProgress<long>(read.Add));
             Assert.Equal(data, back);
 
             // Revision 1.11 chunks: 16000 bytes, so 200 KB is twelve full ones and a tail, both ways.
@@ -395,7 +395,7 @@ public class SaveFileTests : IDisposable
 
             var messages = new List<string>();
             var data = await SaveFileTransfer.DownloadAsync(client, id,
-                status: new Progress<string>(messages.Add));
+                status: new InlineProgress<string>(messages.Add));
 
             Assert.Equal(server.SaveAsideContent, data);
             Assert.Equal(new[] { id }, server.Triggered);
@@ -415,7 +415,7 @@ public class SaveFileTests : IDisposable
 
             var messages = new List<string>();
             var data = await SaveFileTransfer.DownloadAsync(client, id,
-                status: new Progress<string>(messages.Add));
+                status: new InlineProgress<string>(messages.Add));
 
             Assert.Equal(server.SaveAsideContent, data);
             Assert.Contains(messages, m => m.Contains("Waiting", StringComparison.OrdinalIgnoreCase));
@@ -786,7 +786,7 @@ public class SaveFileTests : IDisposable
             var messages = new List<string>();
             var path = await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav",
                 mirror: true, timeout: null,
-                status: new Progress<string>(messages.Add), bytes: new Progress<long>(progress.Add));
+                status: new InlineProgress<string>(messages.Add), bytes: new InlineProgress<long>(progress.Add));
 
             // The console holds the file, sum and all, and this PC holds the same bytes.
             var console = Assert.Single(await client.SaveFileListAsync("any%"));

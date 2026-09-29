@@ -446,9 +446,10 @@ public class ComboCaptureTests
 public class PanelNavTests
 {
     [Fact]
-    public void ModsAreGreyedOutWhenTheConsoleRefusesCodePatches()
+    public void ModsStayOpenUnderRpcs3()
     {
-        Assert.Equal(Ui.ModsAreCodePatches, PanelNav.DisabledReason(PanelNav.Mods, true));
+        // Since build 49 a mod reaches an RPCS3 game as an RPCS3 patch, switched on from the panel.
+        Assert.Null(PanelNav.DisabledReason(PanelNav.Mods, true));
     }
 
     [Fact]
@@ -471,7 +472,6 @@ public class PanelNavTests
     {
         for (int panel = 0; panel < PanelNav.Count; panel++)
         {
-            if (panel == PanelNav.Mods) continue;
             Assert.Null(PanelNav.DisabledReason(panel, true));
         }
     }

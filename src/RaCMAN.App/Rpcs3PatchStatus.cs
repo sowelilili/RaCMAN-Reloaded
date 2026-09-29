@@ -49,13 +49,13 @@ public enum SaveFilePatchReplyKind
 }
 
 /// <summary>What qwark said to SAVEFILE_PATCH for the running game.</summary>
-public sealed record SaveFilePatchReply(SaveFilePatchReplyKind Kind, SaveFilePatch? Patch = null, string Problem = "")
+public sealed record SaveFilePatchReply(SaveFilePatchReplyKind Kind, PatchReply? Patch = null, string Problem = "")
 {
     public static readonly SaveFilePatchReply NotAsked = new(SaveFilePatchReplyKind.NotAsked);
 
     public static readonly SaveFilePatchReply Pending = new(SaveFilePatchReplyKind.Pending);
 
-    public static SaveFilePatchReply Ok(SaveFilePatch patch) => new(SaveFilePatchReplyKind.Ok, patch);
+    public static SaveFilePatchReply Ok(PatchReply patch) => new(SaveFilePatchReplyKind.Ok, patch);
 }
 
 /// <summary>What the session says, as far as the savefile helper patch is concerned.</summary>
@@ -69,9 +69,11 @@ public sealed record SaveFilePatchSession(
     SaveFileInfo Info);
 
 /// <summary>
-/// What RPCS3's folder says about the running game's patch: where the folder is, the executable's
-/// hash, what the title's patch file holds and whether patch_config.yml switches the entry on. Each
-/// step is only taken when the one before it worked, and each one that did not says why.
+/// What RPCS3's folder says about the running game's patches: where the folder is, the executable's
+/// hash, what the title's patch file holds and which of its entries for that executable
+/// patch_config.yml switches on. <see cref="Enabled"/> is the savefile helper's switch and
+/// <see cref="EnabledEntries"/> every one of them, by description. Each step is only taken when the
+/// one before it worked, and each one that did not says why.
 /// </summary>
 public sealed record Rpcs3PatchDisk(
     string TitleId,
@@ -79,8 +81,15 @@ public sealed record Rpcs3PatchDisk(
     ExecutableHashLookup? Hash,
     PatchFileState? File,
     bool Enabled,
-    string Problem)
+    string Problem,
+    IReadOnlyList<string>? EnabledEntries = null)
 {
+    /// <summary>Whether patch_config.yml switches on the running executable's entry filed under <paramref name="description"/>.</summary>
+    public bool IsEnabled(string description) =>
+        EnabledEntries is not null
+            ? EnabledEntries.Contains(description, StringComparer.Ordinal)
+            : Enabled && description == Rpcs3Patches.Description;
+
     public static Rpcs3PatchDisk Inspect(string? overrideFolder, Rpcs3Environment environment, string titleId)
     {
         var located = Rpcs3Patches.Locate(overrideFolder, environment);
@@ -106,14 +115,13 @@ public sealed record Rpcs3PatchDisk(
 
         try
         {
-            var entry = file.Kind == PatchFileKind.Ours ? file.EntryFor(executable) : null;
-            bool enabled = entry is not null
-                           && Rpcs3Patches.IsEnabled(text, new PatchConfigKey(executable, entry.Game, titleId), config);
+            // Also the refusal a write would meet, so the panels say it first.
+            var mine = file.Kind == PatchFileKind.Ours ? file.EntriesFor(executable).ToList() : new List<PatchFileEntry>();
+            var on = Rpcs3Patches.EnabledAmong(text, mine.Select(entry => entry.Key(titleId)), config);
+            var enabled = mine.Where(entry => on.Contains(entry.Key(titleId))).Select(entry => entry.Description).ToArray();
 
-            // Also the refusal the install would meet, so the panel says it first.
-            if (entry is null) Rpcs3Patches.EnablePatches(text, Array.Empty<PatchConfigKey>(), config);
-
-            return new Rpcs3PatchDisk(titleId, located, hash, file, enabled, string.Empty);
+            return new Rpcs3PatchDisk(titleId, located, hash, file,
+                enabled.Contains(Rpcs3Patches.Description, StringComparer.Ordinal), string.Empty, enabled);
         }
         catch (Rpcs3PatchException ex)
         {
@@ -142,8 +150,6 @@ public sealed class Rpcs3PatchController
     private const long RetryMs = 1000;
 
     private readonly AppState _state;
-    private readonly HashSet<string> _backedUp = new(StringComparer.Ordinal);
-    private readonly object _backupGate = new();
 
     private string _replyKey = string.Empty;
     private long _retryAtMs;
@@ -312,6 +318,7 @@ public sealed class Rpcs3PatchController
         string game = session.GameName;
         byte build = _state.Hello?.QwarkVersion ?? session.QwarkVersion;
         var client = _state.Client;
+        var writer = _state.Rpcs3Writer;
 
         Installing = true;
         _ = Task.Run(async () =>
@@ -321,10 +328,11 @@ public sealed class Rpcs3PatchController
             {
                 var patch = await client.SaveFilePatchAsync().ConfigureAwait(false);
                 var hash = Rpcs3Patches.FindExecutableHash(folder, title);
-                if (hash.Hash is null) throw new Rpcs3PatchException(hash.Problem);
+                string executable = hash.Hash ?? throw new Rpcs3PatchException(hash.Problem);
 
-                var plan = Rpcs3Patches.Plan(folder, title, game, hash.Hash, patch, build);
-                lock (_backupGate) Rpcs3Patches.Write(plan, _backedUp);
+                // Planned under the writer's lock, from the files as they are then, so a mod the
+                // Mods panel is writing at the same moment is kept rather than written away.
+                writer.Commit(() => Rpcs3Patches.Plan(folder, title, game, executable, patch, build));
             }
             catch (QwarkStatusException ex)
             {

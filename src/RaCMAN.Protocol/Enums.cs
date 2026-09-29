@@ -66,6 +66,13 @@ public enum Opcode : ushort
     ModRescan = 0x0064,
     ModInfo = 0x0065,
 
+    /// <summary>
+    /// Revision 1.16: one mod as address and value words, for a platform that cannot write it into
+    /// the game itself. The reply is laid out exactly as SAVEFILE_PATCH's, and the client puts it
+    /// into an RPCS3 patch the same way.
+    /// </summary>
+    ModPatch = 0x0066,
+
     // 5.8 Files
     FileOpen = 0x0070,
     FileWrite = 0x0071,
@@ -409,6 +416,12 @@ public enum FeatureFlags : byte
     Signed = 1 << 5,
 }
 
+/// <summary>
+/// Mod.flags, section 5.7 of PROTOCOL.md. On a platform that refuses code patches (SessionInfo
+/// NO_CODE_PATCHES) LOADED means something else since revision 1.16: qwark-rpcs3 has found the
+/// mod's words and caves in game memory this session, put there by an RPCS3 patch, and CHECKING
+/// says it has not looked yet.
+/// </summary>
 [Flags]
 public enum ModFlags : byte
 {
@@ -418,6 +431,9 @@ public enum ModFlags : byte
     NeedsLua = 1 << 2,
     Previous = 1 << 3,
     ParseError = 1 << 4,
+
+    /// <summary>Revision 1.16, only where code cannot be patched: whether the mod is in the game is not known yet this session.</summary>
+    Checking = 1 << 5,
 }
 
 [Flags]

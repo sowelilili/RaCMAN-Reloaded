@@ -18,7 +18,14 @@ public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, "
                                 + "unknown, drop, combos-off, combos-on, sfpatch, start, split[:code[:arg]], reset, "
-                                + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]]";
+                                + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
+                                + "modsin[:dir], modscheck[:dir], modsout[:dir]";
+
+    /// <summary>
+    /// The steps that say what qwark-rpcs3 finds in game memory (revision 1.16): a mod found there,
+    /// still being looked for, or not there, by folder, or every mod the console lists without one.
+    /// </summary>
+    private static readonly string[] PresenceSteps = { "modsin", "modscheck", "modsout" };
 
     public static IReadOnlyList<(double At, string Step)> Parse(string script)
     {
@@ -91,6 +98,14 @@ public static class FakeScript
             var emitted = fake.EmitAutosplitEvent(kind, code, timed ? 0u : third, timeMs);
             Console.WriteLine($"fake-script emit seq={emitted.Seq} kind={kind} code={code} " +
                               $"arg={emitted.Arg} time={emitted.TimeMs}ms");
+            return;
+        }
+
+        if (PresenceSteps.Contains(parts[0]))
+        {
+            string? dir = parts.Length > 1 && parts[1].Length > 0 ? parts[1] : null;
+            fake.SetModPresence(dir, loaded: parts[0] == "modsin", checking: parts[0] == "modscheck");
+            Console.WriteLine($"fake-script {parts[0]} {dir ?? "(every mod)"}");
             return;
         }
 

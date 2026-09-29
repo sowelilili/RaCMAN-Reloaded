@@ -23,8 +23,13 @@ public static class Ui
     /// </summary>
     public const string NoCodePatches = "Needs a code patch, which RPCS3 cannot apply";
 
-    /// <summary>The same fact as a sentence, for the panels that are entirely about code patches.</summary>
-    public const string ModsAreCodePatches = "Mods are code patches, which RPCS3 cannot apply";
+    /// <summary>
+    /// The Mods panel's banner under RPCS3. Mods are code patches, which qwark cannot write into a
+    /// game RPCS3 has recompiled, so they go in as RPCS3 patches instead, and those only ever take
+    /// effect when the game boots.
+    /// </summary>
+    public const string ModsAreRpcs3Patches = "Under RPCS3 a mod goes in as an RPCS3 patch. RPCS3 applies the enabled "
+                                              + "ones when the game boots, so a change takes effect once you restart the game in RPCS3.";
 
     public const string PatchesAreCodePatches = "Client patches are code patches, which RPCS3 cannot apply";
 

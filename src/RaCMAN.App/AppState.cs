@@ -111,6 +111,7 @@ public sealed class AppState : IDisposable
         WebMan = new WebManLoader();
         Rpcs3 = new Rpcs3Host(rootFolder: AppPaths.Rpcs3Root);
         Rpcs3Patch = new Rpcs3PatchController(this, Rpcs3Environment.Current);
+        Rpcs3Mods = new Rpcs3ModsController(this, Rpcs3Environment.Current);
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
 
@@ -214,6 +215,18 @@ public sealed class AppState : IDisposable
     /// install behind its confirmation. Inert until that panel is drawn with the RPCS3 target.
     /// </summary>
     public Rpcs3PatchController Rpcs3Patch { get; }
+
+    /// <summary>
+    /// The mods as RPCS3 patches: what the Mods panel says about each one under RPCS3, and the
+    /// writes behind its Enabled checkboxes. Inert until that panel is drawn for RPCS3.
+    /// </summary>
+    public Rpcs3ModsController Rpcs3Mods { get; }
+
+    /// <summary>
+    /// The one way RPCS3's patch file and patch_config.yml are written, shared by the savefile
+    /// helper's install and the Mods panel so neither writes the other's change away.
+    /// </summary>
+    public Rpcs3PatchWriter Rpcs3Writer { get; } = new();
 
     /// <summary>The connection to LiveSplit's TCP server. Only the autosplitter drives it.</summary>
     public LiveSplitClient LiveSplit { get; }
@@ -1172,6 +1185,18 @@ public sealed class AppState : IDisposable
 
         Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
         RescanLocalMods();
+    }
+
+    /// <summary>
+    /// MOD_LIST again without reading the library: what the Mods panel under RPCS3 asks for while
+    /// qwark-rpcs3 is still looking for mods in the game, and after it has written one.
+    /// </summary>
+    public void RefreshConsoleMods(bool quiet = false)
+    {
+        if (!Connected || UnknownGame) return;
+        if (quiet && HoldsBackgroundWork()) return;
+
+        Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
     }
 
     /// <summary>

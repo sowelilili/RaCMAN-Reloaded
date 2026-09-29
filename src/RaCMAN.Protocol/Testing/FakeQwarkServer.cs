@@ -220,6 +220,212 @@ public sealed class FakeQwarkServer : IDisposable
 
     public List<ModEntry> Mods { get; }
 
+    // ------------------------------------------- 5.7, mods where code cannot be patched
+
+    /// <summary>
+    /// The mods qwark-rpcs3 has found in game memory this session, by folder name (revision 1.16).
+    /// Only read while <see cref="NoCodePatches"/> is on, where they are MOD_LIST's LOADED bit: an
+    /// RPCS3 patch put them there when the game booted. On a console LOADED is what MOD_LOAD did.
+    /// </summary>
+    public HashSet<string> ModsInGame { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The mods qwark-rpcs3 has not looked for yet this session: MOD_LIST's CHECKING bit, the same way.</summary>
+    public HashSet<string> ModsChecking { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What MOD_PATCH hands out for a mod, by folder name, instead of what the fake would work out
+    /// itself: the words of the copy the client uploaded, or made-up ones for a mod it never did.
+    /// </summary>
+    public Dictionary<string, PatchReply> ModPatches { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A refusal MOD_PATCH answers for a mod, by folder name: FULL for a mod too large, say.</summary>
+    public Dictionary<string, Status> ModPatchStatuses { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>How many MOD_PATCH requests were answered with words.</summary>
+    public int ModPatchCount { get; private set; }
+
+    /// <summary>
+    /// What qwark-rpcs3 says about one mod in game memory, or about every mod it lists when
+    /// <paramref name="dirName"/> is null: found there, still being looked for, or neither. Taken
+    /// under the server's lock, so a test or a fake script can change it while MOD_LIST is answered.
+    /// </summary>
+    public void SetModPresence(string? dirName, bool loaded, bool checking)
+    {
+        lock (_gate)
+        {
+            var dirs = dirName is null ? Mods.Select(m => m.DirName).ToList() : new List<string> { dirName };
+            foreach (var dir in dirs)
+            {
+                if (loaded) ModsInGame.Add(dir);
+                else ModsInGame.Remove(dir);
+
+                if (checking) ModsChecking.Add(dir);
+                else ModsChecking.Remove(dir);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Puts the given library copies on the fake console as if the client had uploaded them in an
+    /// earlier session, <c>qwark.sum</c> and all, and rescans: qwark-rpcs3's root lives on the PC
+    /// and outlasts a run, so a user who has enabled mods before starts with them there.
+    /// </summary>
+    public void PreloadMods(IEnumerable<LocalMod> mods)
+    {
+        lock (_gate)
+        {
+            foreach (var mod in mods)
+            {
+                string folder = ModFolder(mod.DirName);
+                Files[$"{folder}/patch.txt"] = File.ReadAllBytes(mod.PatchFile);
+                foreach (var bin in mod.BinFiles)
+                {
+                    string local = Path.Combine(mod.Directory, bin);
+                    if (File.Exists(local)) Files[$"{folder}/{bin.Replace('\\', '/')}"] = File.ReadAllBytes(local);
+                }
+
+                Files[$"{folder}/qwark.sum"] = Encoding.ASCII.GetBytes(Crc32.ToSumText(mod.Hash));
+            }
+
+            RescanUploadedMods();
+        }
+    }
+
+    /// <summary>
+    /// MOD_LIST's rows as this console reports them: where code cannot be patched, LOADED and
+    /// CHECKING come from <see cref="ModsInGame"/> and <see cref="ModsChecking"/>.
+    /// </summary>
+    private ModEntry ReportedMod(ModEntry mod)
+    {
+        if (!NoCodePatches) return mod;
+
+        var flags = mod.Flags & ~(ModFlags.Loaded | ModFlags.Checking);
+        if (ModsInGame.Contains(mod.DirName)) flags |= ModFlags.Loaded;
+        if (ModsChecking.Contains(mod.DirName)) flags |= ModFlags.Checking;
+        return mod with { Flags = flags };
+    }
+
+    /// <summary>The title whose mods MOD_LIST, MOD_RESCAN and MOD_PATCH are about: the running one, or at the XMB the last one.</summary>
+    private string _modTitle = "NPEA00385";
+
+    private string ModFolder(string dirName) => $"{ModLibrary.ConsoleRoot}/{_modTitle}/{dirName}";
+
+    /// <summary>
+    /// MOD_RESCAN over the files the client uploaded: every <c>patch.txt</c> under the title's mod
+    /// folder becomes a row, with the hash out of <c>qwark.sum</c> and the name, version and author
+    /// out of its <c>#-</c> lines, as qwark reads them. The rows the fake was made with stay, and a
+    /// row keeps its place and its auto flag when its folder is read again.
+    /// </summary>
+    private void RescanUploadedMods()
+    {
+        string prefix = $"{ModLibrary.ConsoleRoot}/{_modTitle}/";
+        foreach (var path in Files.Keys.Where(p => p.StartsWith(prefix, StringComparison.Ordinal)
+                                                    && p.EndsWith("/patch.txt", StringComparison.Ordinal)).ToArray())
+        {
+            string dir = path[prefix.Length..^"/patch.txt".Length];
+            if (dir.Length == 0 || dir.Contains('/')) continue;
+
+            var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            bool lua = false;
+            foreach (var raw in Encoding.UTF8.GetString(Files[path]).Split('\n'))
+            {
+                string line = raw.TrimEnd('\r');
+                int colon = line.IndexOf(':');
+                if (line.StartsWith("#-", StringComparison.Ordinal) && colon > 2)
+                {
+                    meta[line[2..colon].Trim()] = line[(colon + 1)..].Trim();
+                }
+                else if (line.TrimStart().StartsWith("automation:", StringComparison.OrdinalIgnoreCase))
+                {
+                    lua = true;
+                }
+            }
+
+            uint hash = Files.TryGetValue($"{prefix}{dir}/qwark.sum", out var sum)
+                        && Crc32.TryParseSum(Encoding.ASCII.GetString(sum), out var parsed) ? parsed : 0;
+
+            int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.OrdinalIgnoreCase));
+            var flags = (at >= 0 ? Mods[at].Flags & ModFlags.Auto : ModFlags.None) | (lua ? ModFlags.NeedsLua : ModFlags.None);
+            var row = new ModEntry((byte)(at >= 0 ? at : Mods.Count), flags, hash, dir,
+                meta.TryGetValue("name", out var name) ? name : dir,
+                meta.TryGetValue("version", out var version) ? version : string.Empty,
+                meta.TryGetValue("author", out var author) ? author : string.Empty);
+
+            if (at >= 0) Mods[at] = row;
+            else Mods.Add(row);
+        }
+    }
+
+    /// <summary>
+    /// A mod's words the way MOD_PATCH lays them out, out of the copy the client uploaded: every
+    /// cave as consecutive words from its address, then the plain words, both in patch.txt order,
+    /// and the last one to three bytes of a cave whose length is not a multiple of four as single
+    /// bytes. Null when there is no uploaded copy, or a cave it names is not there (IO_ERROR).
+    /// </summary>
+    private PatchReply? ParseUploadedMod(string dirName, out bool missingBin)
+    {
+        missingBin = false;
+        string folder = ModFolder(dirName);
+        if (!Files.TryGetValue($"{folder}/patch.txt", out var text)) return null;
+
+        var caves = new List<PatchWord>();
+        var plain = new List<PatchWord>();
+        var tails = new List<PatchByte>();
+
+        foreach (var raw in Encoding.UTF8.GetString(text).Split('\n'))
+        {
+            string line = raw.Trim();
+            if (line.Length < 2 || line[0] == '#') continue;
+
+            int colon = line.IndexOf(':');
+            if (colon < 0) continue;
+
+            string key = line[..colon].Trim();
+            string value = line[(colon + 1)..].Trim();
+            if (!key.StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+                || !uint.TryParse(key[2..], System.Globalization.NumberStyles.HexNumber, null, out uint address))
+            {
+                continue;
+            }
+
+            if (value.StartsWith("0x", StringComparison.OrdinalIgnoreCase))
+            {
+                if (uint.TryParse(value[2..], System.Globalization.NumberStyles.HexNumber, null, out uint word))
+                {
+                    plain.Add(new PatchWord(address, word));
+                }
+
+                continue;
+            }
+
+            if (!Files.TryGetValue($"{folder}/{value.Replace('\\', '/')}", out var cave))
+            {
+                missingBin = true;
+                return null;
+            }
+
+            int whole = cave.Length / 4 * 4;
+            for (int i = 0; i < whole; i += 4)
+            {
+                caves.Add(new PatchWord(address + (uint)i, new SpanReader(cave.AsSpan(i, 4)).ReadU32()));
+            }
+
+            for (int i = whole; i < cave.Length; i++) tails.Add(new PatchByte(address + (uint)i, cave[i]));
+        }
+
+        var words = caves.Concat(plain).ToArray();
+        var bytes = tails.ToArray();
+        return new PatchReply(PatchReply.StampFor(words, bytes), words, bytes);
+    }
+
+    /// <summary>Made-up words for a mod the client never uploaded, different for every row.</summary>
+    private static PatchReply MadeUpModPatch(int index)
+    {
+        uint at = 0x00100000u + (uint)index * 0x1000u;
+        var words = new[] { new PatchWord(at, 0x60000000), new PatchWord(at + 4, 0x4E800020) };
+        return new PatchReply(PatchReply.StampFor(words, Array.Empty<PatchByte>()), words, Array.Empty<PatchByte>());
+    }
+
     /// <summary>Options per ENUM feature id, answered by FEATURE_OPTIONS.</summary>
     public Dictionary<byte, string[]> EnumOptions { get; } = new()
     {
@@ -453,11 +659,7 @@ public sealed class FakeQwarkServer : IDisposable
     /// </summary>
     public uint SaveFilePatchStamp
     {
-        get
-        {
-            var reply = new SaveFilePatch(0, SaveFilePatchWords, SaveFilePatchBytes).ToBytes();
-            return Crc32.Compute(reply.AsSpan(SaveFilePatch.HeaderSize));
-        }
+        get => PatchReply.StampFor(SaveFilePatchWords, SaveFilePatchBytes);
     }
 
     /// <summary>
@@ -686,6 +888,9 @@ public sealed class FakeQwarkServer : IDisposable
                 // The same for a session moved to a game the module knows: it describes that one,
                 // so the game ops answer again.
                 if (_session.Game != GameId.None) _unknownGame = false;
+
+                // qwark keeps the last game's mod table through the XMB, as the real one does.
+                if (!string.IsNullOrEmpty(_session.TitleId)) _modTitle = _session.TitleId;
             }
         }
     }
@@ -804,7 +1009,7 @@ public sealed class FakeQwarkServer : IDisposable
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
         or Opcode.ModList or Opcode.ModLoad or Opcode.ModUnload or Opcode.ModSetAuto
-        or Opcode.ModRescan or Opcode.ModInfo
+        or Opcode.ModRescan or Opcode.ModInfo or Opcode.ModPatch
         or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend or Opcode.ComboEnable
         or Opcode.AutosplitEvents or Opcode.AutosplitDescribe
         or Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
@@ -1404,7 +1609,7 @@ public sealed class FakeQwarkServer : IDisposable
                     buffer[0] = (byte)Mods.Count;
                     for (int i = 0; i < Mods.Count; i++)
                     {
-                        Mods[i].ToBytes().CopyTo(buffer, 1 + i * ModEntry.Size);
+                        ReportedMod(Mods[i]).ToBytes().CopyTo(buffer, 1 + i * ModEntry.Size);
                     }
 
                     return (Status.Ok, buffer);
@@ -1412,7 +1617,38 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.ModRescan:
                     ModRescanCount++;
+                    RescanUploadedMods();
                     return (Status.Ok, null);
+
+                // Revision 1.16: one mod as words and bytes for an RPCS3 patch, laid out as
+                // SAVEFILE_PATCH is. The index is MOD_LIST's. Answered at the XMB as in a game,
+                // since it only reads the console's copy; a boot answers BUSY as everything does.
+                case Opcode.ModPatch:
+                {
+                    if (payload.Length < 1) return (Status.BadArg, null);
+
+                    int index = payload[0];
+                    if (index >= Mods.Count) return (Status.NotFound, null);
+
+                    var mod = Mods[index];
+                    if (ModPatchStatuses.TryGetValue(mod.DirName, out var refused)) return (refused, null);
+                    if (mod.NeedsLua) return (Status.Unsupported, null);
+                    if (mod.ParseError) return (Status.IoError, null);
+
+                    PatchReply? reply = ModPatches.TryGetValue(mod.DirName, out var given) ? given : null;
+                    if (reply is null)
+                    {
+                        reply = ParseUploadedMod(mod.DirName, out bool missingBin);
+                        if (missingBin) return (Status.IoError, null);
+                        reply ??= MadeUpModPatch(index);
+                    }
+
+                    var bytes = reply.ToBytes();
+                    if (bytes.Length > Frame.MaxPayload) return (Status.Full, null);
+
+                    ModPatchCount++;
+                    return (Status.Ok, bytes);
+                }
 
                 case Opcode.AutosplitEvents when AutosplitSupported:
                 {
@@ -1649,7 +1885,7 @@ public sealed class FakeQwarkServer : IDisposable
                     if (!SaveFileSupported) return (Status.Unsupported, null);
 
                     return (Status.Ok,
-                        new SaveFilePatch(SaveFilePatchStamp, SaveFilePatchWords, SaveFilePatchBytes).ToBytes());
+                        new PatchReply(SaveFilePatchStamp, SaveFilePatchWords, SaveFilePatchBytes).ToBytes());
                 }
 
                 case Opcode.SaveFileRead:

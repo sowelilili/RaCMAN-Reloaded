@@ -131,6 +131,11 @@ if (fakeServer)
     fake.Emulator = fakeRpcs3;
     fake.NoCodePatches = fakeRpcs3;
 
+    // qwark-rpcs3's root lives on this PC and outlasts a run, so under RPCS3 the fake starts with
+    // the library's copies already on it, as someone who has enabled mods before would. Whether
+    // each is in the game is the fake script's to say (modsin, modscheck, modsout).
+    if (fakeRpcs3) fake.PreloadMods(state.Mods.Scan(fake.Session.TitleId));
+
     fake.Start();
     connectTo ??= "127.0.0.1";
     Console.WriteLine($"Fake qwark listening on 127.0.0.1:{fake.Port}");
@@ -217,6 +222,10 @@ if (exitAfter > 0)
                       $"mobylayouts={MobyLayouts.All.Count} skin='{InputDisplayPanel.Status}' " +
                       $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
                       $"sfinstalled={state.SaveFile.Installed} sfpatch={state.Rpcs3Patch.LastStatus.State} " +
+
+                      // What the Mods panel's Status column said for each mod under RPCS3, the last
+                      // time it was drawn: empty unless the run ended on that panel.
+                      $"rpcs3mods=[{string.Join(" ", state.Rpcs3Mods.LastStates.OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase).Select(s => $"{s.Key}:{s.Value}"))}] " +
                       $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"obspad={state.ObsPad.State}/{state.ObsPad.Port} " +

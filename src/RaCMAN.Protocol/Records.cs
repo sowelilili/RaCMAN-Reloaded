@@ -635,6 +635,12 @@ public sealed record ModEntry(
 
     public bool ParseError => (Flags & ModFlags.ParseError) != 0;
 
+    /// <summary>
+    /// Revision 1.16, where code cannot be patched: qwark-rpcs3 has not yet looked for the mod in
+    /// game memory this session, so <see cref="Loaded"/> says nothing yet.
+    /// </summary>
+    public bool Checking => (Flags & ModFlags.Checking) != 0;
+
     public static ModEntry Parse(ReadOnlySpan<byte> entry)
     {
         var r = new SpanReader(entry);
@@ -862,15 +868,22 @@ public readonly record struct SaveFileInfo(
 public readonly record struct PatchByte(uint Address, byte Value);
 
 /// <summary>
-/// SAVEFILE_PATCH, revision 1.15: the savefile helper for the running game as a patch. The words
-/// are the caves in address order and then the hook words; the bytes are single bytes the patch
-/// sets at load, which today are the helper's request bytes cleared to 0 (RaC2's sit in the code
-/// segment and are not 0 at load, and a console install clears them before it hooks).
+/// A patch as qwark hands it out for an RPCS3 patch file: the reply of SAVEFILE_PATCH (revision
+/// 1.15) and of MOD_PATCH (revision 1.16), which share one layout.
+/// <para>
+/// For the savefile helper the words are the caves in address order and then the hook words; the
+/// bytes are single bytes the patch sets at load, which today are the helper's request bytes
+/// cleared to 0 (RaC2's sit in the code segment and are not 0 at load, and a console install
+/// clears them before it hooks). For a mod the words are its caves as consecutive words and then
+/// its own patch words, and the bytes are the tails of caves whose length is not a multiple of four.
+/// </para>
+/// <para>
 /// <see cref="Stamp"/> is qwark's CRC-32 over every reply byte after the stamp field, and changes
-/// exactly when the helper does. The client never looks inside any of it: it copies it into an
-/// RPCS3 patch file, and qwark says through SAVEFILE_INFO whether it reached the game.
+/// exactly when the patch does. The client never looks inside any of it beyond the addresses: it
+/// copies it into an RPCS3 patch file, and qwark says whether it reached the game.
+/// </para>
 /// </summary>
-public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] Bytes)
+public sealed record PatchReply(uint Stamp, PatchWord[] Words, PatchByte[] Bytes)
 {
     /// <summary><c>u16 n, u16 pad, u32 stamp</c>.</summary>
     public const int HeaderSize = 8;
@@ -885,17 +898,18 @@ public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] By
     public const int ByteSize = 8;
 
     /// <summary>A patch with no single bytes in it.</summary>
-    public SaveFilePatch(uint stamp, PatchWord[] words) : this(stamp, words, Array.Empty<PatchByte>()) { }
+    public PatchReply(uint stamp, PatchWord[] words) : this(stamp, words, Array.Empty<PatchByte>()) { }
 
     /// <summary>
     /// A reply that stops short of either list is a truncated reply, and a patch built from part of
-    /// the helper would branch the game into half a cave: it throws rather than hand that over.
+    /// it would branch the game into half a cave: it throws rather than hand that over.
+    /// <paramref name="op"/> is the op's name, for the message.
     /// </summary>
-    public static SaveFilePatch Parse(ReadOnlySpan<byte> payload)
+    public static PatchReply Parse(ReadOnlySpan<byte> payload, string op = "SAVEFILE_PATCH")
     {
         if (payload.Length < HeaderSize)
         {
-            throw new ProtocolException($"SAVEFILE_PATCH needs {HeaderSize} bytes of header, got {payload.Length}");
+            throw new ProtocolException($"{op} needs {HeaderSize} bytes of header, got {payload.Length}");
         }
 
         var r = new SpanReader(payload);
@@ -906,7 +920,7 @@ public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] By
         if (r.Remaining < count * WordSize)
         {
             throw new ProtocolException(
-                $"SAVEFILE_PATCH names {count} words but carries {r.Remaining} bytes, {count * WordSize} were needed");
+                $"{op} names {count} words but carries {r.Remaining} bytes, {count * WordSize} were needed");
         }
 
         var words = new PatchWord[count];
@@ -914,7 +928,7 @@ public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] By
 
         if (r.Remaining < ByteHeaderSize)
         {
-            throw new ProtocolException($"SAVEFILE_PATCH stops after its {count} words, before the byte list");
+            throw new ProtocolException($"{op} stops after its {count} words, before the byte list");
         }
 
         int byteCount = r.ReadU16();
@@ -923,7 +937,7 @@ public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] By
         if (r.Remaining < byteCount * ByteSize)
         {
             throw new ProtocolException(
-                $"SAVEFILE_PATCH names {byteCount} bytes but carries {r.Remaining} bytes of them, {byteCount * ByteSize} were needed");
+                $"{op} names {byteCount} bytes but carries {r.Remaining} bytes of them, {byteCount * ByteSize} were needed");
         }
 
         var bytes = new PatchByte[byteCount];
@@ -935,8 +949,15 @@ public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] By
             bytes[i] = new PatchByte(address, value);
         }
 
-        return new SaveFilePatch(stamp, words, bytes);
+        return new PatchReply(stamp, words, bytes);
     }
+
+    /// <summary>
+    /// The CRC-32 qwark stamps a reply with: every byte after the stamp field, the word pairs, the
+    /// byte list's header and its entries. What the fake console computes, and what a test checks.
+    /// </summary>
+    public static uint StampFor(PatchWord[] words, PatchByte[] bytes) =>
+        Crc32.Compute(new PatchReply(0, words, bytes).ToBytes().AsSpan(HeaderSize));
 
     /// <summary>The other direction, for the fake console the tests drive.</summary>
     public byte[] ToBytes()
@@ -966,9 +987,9 @@ public sealed record SaveFilePatch(uint Stamp, PatchWord[] Words, PatchByte[] By
 
     /// <summary>
     /// The same words and the same bytes, in the same order. Two replies that agree on those are
-    /// the same helper whatever their stamps say, and they are what an RPCS3 patch file holds.
+    /// the same patch whatever their stamps say, and they are what an RPCS3 patch file holds.
     /// </summary>
-    public bool SameHelper(IReadOnlyList<PatchWord> words, IReadOnlyList<PatchByte> bytes) =>
+    public bool SameWords(IReadOnlyList<PatchWord> words, IReadOnlyList<PatchByte> bytes) =>
         Words.SequenceEqual(words) && Bytes.SequenceEqual(bytes);
 }
 

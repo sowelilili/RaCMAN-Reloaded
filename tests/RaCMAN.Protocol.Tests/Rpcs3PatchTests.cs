@@ -44,7 +44,7 @@ public class Rpcs3PatchTests : IDisposable
     /// <summary>A request byte cleared at load, as RaC2's have to be.</summary>
     private static readonly PatchByte[] Bytes = { new(0x010CD71D, 0x00) };
 
-    private static SaveFilePatch Patch(uint stamp = 0x1A2B3C4D, PatchWord[]? words = null, PatchByte[]? bytes = null) =>
+    private static PatchReply Patch(uint stamp = 0x1A2B3C4D, PatchWord[]? words = null, PatchByte[]? bytes = null) =>
         new(stamp, words ?? Words, bytes ?? Bytes);
 
     /// <summary>A Windows PC with these rpcs3.exe programs running and nothing in its environment.</summary>
@@ -121,7 +121,7 @@ public class Rpcs3PatchTests : IDisposable
             0x01, 0x0C, 0xD7, 0x1E, 0xA4, 0x00, 0x00, 0x00,
         };
 
-        var patch = SaveFilePatch.Parse(payload);
+        var patch = PatchReply.Parse(payload);
 
         Assert.Equal(0x1A2B3C4Du, patch.Stamp);
         Assert.Equal(Words, patch.Words);
@@ -132,7 +132,7 @@ public class Rpcs3PatchTests : IDisposable
     [Fact]
     public void AReplyWithEmptyListsIsStillAReply()
     {
-        var patch = SaveFilePatch.Parse(new byte[] { 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0 });
+        var patch = PatchReply.Parse(new byte[] { 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0, 0 });
 
         Assert.Empty(patch.Words);
         Assert.Empty(patch.Bytes);
@@ -143,26 +143,26 @@ public class Rpcs3PatchTests : IDisposable
     public void AReplyThatStopsShortOfEitherListIsAProtocolError()
     {
         var whole = Patch().ToBytes();
-        int wordsEnd = SaveFilePatch.HeaderSize + Words.Length * SaveFilePatch.WordSize;
+        int wordsEnd = PatchReply.HeaderSize + Words.Length * PatchReply.WordSize;
 
         // Short of the header, of the words the header promises, of the byte list's own header,
         // and of the bytes that header promises.
-        Assert.Throws<ProtocolException>(() => SaveFilePatch.Parse(ReadOnlySpan<byte>.Empty));
-        Assert.Throws<ProtocolException>(() => SaveFilePatch.Parse(whole.AsSpan(0, 7)));
-        Assert.Throws<ProtocolException>(() => SaveFilePatch.Parse(whole.AsSpan(0, wordsEnd - 1)));
-        Assert.Throws<ProtocolException>(() => SaveFilePatch.Parse(whole.AsSpan(0, wordsEnd)));
-        Assert.Throws<ProtocolException>(() => SaveFilePatch.Parse(whole.AsSpan(0, wordsEnd + 3)));
-        Assert.Throws<ProtocolException>(() => SaveFilePatch.Parse(whole.AsSpan(0, whole.Length - 1)));
+        Assert.Throws<ProtocolException>(() => PatchReply.Parse(ReadOnlySpan<byte>.Empty));
+        Assert.Throws<ProtocolException>(() => PatchReply.Parse(whole.AsSpan(0, 7)));
+        Assert.Throws<ProtocolException>(() => PatchReply.Parse(whole.AsSpan(0, wordsEnd - 1)));
+        Assert.Throws<ProtocolException>(() => PatchReply.Parse(whole.AsSpan(0, wordsEnd)));
+        Assert.Throws<ProtocolException>(() => PatchReply.Parse(whole.AsSpan(0, wordsEnd + 3)));
+        Assert.Throws<ProtocolException>(() => PatchReply.Parse(whole.AsSpan(0, whole.Length - 1)));
 
         // The whole of it parses, so the cuts above are what failed.
-        Assert.Equal(Bytes, SaveFilePatch.Parse(whole).Bytes);
+        Assert.Equal(Bytes, PatchReply.Parse(whole).Bytes);
     }
 
     [Fact]
     public void AnythingPastTheLastByteIsIgnored()
     {
         var bytes = Patch().ToBytes().Concat(new byte[] { 1, 2, 3, 4 }).ToArray();
-        var patch = SaveFilePatch.Parse(bytes);
+        var patch = PatchReply.Parse(bytes);
 
         Assert.Equal(Words, patch.Words);
         Assert.Equal(Bytes, patch.Bytes);
@@ -173,11 +173,11 @@ public class Rpcs3PatchTests : IDisposable
     {
         var patch = Patch(stamp: 1);
 
-        Assert.True(patch.SameHelper(Words.ToList(), Bytes.ToList()));
-        Assert.False(patch.SameHelper(Words.Reverse().ToList(), Bytes));
-        Assert.False(patch.SameHelper(Words.Take(1).ToList(), Bytes));
-        Assert.False(patch.SameHelper(Words, Array.Empty<PatchByte>()));
-        Assert.False(patch.SameHelper(Words, new[] { new PatchByte(0x010CD71D, 0x80) }));
+        Assert.True(patch.SameWords(Words.ToList(), Bytes.ToList()));
+        Assert.False(patch.SameWords(Words.Reverse().ToList(), Bytes));
+        Assert.False(patch.SameWords(Words.Take(1).ToList(), Bytes));
+        Assert.False(patch.SameWords(Words, Array.Empty<PatchByte>()));
+        Assert.False(patch.SameWords(Words, new[] { new PatchByte(0x010CD71D, 0x80) }));
     }
 
     private static async Task<(FakeQwarkServer Server, QwarkClient Client)> ConnectAsync(bool rpcs3)
@@ -202,7 +202,7 @@ public class Rpcs3PatchTests : IDisposable
             Assert.Equal(server.SaveFilePatchBytes, patch.Bytes);
 
             // The stamp covers every byte after itself: the pairs, the byte list's header, the bytes.
-            Assert.Equal(Crc32.Compute(patch.ToBytes().AsSpan(SaveFilePatch.HeaderSize)), patch.Stamp);
+            Assert.Equal(Crc32.Compute(patch.ToBytes().AsSpan(PatchReply.HeaderSize)), patch.Stamp);
             Assert.Equal(server.SaveFilePatchStamp, patch.Stamp);
         }
     }
@@ -531,7 +531,7 @@ public class Rpcs3PatchTests : IDisposable
     // ================================================================ the patch file
 
     private const string ExpectedPatchFile =
-        "# RaCMAN Reloaded writes this file and rewrites it whenever qwark's savefile helper changes. Edits made here are lost.\n"
+        "# RaCMAN Reloaded writes this file: qwark's savefile helper and the mods enabled in RaCMAN. Edits made here are lost.\n"
         + "Version: 1.2\n"
         + "\n"
         + "PPU-ec77eaf73a4f55d1c4ece532c3be6db0011e49ca:\n"

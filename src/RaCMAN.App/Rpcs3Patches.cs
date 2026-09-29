@@ -84,9 +84,23 @@ public sealed record Rpcs3FolderLookup(Rpcs3Folder? Folder, string Problem);
 
 /// <summary>
 /// The PPU executable hash of the running game, read out of RPCS3's log, or why it could not be.
-/// <see cref="PatchApplied"/> says the log also shows RPCS3 applying this client's patch at that boot.
+/// <see cref="PatchApplied"/> says the log also shows RPCS3 applying the savefile helper at that
+/// boot, and <see cref="Applied"/> names every patch of this executable the log shows RPCS3
+/// applying at that boot, by its description.
 /// </summary>
-public sealed record ExecutableHashLookup(string? Hash, string Problem, bool PatchApplied = false, string? Log = null);
+public sealed record ExecutableHashLookup(
+    string? Hash,
+    string Problem,
+    bool PatchApplied = false,
+    string? Log = null,
+    IReadOnlyList<string>? Applied = null)
+{
+    /// <summary>Whether RPCS3 applied the patch filed under <paramref name="description"/> when this boot loaded the executable.</summary>
+    public bool AppliedAtBoot(string description) =>
+        Applied is not null
+            ? Applied.Contains(description, StringComparer.Ordinal)
+            : PatchApplied && description == Rpcs3Patches.Description;
+}
 
 public enum PatchFileKind
 {
@@ -104,34 +118,74 @@ public enum PatchFileKind
 }
 
 /// <summary>
-/// One executable's entry in RaCMAN's patch file: its hash, the game it is for, the words and the
-/// single bytes.
+/// One of this client's entries in RaCMAN's patch file: the executable's hash, the description it
+/// is filed under (the savefile helper's, or one mod's), the game it is for, the words and the
+/// single bytes, and the three lines RPCS3's Patch Manager shows about it. What is read back is
+/// everything that is written, so an entry that is kept is written back exactly as it was.
 /// </summary>
 public sealed record PatchFileEntry(
     string Hash,
     string Game,
     IReadOnlyList<PatchWord> Words,
     IReadOnlyList<PatchByte> Bytes,
-    string Notes)
+    string Notes,
+    string Description = Rpcs3Patches.Description,
+    string Author = Rpcs3Patches.Author,
+    string PatchVersion = Rpcs3Patches.PatchVersion)
 {
-    /// <summary>Whether this entry holds exactly the helper <paramref name="patch"/> describes.</summary>
-    public bool Holds(SaveFilePatch patch) => patch.SameHelper(Words, Bytes);
+    /// <summary>Whether this entry holds exactly the words and bytes of <paramref name="patch"/>.</summary>
+    public bool Holds(PatchReply patch) => patch.SameWords(Words, Bytes);
+
+    /// <summary>qwark's savefile helper.</summary>
+    public bool IsHelper => Description == Rpcs3Patches.Description;
+
+    /// <summary>The folder name of the mod this entry is, or null for the savefile helper.</summary>
+    public string? ModDir => Rpcs3Patches.ModDirOf(Description);
+
+    /// <summary>Where patch_config.yml switches this entry on for <paramref name="serial"/>.</summary>
+    public PatchConfigKey Key(string serial) => new(Hash, Game, serial, Description);
+
+    /// <summary>
+    /// Whether this and <paramref name="other"/> are the same patch of the same executable, so that
+    /// writing one replaces the other: the helper and the helper, or two entries of one mod folder
+    /// even when the mod has been renamed since.
+    /// </summary>
+    public bool SameSlot(PatchFileEntry other)
+    {
+        if (!string.Equals(Hash, other.Hash, StringComparison.OrdinalIgnoreCase)) return false;
+        if (Description == other.Description) return true;
+        return ModDir is { } dir && string.Equals(dir, other.ModDir, StringComparison.OrdinalIgnoreCase);
+    }
 }
 
 /// <summary>What is in a title's patch file, as far as this client is concerned.</summary>
 public sealed record PatchFileState(string Path, PatchFileKind Kind, IReadOnlyList<PatchFileEntry> Entries, string Problem)
 {
-    public PatchFileEntry? EntryFor(string hash) =>
-        Entries.FirstOrDefault(entry => string.Equals(entry.Hash, hash, StringComparison.OrdinalIgnoreCase));
+    /// <summary>The entry of one executable filed under <paramref name="description"/>, the savefile helper's by default.</summary>
+    public PatchFileEntry? EntryFor(string hash, string description = Rpcs3Patches.Description) =>
+        Entries.FirstOrDefault(entry => string.Equals(entry.Hash, hash, StringComparison.OrdinalIgnoreCase)
+                                        && entry.Description == description);
+
+    /// <summary>The entry of one executable for the mod in folder <paramref name="dirName"/>, whatever the mod was called when it was written.</summary>
+    public PatchFileEntry? ModEntryFor(string hash, string dirName) =>
+        Entries.FirstOrDefault(entry => string.Equals(entry.Hash, hash, StringComparison.OrdinalIgnoreCase)
+                                        && string.Equals(entry.ModDir, dirName, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Every entry of one executable.</summary>
+    public IEnumerable<PatchFileEntry> EntriesFor(string hash) =>
+        Entries.Where(entry => string.Equals(entry.Hash, hash, StringComparison.OrdinalIgnoreCase));
 }
 
 /// <summary>Where one of this client's patches is switched on in patch_config.yml.</summary>
-public sealed record PatchConfigKey(string Hash, string Game, string Serial);
+public sealed record PatchConfigKey(string Hash, string Game, string Serial, string Description = Rpcs3Patches.Description);
 
-/// <summary>Everything an install is about to write, worked out before a byte of it is.</summary>
+/// <summary>
+/// Everything a write is about to do, worked out before a byte of it is written. A null
+/// <see cref="PatchText"/> leaves the patch file as it is, which is what switching a patch off does.
+/// </summary>
 public sealed record Rpcs3PatchPlan(
     string PatchFile,
-    string PatchText,
+    string? PatchText,
     bool PatchFileExists,
     string ConfigFile,
     string ConfigText,
@@ -145,23 +199,35 @@ public sealed class Rpcs3PatchException : Exception
 }
 
 /// <summary>
-/// The savefile helper as an RPCS3 patch: finding RPCS3's folder, reading the running game's
-/// executable hash out of its log, writing the per-title patch file and switching the patch on in
-/// patch_config.yml. Nothing here draws anything and nothing here knows an address: the words come
-/// from qwark (SAVEFILE_PATCH) and are copied into the file as they are.
+/// qwark's savefile helper and the mods as RPCS3 patches: finding RPCS3's folder, reading the
+/// running game's executable hash out of its log, writing the per-title patch file and switching
+/// its entries on and off in patch_config.yml. Nothing here draws anything and nothing here knows
+/// an address: the words come from qwark (SAVEFILE_PATCH, MOD_PATCH) and are copied into the file
+/// as they are, and the only thing ever worked out from them is which addresses they cover.
 /// <para>
-/// Why a file at all: RPCS3 recompiles the game's code, so qwark cannot write the helper into a
-/// running game the way it does on a console. RPCS3 does apply patch files when it loads the
-/// executable, before it compiles anything, so the helper goes in as a patch and the game has to be
-/// started again to take it.
+/// Why a file at all: RPCS3 recompiles the game's code, so qwark cannot write the helper or a mod
+/// into a running game the way it does on a console. RPCS3 does apply patch files when it loads the
+/// executable, before it compiles anything, so they go in as patches and the game has to be started
+/// again to take them.
+/// </para>
+/// <para>
+/// The file holds any number of this client's entries, per executable hash: the helper, filed
+/// under <see cref="Description"/>, and one per mod, filed under <see cref="ModDescription"/>.
+/// Every write reads the file first and writes every entry it is not about back exactly as it was.
 /// </para>
 /// </summary>
 public static class Rpcs3Patches
 {
-    /// <summary>The description every entry this client writes is filed under, in the file and in RPCS3's Patch Manager.</summary>
+    /// <summary>The description the savefile helper is filed under, in the file and in RPCS3's Patch Manager.</summary>
     public const string Description = "qwark savefile helper";
 
+    /// <summary>How the description of a mod's entry begins; <see cref="ModDescription"/> has the rest.</summary>
+    public const string ModDescriptionPrefix = "RaCMAN mod: ";
+
     public const string Author = "qwark";
+
+    /// <summary>The author a mod's entry names when the mod names none.</summary>
+    public const string ModAuthorFallback = "RaCMAN Reloaded";
 
     public const string PatchVersion = "1.0";
 
@@ -184,7 +250,46 @@ public static class Rpcs3Patches
     /// <summary>How the first line of a patch file this client owns begins. A file without it is left alone.</summary>
     public const string Marker = "# RaCMAN Reloaded writes this file";
 
-    public const string MarkerLine = Marker + " and rewrites it whenever qwark's savefile helper changes. Edits made here are lost.";
+    /// <summary>
+    /// The first line of the file. Older builds wrote a line about the helper alone; it begins with
+    /// <see cref="Marker"/> too, so their files are still this client's.
+    /// </summary>
+    public const string MarkerLine = Marker + ": qwark's savefile helper and the mods enabled in RaCMAN. Edits made here are lost.";
+
+    /// <summary>
+    /// A mod's description: its name, and its folder in brackets, which is what makes two mods of
+    /// the same name two entries and what finds the entry again after the mod is renamed.
+    /// </summary>
+    public static string ModDescription(string name, string dirName)
+    {
+        string shown = string.IsNullOrWhiteSpace(name) ? dirName : name.Trim();
+        return $"{ModDescriptionPrefix}{shown} [{dirName}]";
+    }
+
+    /// <summary>The mod folder a description names, or null when it is not a mod's.</summary>
+    public static string? ModDirOf(string description)
+    {
+        if (!description.StartsWith(ModDescriptionPrefix, StringComparison.Ordinal) || !description.EndsWith(']')) return null;
+
+        int open = description.LastIndexOf(" [", StringComparison.Ordinal);
+        if (open < ModDescriptionPrefix.Length) return null;
+
+        string dir = description[(open + 2)..^1];
+        return dir.Length == 0 ? null : dir;
+    }
+
+    /// <summary>What to call the patch filed under <paramref name="description"/> in a sentence.</summary>
+    public static string NameOf(string description)
+    {
+        if (description == Description) return "qwark's savefile helper";
+        if (ModDirOf(description) is null) return description;
+
+        int open = description.LastIndexOf(" [", StringComparison.Ordinal);
+        return description[ModDescriptionPrefix.Length..open];
+    }
+
+    /// <summary>Whether this client wrote the entry filed under <paramref name="description"/>.</summary>
+    public static bool IsOurs(string description) => description == Description || ModDirOf(description) is not null;
 
     /// <summary>The Flatpak's application id, whose sandbox keeps RPCS3's folders under ~/.var/app.</summary>
     public const string FlatpakId = "net.rpcs3.RPCS3";
@@ -484,7 +589,7 @@ public static class Rpcs3Patches
     {
         string? serial = null;
         string? hash = null;
-        bool applied = false;
+        var applied = new List<string>();
 
         string? line;
         while ((line = log.ReadLine()) is not null)
@@ -494,7 +599,7 @@ public static class Rpcs3Patches
             {
                 serial = FirstToken(line, at + SerialMarker.Length);
                 hash = null;
-                applied = false;
+                applied.Clear();
                 continue;
             }
 
@@ -507,16 +612,16 @@ public static class Rpcs3Patches
                 if (IsPpuHash(token))
                 {
                     hash = token;
-                    applied = false;
+                    applied.Clear();
                 }
 
                 continue;
             }
 
             // patch_engine::apply's own line for a patch it applied, which comes after the hash.
-            if (hash is not null && line.Contains($"Applied patch (hash='{hash}', description='{Description}'", StringComparison.Ordinal))
+            if (hash is not null && AppliedDescription(line, hash) is { } description && !applied.Contains(description))
             {
-                applied = true;
+                applied.Add(description);
             }
         }
 
@@ -534,7 +639,36 @@ public static class Rpcs3Patches
         return hash is null
             ? new ExecutableHashLookup(null,
                 $"RPCS3's log has no executable hash for this boot of {titleId}. Boot the game in RPCS3 first.")
-            : new ExecutableHashLookup(hash, string.Empty, applied);
+            : new ExecutableHashLookup(hash, string.Empty, applied.Contains(Description), Applied: applied.ToArray());
+    }
+
+    private const string AppliedMarker = "Applied patch (hash='";
+
+    private const string AppliedDescriptionMarker = "', description='";
+
+    private const string AppliedAuthorMarker = "', author='";
+
+    /// <summary>
+    /// The description in patch_engine::apply's line for a patch it applied to <paramref name="hash"/>,
+    /// <c>Applied patch (hash='...', description='...', author='...', ...</c>, or null when the line
+    /// is not one of those or is about another executable. RPCS3 does not escape the quotes, so the
+    /// description runs up to the author that follows it.
+    /// </summary>
+    public static string? AppliedDescription(string line, string hash)
+    {
+        int at = line.IndexOf(AppliedMarker, StringComparison.Ordinal);
+        if (at < 0) return null;
+
+        var rest = line.AsSpan(at + AppliedMarker.Length);
+        if (!rest.StartsWith(hash, StringComparison.Ordinal)) return null;
+
+        rest = rest[hash.Length..];
+        if (!rest.StartsWith(AppliedDescriptionMarker, StringComparison.Ordinal)) return null;
+
+        rest = rest[AppliedDescriptionMarker.Length..];
+        int end = rest.IndexOf(AppliedAuthorMarker, StringComparison.Ordinal);
+        if (end < 0) end = rest.LastIndexOf('\'');
+        return end < 0 ? null : rest[..end].ToString();
     }
 
     private static string FirstToken(string line, int start)
@@ -580,9 +714,10 @@ public static class Rpcs3Patches
     }
 
     /// <summary>
-    /// Reads a patch file back. Only a file whose first line is <see cref="MarkerLine"/> is this
-    /// client's; anything else is somebody's own patches for the title, and is reported rather than
-    /// read. Of this client's file only the entries under <see cref="Description"/> are taken.
+    /// Reads a patch file back. Only a file whose first line begins with <see cref="Marker"/> is
+    /// this client's; anything else is somebody's own patches for the title, and is reported rather
+    /// than read. Of this client's file every entry it writes is taken, the helper's and every
+    /// mod's, for every executable, in the order the file has them.
     /// </summary>
     public static PatchFileState ParsePatchFile(string text, string path)
     {
@@ -612,9 +747,14 @@ public static class Rpcs3Patches
             {
                 if (key is not YamlScalarNode { Value: { } hash } || !IsPpuHash(hash)) continue;
                 if (value is not YamlMappingNode descriptions) continue;
-                if (Child(descriptions, Description) is not YamlMappingNode entry) continue;
 
-                entries.Add(ReadEntry(hash, entry));
+                foreach (var (name, content) in descriptions.Children)
+                {
+                    if (name is not YamlScalarNode { Value: { } description } || !IsOurs(description)) continue;
+                    if (content is not YamlMappingNode entry) continue;
+
+                    entries.Add(ReadEntry(hash, description, entry));
+                }
             }
 
             return new PatchFileState(path, PatchFileKind.Ours, entries, string.Empty);
@@ -626,7 +766,7 @@ public static class Rpcs3Patches
         }
     }
 
-    private static PatchFileEntry ReadEntry(string hash, YamlMappingNode entry)
+    private static PatchFileEntry ReadEntry(string hash, string description, YamlMappingNode entry)
     {
         string game = Child(entry, "Games") is YamlMappingNode games
                       && games.Children.Keys.FirstOrDefault() is YamlScalarNode { Value: { } title }
@@ -634,6 +774,8 @@ public static class Rpcs3Patches
             : string.Empty;
 
         string notes = Child(entry, "Notes") is YamlScalarNode { Value: { } text } ? text : string.Empty;
+        string author = Child(entry, "Author") is YamlScalarNode { Value: { } by } ? by : Author;
+        string version = Child(entry, "Patch Version") is YamlScalarNode { Value: { Length: > 0 } v } ? v : PatchVersion;
 
         var words = new List<PatchWord>();
         var bytes = new List<PatchByte>();
@@ -646,7 +788,7 @@ public static class Rpcs3Patches
                     || parts.Children[1] is not YamlScalarNode { Value: { } address }
                     || parts.Children[2] is not YamlScalarNode { Value: { } value })
                 {
-                    throw new FormatException($"the entry for {hash} holds a patch line that is not [ type, address, value ]");
+                    throw new FormatException($"the entry \"{description}\" for {hash} holds a patch line that is not [ type, address, value ]");
                 }
 
                 switch (type)
@@ -660,12 +802,12 @@ public static class Rpcs3Patches
                         break;
 
                     default:
-                        throw new FormatException($"the entry for {hash} holds a {type} line, which RaCMAN never writes");
+                        throw new FormatException($"the entry \"{description}\" for {hash} holds a {type} line, which RaCMAN never writes");
                 }
             }
         }
 
-        return new PatchFileEntry(hash, game, words, bytes, notes);
+        return new PatchFileEntry(hash, game, words, bytes, notes, description, author, version);
     }
 
     private static uint ParseHex(string text)
@@ -674,17 +816,48 @@ public static class Rpcs3Patches
         return uint.Parse(digits, NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture);
     }
 
-    /// <summary>What the Notes line of an entry says: which qwark the words came from, and their stamp.</summary>
+    /// <summary>What the Notes line of the helper's entry says: which qwark the words came from, and their stamp.</summary>
     public static string NotesFor(byte qwarkBuild, uint stamp) =>
         $"qwark build {qwarkBuild}, helper stamp 0x{stamp:x8}";
 
+    private const string LibraryHashLabel = "library hash ";
+
     /// <summary>
-    /// The entries a rewrite keeps. The running executable's entry is <paramref name="current"/>,
-    /// and every other executable of the same game gets the same words, because the helper is the
-    /// game's: somebody who runs two EBOOTs of one game gets both brought up to date. An entry for
-    /// another game is kept exactly as it was. That only happens on a title that hosts more than
-    /// one game (BCES01503 hosts RaC1 to RaC3), where each game's executable has its own helper and
-    /// one game's words written into another's would break it.
+    /// What the Notes line of a mod's entry says: the CRC of the library copy the words were made
+    /// from, which is the hash the client uploads the mod under and what tells a newer copy in the
+    /// library from this one, then which qwark parsed it and the stamp of its reply.
+    /// </summary>
+    public static string NotesForMod(uint libraryHash, byte qwarkBuild, uint stamp) =>
+        $"{LibraryHashLabel}{Crc32.ToSumText(libraryHash)}, qwark build {qwarkBuild}, patch stamp 0x{stamp:x8}";
+
+    /// <summary>The library hash a mod entry's notes record, or null when they record none.</summary>
+    public static uint? LibraryHashIn(string notes)
+    {
+        int at = notes.IndexOf(LibraryHashLabel, StringComparison.Ordinal);
+        if (at < 0) return null;
+
+        var digits = notes.AsSpan(at + LibraryHashLabel.Length);
+        int end = 0;
+        while (end < digits.Length && char.IsAsciiHexDigit(digits[end])) end++;
+
+        return end == 8 && uint.TryParse(digits[..end], NumberStyles.AllowHexSpecifier, CultureInfo.InvariantCulture, out uint hash)
+            ? hash
+            : null;
+    }
+
+    /// <summary>
+    /// The entries a rewrite keeps. The entry in the same slot as <paramref name="current"/> — the
+    /// same executable and the same patch — is replaced where it stands, or <paramref name="current"/>
+    /// goes at the end; every entry of any other patch is kept exactly as it was, for every hash.
+    /// <para>
+    /// The savefile helper is the one patch that spreads: every other executable of the same game
+    /// gets the same helper words, because the helper is the game's, and somebody who runs two
+    /// EBOOTs of one game gets both brought up to date. A helper entry for another game is kept as
+    /// it was. That only happens on a title that hosts more than one game (BCES01503 hosts RaC1 to
+    /// RaC3), where each game's executable has its own helper and one game's words written into
+    /// another's would break it. A mod is written for the running executable only: its words are
+    /// that executable's addresses.
+    /// </para>
     /// </summary>
     public static IReadOnlyList<PatchFileEntry> MergeEntries(IReadOnlyList<PatchFileEntry> existing, PatchFileEntry current)
     {
@@ -693,14 +866,14 @@ public static class Rpcs3Patches
 
         foreach (var entry in existing)
         {
-            if (merged.Any(kept => string.Equals(kept.Hash, entry.Hash, StringComparison.OrdinalIgnoreCase))) continue;
+            if (merged.Any(kept => kept.SameSlot(entry))) continue;
 
-            if (string.Equals(entry.Hash, current.Hash, StringComparison.OrdinalIgnoreCase))
+            if (entry.SameSlot(current))
             {
                 merged.Add(current);
                 placed = true;
             }
-            else if (string.Equals(entry.Game, current.Game, StringComparison.Ordinal))
+            else if (current.IsHelper && entry.IsHelper && string.Equals(entry.Game, current.Game, StringComparison.Ordinal))
             {
                 merged.Add(current with { Hash = entry.Hash });
             }
@@ -716,10 +889,12 @@ public static class Rpcs3Patches
 
     /// <summary>
     /// The text of a title's patch file: the marker, the engine version RPCS3 insists on, and one
-    /// entry per executable, each filed under <see cref="Description"/> for every version of the
-    /// title. Laid out the way the patches RPCS3 ships are, so it reads like one of them. The be32
-    /// words come first, in qwark's order (the caves, then the hook), and the single bytes after
-    /// them; RPCS3 applies every line when it loads the executable, before any of it runs.
+    /// block per executable holding each of its entries under its own description, for every
+    /// version of the title. An executable's block is where its first entry is, and its entries
+    /// are in the order given. Laid out the way the patches RPCS3 ships are, so it reads like one
+    /// of them. The be32 words come first, in qwark's order (the caves, then the hooks or the mod's
+    /// words), and the single bytes after them; RPCS3 applies every line when it loads the
+    /// executable, before any of it runs.
     /// </summary>
     public static string BuildPatchFile(string titleId, IReadOnlyList<PatchFileEntry> entries)
     {
@@ -727,34 +902,54 @@ public static class Rpcs3Patches
         text.Append(MarkerLine).Append('\n');
         text.Append("Version: ").Append(EngineVersion).Append('\n');
 
+        // One key per hash: a hash written twice would be a duplicate key, which RPCS3 rejects.
+        var hashes = new List<string>();
         foreach (var entry in entries)
         {
+            if (!hashes.Contains(entry.Hash, StringComparer.OrdinalIgnoreCase)) hashes.Add(entry.Hash);
+        }
+
+        foreach (var hash in hashes)
+        {
             text.Append('\n');
-            text.Append(entry.Hash).Append(":\n");
-            text.Append("  ").Append(Quote(Description)).Append(":\n");
-            text.Append("    Games:\n");
-            text.Append("      ").Append(Quote(entry.Game)).Append(":\n");
-            text.Append("        ").Append(titleId).Append(": [ ").Append(AllVersions).Append(" ]\n");
-            text.Append("    Author: ").Append(Quote(Author)).Append('\n');
-            text.Append("    Notes: ").Append(Quote(entry.Notes)).Append('\n');
-            text.Append("    Patch Version: ").Append(PatchVersion).Append('\n');
-            text.Append("    Patch:\n");
+            text.Append(hash).Append(":\n");
 
-            foreach (var word in entry.Words)
+            foreach (var entry in entries.Where(e => string.Equals(e.Hash, hash, StringComparison.OrdinalIgnoreCase)))
             {
-                text.Append("      - [ be32, 0x").Append(word.Address.ToString("x8", CultureInfo.InvariantCulture))
-                    .Append(", 0x").Append(word.Word.ToString("x8", CultureInfo.InvariantCulture)).Append(" ]\n");
-            }
-
-            foreach (var single in entry.Bytes)
-            {
-                text.Append("      - [ byte, 0x").Append(single.Address.ToString("x8", CultureInfo.InvariantCulture))
-                    .Append(", 0x").Append(single.Value.ToString("x2", CultureInfo.InvariantCulture)).Append(" ]\n");
+                AppendEntry(text, titleId, entry);
             }
         }
 
         return text.ToString();
     }
+
+    private static void AppendEntry(StringBuilder text, string titleId, PatchFileEntry entry)
+    {
+        text.Append("  ").Append(Quote(entry.Description)).Append(":\n");
+        text.Append("    Games:\n");
+        text.Append("      ").Append(Quote(entry.Game)).Append(":\n");
+        text.Append("        ").Append(titleId).Append(": [ ").Append(AllVersions).Append(" ]\n");
+        text.Append("    Author: ").Append(Quote(entry.Author)).Append('\n');
+        text.Append("    Notes: ").Append(Quote(entry.Notes)).Append('\n');
+        text.Append("    Patch Version: ").Append(PlainOrQuoted(entry.PatchVersion)).Append('\n');
+        text.Append("    Patch:\n");
+
+        foreach (var word in entry.Words)
+        {
+            text.Append("      - [ be32, 0x").Append(word.Address.ToString("x8", CultureInfo.InvariantCulture))
+                .Append(", 0x").Append(word.Word.ToString("x8", CultureInfo.InvariantCulture)).Append(" ]\n");
+        }
+
+        foreach (var single in entry.Bytes)
+        {
+            text.Append("      - [ byte, 0x").Append(single.Address.ToString("x8", CultureInfo.InvariantCulture))
+                .Append(", 0x").Append(single.Value.ToString("x2", CultureInfo.InvariantCulture)).Append(" ]\n");
+        }
+    }
+
+    /// <summary>A version as RPCS3's own patches write it, bare, unless it is something YAML would read otherwise.</summary>
+    private static string PlainOrQuoted(string text) =>
+        text.Length > 0 && text.All(c => char.IsAsciiDigit(c) || c == '.') ? text : Quote(text);
 
     /// <summary>A double-quoted YAML scalar.</summary>
     private static string Quote(string text)
@@ -793,7 +988,7 @@ public static class Rpcs3Patches
 
         foreach (var key in keys)
         {
-            var versions = Descend(root, path, key.Hash, Description, key.Game, key.Serial);
+            var versions = Descend(root, path, key.Hash, key.Description, key.Game, key.Serial);
             var switches = DescendOne(versions, path, AllVersions);
             SetScalar(switches, "Enabled", "true");
         }
@@ -801,13 +996,70 @@ public static class Rpcs3Patches
         return Emit(root);
     }
 
+    /// <summary>
+    /// patch_config.yml with each of <paramref name="keys"/> switched off the way RPCS3 itself
+    /// writes a switched-off patch. RPCS3's <c>patch_engine::save_config</c> writes an app version
+    /// only when its patch is enabled or has configurable values that differ from the defaults,
+    /// never <c>Enabled: false</c>, and leaves out every hash, description, title and serial with
+    /// nothing under it; a missing switch reads as off. So the <c>Enabled</c> line goes, then the
+    /// app version if nothing is left in it, then each level above that is left empty. Everything
+    /// else is left as it was, and a key that is not in the file is already off.
+    /// </summary>
+    public static string DisablePatches(string? existing, IEnumerable<PatchConfigKey> keys, string path)
+    {
+        var root = LoadConfig(existing, path);
+
+        foreach (var key in keys)
+        {
+            var trail = new List<(YamlMappingNode Parent, YamlNode Key, YamlMappingNode Node)>();
+            YamlMappingNode current = root;
+            bool found = true;
+
+            foreach (var step in new[] { key.Hash, key.Description, key.Game, key.Serial, AllVersions })
+            {
+                if (ChildEntry(current, step) is not { } child || child.Value is not YamlMappingNode map)
+                {
+                    found = false;
+                    break;
+                }
+
+                trail.Add((current, child.Key, map));
+                current = map;
+            }
+
+            if (!found) continue;
+
+            if (ChildEntry(current, "Enabled") is { } enabled) current.Children.Remove(enabled.Key);
+
+            for (int i = trail.Count - 1; i >= 0; i--)
+            {
+                var (parent, name, node) = trail[i];
+                if (node.Children.Count > 0) break;
+                parent.Children.Remove(name);
+            }
+        }
+
+        return Emit(root);
+    }
+
     /// <summary>Whether patch_config.yml switches one of this client's patches on.</summary>
-    public static bool IsEnabled(string? configText, PatchConfigKey key, string path)
+    public static bool IsEnabled(string? configText, PatchConfigKey key, string path) =>
+        IsEnabled(LoadConfig(configText, path), key);
+
+    /// <summary>
+    /// Which of <paramref name="keys"/> patch_config.yml switches on, read once. Throws
+    /// <see cref="Rpcs3PatchException"/> for a file RPCS3 could not read either.
+    /// </summary>
+    public static IReadOnlyList<PatchConfigKey> EnabledAmong(string? configText, IEnumerable<PatchConfigKey> keys, string path)
     {
         var root = LoadConfig(configText, path);
+        return keys.Where(key => IsEnabled(root, key)).ToList();
+    }
 
+    private static bool IsEnabled(YamlMappingNode root, PatchConfigKey key)
+    {
         YamlNode? node = root;
-        foreach (var step in new[] { key.Hash, Description, key.Game, key.Serial, AllVersions, "Enabled" })
+        foreach (var step in new[] { key.Hash, key.Description, key.Game, key.Serial, AllVersions, "Enabled" })
         {
             node = node is YamlMappingNode map ? Child(map, step) : null;
             if (node is null) return false;
@@ -895,11 +1147,14 @@ public static class Rpcs3Patches
         map.Children.Add(new YamlScalarNode(key), new YamlScalarNode(value));
     }
 
-    private static YamlNode? Child(YamlMappingNode map, string key)
+    private static YamlNode? Child(YamlMappingNode map, string key) => ChildEntry(map, key)?.Value;
+
+    /// <summary>The key node and the value under <paramref name="key"/>, so the pair can be removed by the node it was read with.</summary>
+    private static KeyValuePair<YamlNode, YamlNode>? ChildEntry(YamlMappingNode map, string key)
     {
-        foreach (var (existingKey, value) in map.Children)
+        foreach (var pair in map.Children)
         {
-            if (existingKey is YamlScalarNode { Value: { } name } && name == key) return value;
+            if (pair.Key is YamlScalarNode { Value: { } name } && name == key) return pair;
         }
 
         return null;
@@ -959,56 +1214,211 @@ public static class Rpcs3Patches
         }
     }
 
-    // ---------------------------------------------------------------- the install
+    // ---------------------------------------------------------------- the writes
 
     /// <summary>
-    /// Works out both files for an install, reading what is there now. Throws
+    /// Works out both files for the savefile helper's install, reading what is there now: the
+    /// helper's entry goes in beside every other entry the file holds, and patch_config.yml switches
+    /// every helper entry on and leaves every mod's switch as it was. Throws
     /// <see cref="Rpcs3PatchException"/> with the reason when it cannot go ahead: somebody else's
     /// patch file, a broken one of ours, a patch_config.yml that is not a map, a reply with no words.
     /// </summary>
     public static Rpcs3PatchPlan Plan(Rpcs3Folder folder, string titleId, string game, string hash,
-        SaveFilePatch patch, byte qwarkBuild)
+        PatchReply patch, byte qwarkBuild)
     {
-        if (!IsTitleId(titleId)) throw new Rpcs3PatchException($"\"{titleId}\" is not a title id RaCMAN can name a patch file after.");
-        if (!IsPpuHash(hash)) throw new Rpcs3PatchException($"\"{hash}\" is not an RPCS3 executable hash.");
+        CheckNames(titleId, hash);
         if (patch.Words.Length == 0) throw new Rpcs3PatchException("qwark sent a savefile helper with no words in it.");
 
-        var file = ReadPatchFile(folder.PatchFile(titleId));
-        if (file.Kind is PatchFileKind.Foreign or PatchFileKind.Broken) throw new Rpcs3PatchException(file.Problem);
+        var file = ReadOwnFile(folder, titleId);
 
         string name = string.IsNullOrWhiteSpace(game) ? titleId : game;
         var current = new PatchFileEntry(hash, name, patch.Words, patch.Bytes, NotesFor(qwarkBuild, patch.Stamp));
         var entries = MergeEntries(file.Entries, current);
         string patchText = BuildPatchFile(titleId, entries);
 
-        string configFile = folder.PatchConfigFile;
-        bool configExists = File.Exists(configFile);
-        string? configText;
-        try
-        {
-            configText = configExists ? File.ReadAllText(configFile) : null;
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            throw new Rpcs3PatchException($"{configFile} could not be read: {ex.Message}");
-        }
-
+        var (configFile, configExists, configText) = ReadConfig(folder);
         string newConfig = EnablePatches(configText,
-            entries.Select(entry => new PatchConfigKey(entry.Hash, entry.Game, titleId)), configFile);
+            entries.Where(entry => entry.IsHelper).Select(entry => entry.Key(titleId)), configFile);
 
         return new Rpcs3PatchPlan(file.Path, patchText, file.Kind == PatchFileKind.Ours, configFile, newConfig,
             configExists, entries);
     }
 
     /// <summary>
-    /// Writes a plan: the patch file, then a copy of patch_config.yml beside it the first time this
-    /// session changes that file (<paramref name="backedUp"/> remembers which), then the new
-    /// patch_config.yml. Each file is written whole to a temporary name and moved over the old one,
-    /// so RPCS3 never reads half of either.
+    /// Works out both files for writing mods' entries for the running executable and switching them
+    /// on: enabling a mod (and the dependencies the user confirmed), or bringing an enabled one's
+    /// words up to date. Each entry replaces the one of its mod folder for this executable, and a
+    /// mod renamed since leaves its old switch behind switched off; every other entry and every
+    /// other switch is kept exactly as it was.
+    /// <para>
+    /// Refused, with every other mod named, when one of them writes an address that the savefile
+    /// helper's entry for this executable, an enabled mod's, or another of these writes: RPCS3
+    /// would apply one over the other when the game boots and leave neither whole. This is checked
+    /// here, against the files as they are when the write happens, rather than against a look taken
+    /// earlier.
+    /// </para>
+    /// </summary>
+    public static Rpcs3PatchPlan PlanMods(Rpcs3Folder folder, string titleId, string hash, IReadOnlyList<PatchFileEntry> mods)
+    {
+        CheckNames(titleId, hash);
+        if (mods.Count == 0) throw new Rpcs3PatchException("There is no mod to write.");
+
+        foreach (var mod in mods)
+        {
+            if (mod.ModDir is null) throw new Rpcs3PatchException($"\"{mod.Description}\" is not a mod's description.");
+            if (!string.Equals(mod.Hash, hash, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new Rpcs3PatchException($"{NameOf(mod.Description)} was worked out for {mod.Hash}, not for {hash}.");
+            }
+
+            if (mod.Words.Count == 0 && mod.Bytes.Count == 0)
+            {
+                throw new Rpcs3PatchException($"qwark sent {NameOf(mod.Description)} with no words in it, so there is nothing to patch.");
+            }
+        }
+
+        var file = ReadOwnFile(folder, titleId);
+        var (configFile, configExists, configText) = ReadConfig(folder);
+
+        // What is already going into the game at the next boot: the helper whenever it is in the
+        // file (it is switched on by its own button, and nothing may sit under it meanwhile), and
+        // every mod whose switch is on. An entry these writes replace is not in the way of itself.
+        var present = file.EntriesFor(hash).Where(entry => !mods.Any(mod => mod.SameSlot(entry))).ToList();
+        var enabled = EnabledAmong(configText, present.Where(entry => !entry.IsHelper).Select(entry => entry.Key(titleId)), configFile);
+        var inTheWay = present.Where(entry => entry.IsHelper || enabled.Contains(entry.Key(titleId))).ToList();
+
+        CheckOverlaps(mods, inTheWay);
+
+        IReadOnlyList<PatchFileEntry> entries = file.Entries;
+        var renamed = new List<PatchConfigKey>();
+        foreach (var mod in mods)
+        {
+            if (file.ModEntryFor(hash, mod.ModDir!) is { } old && old.Description != mod.Description)
+            {
+                renamed.Add(old.Key(titleId));
+            }
+
+            entries = MergeEntries(entries, mod);
+        }
+
+        string newConfig = DisablePatches(configText, renamed, configFile);
+        newConfig = EnablePatches(newConfig, mods.Select(mod => mod.Key(titleId)), configFile);
+
+        return new Rpcs3PatchPlan(file.Path, BuildPatchFile(titleId, entries), file.Kind == PatchFileKind.Ours,
+            configFile, newConfig, configExists, entries);
+    }
+
+    /// <summary>
+    /// patch_config.yml with the running executable's entries of <paramref name="modDirs"/> switched
+    /// off, and the patch file left as it is: the words stay there for the next time the mod is
+    /// enabled, and RPCS3 applies nothing that is switched off. Null when there is nothing to switch
+    /// off, so nothing is written.
+    /// </summary>
+    public static Rpcs3PatchPlan? PlanDisable(Rpcs3Folder folder, string titleId, string hash, IReadOnlyList<string> modDirs)
+    {
+        CheckNames(titleId, hash);
+
+        var file = ReadOwnFile(folder, titleId);
+        var keys = modDirs.Select(dir => file.ModEntryFor(hash, dir))
+            .Where(entry => entry is not null)
+            .Select(entry => entry!.Key(titleId))
+            .ToList();
+
+        var (configFile, configExists, configText) = ReadConfig(folder);
+        if (keys.Count == 0 || !configExists) return null;
+
+        return new Rpcs3PatchPlan(file.Path, null, file.Kind == PatchFileKind.Ours, configFile,
+            DisablePatches(configText, keys, configFile), configExists, file.Entries);
+    }
+
+    /// <summary>
+    /// Refuses <paramref name="mods"/> when one of them writes an address that one of
+    /// <paramref name="present"/> or another of them writes, naming each one in the way.
+    /// </summary>
+    public static void CheckOverlaps(IReadOnlyList<PatchFileEntry> mods, IReadOnlyList<PatchFileEntry> present)
+    {
+        var ranges = new Dictionary<PatchFileEntry, IReadOnlyList<PatchRange>>(ReferenceEqualityComparer.Instance);
+        IReadOnlyList<PatchRange> RangesOf(PatchFileEntry entry)
+        {
+            if (!ranges.TryGetValue(entry, out var found))
+            {
+                found = PatchRanges.Of(entry.Words, entry.Bytes);
+                ranges[entry] = found;
+            }
+
+            return found;
+        }
+
+        for (int i = 0; i < mods.Count; i++)
+        {
+            var mod = mods[i];
+            var clashes = new List<(string Name, uint Address)>();
+
+            foreach (var other in present.Concat(mods.Take(i)))
+            {
+                if (PatchRanges.FirstShared(RangesOf(mod), RangesOf(other)) is { } address)
+                {
+                    clashes.Add((NameOf(other.Description), address));
+                }
+            }
+
+            if (clashes.Count == 0) continue;
+
+            string names = JoinNames(clashes.Select(clash => clash.Name).Distinct().ToList());
+            throw new Rpcs3PatchException(
+                $"{NameOf(mod.Description)} cannot be enabled: it writes to the same addresses as {names} "
+                + $"(from 0x{clashes[0].Address:x8}), and RPCS3 would apply one over the other. "
+                + (clashes.Count == 1 && clashes[0].Name == NameOf(Description)
+                    ? "It cannot be used together with the savefile helper."
+                    : $"Disable {names} first."));
+        }
+    }
+
+    /// <summary>"A", "A and B", "A, B and C".</summary>
+    public static string JoinNames(IReadOnlyList<string> names) => names.Count switch
+    {
+        0 => string.Empty,
+        1 => names[0],
+        _ => string.Join(", ", names.Take(names.Count - 1)) + " and " + names[^1],
+    };
+
+    private static void CheckNames(string titleId, string hash)
+    {
+        if (!IsTitleId(titleId)) throw new Rpcs3PatchException($"\"{titleId}\" is not a title id RaCMAN can name a patch file after.");
+        if (!IsPpuHash(hash)) throw new Rpcs3PatchException($"\"{hash}\" is not an RPCS3 executable hash.");
+    }
+
+    /// <summary>The title's patch file, when it is missing or this client's; somebody else's or a broken one is a refusal.</summary>
+    private static PatchFileState ReadOwnFile(Rpcs3Folder folder, string titleId)
+    {
+        var file = ReadPatchFile(folder.PatchFile(titleId));
+        if (file.Kind is PatchFileKind.Foreign or PatchFileKind.Broken) throw new Rpcs3PatchException(file.Problem);
+        return file;
+    }
+
+    private static (string File, bool Exists, string? Text) ReadConfig(Rpcs3Folder folder)
+    {
+        string configFile = folder.PatchConfigFile;
+        bool configExists = File.Exists(configFile);
+        try
+        {
+            return (configFile, configExists, configExists ? File.ReadAllText(configFile) : null);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            throw new Rpcs3PatchException($"{configFile} could not be read: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Writes a plan: the patch file when the plan changes it, then a copy of patch_config.yml
+    /// beside it the first time this session changes that file (<paramref name="backedUp"/>
+    /// remembers which), then the new patch_config.yml. Each file is written whole to a temporary
+    /// name and moved over the old one, so RPCS3 never reads half of either.
     /// </summary>
     public static void Write(Rpcs3PatchPlan plan, ISet<string> backedUp)
     {
-        WriteWhole(plan.PatchFile, plan.PatchText);
+        if (plan.PatchText is { } patchText) WriteWhole(plan.PatchFile, patchText);
 
         string config = Path.GetFullPath(plan.ConfigFile);
         if (File.Exists(config) && backedUp.Add(config))
@@ -1042,6 +1452,35 @@ public static class Rpcs3Patches
             }
 
             throw;
+        }
+    }
+}
+
+/// <summary>
+/// The one way this client writes RPCS3's files. The savefile helper's install and the Mods panel
+/// both read the patch file and patch_config.yml, change their own part and write the whole of each
+/// back, so two of them at once would each write the other's change away: every write is worked out
+/// and written under one lock, from the files as they are at that moment. It also remembers which
+/// patch_config.yml has already been copied aside this session, so the copy is always of what the
+/// user had rather than of this client's first write.
+/// </summary>
+public sealed class Rpcs3PatchWriter
+{
+    private readonly object _gate = new();
+    private readonly HashSet<string> _backedUp = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Works out a plan and writes it, both under the lock. A null plan is nothing to write.
+    /// Whatever the planning throws — a <see cref="Rpcs3PatchException"/> with the reason — comes
+    /// out with nothing written.
+    /// </summary>
+    public Rpcs3PatchPlan? Commit(Func<Rpcs3PatchPlan?> plan)
+    {
+        lock (_gate)
+        {
+            var planned = plan();
+            if (planned is not null) Rpcs3Patches.Write(planned, _backedUp);
+            return planned;
         }
     }
 }

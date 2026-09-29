@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(47, true)]     // the build before the one this client ships with
-    [InlineData(48, false)]    // exactly the expected build: RaC2 and Deadlocked planet loads work under RPCS3
-    [InlineData(49, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(48, true)]     // the build before the one this client ships with
+    [InlineData(49, false)]    // exactly the expected build: mods work under RPCS3, as RPCS3 patches
+    [InlineData(50, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(48, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(49, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 

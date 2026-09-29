@@ -13,14 +13,32 @@ public static class ModsPanel
     /// <summary>True while a native file dialog is up, so Browse cannot open a second one.</summary>
     private static bool _dialogOpen;
 
+    /// <summary>The question the RPCS3 dialog was last opened for, so it is opened once per question.</summary>
+    private static ModsConfirmation? _shownConfirmation;
+
+    private const string ConfirmId = "###rpcs3-mods-confirm";
+
+    /// <summary>
+    /// Whether the panel is drawn for RPCS3, where a mod is an RPCS3 patch the user switches on,
+    /// rather than for a console, where it is loaded into the running game. What the connected
+    /// qwark says decides it; between connections it is the target the Connection panel is set to.
+    /// </summary>
+    public static bool UnderRpcs3(AppState state) =>
+        state.Connected ? state.CodePatchesUnsupported : state.Settings.Rpcs3Target;
+
     public static void Draw(AppState state)
     {
         Ui.Heading("Mods");
 
-        // Every mod is patch words, code caves or both, so on a platform that refuses code patches
-        // the whole panel is a library you can keep up to date and not load. Uploading still
-        // works, which is what keeps the console's copy current for the next PS3 session.
-        if (state.CodePatchesUnsupported) Ui.Warning(Ui.ModsAreCodePatches);
+        // Every mod is patch words, code caves or both, which qwark cannot write into a game RPCS3
+        // has recompiled. Under RPCS3 the mods therefore go in as RPCS3 patches, which RPCS3 only
+        // ever applies when the game boots.
+        bool rpcs3 = UnderRpcs3(state);
+        if (rpcs3)
+        {
+            state.Rpcs3Mods.Update();
+            Ui.Warning(Ui.ModsAreRpcs3Patches);
+        }
 
         // The described title: between sessions the library is still the one whose game just quit,
         // and the buttons that need a console are disabled below whether or not one is running.
@@ -30,6 +48,8 @@ public static class ModsPanel
             Ui.Hint("No game is running, so there is no mod library to show.");
             return;
         }
+
+        if (rpcs3) DrawRpcs3Problem(state);
 
         // The library is a button that opens the folder rather than the path printed out: the path
         // is absolute and long enough to need wrapping, and reading it was never the point.
@@ -49,6 +69,16 @@ public static class ModsPanel
         ImGui.SameLine();
         Ui.OpenFolderButton(state, Path.Combine(state.Mods.RootPath, title));
 
+        if (rpcs3)
+        {
+            // RPCS3's Patch Manager can change the same switches, so what the files say is only as
+            // fresh as the last look; this is the look again.
+            ImGui.SameLine();
+            ImGui.BeginDisabled(state.Rpcs3Mods.Writing);
+            if (ImGui.SmallButton("Check again")) state.Rpcs3Mods.Recheck();
+            ImGui.EndDisabled();
+        }
+
         ImGui.Spacing();
 
         var console = state.ConsoleMods.ToDictionary(m => m.DirName, StringComparer.OrdinalIgnoreCase);
@@ -57,6 +87,10 @@ public static class ModsPanel
         if (locals.Count == 0)
         {
             Ui.Hint("No mods found for this title. Install one from a ZIP below.");
+        }
+        else if (rpcs3)
+        {
+            DrawRpcs3Table(state, title, locals, console);
         }
         else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -78,38 +112,7 @@ public static class ModsPanel
                 ImGui.TableNextRow();
                 ImGui.PushID(mod.DirName);
 
-                ImGui.TableNextColumn();
-
-                // A name too long for the column takes a second line and the row grows for it,
-                // which is the difference between reading "Incremental RNG" and reading
-                // "Incremental R". A third line is where a table stops being a table, so the
-                // second one ends in an ellipsis and the tooltip has the rest.
-                string label = WrapName(mod.Name, ImGui.GetContentRegionAvail().X, MeasureText);
-
-                // SpanAllColumns makes the whole row select, but without AllowOverlap the selectable
-                // sits on top of the Auto checkbox and the Load/Upload buttons and eats their clicks.
-                // The id after the ## is the mod's, so wrapping the name differently as the window
-                // is resized does not make it a different item.
-                if (ImGui.Selectable($"{label}##name", _selected == mod.DirName,
-                        ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
-                {
-                    _selected = mod.DirName;
-                }
-
-                // The name is also where the author is read now, and where a name too long for the
-                // column can be read in full. The row's selectable spans every column, so the
-                // tooltip waits for the pointer to settle rather than following it across the row.
-                // Built by hand rather than through SetTooltip, which is printf underneath: a mod
-                // called "100% Speed" would otherwise lose the per cent and what follows it.
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.TextUnformatted(TooltipFor(mod));
-                    ImGui.EndTooltip();
-                }
-
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version);
+                DrawNameAndVersion(mod);
 
                 ImGui.TableNextColumn();
                 DrawConsoleState(mod, remote);
@@ -139,8 +142,209 @@ public static class ModsPanel
             ImGui.EndTable();
         }
 
-        DrawDetails(state, locals, console);
+        DrawDetails(state, locals, console, rpcs3);
         DrawZipInstall(state, title);
+        if (rpcs3) DrawConfirmation(state);
+    }
+
+    /// <summary>
+    /// The first two cells of a row, the same in both layouts: the name, which selects the row and
+    /// carries the author and the full name on its tooltip, and the version.
+    /// </summary>
+    private static void DrawNameAndVersion(LocalMod mod)
+    {
+        ImGui.TableNextColumn();
+
+        // A name too long for the column takes a second line and the row grows for it,
+        // which is the difference between reading "Incremental RNG" and reading
+        // "Incremental R". A third line is where a table stops being a table, so the
+        // second one ends in an ellipsis and the tooltip has the rest.
+        string label = WrapName(mod.Name, ImGui.GetContentRegionAvail().X, MeasureText);
+
+        // SpanAllColumns makes the whole row select, but without AllowOverlap the selectable
+        // sits on top of the checkbox and the buttons and eats their clicks. The id after the
+        // ## is the mod's, so wrapping the name differently as the window is resized does not
+        // make it a different item.
+        if (ImGui.Selectable($"{label}##name", _selected == mod.DirName,
+                ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
+        {
+            _selected = mod.DirName;
+        }
+
+        // The name is also where the author is read now, and where a name too long for the
+        // column can be read in full. The row's selectable spans every column, so the
+        // tooltip waits for the pointer to settle rather than following it across the row.
+        // Built by hand rather than through SetTooltip, which is printf underneath: a mod
+        // called "100% Speed" would otherwise lose the per cent and what follows it.
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
+        {
+            ImGui.BeginTooltip();
+            ImGui.TextUnformatted(TooltipFor(mod));
+            ImGui.EndTooltip();
+        }
+
+        ImGui.TableNextColumn();
+        ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version);
+    }
+
+    // ---------------------------------------------------------------- under RPCS3
+
+    /// <summary>
+    /// Why RPCS3's folder cannot say which mods are enabled, when it cannot: RPCS3 not found, no
+    /// game in its log, somebody else's patch file, a patch_config.yml it cannot read.
+    /// </summary>
+    private static void DrawRpcs3Problem(AppState state)
+    {
+        var mods = state.Rpcs3Mods;
+        string problem = mods.DiskProblem;
+        if (problem.Length == 0)
+        {
+            if (Ui.Debug && mods.Disk is { Hash.Hash: { } hash, File: { } file })
+            {
+                Ui.DebugHint($"Executable {hash}, patch file {file.Path}");
+            }
+
+            return;
+        }
+
+        Ui.Error(problem);
+        if (mods.FolderProblem) Ui.Hint("Set RPCS3's folder on the Connection panel, then press Check again.");
+    }
+
+    /// <summary>
+    /// The RPCS3 table: Status in place of the console column, Enabled in place of Auto, and no
+    /// Load or Unload, since RPCS3 is what loads a mod, when the game boots. Auto has no meaning
+    /// here: an enabled mod goes in at every boot.
+    /// </summary>
+    private static void DrawRpcs3Table(AppState state, string title, IReadOnlyList<LocalMod> locals,
+        Dictionary<string, ModEntry> console)
+    {
+        if (!ImGui.BeginTable("mods-rpcs3", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        {
+            return;
+        }
+
+        var controller = state.Rpcs3Mods;
+
+        ImGui.TableSetupColumn("Mod");
+        ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 60);
+        ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthFixed, 140);
+        ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, 55);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 110);
+        ImGui.TableHeadersRow();
+
+        foreach (var mod in locals)
+        {
+            console.TryGetValue(mod.DirName, out var remote);
+            var status = controller.StatusFor(mod);
+            bool busy = controller.IsBusy(mod);
+
+            ImGui.TableNextRow();
+            ImGui.PushID(mod.DirName);
+
+            DrawNameAndVersion(mod);
+
+            ImGui.TableNextColumn();
+            var colour = status.Tone switch
+            {
+                ModRpcs3Tone.Good => Ui.Green,
+                ModRpcs3Tone.Bad => Ui.Red,
+                ModRpcs3Tone.Pending => Ui.Yellow,
+                _ => Ui.Grey,
+            };
+            Ui.Text(busy ? Ui.Yellow : colour, busy ? "Writing..." : status.Text);
+            Ui.Tooltip(busy ? "Writing to RPCS3's folder..." : status.Tooltip);
+
+            ImGui.TableNextColumn();
+            bool ticked = status.Enabled;
+            ImGui.BeginDisabled(!status.CanToggle || busy || controller.Writing);
+            if (ImGui.Checkbox("##enabled", ref ticked)) controller.Toggle(mod, ticked);
+            ImGui.EndDisabled();
+            if (!status.CanToggle && status.ToggleReason.Length > 0) Ui.Tooltip(status.ToggleReason);
+
+            ImGui.TableNextColumn();
+            if (status.CanUpdate)
+            {
+                bool answering = state.Connected && !state.ConsoleBusy;
+                ImGui.BeginDisabled(controller.Writing || !answering);
+                if (ImGui.SmallButton("Update")) controller.RequestUpdate(mod);
+                ImGui.EndDisabled();
+                Ui.Tooltip(answering
+                    ? "Rewrite this mod's RPCS3 patch from the library's copy. Asks first."
+                    : "qwark-rpcs3 hands out the mod's words: connect to it, and wait while a game is starting or stopping.");
+                if (Ui.Debug) ImGui.SameLine();
+            }
+
+            if (Ui.Debug) DrawUploadButton(state, title, mod);
+
+            ImGui.PopID();
+        }
+
+        ImGui.EndTable();
+    }
+
+    /// <summary>
+    /// The question before a change the user did not click directly: a dependency, a dependant, an
+    /// update. No is the easy answer, as with every such question this client asks.
+    /// </summary>
+    private static void DrawConfirmation(AppState state)
+    {
+        var controller = state.Rpcs3Mods;
+        var pending = controller.Pending;
+        if (pending is null)
+        {
+            _shownConfirmation = null;
+            return;
+        }
+
+        string label = pending.Title + ConfirmId;
+        if (!ReferenceEquals(pending, _shownConfirmation))
+        {
+            _shownConfirmation = pending;
+            ImGui.OpenPopup(label);
+        }
+        else if (!ImGui.IsPopupOpen(label))
+        {
+            // Closed some other way than the two buttons: that is a no.
+            controller.Cancel();
+            _shownConfirmation = null;
+            return;
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(520, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(label, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!open) controller.Cancel();
+            return;
+        }
+
+        Ui.Paragraph(pending.Message);
+        ImGui.Spacing();
+        Ui.Hint("RPCS3 applies mods when the game boots, so restart the game in RPCS3 afterwards.");
+        ImGui.Separator();
+
+        if (ImGui.Button(pending.ConfirmLabel, new Vector2(140, 0)))
+        {
+            controller.Confirm();
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new Vector2(120, 0));
+
+        // Enter on a dialog that has just opened answers no.
+        ImGui.SetItemDefaultFocus();
+        if (cancel || !open)
+        {
+            controller.Cancel();
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
     }
 
     /// <summary>How wide a piece of text is on screen. The measure WrapName uses in the panel.</summary>
@@ -280,6 +484,14 @@ public static class ModsPanel
         }
 
         ImGui.SameLine();
+        DrawUploadButton(state, title, mod);
+        ImGui.EndDisabled();
+    }
+
+    /// <summary>The debug-only Upload, in both layouts: the console's copy is otherwise sent only on the way to a load or an enable.</summary>
+    private static void DrawUploadButton(AppState state, string title, LocalMod mod)
+    {
+        ImGui.BeginDisabled(!state.Connected);
         if (ImGui.SmallButton("Upload"))
         {
             var library = state.Mods;
@@ -299,7 +511,7 @@ public static class ModsPanel
         ImGui.EndDisabled();
     }
 
-    private static void DrawDetails(AppState state, IReadOnlyList<LocalMod> locals, Dictionary<string, ModEntry> console)
+    private static void DrawDetails(AppState state, IReadOnlyList<LocalMod> locals, Dictionary<string, ModEntry> console, bool rpcs3)
     {
         var mod = locals.FirstOrDefault(m => m.DirName == _selected);
         if (mod is null) return;
@@ -324,7 +536,12 @@ public static class ModsPanel
             }
         }
 
-        if (mod.NeedsLua) Ui.Warning("This mod has a Lua automation; only its patches are applied.");
+        if (mod.NeedsLua)
+        {
+            Ui.Warning(rpcs3
+                ? "This mod has a Lua automation, which qwark cannot run, so it cannot go in as an RPCS3 patch."
+                : "This mod has a Lua automation; only its patches are applied.");
+        }
         if (!string.IsNullOrEmpty(mod.Link)) Ui.Hint(mod.Link);
 
         if (!string.IsNullOrEmpty(mod.Description))
