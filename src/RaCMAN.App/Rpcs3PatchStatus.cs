@@ -451,6 +451,6 @@ public sealed class Rpcs3PatchController
         }
 
         return new(SaveFilePatchState.RestartGame,
-            "Installed. Restart the game in RPCS3 to load it: stop the game and boot it again.");
+            "Installed. Restart the game in RPCS3 to apply changes.");
     }
 }
