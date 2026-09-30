@@ -11,14 +11,32 @@ namespace RaCMAN.App.Panels;
 /// nothing to this client beyond "byte n". The table re-reads itself on the Settings panel's table
 /// refresh interval: a flag flips as the game runs, and a stale table is worse than a re-read a
 /// second. An interval of zero leaves the Refresh button as the only thing that reads.
+///
+/// "Check all" is the bit checkboxes over the whole table: LEVELFLAGS_SET of FF for every byte
+/// LEVELFLAGS_GET reported, one request per byte, the way the Unlocks panel's bulk buttons loop
+/// UNLOCK_SET. The client knows nothing about which bits the game uses, so it sets them all.
 /// </summary>
 public static class LevelFlagsPanel
 {
+    /// <summary>What "Check all" writes to every byte: all eight bits set.</summary>
+    public const byte AllBits = 0xFF;
+
+    /// <summary>Which of the row's two confirmations is showing. One at most, so there is one field.</summary>
+    private enum Armed
+    {
+        None,
+        Reset,
+        CheckAll,
+    }
+
     private static byte[] _flags = Array.Empty<byte>();
     private static int _loadedPlanet = -1;
     private static int _planet = -1;
     private static float _sinceRefresh;
-    private static bool _resetArmed;
+    private static Armed _armed;
+
+    /// <summary>The red of a confirmation button: the second click that writes game memory.</summary>
+    private static readonly Vector4 ConfirmColour = new(0.6f, 0.2f, 0.2f, 1f);
 
     /// <summary>How many flag bytes the last LEVELFLAGS_GET returned, for the smoke-run summary.</summary>
     public static int LoadedByteCount => _flags.Length;
@@ -38,7 +56,7 @@ public static class LevelFlagsPanel
         _flags = Array.Empty<byte>();
         _loadedPlanet = -1;
         _sinceRefresh = 0;
-        _resetArmed = false;
+        _armed = Armed.None;
     }
 
     public static void Draw(AppState state)
@@ -83,16 +101,18 @@ public static class LevelFlagsPanel
             if (ImGui.Button("Refresh")) Load(state);
         }
 
-        // Resetting a planet's flags writes game memory, so unlike the reads above it needs a
-        // game to write to. The rest of the row keeps working between sessions.
+        // Resetting or checking a planet's flags writes game memory, so unlike the reads above it
+        // needs a game to write to. The rest of the row keeps working between sessions. Each asks
+        // for a second click, and arming one puts the other back, so there is only ever one
+        // confirmation on the row to click.
         ImGui.BeginDisabled(!state.Ingame);
         ImGui.SameLine();
-        if (_resetArmed)
+        if (_armed == Armed.Reset)
         {
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
+            ImGui.PushStyleColor(ImGuiCol.Button, ConfirmColour);
             if (ImGui.Button("Confirm reset"))
             {
-                _resetArmed = false;
+                _armed = Armed.None;
                 byte planet = (byte)_planet;
                 state.Run(async () =>
                 {
@@ -103,13 +123,36 @@ public static class LevelFlagsPanel
 
             ImGui.PopStyleColor();
             ImGui.SameLine();
-            if (ImGui.Button("Cancel")) _resetArmed = false;
+            if (ImGui.Button("Cancel##reset")) _armed = Armed.None;
         }
         else if (ImGui.Button("Reset flags..."))
         {
-            _resetArmed = true;
+            _armed = Armed.Reset;
         }
 
+        // Check all also needs the bytes themselves: their count is how many it writes.
+        ImGui.SameLine();
+        ImGui.BeginDisabled(_flags.Length == 0);
+        if (_armed == Armed.CheckAll)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, ConfirmColour);
+            if (ImGui.Button("Confirm check all"))
+            {
+                _armed = Armed.None;
+                CheckAll(state);
+            }
+
+            ImGui.PopStyleColor();
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel##checkall")) _armed = Armed.None;
+        }
+        else
+        {
+            if (ImGui.Button("Check all...")) _armed = Armed.CheckAll;
+            Ui.Tooltip("Sets every flag bit of this planet: each byte in the table is written as FF.");
+        }
+
+        ImGui.EndDisabled();
         ImGui.EndDisabled();
         ImGui.EndDisabled();
 
@@ -228,6 +271,56 @@ public static class LevelFlagsPanel
             await state.Client.LevelFlagsSetAsync(planet, offset, value).ConfigureAwait(false);
             state.Post(() => Load(state, quiet: true));
         });
+    }
+
+    /// <summary>
+    /// The confirmed "Check all": every byte of the table as last read goes to FF on screen at once,
+    /// as a single tick does, and <see cref="RunCheckAll"/> writes them to the planet they were read from.
+    /// </summary>
+    private static void CheckAll(AppState state)
+    {
+        byte planet = (byte)_loadedPlanet;
+        int length = _flags.Length;
+        Array.Fill(_flags, AllBits);
+
+        RunCheckAll(state, planet, length, () => Load(state, quiet: true));
+    }
+
+    /// <summary>
+    /// <see cref="CheckAllAsync"/> from one task, with one toast when every byte is written and the
+    /// refusal's status when one is not. <paramref name="reread"/> is posted either way: after a
+    /// refusal the bytes before it are set and the rest are not, and only a read says which.
+    /// </summary>
+    public static void RunCheckAll(AppState state, byte planet, int length, Action reread)
+    {
+        state.Run(async () =>
+        {
+            try
+            {
+                await CheckAllAsync(state.Client, planet, length).ConfigureAwait(false);
+            }
+            finally
+            {
+                state.Post(reread);
+            }
+        }, CheckAllToast(planet));
+    }
+
+    /// <summary>What the toast says when "Check all" has written every byte.</summary>
+    public static string CheckAllToast(byte planet) => $"Level flags all set on planet {planet}";
+
+    /// <summary>
+    /// LEVELFLAGS_SET of <see cref="AllBits"/> at every offset below <paramref name="length"/>, one
+    /// request per byte, from offset 0 up, each waiting for the answer to the one before. The length
+    /// is what LEVELFLAGS_GET reported for the planet. A refusal is thrown as it arrives, so nothing
+    /// is written past it.
+    /// </summary>
+    public static async Task CheckAllAsync(QwarkClient client, byte planet, int length, CancellationToken cancellationToken = default)
+    {
+        for (int offset = 0; offset < length; offset++)
+        {
+            await client.LevelFlagsSetAsync(planet, (ushort)offset, AllBits, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static void Load(AppState state, bool quiet = false)
