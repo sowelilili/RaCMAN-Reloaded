@@ -1180,6 +1180,8 @@ public class Rpcs3ModsTests : IDisposable
             (Decide(Disk(), Row(), refusal: ModPatchRefusal.TooLarge), ModRpcs3State.TooLarge, "Too large for RPCS3", ModRpcs3Tone.Quiet, false),
             (Decide(Disk(), Row(), refusal: ModPatchRefusal.NothingToPatch), ModRpcs3State.NothingToPatch,
                 "Nothing to patch", ModRpcs3Tone.Quiet, false),
+            (Decide(Disk(), Row(), Mod(new string('a', 32), "Last Ground Display")), ModRpcs3State.FolderNameTooLong,
+                "Folder name too long", ModRpcs3Tone.Bad, false),
         };
 
         foreach (var (status, state, text, tone, ticked) in cases)

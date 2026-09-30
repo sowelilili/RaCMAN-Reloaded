@@ -18,6 +18,33 @@ public static class ModsPanel
 
     private const string ConfirmId = "###rpcs3-mods-confirm";
 
+    /// <summary>The frame the panel was last drawn on, so a frame that does not follow it is the panel opening.</summary>
+    private static int _lastDrawnFrame = int.MinValue;
+
+    /// <summary>The uninstall the user picked from a row's menu, waiting for the answer to its question.</summary>
+    private static UninstallPlan? _pendingUninstall;
+
+    /// <summary>The plan the uninstall dialog was last opened for, so it is opened once per question.</summary>
+    private static UninstallPlan? _shownUninstall;
+
+    /// <summary>True while a confirmed uninstall is running; no other starts meanwhile.</summary>
+    private static bool _uninstalling;
+
+    private const string UninstallId = "###mods-uninstall";
+
+    /// <summary>The rename the user picked from a row's menu, and the name it would take.</summary>
+    private static (LocalMod Mod, string NewName)? _pendingRename;
+
+    private static bool _renameShown;
+
+    private const string RenameId = "Rename folder?###mods-rename";
+
+    /// <summary>
+    /// The console-only rows as they were last drawn, folder and status, for the summary line of a
+    /// headless run: empty unless the run ended on this panel.
+    /// </summary>
+    public static string ConsoleOnlySummary { get; private set; } = string.Empty;
+
     /// <summary>
     /// Whether the panel is drawn for RPCS3, where a mod is an RPCS3 patch the user switches on,
     /// rather than for a console, where it is loaded into the running game. What the connected
@@ -49,11 +76,22 @@ public static class ModsPanel
             return;
         }
 
+        // The panel has just been opened: the console's list and its mod folder are read again, so
+        // a mod that only the console has shows up without anybody pressing anything. Once, not
+        // once a frame.
+        int frame = ImGui.GetFrameCount();
+        if (frame != _lastDrawnFrame + 1) state.RefreshMods(quiet: true);
+        _lastDrawnFrame = frame;
+
         if (rpcs3) DrawRpcs3Problem(state);
 
         // The library is a button that opens the folder rather than the path printed out: the path
         // is absolute and long enough to need wrapping, and reading it was never the point.
-        if (ImGui.SmallButton("Rescan library")) state.RescanLocalMods();
+        if (ImGui.SmallButton("Rescan library"))
+        {
+            state.RescanLocalMods();
+            state.RefreshConsoleFolders(quiet: true);
+        }
 
         // Under RPCS3 there is no console, and the folder qwark-rpcs3 keeps its copies in is one the
         // client uploads to and rescans by itself whenever a mod is enabled.
@@ -88,16 +126,20 @@ public static class ModsPanel
 
         ImGui.Spacing();
 
-        var console = state.ConsoleMods.ToDictionary(m => m.DirName, StringComparer.OrdinalIgnoreCase);
-        var locals = state.LocalMods;
+        // The library's mods first, then every mod only the console has, found by pairing MOD_LIST
+        // with the folder names DIR_LIST gives whole (ModTable).
+        var rows = state.ModRows();
+        bool busy = state.ConsoleBusy || _uninstalling;
+        ConsoleOnlySummary = string.Join(" ", rows.Where(row => row.ConsoleOnly)
+            .Select(row => $"{row.FolderName}=\"{ModTable.ConsoleOnlyStatus(row, withAuto: true).Text}\""));
 
-        if (locals.Count == 0)
+        if (rows.Count == 0)
         {
             Ui.Hint("No mods found for this title. Install one from a ZIP below.");
         }
         else if (rpcs3)
         {
-            DrawRpcs3Table(state, title, locals);
+            DrawRpcs3Table(state, title, rows, busy);
         }
         else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -113,23 +155,25 @@ public static class ModsPanel
             ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 130);
             ImGui.TableHeadersRow();
 
-            foreach (var mod in locals)
+            foreach (var row in rows)
             {
-                console.TryGetValue(mod.DirName, out var remote);
+                var actions = ModTable.ActionsFor(row, rpcs3: false, state.Connected, busy);
                 ImGui.TableNextRow();
-                ImGui.PushID(mod.DirName);
+                ImGui.PushID(row.Key);
 
-                DrawNameAndVersion(mod);
-
-                ImGui.TableNextColumn();
-                DrawConsoleState(mod, remote);
+                DrawNameAndVersion(state, title, row, actions, rpcs3: false);
 
                 ImGui.TableNextColumn();
-                bool auto = remote?.Auto ?? false;
-                ImGui.BeginDisabled(remote is null || !state.Connected);
-                if (ImGui.Checkbox("##auto", ref auto))
+                var (text, tone) = ModTable.ConsoleStatus(row);
+                Ui.Text(ColourOf(tone), text);
+                if (row.ConsoleOnly) Ui.Tooltip(row.FolderNameTooLong ? $"{ConsoleOnlyTooltip} qwark cannot load it: {ModFolderName.TooLongFact(row.FolderName)}" : ConsoleOnlyTooltip);
+                else if (row.FolderNameTooLong) Ui.Tooltip($"This mod cannot be uploaded or loaded: {ModFolderName.TooLongReason(row.FolderName)}");
+
+                ImGui.TableNextColumn();
+                bool auto = row.Console?.Auto ?? false;
+                ImGui.BeginDisabled(!actions.AutoEnabled);
+                if (ImGui.Checkbox("##auto", ref auto) && row.ListedName is { } dir)
                 {
-                    string dir = mod.DirName;
                     bool wanted = auto;
                     state.Run(async () =>
                     {
@@ -141,7 +185,7 @@ public static class ModsPanel
                 ImGui.EndDisabled();
 
                 ImGui.TableNextColumn();
-                DrawActions(state, title, mod, remote);
+                DrawActions(state, title, row, actions);
 
                 ImGui.PopID();
             }
@@ -149,16 +193,29 @@ public static class ModsPanel
             ImGui.EndTable();
         }
 
-        DrawDetails(state, locals, console, rpcs3);
+        DrawDetails(state, title, rows, rpcs3);
         DrawZipInstall(state, title);
         if (rpcs3) DrawConfirmation(state);
+        DrawUninstallQuestion(state);
+        DrawRenameQuestion(state, title);
     }
 
+    private const string ConsoleOnlyTooltip =
+        "Only the console has this mod: no mods folder on this PC holds it. Right-click it to uninstall it from the console.";
+
+    private static Vector4 ColourOf(ModTone tone) => tone switch
+    {
+        ModTone.Good => Ui.Green,
+        ModTone.Bad => Ui.Red,
+        _ => Ui.Grey,
+    };
+
     /// <summary>
-    /// The first two cells of a row, the same in both layouts: the name, which selects the row and
-    /// carries the author and the full name on its tooltip, and the version.
+    /// The first two cells of a row, the same in both layouts: the name, which selects the row,
+    /// carries the author and the full name on its tooltip and the row's menu on a right-click, and
+    /// the version. A mod only the console has is drawn in grey, as "not uploaded" is.
     /// </summary>
-    private static void DrawNameAndVersion(LocalMod mod)
+    private static void DrawNameAndVersion(AppState state, string title, ModRow row, ModRowActions actions, bool rpcs3)
     {
         ImGui.TableNextColumn();
 
@@ -166,17 +223,17 @@ public static class ModsPanel
         // which is the difference between reading "Incremental RNG" and reading
         // "Incremental R". A third line is where a table stops being a table, so the
         // second one ends in an ellipsis and the tooltip has the rest.
-        string label = WrapName(mod.Name, ImGui.GetContentRegionAvail().X, MeasureText);
+        string label = WrapName(row.Name, ImGui.GetContentRegionAvail().X, MeasureText);
 
         // SpanAllColumns makes the whole row select, but without AllowOverlap the selectable
-        // sits on top of the checkbox and the buttons and eats their clicks. The id after the
-        // ## is the mod's, so wrapping the name differently as the window is resized does not
-        // make it a different item.
-        if (ImGui.Selectable($"{label}##name", _selected == mod.DirName,
-                ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap))
-        {
-            _selected = mod.DirName;
-        }
+        // sits on top of the checkbox and the buttons and eats their clicks. The row's own ID is
+        // pushed around all of it, so wrapping the name differently as the window is resized does
+        // not lose the selection or the menu.
+        if (row.ConsoleOnly) ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
+        bool clicked = ImGui.Selectable($"{label}##name", _selected == row.Key,
+            ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap);
+        if (row.ConsoleOnly) ImGui.PopStyleColor();
+        if (clicked) _selected = row.Key;
 
         // The name is also where the author is read now, and where a name too long for the
         // column can be read in full. The row's selectable spans every column, so the
@@ -186,12 +243,231 @@ public static class ModsPanel
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
         {
             ImGui.BeginTooltip();
-            ImGui.TextUnformatted(TooltipFor(mod));
+            ImGui.TextUnformatted(TooltipFor(row));
             ImGui.EndTooltip();
         }
 
+        DrawRowMenu(state, title, row, actions, rpcs3);
+
         ImGui.TableNextColumn();
-        ImGui.TextUnformatted(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version);
+        string version = string.IsNullOrEmpty(row.Version) ? "-" : row.Version;
+        if (row.ConsoleOnly) Ui.Text(Ui.Grey, version);
+        else ImGui.TextUnformatted(version);
+    }
+
+    /// <summary>
+    /// A row's right-click menu: Uninstall, which removes the mod from the console and from this
+    /// PC, and for a mod of the user's whose folder name qwark cannot use, Rename folder. Both only
+    /// ask their question here; nothing is changed until the user answers it.
+    /// </summary>
+    private static void DrawRowMenu(AppState state, string title, ModRow row, ModRowActions actions, bool rpcs3)
+    {
+        if (!ImGui.BeginPopupContextItem("row-menu")) return;
+
+        if (ImGui.MenuItem("Uninstall...", string.Empty, false, actions.UninstallEnabled))
+        {
+            _pendingUninstall = PlanUninstall(state, title, row, rpcs3);
+        }
+
+        if (!actions.UninstallEnabled) Ui.Tooltip(actions.UninstallReason);
+
+        if (actions.Rename && row.Local is { } mod && ImGui.MenuItem("Rename folder..."))
+        {
+            _pendingRename = (mod, state.Mods.SuggestFolderName(title, mod));
+        }
+
+        ImGui.EndPopup();
+    }
+
+    /// <summary>
+    /// The uninstall of one row, as it would go now. Under RPCS3 RaCMAN's patch file is read here,
+    /// once, so the question can say whether the mod has an RPCS3 patch to take out.
+    /// </summary>
+    private static UninstallPlan PlanUninstall(AppState state, string title, ModRow row, bool rpcs3)
+    {
+        Rpcs3UninstallLook? look = null;
+        if (rpcs3)
+        {
+            var disk = state.Rpcs3Mods.Disk;
+            var folder = disk?.Folder.Folder;
+            var file = folder is null || !Rpcs3Patches.IsTitleId(title) ? null : Rpcs3Patches.ReadPatchFile(folder.PatchFile(title));
+            look = new Rpcs3UninstallLook(folder, file, disk?.Folder.Problem ?? "RPCS3's folder has not been looked at yet");
+        }
+
+        bool shippedBehind = row.Local is { Shipped: false } mine
+                             && state.Mods.ShippedTitleFolder(title) is { } shipped
+                             && ModLibrary.Read(Path.Combine(shipped, mine.DirName), shipped: true) is not null;
+
+        return ModUninstall.Plan(row, title, rpcs3, look, shippedBehind);
+    }
+
+    /// <summary>
+    /// The question before an uninstall, listing each step it will take in order, and what it will
+    /// not do and why. Cancel is the easy answer, as with every question this client asks.
+    /// </summary>
+    private static void DrawUninstallQuestion(AppState state)
+    {
+        var plan = _pendingUninstall;
+        if (plan is null)
+        {
+            _shownUninstall = null;
+            return;
+        }
+
+        string label = $"Uninstall {plan.ModName}?{UninstallId}";
+        if (!ReferenceEquals(plan, _shownUninstall))
+        {
+            _shownUninstall = plan;
+            ImGui.OpenPopup(label);
+        }
+        else if (!ImGui.IsPopupOpen(label))
+        {
+            _pendingUninstall = null;
+            _shownUninstall = null;
+            return;
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(label, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!open) _pendingUninstall = null;
+            return;
+        }
+
+        if (plan.NothingToDo)
+        {
+            Ui.Paragraph($"There is nothing to remove for {plan.ModName}.");
+        }
+        else
+        {
+            Ui.Paragraph($"Uninstalling {plan.ModName} does this, in this order:");
+            for (int i = 0; i < plan.Steps.Count; i++) Ui.Paragraph($"{i + 1}. {plan.Steps[i].Text}");
+        }
+
+        foreach (var note in plan.Notes)
+        {
+            ImGui.Spacing();
+            Ui.Hint(note);
+        }
+
+        if (!plan.NothingToDo)
+        {
+            ImGui.Spacing();
+            Ui.Hint((plan.Rpcs3 ? "qwark-rpcs3" : "The console") + " then rescans its mod folder. If a step fails, the steps after it are not done.");
+            if (plan.Rpcs3 && plan.Steps.Any(step => step.Kind == UninstallStepKind.RemoveRpcs3Patch))
+            {
+                Ui.Hint("RPCS3 applies patches when the game boots, so a mod in the game now stays there until the game is restarted in RPCS3.");
+            }
+        }
+
+        ImGui.Separator();
+
+        ImGui.BeginDisabled(plan.NothingToDo || _uninstalling);
+        bool confirm = ImGui.Button("Uninstall", new Vector2(140, 0));
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool cancel = ImGui.Button(plan.NothingToDo ? "Close" : "Cancel", new Vector2(120, 0));
+
+        // Enter on a dialog that has just opened answers no.
+        ImGui.SetItemDefaultFocus();
+
+        if (confirm)
+        {
+            _uninstalling = true;
+            _pendingUninstall = null;
+            ModUninstall.Start(state, plan, () => _uninstalling = false);
+            ImGui.CloseCurrentPopup();
+        }
+        else if (cancel || !open)
+        {
+            _pendingUninstall = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    /// <summary>
+    /// The question before a user mod's folder is renamed to a name qwark can use. Only the folder
+    /// on this PC moves; a copy the console has under the old name stays there, and shows up in the
+    /// list as a console-only mod for Uninstall to take away.
+    /// </summary>
+    private static void DrawRenameQuestion(AppState state, string title)
+    {
+        if (_pendingRename is not { } rename)
+        {
+            _renameShown = false;
+            return;
+        }
+
+        if (!_renameShown)
+        {
+            _renameShown = true;
+            ImGui.OpenPopup(RenameId);
+        }
+        else if (!ImGui.IsPopupOpen(RenameId))
+        {
+            _pendingRename = null;
+            _renameShown = false;
+            return;
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(RenameId, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!open) _pendingRename = null;
+            return;
+        }
+
+        var (mod, newName) = rename;
+        Ui.Paragraph($"{mod.Name} is in a folder called {mod.DirName}, which is {ModFolderName.ByteCount(mod.DirName)} bytes long. "
+                     + $"qwark can only use folder names of up to {ModFolderName.MaxBytes} bytes, so this mod cannot be uploaded or loaded.");
+        ImGui.Spacing();
+        Ui.Paragraph($"Rename the folder to {newName}?");
+        ImGui.Spacing();
+        Ui.Hint("Only the folder in your mods folder is renamed. A copy the console already has under the old name stays "
+                + "there; it shows in this list as a console-only mod, and Uninstall removes it.");
+        ImGui.Separator();
+
+        bool confirm = ImGui.Button("Rename", new Vector2(140, 0));
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new Vector2(120, 0));
+        ImGui.SetItemDefaultFocus();
+
+        if (confirm)
+        {
+            try
+            {
+                var renamed = state.Mods.RenameFolder(title, mod, newName);
+                state.AddToast($"{renamed.Name}'s folder is now {renamed.DirName}", ToastKind.Success);
+                _selected = renamed.DirName;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                state.AddToast($"{mod.Name}'s folder was not renamed: {ex.Message}", ToastKind.Error);
+            }
+
+            state.RescanLocalMods();
+            state.RefreshConsoleFolders(quiet: true);
+            _pendingRename = null;
+            ImGui.CloseCurrentPopup();
+        }
+        else if (cancel || !open)
+        {
+            _pendingRename = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
     }
 
     // ---------------------------------------------------------------- under RPCS3
@@ -226,27 +502,38 @@ public static class ModsPanel
     /// <summary>
     /// The RPCS3 table: Status in place of the console column, Enabled in place of Auto, and no
     /// Load or Unload, since RPCS3 is what loads a mod, when the game boots. Auto has no meaning
-    /// here: an enabled mod goes in at every boot.
+    /// here: an enabled mod goes in at every boot. A mod only qwark-rpcs3's folder has is listed
+    /// after the library's, in grey, with nothing to enable: its row's menu uninstalls it.
     /// <para>
     /// Status is the column that stretches, since its texts are the long ones ("Disabled - restart
     /// needed"); Mod is as wide as the longest name in it (<see cref="Rpcs3ModColumnWidth"/>) and
     /// the rest are as wide as what they hold, so no band of empty name column is left over.
     /// </para>
     /// </summary>
-    private static void DrawRpcs3Table(AppState state, string title, IReadOnlyList<LocalMod> locals)
+    private static void DrawRpcs3Table(AppState state, string title, IReadOnlyList<ModRow> rows, bool busy)
     {
         var controller = state.Rpcs3Mods;
 
         // Decided before the table, so the Status column's longest text is known when the columns
         // are set up; each row is still decided once a frame, as it was.
-        var statuses = new ModRpcs3Status[locals.Count];
-        var writing = new bool[locals.Count];
+        var statuses = new ModRpcs3Status?[rows.Count];
+        var texts = new string[rows.Count];
+        var writing = new bool[rows.Count];
         float statusNeeds = MeasureText("Status");
-        for (int i = 0; i < locals.Count; i++)
+        for (int i = 0; i < rows.Count; i++)
         {
-            statuses[i] = controller.StatusFor(locals[i]);
-            writing[i] = controller.IsBusy(locals[i]);
-            statusNeeds = MathF.Max(statusNeeds, MeasureText(writing[i] ? WritingText : statuses[i].Text));
+            if (rows[i].Local is { } mod)
+            {
+                statuses[i] = controller.StatusFor(mod);
+                writing[i] = controller.IsBusy(mod);
+                texts[i] = writing[i] ? WritingText : statuses[i]!.Text;
+            }
+            else
+            {
+                texts[i] = ModTable.ConsoleOnlyStatus(rows[i], withAuto: true).Text;
+            }
+
+            statusNeeds = MathF.Max(statusNeeds, MeasureText(texts[i]));
         }
 
         // The buttons column holds Update, and in debug Upload beside it, and nothing else.
@@ -262,7 +549,7 @@ public static class ModsPanel
         // puts around every column (cell padding each side, a border between two, one down each edge).
         float overhead = (style.CellPadding.X * 2f * Rpcs3Columns) + (Rpcs3Columns - 1) + 2f;
         float room = ImGui.GetContentRegionAvail().X - overhead - version - enabled - actions;
-        float name = Rpcs3ModColumnWidth(locals.Select(m => m.Name), room, statusNeeds, MeasureText);
+        float name = Rpcs3ModColumnWidth(rows.Select(row => row.Name), room, statusNeeds, MeasureText);
 
         if (!ImGui.BeginTable("mods-rpcs3", Rpcs3Columns, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
@@ -278,16 +565,24 @@ public static class ModsPanel
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, actions);
         ImGui.TableHeadersRow();
 
-        for (int i = 0; i < locals.Count; i++)
+        for (int i = 0; i < rows.Count; i++)
         {
-            var mod = locals[i];
-            var status = statuses[i];
-            bool busy = writing[i];
+            var row = rows[i];
+            var rowActions = ModTable.ActionsFor(row, rpcs3: true, state.Connected, busy || controller.Writing);
 
             ImGui.TableNextRow();
-            ImGui.PushID(mod.DirName);
+            ImGui.PushID(row.Key);
 
-            DrawNameAndVersion(mod);
+            DrawNameAndVersion(state, title, row, rowActions, rpcs3: true);
+
+            if (row.Local is not { } mod || statuses[i] is not { } status)
+            {
+                DrawRpcs3ConsoleOnlyCells(row, texts[i]);
+                ImGui.PopID();
+                continue;
+            }
+
+            bool rowBusy = writing[i];
 
             ImGui.TableNextColumn();
             var colour = status.Tone switch
@@ -297,12 +592,12 @@ public static class ModsPanel
                 ModRpcs3Tone.Pending => Ui.Yellow,
                 _ => Ui.Grey,
             };
-            Ui.Text(busy ? Ui.Yellow : colour, busy ? WritingText : status.Text);
-            Ui.Tooltip(busy ? "Writing to RPCS3's folder..." : status.Tooltip);
+            Ui.Text(rowBusy ? Ui.Yellow : colour, texts[i]);
+            Ui.Tooltip(rowBusy ? "Writing to RPCS3's folder..." : status.Tooltip);
 
             ImGui.TableNextColumn();
             bool ticked = status.Enabled;
-            ImGui.BeginDisabled(!status.CanToggle || busy || controller.Writing);
+            ImGui.BeginDisabled(!status.CanToggle || rowBusy || controller.Writing || _uninstalling);
             if (ImGui.Checkbox("##enabled", ref ticked)) controller.Toggle(mod, ticked);
             ImGui.EndDisabled();
             if (!status.CanToggle && status.ToggleReason.Length > 0) Ui.Tooltip(status.ToggleReason);
@@ -326,6 +621,29 @@ public static class ModsPanel
         }
 
         ImGui.EndTable();
+    }
+
+    /// <summary>
+    /// The Status, Enabled and button cells of a mod only qwark-rpcs3's folder has: what it is, and
+    /// an Enabled box that cannot be ticked, since there is no library copy to make a patch of.
+    /// </summary>
+    private static void DrawRpcs3ConsoleOnlyCells(ModRow row, string text)
+    {
+        ImGui.TableNextColumn();
+        var (_, tone) = ModTable.ConsoleOnlyStatus(row, withAuto: true);
+        Ui.Text(ColourOf(tone), text);
+        Ui.Tooltip(row.FolderNameTooLong
+            ? $"Only qwark-rpcs3's folder has this mod, and qwark cannot use it: {ModFolderName.TooLongFact(row.FolderName)} Right-click it to uninstall it."
+            : "Only qwark-rpcs3's folder has this mod: no mods folder on this PC holds it. Right-click it to uninstall it.");
+
+        ImGui.TableNextColumn();
+        bool ticked = false;
+        ImGui.BeginDisabled();
+        ImGui.Checkbox("##enabled", ref ticked);
+        ImGui.EndDisabled();
+        Ui.Tooltip("Not in your mods library, so there is nothing to enable. Right-click it to uninstall it.");
+
+        ImGui.TableNextColumn();
     }
 
     /// <summary>
@@ -482,82 +800,79 @@ public static class ModsPanel
         return text + (mod.Shipped ? "\nShips with RaCMAN Reloaded" : "\nIn your mods folder");
     }
 
-    private static void DrawConsoleState(LocalMod mod, ModEntry? remote)
+    /// <summary>The same for any row: a mod only the console has says so, and names its folder there.</summary>
+    public static string TooltipFor(ModRow row)
     {
-        if (remote is null)
-        {
-            ImGui.TextColored(Ui.Grey, "not uploaded");
-            return;
-        }
+        if (row.Local is { } mod) return TooltipFor(mod);
 
-        var parts = new List<string>();
-        if (remote.Loaded) parts.Add("loaded");
-        if (remote.Previous) parts.Add("previous");
-        if (remote.NeedsLua) parts.Add("needs Lua");
-        if (remote.ParseError) parts.Add("parse error");
-        if (remote.Hash != mod.Hash) parts.Add("stale");
-
-        var colour = remote.Loaded ? Ui.Green : remote.ParseError ? Ui.Red : Ui.Grey;
-        ImGui.TextColored(colour, parts.Count == 0 ? "ready" : string.Join(", ", parts));
+        string text = string.IsNullOrWhiteSpace(row.Author) ? row.Name : $"{row.Name}\nby {row.Author}";
+        return text + $"\nOnly on the console, in {row.FolderName}";
     }
 
-    private static void DrawActions(AppState state, string title, LocalMod mod, ModEntry? remote)
+    private static void DrawActions(AppState state, string title, ModRow row, ModRowActions actions)
     {
-        ImGui.BeginDisabled(!state.Connected);
+        if (actions.Unload)
+        {
+            ImGui.BeginDisabled(!state.Connected || row.ListedName is null);
+            if (ImGui.SmallButton("Unload") && row.ListedName is { } dir)
+            {
+                state.Run(async () =>
+                {
+                    await state.Client.ModUnloadAsync(dir);
+                    state.Post(() => state.RefreshMods());
+                }, $"{row.Name} unloaded");
+            }
 
-        bool loaded = remote?.Loaded ?? false;
-        if (!loaded)
+            ImGui.EndDisabled();
+        }
+        else if (actions.Load)
         {
             // MOD_LOAD is answered UNSUPPORTED for a mod with patch words or caves on a platform
             // without code patches, which is every mod: the button is greyed out rather than left
             // to produce an error toast.
             bool blocked = state.CodePatchesUnsupported;
-            ImGui.BeginDisabled(blocked);
+            ImGui.BeginDisabled(blocked || !actions.LoadEnabled);
             bool load = ImGui.SmallButton("Load");
             ImGui.EndDisabled();
-            if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NoCodePatches);
+            if (!actions.LoadEnabled && actions.LoadReason.Length > 0) Ui.Tooltip(actions.LoadReason);
+            else if (blocked) Ui.Tooltip(Ui.NoCodePatches);
 
-            if (load)
+            if (load && row.Local is { } mod)
             {
                 var library = state.Mods;
-                var target = mod;
-                uint consoleHash = remote?.Hash ?? 0;
+                uint consoleHash = row.Console?.Hash ?? 0;
                 state.Run(async () =>
                 {
-                    await library.EnsureUploadedAsync(state.Client, title, target, consoleHash,
+                    await library.EnsureUploadedAsync(state.Client, title, mod, consoleHash,
                         new Progress<string>(message => state.Post(() => state.AddToast(message))));
-                    await state.Client.ModLoadAsync(target.DirName);
+                    await state.Client.ModLoadAsync(mod.DirName);
                     state.Post(() => state.RefreshMods());
                 }, $"{mod.Name} loaded");
             }
-        }
-        else if (ImGui.SmallButton("Unload"))
-        {
-            string dir = mod.DirName;
-            state.Run(async () =>
+            else if (load && row.ListedName is { } dir)
             {
-                await state.Client.ModUnloadAsync(dir);
-                state.Post(() => state.RefreshMods());
-            }, $"{mod.Name} unloaded");
+                // A mod only the console has is loaded from the console's own copy: there is
+                // nothing on this PC to upload first.
+                state.Run(async () =>
+                {
+                    await state.Client.ModLoadAsync(dir);
+                    state.Post(() => state.RefreshMods());
+                }, $"{row.Name} loaded");
+            }
         }
 
         // Load uploads on its own when the console's copy is missing or stale, so a manual
         // upload is only a debugging tool; it stays behind the debug switch.
-        if (!Ui.Debug)
-        {
-            ImGui.EndDisabled();
-            return;
-        }
+        if (!Ui.Debug || row.Local is not { } local) return;
 
         ImGui.SameLine();
-        DrawUploadButton(state, title, mod);
-        ImGui.EndDisabled();
+        DrawUploadButton(state, title, local);
     }
 
     /// <summary>The debug-only Upload, in both layouts: the console's copy is otherwise sent only on the way to a load or an enable.</summary>
     private static void DrawUploadButton(AppState state, string title, LocalMod mod)
     {
-        ImGui.BeginDisabled(!state.Connected);
+        ImGui.BeginDisabled(!state.Connected || mod.FolderNameTooLong);
         if (ImGui.SmallButton("Upload"))
         {
             var library = state.Mods;
@@ -575,30 +890,42 @@ public static class ModsPanel
         }
 
         ImGui.EndDisabled();
+        if (mod.FolderNameTooLong) Ui.Tooltip($"It cannot be uploaded: {ModFolderName.TooLongReason(mod.DirName)}");
     }
 
-    private static void DrawDetails(AppState state, IReadOnlyList<LocalMod> locals, Dictionary<string, ModEntry> console, bool rpcs3)
+    private static void DrawDetails(AppState state, string title, IReadOnlyList<ModRow> rows, bool rpcs3)
     {
-        var mod = locals.FirstOrDefault(m => m.DirName == _selected);
-        if (mod is null) return;
+        var row = rows.FirstOrDefault(r => r.Key == _selected);
+        if (row is null) return;
 
         ImGui.Spacing();
         ImGui.Separator();
-        Ui.Heading(mod.Name);
+        Ui.Heading(row.Name);
 
-        ImGui.Text($"Folder: {mod.DirName}  ({(mod.Shipped ? "ships with RaCMAN Reloaded" : "yours")})");
-        ImGui.Text($"Version: {(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version)}    Author: {(string.IsNullOrEmpty(mod.Author) ? "-" : mod.Author)}");
+        if (row.Local is not { } mod)
+        {
+            DrawConsoleOnlyDetails(state, title, row, rpcs3);
+            return;
+        }
+
+        ImGui.TextUnformatted($"Folder: {mod.DirName}  ({(mod.Shipped ? "ships with RaCMAN Reloaded" : "yours")})");
+        ImGui.TextUnformatted($"Version: {(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version)}    Author: {(string.IsNullOrEmpty(mod.Author) ? "-" : mod.Author)}");
+
+        if (mod.FolderNameTooLong)
+        {
+            Ui.Error($"This mod cannot be uploaded or loaded: {ModFolderName.TooLongReason(mod.DirName)}");
+        }
 
         // Word counts, code caves and checksums say nothing to someone who only wants the mod on;
         // they are what you look at when a mod misbehaves, which is what the debug switch is for.
         // The console column already says whether the console's copy is stale.
         if (Ui.Debug)
         {
-            ImGui.Text($"Patch words: {mod.PatchWordCount}    Code caves: {mod.BinFiles.Count}    CRC32: {Crc32.ToSumText(mod.Hash)}");
+            ImGui.TextUnformatted($"Patch words: {mod.PatchWordCount}    Code caves: {mod.BinFiles.Count}    CRC32: {Crc32.ToSumText(mod.Hash)}");
 
-            if (console.TryGetValue(mod.DirName, out var remote))
+            if (row.Console is { } remote)
             {
-                ImGui.Text($"Console hash: {Crc32.ToSumText(remote.Hash)}{(remote.Hash == mod.Hash ? " (current)" : " (differs, will re-upload)")}");
+                ImGui.TextUnformatted($"Console hash: {Crc32.ToSumText(remote.Hash)}{(remote.Hash == mod.Hash ? " (current)" : " (differs, will re-upload)")}");
             }
         }
 
@@ -621,11 +948,42 @@ public static class ModsPanel
         // parsed out of its own copy: a wire check, not something to offer while playing.
         if (!Ui.Debug) return;
 
-        ImGui.Spacing();
-        ImGui.BeginDisabled(!state.Connected);
-        if (ImGui.Button("Read description from console"))
+        DrawReadDescription(state, row);
+    }
+
+    /// <summary>What there is to say about a mod only the console has: where it is, what qwark makes of it, and what to do about it.</summary>
+    private static void DrawConsoleOnlyDetails(AppState state, string title, ModRow row, bool rpcs3)
+    {
+        string where = rpcs3 ? "qwark-rpcs3's folder" : "the console";
+        ImGui.TextUnformatted(row.ConsoleFolder is { } folder
+            ? $"Folder: {ModLibrary.ConsoleFolder(title, folder)}  (only on {where})"
+            : $"qwark lists it as {row.ListedName}, and its folder is not in {where}'s mod folder any more.");
+        ImGui.TextUnformatted($"Version: {(string.IsNullOrEmpty(row.Version) ? "-" : row.Version)}    Author: {(string.IsNullOrEmpty(row.Author) ? "-" : row.Author)}");
+
+        if (row.FolderNameTooLong)
         {
-            string dir = mod.DirName;
+            Ui.Error($"qwark cannot load this mod: {ModFolderName.TooLongFact(row.FolderName)}");
+        }
+
+        if (row.Console is { Auto: true })
+        {
+            Ui.Warning(rpcs3
+                ? "It is flagged to load by itself when the game boots."
+                : "It loads by itself whenever the game boots.");
+        }
+
+        Ui.Hint($"No mods folder on this PC holds this mod. Right-click it and pick Uninstall... to remove it from {where}.");
+
+        if (!Ui.Debug || row.ListedName is null) return;
+        DrawReadDescription(state, row);
+    }
+
+    private static void DrawReadDescription(AppState state, ModRow row)
+    {
+        ImGui.Spacing();
+        ImGui.BeginDisabled(!state.Connected || row.ListedName is null);
+        if (ImGui.Button("Read description from console") && row.ListedName is { } dir)
+        {
             state.Run(() => state.Client.ModInfoAsync(dir), info => state.AddToast(string.IsNullOrWhiteSpace(info) ? "(no description)" : info));
         }
 
@@ -680,6 +1038,7 @@ public static class ModsPanel
                 var installed = state.Mods.CommitZip(candidate, title);
                 state.AddToast($"{installed.Name} {installed.Version} installed", ToastKind.Success);
                 state.RescanLocalMods();
+                state.RefreshConsoleFolders(quiet: true);
             }
             catch (Exception ex) when (ex is IOException or InvalidDataException)
             {
@@ -730,6 +1089,7 @@ public static class ModsPanel
                 _pendingZip.Dispose();
                 _pendingZip = null;
                 state.RescanLocalMods();
+                state.RefreshConsoleFolders(quiet: true);
             }
         }
         // ArgumentException and NotSupportedException are what Path and ZipFile throw at a path

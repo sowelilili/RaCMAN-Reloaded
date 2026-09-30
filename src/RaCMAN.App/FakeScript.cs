@@ -20,7 +20,10 @@ public static class FakeScript
                                 + "unknown, drop, combos-off, combos-on, sfpatch, switchesin, switchesout, start, "
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
-                                + "modsin[:dir], modscheck[:dir], modsout[:dir]";
+                                + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir]";
+
+    /// <summary>The folder <c>consolemod</c> puts on the fake console when the step names none.</summary>
+    public const string DefaultConsoleMod = "old-savefile-helper";
 
     /// <summary>
     /// The steps that say what qwark-rpcs3 finds in game memory (revision 1.16): a mod found there,
@@ -107,6 +110,17 @@ public static class FakeScript
             string? dir = parts.Length > 1 && parts[1].Length > 0 ? parts[1] : null;
             fake.SetModPresence(dir, loaded: parts[0] == "modsin", checking: parts[0] == "modscheck");
             Console.WriteLine($"fake-script {parts[0]} {dir ?? "(every mod)"}");
+            return;
+        }
+
+        // A mod folder only the console has, flagged to load at boot: what a test leaves behind
+        // and the Mods panel lists as console-only. A folder name over 31 bytes is one qwark lists
+        // cut short, the way a ZIP installed under its temporary folder's name used to end up.
+        if (parts[0] == "consolemod")
+        {
+            string folder = parts.Length > 1 && parts[1].Length > 0 ? parts[1] : DefaultConsoleMod;
+            fake.AddConsoleMod(folder, "Old savefile helper", auto: true);
+            Console.WriteLine($"fake-script consolemod {folder}");
             return;
         }
 

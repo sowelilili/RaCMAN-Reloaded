@@ -50,6 +50,9 @@ public enum ModRpcs3State
     /// <summary>Enabled, but qwark-rpcs3 has no copy, so it cannot look for it in the game.</summary>
     NotUploaded,
 
+    /// <summary>The folder name is longer than qwark can use, so the mod cannot be uploaded.</summary>
+    FolderNameTooLong,
+
     /// <summary>RPCS3's folder cannot be read, so whether the mod is enabled is not known.</summary>
     Unknown,
 }
@@ -487,6 +490,15 @@ public sealed class Rpcs3ModsController
     /// <summary>What makes a mod impossible to enable at all, from the library, MOD_LIST or an earlier MOD_PATCH.</summary>
     private static ModRpcs3Status? Blocker(ModRpcs3Facts facts)
     {
+        // Before anything qwark says: qwark lists such a folder under a shorter name, so what it
+        // says is about a copy it cannot load, and the upload an enable starts with is refused.
+        if (facts.Mod.FolderNameTooLong)
+        {
+            return new(ModRpcs3State.FolderNameTooLong, "Folder name too long", ModRpcs3Tone.Bad,
+                $"This mod cannot be enabled: {ModFolderName.TooLongReason(facts.Mod.DirName)}",
+                false, false, string.Empty);
+        }
+
         if (facts.Mod.NeedsLua || facts.Console is { NeedsLua: true } || facts.Refusal == ModPatchRefusal.NeedsLua)
         {
             return new(ModRpcs3State.NeedsLua, "Needs Lua", ModRpcs3Tone.Quiet,
@@ -714,6 +726,9 @@ public sealed class Rpcs3ModsController
 
                 _bump++;
                 _state.RefreshConsoleMods(quiet: true);
+
+                // The write uploads the mods it enables, so qwark-rpcs3's folder may hold new ones.
+                _state.RefreshConsoleFolders(quiet: true);
             });
         });
     }

@@ -184,6 +184,10 @@ public sealed record PatchFileState(string Path, PatchFileKind Kind, IReadOnlyLi
     /// <summary>Every entry of one executable.</summary>
     public IEnumerable<PatchFileEntry> EntriesFor(string hash) =>
         Entries.Where(entry => string.Equals(entry.Hash, hash, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>Every entry of the mod in folder <paramref name="dirName"/>, for every executable.</summary>
+    public IReadOnlyList<PatchFileEntry> ModEntries(string dirName) =>
+        Entries.Where(entry => string.Equals(entry.ModDir, dirName, StringComparison.OrdinalIgnoreCase)).ToList();
 }
 
 /// <summary>Where one of this client's patches is switched on in patch_config.yml.</summary>
@@ -191,14 +195,16 @@ public sealed record PatchConfigKey(string Hash, string Game, string Serial, str
 
 /// <summary>
 /// Everything a write is about to do, worked out before a byte of it is written. A null
-/// <see cref="PatchText"/> leaves the patch file as it is, which is what switching a patch off does.
+/// <see cref="PatchText"/> leaves the patch file as it is, which is what switching a patch off does,
+/// and a null <see cref="ConfigText"/> leaves patch_config.yml as it is, which is what taking a mod
+/// out does when there is no patch_config.yml to switch it off in.
 /// </summary>
 public sealed record Rpcs3PatchPlan(
     string PatchFile,
     string? PatchText,
     bool PatchFileExists,
     string ConfigFile,
-    string ConfigText,
+    string? ConfigText,
     bool ConfigExists,
     IReadOnlyList<PatchFileEntry> Entries);
 
@@ -1436,6 +1442,32 @@ public static class Rpcs3Patches
     }
 
     /// <summary>
+    /// Works out both files for taking the mod in folder <paramref name="modDir"/> out altogether,
+    /// which uninstalling it does: every entry of that folder leaves the patch file, for every
+    /// executable, and each one's switch leaves patch_config.yml the way switching it off would
+    /// take it out. Every other entry and every other switch is kept exactly as it was, qwark's own
+    /// patches included. Null when the file holds no entry of that folder, so nothing is written;
+    /// a patch file that is somebody else's or a broken one of ours is a refusal, as for any write.
+    /// </summary>
+    public static Rpcs3PatchPlan? PlanRemoveMod(Rpcs3Folder folder, string titleId, string modDir)
+    {
+        if (!IsTitleId(titleId)) throw new Rpcs3PatchException($"\"{titleId}\" is not a title id RaCMAN can name a patch file after.");
+
+        var file = ReadOwnFile(folder, titleId);
+        var removed = file.ModEntries(modDir);
+        if (removed.Count == 0) return null;
+
+        var kept = file.Entries.Where(entry => !removed.Contains(entry)).ToList();
+        var (configFile, configExists, configText) = ReadConfig(folder);
+        string? newConfig = configExists
+            ? DisablePatches(configText, removed.Select(entry => entry.Key(titleId)), configFile)
+            : null;
+
+        return new Rpcs3PatchPlan(file.Path, BuildPatchFile(titleId, kept), file.Kind == PatchFileKind.Ours,
+            configFile, newConfig, configExists, kept);
+    }
+
+    /// <summary>
     /// Refuses <paramref name="mods"/> when one of them writes an address that one of
     /// <paramref name="present"/> or another of them writes, naming each one in the way.
     /// </summary>
@@ -1520,6 +1552,7 @@ public static class Rpcs3Patches
     public static void Write(Rpcs3PatchPlan plan, ISet<string> backedUp)
     {
         if (plan.PatchText is { } patchText) WriteWhole(plan.PatchFile, patchText);
+        if (plan.ConfigText is null) return;
 
         string config = Path.GetFullPath(plan.ConfigFile);
         if (File.Exists(config) && backedUp.Add(config))

@@ -47,6 +47,12 @@ public sealed class LocalMod
 
     public string PatchFile => System.IO.Path.Combine(Directory, "patch.txt");
 
+    /// <summary>
+    /// True when the folder name is longer than qwark can use (<see cref="ModFolderName.MaxBytes"/>):
+    /// the mod is listed but never uploaded or loaded, and the Mods panel offers a rename.
+    /// </summary>
+    public bool FolderNameTooLong => !ModFolderName.Fits(DirName);
+
     public override string ToString() => $"{Name} {Version}".TrimEnd();
 }
 
@@ -134,7 +140,10 @@ public sealed class ModLibrary
     public string? ShippedTitleFolder(string titleId) =>
         ShippedRootPath is null ? null : System.IO.Path.Combine(ShippedRootPath, titleId);
 
-    public static string ConsoleFolder(string titleId, string dirName) => $"{ConsoleRoot}/{titleId}/{dirName}";
+    public static string ConsoleFolder(string titleId, string dirName) => $"{ConsoleTitleFolder(titleId)}/{dirName}";
+
+    /// <summary>The console's folder holding every mod of a title, which DIR_LIST reads for the folders' whole names.</summary>
+    public static string ConsoleTitleFolder(string titleId) => $"{ConsoleRoot}/{titleId}";
 
     /// <summary>
     /// Every mod for a title, the user's and the release's together, sorted by name: folders without
@@ -168,8 +177,12 @@ public sealed class ModLibrary
         }
     }
 
-    /// <summary>Reads one mod folder, or null when it has no patch.txt.</summary>
-    public static LocalMod? Read(string folder, bool shipped = false)
+    /// <summary>
+    /// Reads one mod folder, or null when it has no patch.txt. <paramref name="dirName"/> is the
+    /// folder name the mod is to have, where that is not the name of the folder it is read from:
+    /// a ZIP extracted to a temporary folder is read under the name it will be installed as.
+    /// </summary>
+    public static LocalMod? Read(string folder, bool shipped = false, string? dirName = null)
     {
         var patchFile = System.IO.Path.Combine(folder, "patch.txt");
         if (!File.Exists(patchFile)) return null;
@@ -219,7 +232,7 @@ public sealed class ModLibrary
             }
         }
 
-        var dirName = new DirectoryInfo(folder).Name;
+        dirName ??= new DirectoryInfo(folder).Name;
         var mod = new LocalMod
         {
             Directory = folder,
@@ -260,7 +273,9 @@ public sealed class ModLibrary
 
     /// <summary>
     /// Uploads the mod to /dev_hdd0/qwark/mods/&lt;TITLEID&gt;/&lt;dir&gt;/ when the console's hash
-    /// differs, writes qwark.sum and rescans. Returns true when anything was uploaded.
+    /// differs, writes qwark.sum and rescans. Returns true when anything was uploaded. A folder name
+    /// qwark cannot use is refused with <see cref="ModFolderNameException"/> before anything is
+    /// written: the copy would be listed under a shorter name and never load.
     /// </summary>
     public async Task<bool> EnsureUploadedAsync(
         QwarkClient client,
@@ -270,6 +285,11 @@ public sealed class ModLibrary
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (mod.FolderNameTooLong)
+        {
+            throw new ModFolderNameException($"{mod.Name} was not uploaded: {ModFolderName.TooLongReason(mod.DirName)}");
+        }
+
         uint localHash = ComputeHash(mod);
         if (consoleHash == localHash && consoleHash != 0) return false;
 
@@ -311,6 +331,12 @@ public sealed class ModLibrary
     /// <summary>
     /// Extracts a ZIP to a temp folder and finds the first directory holding a patch.txt, the same
     /// rule the old ModLoaderForm used. The caller confirms and then calls <see cref="CommitZip"/>.
+    /// <para>
+    /// The mod's folder name is the name of the folder it came in. A ZIP with patch.txt at its root
+    /// has no such folder, so its name comes from the ZIP file's name, or the mod's <c>#- name</c>
+    /// when that leaves nothing (<see cref="NewFolderName"/>); the temporary folder it was extracted
+    /// to never names anything. A folder whose name qwark could not use is renamed the same way.
+    /// </para>
     /// </summary>
     public ZipCandidate OpenZip(string zipPath, string titleId)
     {
@@ -327,7 +353,8 @@ public sealed class ModLibrary
             if (Read(tempRoot) is { } rootMod)
             {
                 sourceDir = tempRoot;
-                mod = rootMod;
+                string dirName = NewFolderName(titleId, System.IO.Path.GetFileNameWithoutExtension(zipPath), rootMod.Name);
+                mod = Read(tempRoot, dirName: dirName);
             }
             else
             {
@@ -336,6 +363,12 @@ public sealed class ModLibrary
                     mod = Read(dir);
                     if (mod is null) continue;
                     sourceDir = dir;
+
+                    if (mod.FolderNameTooLong)
+                    {
+                        mod = Read(dir, dirName: NewFolderName(titleId, mod.DirName, mod.Name));
+                    }
+
                     break;
                 }
             }
@@ -374,9 +407,121 @@ public sealed class ModLibrary
     /// <summary>Copies the extracted mod into the library, merging over anything already there.</summary>
     public LocalMod CommitZip(ZipCandidate candidate, string titleId)
     {
+        if (candidate.Mod.FolderNameTooLong)
+        {
+            throw new InvalidDataException($"The mod's folder name {candidate.Mod.DirName} is longer than qwark can use.");
+        }
+
         var target = System.IO.Path.Combine(TitleFolder(titleId), candidate.Mod.DirName);
         CopyAll(new DirectoryInfo(candidate.SourceDirectory), new DirectoryInfo(target));
         return Read(target) ?? throw new InvalidDataException("The installed mod has no patch.txt.");
+    }
+
+    // ---------------------------------------------------------------- folder names
+
+    /// <summary>
+    /// A folder name for a mod called <paramref name="modName"/> that has none of its own yet: made
+    /// out of <paramref name="preferred"/> (a ZIP file's name, a folder name too long to keep), or
+    /// out of the mod's name when that leaves nothing, sanitised and at most
+    /// <see cref="ModFolderName.MaxBytes"/> long. Where a folder of that name is already in the
+    /// user's library or the shipped one, <c>-2</c>, <c>-3</c> and so on are added, unless that
+    /// folder holds a mod of the same name: installing the same mod again is a replace or an
+    /// upgrade, which the install asks about as it does for any other ZIP.
+    /// </summary>
+    public string NewFolderName(string titleId, string? preferred, string? modName)
+    {
+        string wanted = ModFolderName.Sanitise(preferred);
+        if (wanted.Length == 0) wanted = ModFolderName.Sanitise(modName);
+        if (wanted.Length == 0) wanted = "mod";
+
+        return ModFolderName.Unique(wanted, name => FolderTaken(titleId, name, modName));
+    }
+
+    /// <summary>
+    /// Whether a folder of this name is in either library, holding anything but a mod called
+    /// <paramref name="sameModName"/> (null: holding anything at all).
+    /// </summary>
+    private bool FolderTaken(string titleId, string name, string? sameModName)
+    {
+        foreach (var (folder, shipped) in TitleFolders(titleId))
+        {
+            string path = System.IO.Path.Combine(folder, name);
+            if (!System.IO.Directory.Exists(path) && !File.Exists(path)) continue;
+            if (sameModName is null) return true;
+
+            var mod = Read(path, shipped);
+            if (mod is null || !string.Equals(mod.Name, sameModName, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+
+        return false;
+    }
+
+    private IEnumerable<(string Folder, bool Shipped)> TitleFolders(string titleId)
+    {
+        yield return (TitleFolder(titleId), false);
+        if (ShippedTitleFolder(titleId) is { } shipped) yield return (shipped, true);
+    }
+
+    /// <summary>
+    /// The name <see cref="RenameFolder"/> gives a mod whose folder name qwark cannot use: the
+    /// mod's own name, sanitised, or what fits of the folder name when that leaves nothing, made
+    /// unique against both libraries.
+    /// </summary>
+    public string SuggestFolderName(string titleId, LocalMod mod)
+    {
+        string wanted = ModFolderName.Sanitise(mod.Name);
+        if (wanted.Length == 0) wanted = ModFolderName.Sanitise(mod.DirName);
+        if (wanted.Length == 0) wanted = "mod";
+
+        return ModFolderName.Unique(wanted, name => FolderTaken(titleId, name, sameModName: null));
+    }
+
+    /// <summary>
+    /// Renames a mod folder of the user's library to <paramref name="newName"/> and reads it back.
+    /// Refused for a shipped mod, which lives in the application folder and is never written, for
+    /// a name qwark cannot use, and for a name either library already has.
+    /// </summary>
+    public LocalMod RenameFolder(string titleId, LocalMod mod, string newName)
+    {
+        if (mod.Shipped) throw new IOException($"{mod.Name} ships with RaCMAN Reloaded, so its folder cannot be renamed.");
+        if (newName.Length == 0 || !ModFolderName.Fits(newName) || newName != ModFolderName.Sanitise(newName))
+        {
+            throw new IOException($"\"{newName}\" is not a folder name qwark can use.");
+        }
+
+        string source = UserFolderOf(titleId, mod);
+        if (FolderTaken(titleId, newName, sameModName: null)) throw new IOException($"A mod folder called {newName} already exists.");
+
+        string target = System.IO.Path.Combine(TitleFolder(titleId), newName);
+        System.IO.Directory.Move(source, target);
+        return Read(target) ?? throw new IOException($"{target} has no patch.txt after the rename.");
+    }
+
+    /// <summary>
+    /// Deletes a mod folder of the user's library, and nothing else: the folder must be the mod's
+    /// own, directly under the title's folder in the user's library. A shipped mod is refused.
+    /// </summary>
+    public void DeleteUserFolder(string titleId, LocalMod mod)
+    {
+        if (mod.Shipped) throw new IOException($"{mod.Name} ships with RaCMAN Reloaded, so it cannot be deleted from the application folder.");
+        System.IO.Directory.Delete(UserFolderOf(titleId, mod), recursive: true);
+    }
+
+    /// <summary>The mod's folder, checked to be a folder directly under the title's folder in the user's library.</summary>
+    private string UserFolderOf(string titleId, LocalMod mod)
+    {
+        string titleFolder = System.IO.Path.GetFullPath(TitleFolder(titleId));
+        string folder = System.IO.Path.GetFullPath(mod.Directory);
+        string? parent = System.IO.Path.GetDirectoryName(folder.TrimEnd(System.IO.Path.DirectorySeparatorChar, System.IO.Path.AltDirectorySeparatorChar));
+
+        if (parent is null || !string.Equals(parent.TrimEnd(System.IO.Path.DirectorySeparatorChar), titleFolder.TrimEnd(System.IO.Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new IOException($"{folder} is not a mod folder in your library for {titleId}.");
+        }
+
+        if (!System.IO.Directory.Exists(folder)) throw new DirectoryNotFoundException($"{folder} is not there any more.");
+        return folder;
     }
 
     private static int CompareVersions(string? left, string? right)

@@ -372,6 +372,13 @@ public sealed class AppState : IDisposable
 
     public ModEntry[] ConsoleMods { get; private set; } = Array.Empty<ModEntry>();
 
+    /// <summary>
+    /// The folders DIR_LIST found in the console's mod folder for a title, with their whole names,
+    /// or null until it has been read. MOD_LIST carries only the first 31 bytes of a folder name, so
+    /// this is what the Mods panel pairs its rows with (<see cref="ModRows"/>).
+    /// </summary>
+    public ConsoleModFolders? ConsoleFolders { get; private set; }
+
     public ComboEntry[] Combos { get; private set; } = Array.Empty<ComboEntry>();
 
     public PositionList Positions { get; private set; } = PositionList.Empty;
@@ -813,6 +820,7 @@ public sealed class AppState : IDisposable
         Freezes = Array.Empty<FreezeEntry>();
         Patches = Array.Empty<PatchEntry>();
         ConsoleMods = Array.Empty<ModEntry>();
+        ConsoleFolders = null;
         Combos = Array.Empty<ComboEntry>();
         LocalMods = Array.Empty<LocalMod>();
         Previous = null;
@@ -1191,6 +1199,7 @@ public sealed class AppState : IDisposable
         if (quiet && HoldsBackgroundWork()) return;
 
         Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
+        RefreshConsoleFolders(quiet);
         RescanLocalMods();
     }
 
@@ -1204,6 +1213,47 @@ public sealed class AppState : IDisposable
         if (quiet && HoldsBackgroundWork()) return;
 
         Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
+    }
+
+    /// <summary>
+    /// DIR_LIST of the console's mod folder for the title on screen: the folders' whole names,
+    /// which MOD_LIST cuts to 31 bytes. Read with every <see cref="RefreshMods"/> (a rescan, a
+    /// load, an upload, a reconnect), when the Mods panel opens and after an uninstall, never once
+    /// a frame. A title with no mod folder on the console answers NOT_FOUND, which is no folders.
+    /// </summary>
+    public void RefreshConsoleFolders(bool quiet = false)
+    {
+        if (!Connected || UnknownGame) return;
+        if (quiet && HoldsBackgroundWork()) return;
+
+        string title = CurrentTitle;
+        if (string.IsNullOrEmpty(title)) return;
+
+        Run(async () =>
+        {
+            IReadOnlyList<string> folders;
+            try
+            {
+                folders = ConsoleModMatch.FoldersIn(
+                    await Client.DirListAsync(ModLibrary.ConsoleTitleFolder(title)).ConfigureAwait(false));
+            }
+            catch (QwarkStatusException ex) when (ex.Status == Status.NotFound)
+            {
+                folders = Array.Empty<string>();
+            }
+
+            Post(() => ConsoleFolders = new ConsoleModFolders(title, folders));
+        }, null, quiet);
+    }
+
+    /// <summary>
+    /// The Mods panel's rows for the title on screen: the library's mods, each with what the
+    /// console has of it, and then every mod the console has that no library does.
+    /// </summary>
+    public IReadOnlyList<ModRow> ModRows()
+    {
+        var folders = ConsoleFolders is { } listed && listed.Title == CurrentTitle ? listed.Folders : null;
+        return ModTable.Build(LocalMods, ConsoleMods, folders);
     }
 
     /// <summary>

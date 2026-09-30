@@ -311,19 +311,68 @@ public sealed class FakeQwarkServer : IDisposable
     private string ModFolder(string dirName) => $"{ModLibrary.ConsoleRoot}/{_modTitle}/{dirName}";
 
     /// <summary>
+    /// The rows a rescan made out of uploaded files, by the name MOD_LIST carries, with the whole
+    /// name of the folder each was read from. The two differ for a folder name longer than 31
+    /// bytes, which qwark cuts short in its table and then cannot find the files of.
+    /// </summary>
+    private readonly Dictionary<string, string> _scannedFolders = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Puts a mod folder on the fake console that no library on the PC has, as an old upload or a
+    /// test's leftover would be, and rescans: <c>patch.txt</c> with the given name, version and
+    /// author lines and one patch word, and <c>qwark.sum</c>. <paramref name="auto"/> sets its
+    /// auto-apply flag, the way a console that has loaded it at every boot reports it.
+    /// </summary>
+    public void AddConsoleMod(string folder, string name, string version = "1.0", string author = "someone", bool auto = false)
+    {
+        lock (_gate)
+        {
+            string path = ModFolder(folder);
+            var patch = Encoding.UTF8.GetBytes($"#- name: {name}\n#- version: {version}\n#- author: {author}\n0x00100000: 0x60000000\n");
+            Files[$"{path}/patch.txt"] = patch;
+            Files[$"{path}/qwark.sum"] = Encoding.ASCII.GetBytes(Crc32.ToSumText(Crc32.Finish(Crc32.Update(Crc32.Start(), patch))));
+            RescanUploadedMods();
+
+            if (!auto) return;
+            string listed = ModFolderName.AsListed(folder);
+            int at = Mods.FindIndex(m => string.Equals(m.DirName, listed, StringComparison.Ordinal));
+            if (at >= 0) Mods[at] = Mods[at] with { Flags = Mods[at].Flags | ModFlags.Auto };
+        }
+    }
+
+    /// <summary>
     /// MOD_RESCAN over the files the client uploaded: every <c>patch.txt</c> under the title's mod
     /// folder becomes a row, with the hash out of <c>qwark.sum</c> and the name, version and author
-    /// out of its <c>#-</c> lines, as qwark reads them. The rows the fake was made with stay, and a
-    /// row keeps its place and its auto flag when its folder is read again.
+    /// out of its <c>#-</c> lines, as qwark reads them, and the folder name cut to its first 31
+    /// bytes, as qwark's table keeps it. The rows the fake was made with stay, and a row keeps its
+    /// place and its auto flag when its folder is read again. A row read out of a folder that is
+    /// gone goes, unless the mod is loaded, which qwark leaves exactly as it was.
     /// </summary>
     private void RescanUploadedMods()
     {
         string prefix = $"{ModLibrary.ConsoleRoot}/{_modTitle}/";
+
+        foreach (var (listedName, folder) in _scannedFolders.ToArray())
+        {
+            if (Files.ContainsKey($"{prefix}{folder}/patch.txt")) continue;
+
+            int gone = Mods.FindIndex(m => string.Equals(m.DirName, listedName, StringComparison.Ordinal));
+            if (gone >= 0 && Mods[gone].Loaded) continue;
+            if (gone >= 0) Mods.RemoveAt(gone);
+            _scannedFolders.Remove(listedName);
+        }
+
+        for (int i = 0; i < Mods.Count; i++)
+        {
+            if (Mods[i].Index != i) Mods[i] = Mods[i] with { Index = (byte)i };
+        }
+
         foreach (var path in Files.Keys.Where(p => p.StartsWith(prefix, StringComparison.Ordinal)
                                                     && p.EndsWith("/patch.txt", StringComparison.Ordinal)).ToArray())
         {
-            string dir = path[prefix.Length..^"/patch.txt".Length];
-            if (dir.Length == 0 || dir.Contains('/')) continue;
+            string folder = path[prefix.Length..^"/patch.txt".Length];
+            if (folder.Length == 0 || folder.Contains('/')) continue;
+            string dir = ModFolderName.AsListed(folder);
 
             var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             bool lua = false;
@@ -341,10 +390,12 @@ public sealed class FakeQwarkServer : IDisposable
                 }
             }
 
-            uint hash = Files.TryGetValue($"{prefix}{dir}/qwark.sum", out var sum)
+            uint hash = Files.TryGetValue($"{prefix}{folder}/qwark.sum", out var sum)
                         && Crc32.TryParseSum(Encoding.ASCII.GetString(sum), out var parsed) ? parsed : 0;
 
             int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.OrdinalIgnoreCase));
+            if (at >= 0 && Mods[at].Loaded) continue;
+
             var flags = (at >= 0 ? Mods[at].Flags & ModFlags.Auto : ModFlags.None) | (lua ? ModFlags.NeedsLua : ModFlags.None);
             var row = new ModEntry((byte)(at >= 0 ? at : Mods.Count), flags, hash, dir,
                 meta.TryGetValue("name", out var name) ? name : dir,
@@ -353,7 +404,66 @@ public sealed class FakeQwarkServer : IDisposable
 
             if (at >= 0) Mods[at] = row;
             else Mods.Add(row);
+            _scannedFolders[dir] = folder;
         }
+    }
+
+    /// <summary>
+    /// A refusal the fake answers for an opcode, whatever the payload, before it looks at anything
+    /// else: how a test makes one step of a longer job fail and watches the job stop there.
+    /// </summary>
+    public Dictionary<Opcode, Status> RefusedOps { get; } = new();
+
+    /// <summary>
+    /// MOD_LOAD and MOD_UNLOAD on a console, where LOADED is qwark's own (revision 1.16 has it mean
+    /// "in game memory" where code cannot be patched, and MOD_LOAD is refused there before this).
+    /// The dirname is compared exactly, as qwark does. A row qwark listed under a shorter name than
+    /// its folder's does not load: qwark looks for the mod's files under the shorter name.
+    /// </summary>
+    private (Status, byte[]?) LoadOrUnload(Opcode opcode, byte[] payload)
+    {
+        if (payload.Length < 32) return (Status.BadArg, null);
+        string dir = SpanReader.DecodeFixed(payload.AsSpan(0, 32));
+
+        int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.Ordinal));
+        if (at < 0) return (Status.NotFound, null);
+        var mod = Mods[at];
+
+        if (opcode == Opcode.ModUnload)
+        {
+            if (!mod.Loaded) return (Status.NotFound, null);
+            Mods[at] = mod with { Flags = mod.Flags & ~ModFlags.Loaded };
+            return (Status.Ok, null);
+        }
+
+        if (mod.ParseError) return (Status.IoError, null);
+        if (_scannedFolders.TryGetValue(dir, out var folder) && folder != dir) return (Status.IoError, null);
+
+        Mods[at] = mod with { Flags = (mod.Flags | ModFlags.Loaded) & ~ModFlags.Previous };
+        return (Status.Ok, null);
+    }
+
+    /// <summary>MOD_SET_AUTO: the dirname compared exactly, NOT_FOUND for a mod the table does not have.</summary>
+    private (Status, byte[]?) SetModAuto(byte[] payload)
+    {
+        if (payload.Length < 33) return (Status.BadArg, null);
+        string dir = SpanReader.DecodeFixed(payload.AsSpan(0, 32));
+
+        int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.Ordinal));
+        if (at < 0) return (Status.NotFound, null);
+
+        var mod = Mods[at];
+        Mods[at] = mod with { Flags = payload[32] != 0 ? mod.Flags | ModFlags.Auto : mod.Flags & ~ModFlags.Auto };
+        return (Status.Ok, null);
+    }
+
+    /// <summary>Whether anything is at <paramref name="path"/>: a folder made with DIR_CREATE, or one a file or folder is under.</summary>
+    private bool PathExists(string path)
+    {
+        string prefix = path + "/";
+        return Files.ContainsKey(path)
+               || Directories.Any(d => d == path || d.StartsWith(prefix, StringComparison.Ordinal))
+               || Files.Keys.Any(f => f.StartsWith(prefix, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -1293,6 +1403,7 @@ public sealed class FakeQwarkServer : IDisposable
             }
 
             if (RefusedWithoutCodePatches(opcode, payload)) return (Status.Unsupported, null);
+            if (RefusedOps.TryGetValue(opcode, out var refusal)) return (refusal, null);
 
             switch (opcode)
             {
@@ -1697,6 +1808,13 @@ public sealed class FakeQwarkServer : IDisposable
                     RescanUploadedMods();
                     return (Status.Ok, null);
 
+                case Opcode.ModLoad:
+                case Opcode.ModUnload:
+                    return LoadOrUnload(opcode, payload);
+
+                case Opcode.ModSetAuto:
+                    return SetModAuto(payload);
+
                 // Revision 1.16: one mod as words and bytes for an RPCS3 patch, laid out as
                 // SAVEFILE_PATCH is. The index is MOD_LIST's. Answered at the XMB as in a game,
                 // since it only reads the console's copy; a boot answers BUSY as everything does.
@@ -1796,9 +1914,13 @@ public sealed class FakeQwarkServer : IDisposable
                     return (Status.Ok, null);
                 }
 
+                // Recursive, and NOT_FOUND for a path with nothing at it, as qwark's rmdir_recursive.
                 case Opcode.DirDelete:
                 {
                     string path = Encoding.UTF8.GetString(payload).TrimEnd('/');
+                    if (path.Length == 0) return (Status.BadArg, null);
+                    if (!PathExists(path)) return (Status.NotFound, null);
+
                     Directories.RemoveAll(d => d == path || d.StartsWith(path + "/", StringComparison.Ordinal));
                     foreach (var key in Files.Keys.Where(k => k.StartsWith(path + "/", StringComparison.Ordinal)).ToArray())
                     {
@@ -1878,10 +2000,12 @@ public sealed class FakeQwarkServer : IDisposable
                     return Files.Remove(path) ? (Status.Ok, null) : (Status.NotFound, null);
                 }
 
+                // NOT_FOUND for a folder that is not there, as qwark answers when it cannot open it.
                 case Opcode.DirList:
                 {
                     string path = Encoding.UTF8.GetString(payload).TrimEnd('/');
                     if (path.Length == 0) return (Status.BadArg, null);
+                    if (!PathExists(path)) return (Status.NotFound, null);
 
                     string prefix = path + "/";
                     var entries = new List<(bool IsDir, uint Size, string Name)>();

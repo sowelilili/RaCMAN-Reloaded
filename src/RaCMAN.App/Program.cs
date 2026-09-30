@@ -235,6 +235,9 @@ if (exitAfter > 0)
                       // What the Mods panel's Status column said for each mod under RPCS3, the last
                       // time it was drawn: empty unless the run ended on that panel.
                       $"rpcs3mods=[{string.Join(" ", state.Rpcs3Mods.LastStates.OrderBy(s => s.Key, StringComparer.OrdinalIgnoreCase).Select(s => $"{s.Key}:{s.Value}"))}] " +
+
+                      // The Mods panel's rows for mods only the console has, the same way.
+                      $"consoleonly=[{ModsPanel.ConsoleOnlySummary}] " +
                       $"savefiles={SaveFilesPanel.Summary} " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"obspad={state.ObsPad.State}/{state.ObsPad.Port} " +
