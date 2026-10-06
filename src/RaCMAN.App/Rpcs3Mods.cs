@@ -41,7 +41,11 @@ public enum ModRpcs3State
     /// <summary>qwark-rpcs3 cannot parse it, or a .bin it names is missing.</summary>
     ParseError,
 
-    /// <summary>More than qwark-rpcs3 can hand over in one reply.</summary>
+    /// <summary>
+    /// More than qwark-rpcs3 can hand over: MOD_PATCH answered FULL. Since build 52 a mod comes in
+    /// pages, so that is only a mod whose single bytes alone do not fit in one page, or any mod past
+    /// one reply from an older qwark-rpcs3.
+    /// </summary>
     TooLarge,
 
     /// <summary>No patch words and no caves: nothing for RPCS3 to apply, and nothing qwark-rpcs3 ever looks for.</summary>
@@ -776,6 +780,10 @@ public sealed class Rpcs3ModsController
                 _ => (null, ModPatchRefusal.None, $"qwark-rpcs3 answered {ex.Status} to MOD_PATCH."),
             };
         }
+        catch (ModPatchChangedException)
+        {
+            return (null, ModPatchRefusal.None, ChangedWhileReading(mod.Name));
+        }
 
         uint libraryHash = ModLibrary.ComputeHash(mod);
         var entry = new PatchFileEntry(hash, string.IsNullOrWhiteSpace(game) ? title : game, reply.Words, reply.Bytes,
@@ -784,6 +792,14 @@ public sealed class Rpcs3ModsController
             string.IsNullOrWhiteSpace(mod.Author) ? Rpcs3Patches.ModAuthorFallback : mod.Author);
         return (entry, ModPatchRefusal.None, string.Empty);
     }
+
+    /// <summary>
+    /// Why nothing was written when the mod changed on qwark-rpcs3 while its MOD_PATCH pages were
+    /// being read, twice running (<see cref="ModPatchChangedException"/>). Not remembered: the next
+    /// try reads it afresh.
+    /// </summary>
+    public static string ChangedWhileReading(string name) =>
+        $"{name} changed on qwark-rpcs3 while RaCMAN was reading it, twice running, so nothing was written. Try again.";
 
     private static ModEntry? Row(IEnumerable<ModEntry> list, LocalMod mod) =>
         list.FirstOrDefault(m => string.Equals(m.DirName, mod.DirName, StringComparison.OrdinalIgnoreCase));

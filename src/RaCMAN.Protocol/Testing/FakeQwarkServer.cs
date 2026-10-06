@@ -241,8 +241,36 @@ public sealed class FakeQwarkServer : IDisposable
     /// <summary>A refusal MOD_PATCH answers for a mod, by folder name: FULL for a mod too large, say.</summary>
     public Dictionary<string, Status> ModPatchStatuses { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>How many MOD_PATCH requests were answered with words.</summary>
+    /// <summary>How many MOD_PATCH requests were answered with words: one per page.</summary>
     public int ModPatchCount { get; private set; }
+
+    /// <summary>
+    /// The most rows, word and byte rows together, one MOD_PATCH page carries. qwark's is what fits
+    /// in a frame, <see cref="PatchPage.MaxRows"/>; a test sets a small one so that a small mod
+    /// takes several pages.
+    /// </summary>
+    public int ModPatchRowsPerPage { get; set; } = PatchPage.MaxRows;
+
+    /// <summary>
+    /// True answers MOD_PATCH as qwark-rpcs3 did before build 52: the whole mod in one reply with 0
+    /// where the page count is now, whatever page is asked for, and FULL for a mod past one frame.
+    /// </summary>
+    public bool ModPatchUnpaged { get; set; }
+
+    /// <summary>
+    /// Called with the page's number after each MOD_PATCH page is answered with words, under the
+    /// server's lock: where a test changes the mod (or the page size) between two pages, as an
+    /// upload, a rescan or another client could.
+    /// </summary>
+    public Action<ushort>? ModPatchPageServed { get; set; }
+
+    private readonly List<ushort> _modPatchPages = new();
+
+    /// <summary>The page every MOD_PATCH request asked for, oldest first.</summary>
+    public ushort[] ModPatchPagesAsked()
+    {
+        lock (_gate) return _modPatchPages.ToArray();
+    }
 
     /// <summary>
     /// What qwark-rpcs3 says about one mod in game memory, or about every mod it lists when
@@ -1818,11 +1846,17 @@ public sealed class FakeQwarkServer : IDisposable
                 // Revision 1.16: one mod as words and bytes for an RPCS3 patch, laid out as
                 // SAVEFILE_PATCH is. The index is MOD_LIST's. Answered at the XMB as in a game,
                 // since it only reads the console's copy; a boot answers BUSY as everything does.
+                // Revision 1.19 (build 52): answered one page at a time, the u16 page after the
+                // index and pad (0 when a request stops before it), cut by PatchPage.Split at
+                // ModPatchRowsPerPage; BAD_ARG for a page at or past the count, and FULL only when
+                // the byte rows alone do not fit on one page.
                 case Opcode.ModPatch:
                 {
                     if (payload.Length < 1) return (Status.BadArg, null);
 
                     int index = payload[0];
+                    ushort page = payload.Length >= 4 ? new SpanReader(payload.AsSpan(2, 2)).ReadU16() : (ushort)0;
+                    _modPatchPages.Add(page);
                     if (index >= Mods.Count) return (Status.NotFound, null);
 
                     var mod = Mods[index];
@@ -1838,11 +1872,22 @@ public sealed class FakeQwarkServer : IDisposable
                         reply ??= MadeUpModPatch(index);
                     }
 
-                    var bytes = reply.ToBytes();
-                    if (bytes.Length > Frame.MaxPayload) return (Status.Full, null);
+                    if (ModPatchUnpaged)
+                    {
+                        var whole = reply.ToBytes();
+                        if (whole.Length > Frame.MaxPayload) return (Status.Full, null);
+
+                        ModPatchCount++;
+                        return (Status.Ok, whole);
+                    }
+
+                    if (PatchPage.Split(reply, ModPatchRowsPerPage) is not { } pages) return (Status.Full, null);
+                    if (page >= pages.Length) return (Status.BadArg, null);
 
                     ModPatchCount++;
-                    return (Status.Ok, bytes);
+                    var answer = pages[page].ToBytes();
+                    ModPatchPageServed?.Invoke(page);
+                    return (Status.Ok, answer);
                 }
 
                 case Opcode.AutosplitEvents when AutosplitSupported:

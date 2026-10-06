@@ -897,6 +897,11 @@ public readonly record struct PatchByte(uint Address, byte Value);
 /// exactly when the patch does. The client never looks inside any of it beyond the addresses: it
 /// copies it into an RPCS3 patch file, and qwark says whether it reached the game.
 /// </para>
+/// <para>
+/// Since qwark build 52 (revision 1.19) MOD_PATCH answers in pages, each one a
+/// <see cref="PatchPage"/> in this layout; a whole mod is the pages put back together, and its
+/// stamp is still the CRC-32 of what one reply would hold after the stamp field.
+/// </para>
 /// </summary>
 public sealed record PatchReply(uint Stamp, PatchWord[] Words, PatchByte[] Bytes)
 {
@@ -918,9 +923,17 @@ public sealed record PatchReply(uint Stamp, PatchWord[] Words, PatchByte[] Bytes
     /// <summary>
     /// A reply that stops short of either list is a truncated reply, and a patch built from part of
     /// it would branch the game into half a cave: it throws rather than hand that over.
-    /// <paramref name="op"/> is the op's name, for the message.
+    /// <paramref name="op"/> is the op's name, for the message. The <c>u16</c> after <c>n</c> is
+    /// padding here and is not looked at; MOD_PATCH's page count is there, which
+    /// <see cref="PatchPage.Parse"/> reads.
     /// </summary>
-    public static PatchReply Parse(ReadOnlySpan<byte> payload, string op = "SAVEFILE_PATCH")
+    public static PatchReply Parse(ReadOnlySpan<byte> payload, string op = "SAVEFILE_PATCH") => Parse(payload, op, out _);
+
+    /// <summary>
+    /// <see cref="Parse(ReadOnlySpan{byte}, string)"/>, handing out the <c>u16</c> after <c>n</c>:
+    /// the pad of SAVEFILE_PATCH and SWITCH_PATCH, MOD_PATCH's <c>pages</c>.
+    /// </summary>
+    internal static PatchReply Parse(ReadOnlySpan<byte> payload, string op, out ushort afterCount)
     {
         if (payload.Length < HeaderSize)
         {
@@ -929,7 +942,7 @@ public sealed record PatchReply(uint Stamp, PatchWord[] Words, PatchByte[] Bytes
 
         var r = new SpanReader(payload);
         int count = r.ReadU16();
-        r.Skip(2);
+        afterCount = r.ReadU16();
         uint stamp = r.ReadU32();
 
         if (r.Remaining < count * WordSize)
@@ -975,12 +988,15 @@ public sealed record PatchReply(uint Stamp, PatchWord[] Words, PatchByte[] Bytes
         Crc32.Compute(new PatchReply(0, words, bytes).ToBytes().AsSpan(HeaderSize));
 
     /// <summary>The other direction, for the fake console the tests drive.</summary>
-    public byte[] ToBytes()
+    public byte[] ToBytes() => ToBytes(0);
+
+    /// <summary><see cref="ToBytes()"/> with <paramref name="afterCount"/> after <c>n</c>: MOD_PATCH's <c>pages</c>.</summary>
+    internal byte[] ToBytes(ushort afterCount)
     {
         var bytes = new byte[HeaderSize + Words.Length * WordSize + ByteHeaderSize + Bytes.Length * ByteSize];
         var w = new SpanWriter(bytes);
         w.WriteU16((ushort)Words.Length);
-        w.WriteZeros(2);
+        w.WriteU16(afterCount);
         w.WriteU32(Stamp);
         foreach (var word in Words)
         {
@@ -1006,6 +1022,109 @@ public sealed record PatchReply(uint Stamp, PatchWord[] Words, PatchByte[] Bytes
     /// </summary>
     public bool SameWords(IReadOnlyList<PatchWord> words, IReadOnlyList<PatchByte> bytes) =>
         Words.SequenceEqual(words) && Bytes.SequenceEqual(bytes);
+}
+
+/// <summary>
+/// One page of a MOD_PATCH reply (revision 1.19, paged since qwark build 52): the layout of
+/// <see cref="PatchReply"/> with the pad after <c>n</c> now <c>u16 pages</c>, because one frame
+/// holds at most <see cref="MaxRows"/> rows and a large mod takes more. The word rows are split
+/// across the pages in order, as many per page as fit, and every byte row is on the last page.
+/// <see cref="Pages"/> and the stamp in <see cref="Rows"/> are the same on every page, and the stamp
+/// is the CRC-32 of what one unbounded reply would hold after it: all the word rows, then
+/// <c>u16 nb, u16 pad</c> and all the byte rows. A mod that fits in one page is exactly the reply of
+/// before, with 1 where the pad was.
+/// </summary>
+public sealed record PatchPage(ushort Pages, PatchReply Rows)
+{
+    /// <summary>
+    /// The most rows, word and byte rows together, one page carries: what fits in a frame after
+    /// the header and the byte list's header. 2046.
+    /// </summary>
+    public const int MaxRows = (Frame.MaxPayload - PatchReply.HeaderSize - PatchReply.ByteHeaderSize) / PatchReply.WordSize;
+
+    /// <summary>
+    /// One page off the wire. Throws <see cref="ProtocolException"/> as
+    /// <see cref="PatchReply.Parse(ReadOnlySpan{byte}, string)"/> does. A page count of 0 is read as
+    /// 1: a qwark-rpcs3 from before build 52 answers the whole mod in one reply with 0 there.
+    /// </summary>
+    public static PatchPage Parse(ReadOnlySpan<byte> payload, string op = "MOD_PATCH")
+    {
+        var rows = PatchReply.Parse(payload, op, out ushort pages);
+        return new PatchPage(Math.Max((ushort)1, pages), rows);
+    }
+
+    /// <summary>The other direction, for the fake console the tests drive.</summary>
+    public byte[] ToBytes() => Rows.ToBytes(Pages);
+
+    /// <summary>
+    /// A whole reply cut into pages the way qwark cuts it, for the fake console: the word rows in
+    /// order, as many per page as fit in <paramref name="rowsPerPage"/>, and every byte row on the
+    /// last page, which carries fewer word rows when it must. Every page carries the whole reply's
+    /// stamp and the page count. Null when the byte rows alone do not fit on one page or the mod
+    /// would take more than 65535 pages, which qwark answers FULL.
+    /// </summary>
+    public static PatchPage[]? Split(PatchReply whole, int rowsPerPage = MaxRows)
+    {
+        if (rowsPerPage is < 1 or > MaxRows)
+        {
+            throw new ArgumentOutOfRangeException(nameof(rowsPerPage), $"a page carries 1 to {MaxRows} rows");
+        }
+
+        int words = whole.Words.Length;
+        int bytes = whole.Bytes.Length;
+        if (bytes > rowsPerPage) return null;
+
+        int count = Math.Max(1, (words + bytes + rowsPerPage - 1) / rowsPerPage);
+        if (count > ushort.MaxValue) return null;
+
+        var pages = new PatchPage[count];
+        for (int i = 0; i < count; i++)
+        {
+            bool last = i == count - 1;
+            int from = Math.Min(words, i * rowsPerPage);
+            int to = last ? words : Math.Min(words, from + rowsPerPage);
+            pages[i] = new PatchPage((ushort)count,
+                new PatchReply(whole.Stamp, whole.Words[from..to], last ? whole.Bytes : Array.Empty<PatchByte>()));
+        }
+
+        return pages;
+    }
+
+    /// <summary>
+    /// The one reply <paramref name="pages"/> make, pages 0 to pages-1 of one mod in order: every
+    /// page's word rows one after another, the byte rows, and the stamp they share. The caller has
+    /// checked that every page names the same page count and stamp. Throws
+    /// <see cref="ProtocolException"/> when the stamp is not the CRC-32 of what the pages carry,
+    /// since a patch built from rows that are not the ones qwark stamped would put the wrong words
+    /// into the game.
+    /// </summary>
+    public static PatchReply Join(IReadOnlyList<PatchPage> pages, string op = "MOD_PATCH")
+    {
+        if (pages.Count == 0) throw new ArgumentException("a reply has at least one page", nameof(pages));
+
+        uint stamp = pages[0].Rows.Stamp;
+        var words = pages.SelectMany(page => page.Rows.Words).ToArray();
+        var bytes = pages.SelectMany(page => page.Rows.Bytes).ToArray();
+        uint carried = PatchReply.StampFor(words, bytes);
+        if (carried != stamp)
+        {
+            throw new ProtocolException(
+                $"{op} is stamped 0x{stamp:X8}, but its {words.Length} words and {bytes.Length} bytes over {pages.Count} "
+                + $"{(pages.Count == 1 ? "page" : "pages")} are 0x{carried:X8}");
+        }
+
+        return new PatchReply(stamp, words, bytes);
+    }
+}
+
+/// <summary>
+/// MOD_PATCH's pages did not agree on their page count or their stamp, twice running: the mod
+/// qwark-rpcs3 hands out changed while the client was reading it (an upload or a rescan between two
+/// pages), and did so again when it started over. Nothing of either read is used.
+/// </summary>
+public sealed class ModPatchChangedException : Exception
+{
+    public ModPatchChangedException(string message) : base(message) { }
 }
 
 /// <summary>

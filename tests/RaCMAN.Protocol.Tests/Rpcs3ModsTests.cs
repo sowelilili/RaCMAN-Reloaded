@@ -236,6 +236,284 @@ public class Rpcs3ModsTests : IDisposable
         }
     }
 
+    // ================================================================ MOD_PATCH in pages (build 52)
+
+    /// <summary>A cave of <paramref name="words"/> whole words and <paramref name="tail"/> bytes after them.</summary>
+    private static byte[] CaveBin(int words, int tail)
+    {
+        var bin = new byte[words * 4 + tail];
+        for (int i = 0; i < bin.Length; i++) bin[i] = (byte)(i * 7 + 1);
+        return bin;
+    }
+
+    /// <summary>
+    /// The rows MOD_PATCH hands out for "big" as <see cref="UploadBig"/> or the library writes it:
+    /// the cave's words from 0x662000, the plain word, then the cave's tail bytes.
+    /// </summary>
+    private static (PatchWord[] Words, PatchByte[] Bytes) BigRows(int words, int tail, uint plain = 0x4BF5AFC9)
+    {
+        var bin = CaveBin(words, tail);
+        var cave = Enumerable.Range(0, words)
+            .Select(i => new PatchWord(0x00662000u + (uint)i * 4, System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(bin.AsSpan(i * 4, 4))));
+        var bytes = Enumerable.Range(words * 4, tail).Select(i => new PatchByte(0x00662000u + (uint)i, bin[i]));
+        return (cave.Append(new PatchWord(0x0070719C, plain)).ToArray(), bytes.ToArray());
+    }
+
+    private static string BigPatch(uint plain = 0x4BF5AFC9) => $"#- name: Big\n0x662000: big.bin\n0x70719c: 0x{plain:x8}\n";
+
+    /// <summary>
+    /// "big" on qwark-rpcs3: a cave of 24 words and 3 bytes and one plain word, 25 words and 3
+    /// bytes in all. One page at qwark's page size, three at ten rows a page.
+    /// </summary>
+    private static void UploadBig(FakeQwarkServer server, uint plain = 0x4BF5AFC9) =>
+        Upload(server, "big", BigPatch(plain), ("big.bin", CaveBin(24, 3)));
+
+    private static async Task<byte> UploadBigAsync(FakeQwarkServer server, QwarkClient client)
+    {
+        UploadBig(server);
+        await client.ModRescanAsync();
+        return (await client.ModListAsync()).Single(m => m.DirName == "big").Index;
+    }
+
+    [Fact]
+    public async Task AOnePageModIsAskedForAsPageZeroAndIsTheReplyOfBeforeWithOneWhereThePadWas()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            byte index = await UploadBigAsync(server, client);
+
+            var patch = await client.ModPatchAsync(index);
+            Assert.Equal(new ushort[] { 0 }, server.ModPatchPagesAsked());
+            Assert.Equal(new byte[] { index, 0, 0, 0 }, server.LastPayload(Opcode.ModPatch));
+            var (words, bytes) = BigRows(24, 3);
+            Assert.Equal(words, patch.Words);
+            Assert.Equal(bytes, patch.Bytes);
+
+            // On the wire it is build 51's reply, the stamp the CRC-32 of the same bytes after it,
+            // with 1 where the pad was.
+            var raw = await client.RequestAsync(Opcode.ModPatch, new byte[] { index, 0, 0, 0 });
+            var before = patch.ToBytes();
+            Assert.Equal(Crc32.Compute(before.AsSpan(PatchReply.HeaderSize)), patch.Stamp);
+            Assert.Equal(PatchReply.StampFor(words, bytes), patch.Stamp);
+            Assert.Equal(new byte[] { 0, 0 }, before[2..4]);
+            before[3] = 1;
+            Assert.Equal(before, raw);
+
+            // Read as a page it is the whole mod; read in SAVEFILE_PATCH's layout, what it always was.
+            var page = PatchPage.Parse(raw);
+            Assert.Equal(1, page.Pages);
+            Assert.Equal(patch.Stamp, PatchPage.Join(new[] { page }).Stamp);
+            Assert.True(PatchReply.Parse(raw, "MOD_PATCH").SameWords(words, bytes));
+        }
+    }
+
+    [Fact]
+    public async Task AThreePageModIsReadPageByPageAndPutBackTogetherExactly()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            byte index = await UploadBigAsync(server, client);
+            var whole = await client.ModPatchAsync(index);
+
+            // Ten rows a page: 28 rows are three pages, read in order and put back together.
+            server.ModPatchRowsPerPage = 10;
+            var paged = await client.ModPatchAsync(index);
+            Assert.Equal(new ushort[] { 0, 0, 1, 2 }, server.ModPatchPagesAsked());
+            Assert.Equal(new byte[] { index, 0, 0, 2 }, server.LastPayload(Opcode.ModPatch));
+            Assert.Equal(whole.Stamp, paged.Stamp);
+            Assert.Equal(whole.Words, paged.Words);
+            Assert.Equal(whole.Bytes, paged.Bytes);
+            Assert.Equal(3, paged.Bytes.Length);
+
+            // Page by page: ten words, ten words, then the last five with every byte row, and the
+            // same count and stamp on each.
+            var pages = new List<PatchPage>();
+            for (ushort number = 0; number < 3; number++) pages.Add(await client.ModPatchPageAsync(index, number));
+            Assert.All(pages, page => Assert.Equal(((ushort)3, whole.Stamp), (page.Pages, page.Rows.Stamp)));
+            Assert.Equal(new[] { 10, 10, 5 }, pages.Select(page => page.Rows.Words.Length));
+            Assert.Equal(new[] { 0, 0, 3 }, pages.Select(page => page.Rows.Bytes.Length));
+            Assert.Equal(whole.Words, pages.SelectMany(page => page.Rows.Words).ToArray());
+
+            // A page at or past the count is BAD_ARG; the page number is big-endian after the pad.
+            var past = await Assert.ThrowsAsync<QwarkStatusException>(() => client.ModPatchPageAsync(index, 3));
+            Assert.Equal(Status.BadArg, past.Status);
+            await Assert.ThrowsAsync<QwarkStatusException>(() => client.ModPatchPageAsync(index, 0x0102));
+            Assert.Equal(new byte[] { index, 0, 0x01, 0x02 }, server.LastPayload(Opcode.ModPatch));
+        }
+    }
+
+    [Fact]
+    public void SplitPutsEveryByteRowOnTheLastPageAndJoinPutsThemBack()
+    {
+        var words = Enumerable.Range(0, 15).Select(i => new PatchWord(0x1000u + (uint)i * 4, (uint)i)).ToArray();
+        var bytes = Enumerable.Range(0, 8).Select(i => new PatchByte(0x2000u + (uint)i, (byte)i)).ToArray();
+        var whole = new PatchReply(PatchReply.StampFor(words, bytes), words, bytes);
+
+        // Fifteen words and eight bytes at ten a page: the eight bytes do not fit beside the last
+        // five words, so they have a page of their own.
+        var pages = PatchPage.Split(whole, 10)!;
+        Assert.Equal(new[] { (10, 0), (5, 0), (0, 8) }, pages.Select(page => (page.Rows.Words.Length, page.Rows.Bytes.Length)));
+        Assert.All(pages, page => Assert.Equal(((ushort)3, whole.Stamp), (page.Pages, page.Rows.Stamp)));
+        Assert.True(PatchPage.Join(pages).SameWords(words, bytes));
+
+        // Round trip through the wire.
+        var read = pages.Select(page => PatchPage.Parse(page.ToBytes())).ToList();
+        Assert.Equal(whole.Stamp, PatchPage.Join(read).Stamp);
+        Assert.True(PatchPage.Join(read).SameWords(words, bytes));
+
+        // At qwark's size it is one page; an empty mod is one empty page; byte rows that do not fit
+        // on one page are FULL.
+        Assert.Equal(2046, PatchPage.MaxRows);
+        Assert.Single(PatchPage.Split(whole)!);
+        Assert.Equal(1, PatchPage.Split(new PatchReply(0, Array.Empty<PatchWord>()))!.Single().Pages);
+        Assert.Null(PatchPage.Split(whole, 7));
+
+        // Pages whose rows are not what the stamp is the CRC of are refused, however many.
+        var wrong = pages.Select(page => page with { Rows = page.Rows with { Stamp = whole.Stamp ^ 1 } }).ToList();
+        Assert.Contains("stamped", Assert.Throws<ProtocolException>(() => PatchPage.Join(wrong)).Message);
+        Assert.Throws<ProtocolException>(() => PatchPage.Join(pages.Take(2).ToList()));
+    }
+
+    [Fact]
+    public async Task APageCountOfZeroIsReadAsOneTheWayAnOlderQwarkRpcs3WritesIt()
+    {
+        var words = Enumerable.Range(0, 5).Select(i => new PatchWord(0x1000u + (uint)i * 4, (uint)i)).ToArray();
+        var bytes = new[] { new PatchByte(0x2000, 0xAB) };
+        var whole = new PatchReply(PatchReply.StampFor(words, bytes), words, bytes);
+
+        // Build 51 wrote 0 after n, where the page count is now.
+        var old = whole.ToBytes();
+        Assert.Equal(new byte[] { 0, 0 }, old[2..4]);
+        var page = PatchPage.Parse(old);
+        Assert.Equal(1, page.Pages);
+        Assert.True(PatchPage.Join(new[] { page }).SameWords(words, bytes));
+
+        // And a whole read against such a qwark-rpcs3 is one request, as it always was.
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.ModPatchUnpaged = true;
+            byte index = await UploadBigAsync(server, client);
+
+            var raw = await client.RequestAsync(Opcode.ModPatch, new byte[] { index, 0, 0, 0 });
+            Assert.Equal(new byte[] { 0, 0 }, raw[2..4]);
+
+            var patch = await client.ModPatchAsync(index);
+            Assert.Equal(new ushort[] { 0, 0 }, server.ModPatchPagesAsked());
+            Assert.True(patch.SameWords(BigRows(24, 3).Words, BigRows(24, 3).Bytes));
+            Assert.Equal(PatchReply.StampFor(patch.Words, patch.Bytes), patch.Stamp);
+        }
+    }
+
+    [Fact]
+    public async Task AStampThatChangesBetweenPagesStartsTheReadOverOnce()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            byte index = await UploadBigAsync(server, client);
+            server.ModPatchRowsPerPage = 10;
+
+            // Between the first read's page 0 and page 1 the mod's plain word changes, as it would
+            // when another client uploads a new version: the same rows, another stamp.
+            int served = 0;
+            server.ModPatchPageServed = page =>
+            {
+                if (page == 0 && served++ == 0) UploadBig(server, 0x38600001);
+            };
+
+            var patch = await client.ModPatchAsync(index);
+            Assert.Equal(new ushort[] { 0, 1, 0, 1, 2 }, server.ModPatchPagesAsked());
+            Assert.Contains(new PatchWord(0x0070719C, 0x38600001), patch.Words);
+            Assert.DoesNotContain(new PatchWord(0x0070719C, 0x4BF5AFC9), patch.Words);
+            Assert.True(patch.SameWords(BigRows(24, 3, 0x38600001).Words, BigRows(24, 3).Bytes));
+            Assert.Equal(PatchReply.StampFor(patch.Words, patch.Bytes), patch.Stamp);
+        }
+    }
+
+    [Fact]
+    public async Task AStampOrPageCountThatKeepsChangingBetweenPagesFailsAfterOneRetry()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            byte index = await UploadBigAsync(server, client);
+            server.ModPatchRowsPerPage = 10;
+
+            // The word changes after every page 0: each read sees two stamps.
+            bool flip = false;
+            server.ModPatchPageServed = page =>
+            {
+                if (page != 0) return;
+                flip = !flip;
+                UploadBig(server, flip ? 0x38600001u : 0x4BF5AFC9u);
+            };
+
+            var changed = await Assert.ThrowsAsync<ModPatchChangedException>(() => client.ModPatchAsync(index));
+            Assert.Contains("changed", changed.Message);
+            Assert.Equal(new ushort[] { 0, 1, 0, 1 }, server.ModPatchPagesAsked());
+
+            // The page count on its own: the same rows, and so the same stamp, at ten a page (three
+            // pages) and then at sixteen (two), and back.
+            server.ModPatchPageServed = page =>
+            {
+                if (page == 0) server.ModPatchRowsPerPage = server.ModPatchRowsPerPage == 10 ? 16 : 10;
+            };
+
+            await Assert.ThrowsAsync<ModPatchChangedException>(() => client.ModPatchAsync(index));
+            Assert.Equal(new ushort[] { 0, 1, 0, 1, 0, 1, 0, 1 }, server.ModPatchPagesAsked());
+
+            // A mod that shrinks to fewer pages than page 0 said makes the next page BAD_ARG, which
+            // is the same change: the read starts over, and the second read is whole.
+            server.ModPatchRowsPerPage = 10;
+            server.ModPatchPageServed = page =>
+            {
+                if (page == 1) server.ModPatchRowsPerPage = PatchPage.MaxRows;
+            };
+
+            var patch = await client.ModPatchAsync(index);
+            Assert.Equal(new ushort[] { 0, 1, 2, 0 }, server.ModPatchPagesAsked()[8..]);
+            Assert.Equal(25, patch.Words.Length);
+            Assert.Equal(3, patch.Bytes.Length);
+
+            // BAD_ARG for page 0 is not a change: it is the answer.
+            server.ModPatchPageServed = null;
+            server.ModPatchStatuses["big"] = Status.BadArg;
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => client.ModPatchAsync(index));
+            Assert.Equal(Status.BadArg, refused.Status);
+            Assert.Equal(new ushort[] { 0 }, server.ModPatchPagesAsked()[12..]);
+        }
+    }
+
+    [Fact]
+    public async Task AReplyWhoseStampIsNotItsRowsIsAProtocolErrorAndIsNotReadAgain()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var (words, bytes) = BigRows(24, 3);
+            server.ModPatches["crash-patch"] = new PatchReply(PatchReply.StampFor(words, bytes) ^ 0x00010000, words, bytes);
+
+            var one = await Assert.ThrowsAsync<ProtocolException>(() => client.ModPatchAsync(0));
+            Assert.Contains("MOD_PATCH", one.Message);
+            Assert.Equal(new ushort[] { 0 }, server.ModPatchPagesAsked());
+
+            // Over three pages the stamp agrees from page to page, so it is not a change: it is a
+            // reply that is wrong, and reading it again would not make it right.
+            server.ModPatchRowsPerPage = 10;
+            await Assert.ThrowsAsync<ProtocolException>(() => client.ModPatchAsync(0));
+            Assert.Equal(new ushort[] { 0, 0, 1, 2 }, server.ModPatchPagesAsked());
+        }
+    }
+
     // ================================================================ the patch file
 
     private static readonly PatchWord[] HelperWords = { new(0x000F0000, 0x9421FFF0), new(0x0004A2C8, 0x480A5D39) };
@@ -1435,6 +1713,98 @@ public class Rpcs3ModsTests : IDisposable
             Assert.Equal(ModRpcs3State.TooLarge, status.State);
             Assert.False(status.CanToggle);
             Assert.False(File.Exists(folder.PatchFile(Title)));
+        }
+    }
+
+    [Fact]
+    public async Task AModOfSeveralPagesIsWrittenWithEveryRowAndReadsAsASmallOneDoes()
+    {
+        // The size of the dl-tas mod: 2340 cave words, one plain word and three tail bytes, 2344
+        // rows, which is two pages at qwark's page size and was FULL before build 52.
+        AddToLibrary("big", "#- name: Big\n#- author: someone\n0x662000: big.bin\n0x70719c: 0x4bf5afc9\n",
+            ("big.bin", CaveBin(2340, 3)));
+        var (words, bytes) = BigRows(2340, 3);
+        Assert.Equal(2344, words.Length + bytes.Length);
+        Assert.True(new PatchReply(0, words, bytes).ToBytes().Length > Frame.MaxPayload);
+
+        var (server, state, folder) = await StartAsync();
+        using (server)
+        using (state)
+        {
+            var mods = state.Rpcs3Mods;
+            Assert.True(await PumpAsync(state, () => state.LocalMods.Count == 1 && mods.Disk is not null));
+            var mod = Local(state, "big");
+            Assert.Equal(ModRpcs3State.Disabled, mods.StatusFor(mod).State);
+
+            mods.Toggle(mod, true);
+            Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Kind != ToastKind.Info && t.Text.Contains("Big"))));
+            Assert.Contains(state.Toasts, t => t.Kind == ToastKind.Success && t.Text == "Enabled Big. Restart the game in RPCS3 to load it.");
+            Assert.Equal(new ushort[] { 0, 1 }, server.ModPatchPagesAsked());
+
+            // Every row of both pages, in order, under the stamp of the whole mod.
+            var entry = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).ModEntryFor(Hash, "big")!;
+            Assert.Equal(words, entry.Words);
+            Assert.Equal(bytes, entry.Bytes);
+            Assert.Equal(mod.Hash, Rpcs3Patches.LibraryHashIn(entry.Notes));
+            Assert.EndsWith($", patch stamp 0x{PatchReply.StampFor(words, bytes):x8}", entry.Notes);
+            Assert.True(Rpcs3Patches.IsEnabled(File.ReadAllText(folder.PatchConfigFile), entry.Key(Title), "x"));
+
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.EnabledRestartNeeded));
+            Assert.Equal("Enabled - restart needed", mods.StatusFor(mod).Text);
+            Assert.True(mods.StatusFor(mod).Enabled);
+
+            // The game restarts in RPCS3, and qwark-rpcs3 finds it.
+            server.SetModPresence("big", loaded: true, checking: false);
+            server.Session = server.Session with { Generation = server.Session.Generation + 1 };
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.Loaded));
+            Assert.Equal("Loaded", mods.StatusFor(mod).Text);
+        }
+    }
+
+    [Fact]
+    public async Task AModThatKeepsChangingWhileItIsReadIsNotWrittenAndTheToastSaysSo()
+    {
+        AddToLibrary("big", BigPatch(), ("big.bin", CaveBin(24, 3)));
+
+        var (server, state, folder) = await StartAsync();
+        using (server)
+        using (state)
+        {
+            var mods = state.Rpcs3Mods;
+            Assert.True(await PumpAsync(state, () => state.LocalMods.Count == 1 && mods.Disk is not null));
+            var mod = Local(state, "big");
+
+            // Three pages, and qwark-rpcs3's copy changes its plain word after every page 0.
+            server.ModPatchRowsPerPage = 10;
+            bool flip = false;
+            server.ModPatchPageServed = page =>
+            {
+                if (page != 0) return;
+                flip = !flip;
+                server.Files[$"{ModLibrary.ConsoleRoot}/{Title}/big/patch.txt"] =
+                    Encoding.UTF8.GetBytes(BigPatch(flip ? 0x38600001u : 0x4BF5AFC9u));
+            };
+
+            mods.Toggle(mod, true);
+            Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Kind == ToastKind.Error)));
+            Assert.Equal("Big was not enabled: " + Rpcs3ModsController.ChangedWhileReading("Big"),
+                state.Toasts.Last(t => t.Kind == ToastKind.Error).Text);
+            Assert.Equal("Big changed on qwark-rpcs3 while RaCMAN was reading it, twice running, so nothing was written. Try again.",
+                Rpcs3ModsController.ChangedWhileReading("Big"));
+            Assert.Equal(new ushort[] { 0, 1, 0, 1 }, server.ModPatchPagesAsked());
+            Assert.False(File.Exists(folder.PatchFile(Title)));
+
+            // Nothing about the mod is remembered: once it holds still it is enabled as any other.
+            Assert.True(await PumpAsync(state, () => !mods.IsBusy(mod)));
+            Assert.Equal(ModRpcs3State.Disabled, mods.StatusFor(mod).State);
+            Assert.True(mods.StatusFor(mod).CanToggle);
+
+            server.ModPatchPageServed = null;
+            mods.Toggle(mod, true);
+            Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Text == "Enabled Big. Restart the game in RPCS3 to load it.")));
+            Assert.Equal(new ushort[] { 0, 1, 2 }, server.ModPatchPagesAsked()[4..]);
+            var entry = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).ModEntryFor(Hash, "big")!;
+            Assert.Equal(28, entry.Words.Count + entry.Bytes.Count);
         }
     }
 

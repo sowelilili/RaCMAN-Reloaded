@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 51;
+    public const byte ExpectedQwarkBuild = 52;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -970,15 +970,79 @@ public sealed class QwarkClient : IDisposable
     /// <summary>
     /// MOD_PATCH, revision 1.16: the mod at <paramref name="index"/> in MOD_LIST, parsed out of the
     /// console's copy, as words and single bytes for an RPCS3 patch. Its dependencies are not in
-    /// it. NOT_FOUND for an index MOD_LIST does not have, IO_ERROR for a mod that does not parse or
-    /// misses a .bin, UNSUPPORTED for a Lua mod and FULL for one too large for one reply. A reply
-    /// that stops short of either list throws <see cref="ProtocolException"/>.
+    /// it. Since build 52 (revision 1.19) the reply comes in pages (<see cref="PatchPage"/>): this
+    /// reads page 0 and then every other page of the same mod, and hands back the one reply they
+    /// make. NOT_FOUND for an index MOD_LIST does not have, IO_ERROR for a mod that does not parse
+    /// or misses a .bin, UNSUPPORTED for a Lua mod, and FULL for one whose single bytes alone do
+    /// not fit in one page (before build 52, for one too large for one reply).
+    /// <para>
+    /// A page whose page count or stamp is not page 0's means the mod changed on qwark-rpcs3 while
+    /// the pages were being read, and so does BAD_ARG for a later page (the mod has fewer pages
+    /// now): the read starts over once, and a second such read throws
+    /// <see cref="ModPatchChangedException"/>. A reply that stops short of either list, or whose
+    /// rows are not the ones its stamp is the CRC of, throws <see cref="ProtocolException"/>.
+    /// </para>
     /// </summary>
     public async Task<PatchReply> ModPatchAsync(byte index, CancellationToken cancellationToken = default)
     {
-        var payload = await RequestAsync(Opcode.ModPatch, new byte[] { index, 0, 0, 0 }, cancellationToken)
-            .ConfigureAwait(false);
-        return PatchReply.Parse(payload, "MOD_PATCH");
+        const int reads = 2;
+        for (int read = 1; ; read++)
+        {
+            var pages = await ReadModPagesAsync(index, cancellationToken).ConfigureAwait(false);
+            if (pages is not null) return PatchPage.Join(pages);
+
+            if (read == reads)
+            {
+                throw new ModPatchChangedException(
+                    $"MOD_PATCH changed between its pages on {reads} reads running: the mod changed on qwark while it was being read");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Page <paramref name="page"/> of MOD_PATCH for the mod at <paramref name="index"/>: one
+    /// request, <c>u8 index, u8 pad, u16 page</c>. BAD_ARG for a page at or past the mod's page
+    /// count. <see cref="ModPatchAsync"/> is what reads a whole mod.
+    /// </summary>
+    public async Task<PatchPage> ModPatchPageAsync(byte index, ushort page, CancellationToken cancellationToken = default)
+    {
+        var request = Bytes(4, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8(index);
+            w.WriteZeros(1);
+            w.WriteU16(page);
+        });
+
+        var payload = await RequestAsync(Opcode.ModPatch, request, cancellationToken).ConfigureAwait(false);
+        return PatchPage.Parse(payload);
+    }
+
+    /// <summary>
+    /// Every page of one read of a mod, or null when the pages do not agree: a page count or stamp
+    /// that is not page 0's, or BAD_ARG for a page page 0 said the mod has.
+    /// </summary>
+    private async Task<List<PatchPage>?> ReadModPagesAsync(byte index, CancellationToken cancellationToken)
+    {
+        var first = await ModPatchPageAsync(index, 0, cancellationToken).ConfigureAwait(false);
+        var pages = new List<PatchPage>(first.Pages) { first };
+
+        for (int number = 1; number < first.Pages; number++)
+        {
+            PatchPage next;
+            try
+            {
+                next = await ModPatchPageAsync(index, (ushort)number, cancellationToken).ConfigureAwait(false);
+            }
+            catch (QwarkStatusException ex) when (ex.Status == Status.BadArg)
+            {
+                return null;
+            }
+
+            if (next.Pages != first.Pages || next.Rows.Stamp != first.Rows.Stamp) return null;
+            pages.Add(next);
+        }
+
+        return pages;
     }
 
     // ---------------------------------------------------------------- 5.8 files
