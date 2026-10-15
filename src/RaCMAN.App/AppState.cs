@@ -393,6 +393,35 @@ public sealed class AppState : IDisposable
     /// <summary>Set when LEVELFLAGS_GET answers UNSUPPORTED (e.g. Deadlocked), so the nav can hide it.</summary>
     public bool LevelFlagsUnsupported { get; private set; }
 
+    /// <summary>
+    /// MANIP_LIST for the described game (revision 1.21): its category types, the selection, the
+    /// two options and the last event, all of them the console's. Null hides the manips area: not
+    /// read yet, or answered UNSUPPORTED (a game with no groups) or UNKNOWN_OP (a module older than
+    /// build 53). Kept through a quit and a dropped link like the description, so the area stays
+    /// on screen greyed out; a different game drops it.
+    /// </summary>
+    public ManipList? Manips { get; private set; }
+
+    /// <summary>How many manip events this run has toasted, for the headless summary.</summary>
+    public int ManipToasts { get; private set; }
+
+    private readonly ManipEvents _manipEvents = new();
+
+    /// <summary>Render-thread flags: a MANIP_LIST is out, and another was asked for meanwhile.</summary>
+    private bool _manipsInFlight;
+
+    private bool _manipsAgain;
+
+    /// <summary>
+    /// Seconds until the second read after a planet change, or 0 for none. A file load changes the
+    /// planet, and whether qwark has recorded the load's event by the time telemetry shows the new
+    /// planet is a race, so the read is made at once and once more a moment later.
+    /// </summary>
+    private float _manipFollowUp;
+
+    /// <summary>How long after a planet change the second MANIP_LIST goes out.</summary>
+    public const float ManipFollowUpSeconds = 2f;
+
     public IReadOnlyList<LocalMod> LocalMods { get; private set; } = Array.Empty<LocalMod>();
 
     public Dictionary<byte, string[]> EnumOptions { get; } = new();
@@ -805,8 +834,27 @@ public sealed class AppState : IDisposable
 
         if (session.CurrentPlanet != _lastPlanet && session.State == SessionState.Ingame && !UnknownGame)
         {
+            // 0xFF is "not known yet", which every session change sets; only a real move counts as
+            // the load that may have applied, or refused, the selected manips.
+            bool moved = _lastPlanet != 0xFF;
             _lastPlanet = session.CurrentPlanet;
             RefreshPositions(quiet: true);
+
+            if (moved && Manips is not null)
+            {
+                RefreshManips();
+                _manipFollowUp = ManipFollowUpSeconds;
+            }
+        }
+
+        if (_manipFollowUp > 0)
+        {
+            _manipFollowUp -= deltaSeconds;
+            if (_manipFollowUp <= 0)
+            {
+                _manipFollowUp = 0;
+                RefreshManips();
+            }
         }
 
         // PREVIOUS_LIST is a bulk op, and section 4.1 sets the pending flag on the way through a
@@ -870,6 +918,8 @@ public sealed class AppState : IDisposable
         Unlocks = UnlockList.Empty;
         UnlocksUnsupported = false;
         LevelFlagsUnsupported = false;
+        Manips = null;
+        _manipFollowUp = 0;
     }
 
     /// <summary>
@@ -1040,6 +1090,171 @@ public sealed class AppState : IDisposable
         RefreshPatches(quiet);
         RefreshMods(quiet);
         RefreshCombos(quiet);
+
+        // The selection and the options are the console's, and a boot may have forgotten the
+        // selection (remember category off), so every way back into a game reads them again.
+        RefreshManips();
+    }
+
+    // ---------------------------------------------------------------- manip categories
+
+    /// <summary>The session a MANIP_LIST answer belongs to; see <see cref="ManipEvents.KeyFor"/>.</summary>
+    private string ManipKey => ManipEvents.KeyFor(Session);
+
+    /// <summary>
+    /// Reads MANIP_LIST, quietly: on every way back into a game, after every manip request, after a
+    /// planet change, and on a timer while the manips area is on screen. Only INGAME, where the op
+    /// answers for the game; at the XMB the area keeps what it has, greyed out. One read at a time:
+    /// a read asked for while one is out goes out when that one is answered, so the answer after a
+    /// change is never one that left before it. UNSUPPORTED and UNKNOWN_OP hide the area.
+    /// </summary>
+    public void RefreshManips()
+    {
+        if (!Ingame || UnknownGame) return;
+
+        if (_manipsInFlight)
+        {
+            _manipsAgain = true;
+            return;
+        }
+
+        _manipsInFlight = true;
+        string key = ManipKey;
+        RunQuiet(async () =>
+        {
+            try
+            {
+                var list = await Client.ManipListAsync().ConfigureAwait(false);
+                Post(() => AdoptManips(list, key));
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp)
+            {
+                Post(() =>
+                {
+                    if (key == ManipKey) Manips = null;
+                });
+            }
+            catch (ProtocolException ex)
+            {
+                // Hidden rather than retried: the area is what polls, so a reply that cannot be
+                // read is reported once and not again every second and a half.
+                Post(() =>
+                {
+                    Manips = null;
+                    AddToast($"Manip categories: {ex.Message}", ToastKind.Error);
+                });
+            }
+            finally
+            {
+                Post(() =>
+                {
+                    _manipsInFlight = false;
+                    if (!_manipsAgain) return;
+
+                    _manipsAgain = false;
+                    RefreshManips();
+                });
+            }
+        });
+    }
+
+    /// <summary>
+    /// Takes a MANIP_LIST answer and toasts its event if it is a new one. An answer from a session
+    /// that has since gone is dropped; the next read is the new session's. Returns the event this
+    /// answer toasted, or null when it toasted nothing.
+    /// </summary>
+    private ManipNotice? AdoptManips(ManipList list, string key)
+    {
+        if (key != ManipKey) return null;
+
+        Manips = list;
+        if (_manipEvents.Observe(key, list) is not { Toast: { } kind } notice) return null;
+
+        AddToast(notice.Text, kind);
+        ManipToasts++;
+        return notice;
+    }
+
+    /// <summary>MANIP_SELECT, then a read so the dropdown shows what the console now holds.</summary>
+    public void SelectManipGroup(byte group) => ManipRequest(() => Client.ManipSelectAsync(group));
+
+    /// <summary>MANIP_OPTIONS with both options, then a read so the two checkboxes show the console's.</summary>
+    public void SetManipOptions(bool autoReset, bool remember) =>
+        ManipRequest(() => Client.ManipOptionsAsync(autoReset, remember));
+
+    /// <summary>One manip request behind a click: its status is the user's to see, and a read follows whatever it was.</summary>
+    private void ManipRequest(Func<Task> request) => Run(async () =>
+    {
+        try
+        {
+            await request().ConfigureAwait(false);
+        }
+        finally
+        {
+            Post(RefreshManips);
+        }
+    });
+
+    /// <summary>
+    /// Apply now. The console refuses with BUSY when the challenge-mode check fails, and its event
+    /// says why, so a BUSY in a game is not reported as one: the list is read straight after and
+    /// the event's own toast is the answer. A request that went through and brought no toast of its
+    /// own (a per-run reapply is quiet on a load) says so, since somebody pressed a button; a
+    /// refusal that brought no event says that much. Any other status is reported as any button's.
+    /// </summary>
+    public void ApplyManips()
+    {
+        if (Manips is not { } current) return;
+
+        string group = current.GroupName(current.Selected);
+        string key = ManipKey;
+        Run(async () =>
+        {
+            bool refused = false;
+            try
+            {
+                await Client.ManipApplyAsync().ConfigureAwait(false);
+            }
+            catch (QwarkStatusException ex) when (ex.Status == Status.Busy && Session.State == SessionState.Ingame)
+            {
+                refused = true;
+            }
+            catch
+            {
+                Post(RefreshManips);
+                throw;
+            }
+
+            ManipList? after = null;
+            try
+            {
+                after = await Client.ManipListAsync().ConfigureAwait(false);
+            }
+            catch (QwarkStatusException)
+            {
+                // The fallback below says what is known.
+            }
+
+            Post(() =>
+            {
+                if (after is null)
+                {
+                    AddToast(refused ? ManipEvents.NotApplied(group) : ManipEvents.Applied(group),
+                        refused ? ToastKind.Error : ToastKind.Success);
+                    return;
+                }
+
+                AdoptManips(after, key);
+
+                // Whether the console's own event has said it, here or in a timed read that got to
+                // it first: either way it was toasted once, and saying it again would be twice.
+                bool spoke = after.EventSeq != current.EventSeq && ManipEvents.NoticeFor(after)?.Toast is not null;
+                if (spoke) return;
+
+                if (refused) AddToast(ManipEvents.NotApplied(group), ToastKind.Error);
+                else AddToast(ManipEvents.Applied(group), ToastKind.Success);
+            });
+        });
     }
 
     /// <summary>

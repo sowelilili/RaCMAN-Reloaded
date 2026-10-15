@@ -12,8 +12,8 @@ namespace RaCMAN.Protocol.Testing;
 /// really keeps, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
 /// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND/ENABLE, the two AUTOSPLIT ops
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
-/// ops of revision 1.10 over the same in-memory filesystem the file ops use. Everything else
-/// answers UNKNOWN_OP.
+/// ops of revision 1.10 over the same in-memory filesystem the file ops use, and the four MANIP ops
+/// of revision 1.21 over a small per-game group table. Everything else answers UNKNOWN_OP.
 /// <para>
 /// <see cref="UnknownGame"/> is the other session build 36 can report: a title the module has no
 /// game for, where the memory ops work and every game op answers UNSUPPORTED.
@@ -649,6 +649,274 @@ public sealed class FakeQwarkServer : IDisposable
         }
     }
 
+    // ------------------------------------------- 5.14, manip categories (revision 1.21)
+
+    /// <summary>The DESCRIBE labels the fake lists under Deadlocked's Fixes heading, as build 53 does.</summary>
+    public static readonly string[] ManipFixLabels = { "Crash patches", "Fix reset softlocks" };
+
+    /// <summary>UYA's existing trophy refresh ACTION, which build 53 lists under its Trophies heading.</summary>
+    public const string TrophyRefreshLabel = "Refresh trophy state";
+
+    /// <summary>
+    /// The toggle build 53 adds beside it to make the refresh by itself. The label is the fake's;
+    /// the client goes by the ids the header lists.
+    /// </summary>
+    public const string TrophyAutoLabel = "Auto-refresh trophies";
+
+    /// <summary>
+    /// The headings each game's MANIP_LIST carries, with the DESCRIBE labels of the features listed
+    /// under each: Deadlocked's Fixes and UYA's Trophies, and none for the other two.
+    /// </summary>
+    public static (string Name, string[] Labels)[] ManipHeadersFor(GameId game) => game switch
+    {
+        GameId.Rac3 => new[] { ("Trophies", new[] { TrophyRefreshLabel, TrophyAutoLabel }) },
+        GameId.Rac4 => new[] { ("Fixes", ManipFixLabels) },
+        _ => Array.Empty<(string, string[])>(),
+    };
+
+    /// <summary>
+    /// The category types per game, modelled on SPEC-manips section 2: the ids, names, kinds,
+    /// flags and categories, and none of the writes, which are the real module's business.
+    /// </summary>
+    public static ManipGroup[] ManipGroupsFor(GameId game)
+    {
+        const ManipGroupFlags ng = ManipGroupFlags.NgPlus;
+        const ManipGroupFlags run = ManipGroupFlags.PerRun;
+        const ManipGroupFlags ext = ManipGroupFlags.Extension;
+
+        return game switch
+        {
+            GameId.Rac1 => new[]
+            {
+                new ManipGroup(1, ng | run, "NG+ (poki skip)", new[] { "NG+" }),
+                new ManipGroup(2, ng | run, "NG+ (no poki skip)", new[] { "NG+" }),
+                new ManipGroup(3, run, "All Missions", new[] { "All Missions" }),
+                new ManipGroup(4, run, "All Checkmarks", new[] { "All Checkmarks" }),
+                new ManipGroup(5, ng | run | ext, "NG+ GBSP", new[] { "NG+ GBSP" }),
+            },
+            GameId.Rac2 => new[]
+            {
+                new ManipGroup(1, ng | run, "NG+ no IMG", new[] { "NG+ no IMG" }),
+                new ManipGroup(2, ng | run, "NG+", new[] { "NG+" }),
+                new ManipGroup(3, run, "Any%", new[] { "Any%", "All Platinum Bolts" }),
+                new ManipGroup(4, run, "100%", new[] { "Max%", "100%" }),
+                new ManipGroup(5, ng | run | ext, "NG+ All Missions", new[] { "NG+ All Missions" }),
+                new ManipGroup(6, ng | run | ext | ManipGroupFlags.NoChallengeCheck, "NG+ No Specials",
+                    new[] { "NG+ No Specials" }),
+            },
+            GameId.Rac3 => new[]
+            {
+                new ManipGroup(1, ng, "NG+ no QE", new[] { "NG+ no QE" }),
+                new ManipGroup(2, ng, "NG+", new[] { "NG+" }),
+                new ManipGroup(3, ng | run | ext, "NG+ CC Early", new[] { "NG+ CC Early" }),
+            },
+            GameId.Rac4 => new[]
+            {
+                new ManipGroup(1, ng, "NG+", new[] { "NG+ no LC", "NG+" }),
+            },
+            _ => Array.Empty<ManipGroup>(),
+        };
+    }
+
+    /// <summary>
+    /// The feature table with the features <paramref name="game"/>'s headings list added where it
+    /// lacks them, for a fake session moved to that game, so a headless run has something to draw
+    /// under each heading: Deadlocked's two fixes (toggles, the crash patches writing code) and
+    /// UYA's trophy refresh button and its toggle.
+    /// </summary>
+    public static DescribeResult WithManipHeaderFeatures(DescribeResult describe, GameId game)
+    {
+        var features = describe.Features.ToList();
+        foreach (var (_, labels) in ManipHeadersFor(game))
+        {
+            foreach (var label in labels)
+            {
+                if (features.Any(f => f.Label == label)) continue;
+
+                byte id = (byte)(features.Count == 0 ? 0 : features.Max(f => f.Id) + 1);
+                var kind = label == TrophyRefreshLabel ? FeatureKind.Action : FeatureKind.Toggle;
+                var flags = label == ManipFixLabels[0] ? FeatureFlags.WritesCode : FeatureFlags.None;
+                features.Add(new Feature(id, kind, 0, 0, flags, 0xFF, 0, 0, label));
+            }
+        }
+
+        return describe with { Features = features.ToArray() };
+    }
+
+    /// <summary>Off answers all four manip ops UNSUPPORTED, as a game with no groups does.</summary>
+    public bool ManipsSupported { get; set; } = true;
+
+    /// <summary>
+    /// Whether a file is loaded, for MANIP_APPLY: the title screen and the menus have none, and
+    /// the console refuses there with event 5.
+    /// </summary>
+    public bool ManipFileLoaded { get; set; } = true;
+
+    /// <summary>The loaded file's challenge counter: 0 for a fresh file, 1 and up for challenge mode.</summary>
+    public byte ChallengeCounter { get; set; }
+
+    /// <summary>How many MANIP_APPLY requests have arrived, refused ones included.</summary>
+    public int ManipApplyCount { get; private set; }
+
+    /// <summary>What the console keeps per game: the selection and the two options from its config.</summary>
+    private sealed class ManipConfig
+    {
+        public byte Selected;
+        public bool AutoReset = true;
+        public bool Remember;
+
+        /// <summary>The boot the groups below were activated on, which a new one forgets.</summary>
+        public uint Generation;
+
+        public readonly HashSet<byte> Activated = new();
+    }
+
+    private readonly Dictionary<GameId, ManipConfig> _manipConfigs = new();
+    private ushort _manipSeq;
+    private ManipEventKind _manipKind;
+    private byte _manipGroup;
+
+    /// <summary>
+    /// The running game's manip config, moved to the running boot first: a new boot forgets which
+    /// setups were made, and forgets the selection too unless "remember category" is on.
+    /// </summary>
+    private ManipConfig ManipConfigFor(GameId game)
+    {
+        if (!_manipConfigs.TryGetValue(game, out var config))
+        {
+            config = new ManipConfig { Generation = _session.Generation };
+            _manipConfigs[game] = config;
+        }
+
+        if (config.Generation != _session.Generation)
+        {
+            config.Generation = _session.Generation;
+            config.Activated.Clear();
+            if (!config.Remember) config.Selected = ManipList.None;
+        }
+
+        return config;
+    }
+
+    /// <summary>The selection and both options the fake console holds for a game.</summary>
+    public (byte Selected, bool AutoReset, bool Remember) ManipOptionsFor(GameId game)
+    {
+        lock (_gate)
+        {
+            var config = ManipConfigFor(game);
+            return (config.Selected, config.AutoReset, config.Remember);
+        }
+    }
+
+    /// <summary>
+    /// Records a new event the way the console does: the sequence number moves on, so the client
+    /// shows it once. <paramref name="group"/> defaults to the running game's selection.
+    /// </summary>
+    public ushort RaiseManipEvent(ManipEventKind kind, byte? group = null)
+    {
+        lock (_gate)
+        {
+            _manipSeq++;
+            _manipKind = kind;
+            _manipGroup = group ?? ManipConfigFor(_session.Game).Selected;
+            return _manipSeq;
+        }
+    }
+
+    /// <summary>
+    /// The running game's headings, each with the ids of its features found by label in the
+    /// feature table. A label the table lacks is left out, so the heading is still there.
+    /// </summary>
+    private ManipHeader[] ManipHeadersOn(GameId game) =>
+        ManipHeadersFor(game)
+            .Select(header => new ManipHeader(header.Name, header.Labels
+                .Select(label => Array.Find(Describe.Features, f => f.Label == label))
+                .Where(f => f is not null)
+                .Select(f => (ushort)f!.Id)
+                .ToArray()))
+            .ToArray();
+
+    /// <summary>The running game's groups, or false when the four ops answer UNSUPPORTED.</summary>
+    private bool ManipsAvailable(out ManipGroup[] groups)
+    {
+        groups = ManipGroupsFor(_session.Game);
+        return ManipsSupported && _session.State == SessionState.Ingame && groups.Length > 0;
+    }
+
+    /// <summary>
+    /// The challenge-mode check, both ways: an NG+ group needs a challenge-mode file and a
+    /// new-game group a fresh one, unless the group skips the check. Null when the group may write.
+    /// </summary>
+    private ManipEventKind? ManipRefusal(ManipGroup group)
+    {
+        if (!ManipFileLoaded) return ManipEventKind.RefusedNoFile;
+        if (group.SkipsChallengeCheck) return null;
+        if (group.IsNgPlus && ChallengeCounter == 0) return ManipEventKind.RefusedNotChallengeFile;
+        if (!group.IsNgPlus && ChallengeCounter > 0) return ManipEventKind.RefusedChallengeFile;
+        return null;
+    }
+
+    private (Status, byte[]?) HandleManips(Opcode opcode, byte[] payload)
+    {
+        if (!ManipsAvailable(out var groups)) return (Status.Unsupported, null);
+
+        var config = ManipConfigFor(_session.Game);
+        switch (opcode)
+        {
+            case Opcode.ManipList:
+            {
+                var list = new ManipList(config.Selected, config.AutoReset, config.Remember,
+                    _manipSeq, _manipKind, _manipGroup, groups, ManipHeadersOn(_session.Game));
+                return (Status.Ok, list.ToBytes());
+            }
+
+            case Opcode.ManipSelect:
+            {
+                if (payload.Length < 1) return (Status.BadArg, null);
+                byte id = payload[0];
+                var group = Array.Find(groups, g => g.Id == id);
+                if (id != ManipList.None && group is null) return (Status.BadArg, null);
+
+                config.Selected = id;
+
+                // A group picked while a file it suits is loaded has its setup made at once, which
+                // is the first time this boot and so says so.
+                if (group is not null && ManipRefusal(group) is null && config.Activated.Add(id))
+                {
+                    RaiseManipEvent(ManipEventKind.Activated, id);
+                }
+
+                return (Status.Ok, null);
+            }
+
+            case Opcode.ManipOptions:
+                if (payload.Length < 2) return (Status.BadArg, null);
+                config.AutoReset = payload[0] != 0;
+                config.Remember = payload[1] != 0;
+                return (Status.Ok, null);
+
+            case Opcode.ManipApply:
+            {
+                ManipApplyCount++;
+                var group = Array.Find(groups, g => g.Id == config.Selected);
+                if (group is null) return (Status.Ok, null);
+
+                if (ManipRefusal(group) is { } refusal)
+                {
+                    RaiseManipEvent(refusal, group.Id);
+                    return (Status.Busy, null);
+                }
+
+                if (config.Activated.Add(group.Id)) RaiseManipEvent(ManipEventKind.Activated, group.Id);
+                else if (group.HasPerRun) RaiseManipEvent(ManipEventKind.PerRunApplied, group.Id);
+                return (Status.Ok, null);
+            }
+
+            default:
+                return (Status.UnknownOp, null);
+        }
+    }
+
     // ------------------------------------------- 5.5, the position slots
 
     /// <summary>How many slots a planet has, section 5.5.</summary>
@@ -1236,7 +1504,8 @@ public sealed class FakeQwarkServer : IDisposable
         or Opcode.AutosplitEvents or Opcode.AutosplitDescribe
         or Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
         or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
-        or Opcode.SaveFileRestore or Opcode.SaveFileCategory or Opcode.SaveFilePatch;
+        or Opcode.SaveFileRestore or Opcode.SaveFileCategory or Opcode.SaveFilePatch
+        or Opcode.ManipList or Opcode.ManipSelect or Opcode.ManipOptions or Opcode.ManipApply;
 
     /// <summary>
     /// How many requests have been refused with BUSY because a game was starting or ending. A
@@ -2373,6 +2642,12 @@ public sealed class FakeQwarkServer : IDisposable
                     Files[to] = moving;
                     return (Status.Ok, null);
                 }
+
+                case Opcode.ManipList:
+                case Opcode.ManipSelect:
+                case Opcode.ManipOptions:
+                case Opcode.ManipApply:
+                    return HandleManips(opcode, payload);
 
                 default:
                     return (Status.UnknownOp, null);

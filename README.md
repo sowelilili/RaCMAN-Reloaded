@@ -57,6 +57,10 @@ The cheats that patch game code, such as fast loads and infinite ammo, work afte
 
 RPCS3 accepts one IPC client at a time. If another program holds the port, the client says so and waits for the port. RPCS3 support is for Windows at the moment.
 
+## Manip categories
+
+Open **Game**, then **Manips**, and pick the category type of your run. Hover a type to see its leaderboard categories. The console applies the manips when you load a save or start a new game, also when no PC is connected. **Auto-reset** applies them again at every load, **Remember category** keeps your choice when the game restarts, and **Apply now** applies them at once. NG+ manips need a challenge-mode save, and the other manips need a new save. If the save does not match, the console writes nothing and the client tells you.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.

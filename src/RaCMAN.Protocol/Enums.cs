@@ -132,6 +132,73 @@ public enum Opcode : ushort
     /// it recompiles anything, so the client puts these words into an RPCS3 patch.
     /// </summary>
     SaveFilePatch = 0x00B8,
+
+    // 5.14 Manip categories (revision 1.21, build 53). All four answer UNSUPPORTED for a game with
+    // no groups and outside a game, and NOT_INGAME where they need the game's state.
+
+    /// <summary>
+    /// The game's category types, the selection, the two options, the last event and the headings
+    /// the manips area draws with the features listed under each.
+    /// </summary>
+    ManipList = 0x00D0,
+
+    /// <summary><c>u8 group</c>, 0 for None. BAD_ARG for an id the game does not have.</summary>
+    ManipSelect = 0x00D1,
+
+    /// <summary><c>u8 auto_reset, u8 remember</c>. qwark keeps both in its config.</summary>
+    ManipOptions = 0x00D2,
+
+    /// <summary>
+    /// Applies the selected group's setup and per-run writes now, behind the challenge-mode check.
+    /// A refusal is BUSY, and the reason is the event MANIP_LIST reports next.
+    /// </summary>
+    ManipApply = 0x00D3,
+}
+
+/// <summary>
+/// MANIP_LIST group flags, section 5.14 of PROTOCOL.md (revision 1.21). The client only reads
+/// them to draw the dropdown and the auto-reset warning; what each group writes is qwark's alone.
+/// </summary>
+[Flags]
+public enum ManipGroupFlags : byte
+{
+    None = 0,
+
+    /// <summary>bit0: a challenge-mode (NG+) group. Clear means a new-game, any%-style group.</summary>
+    NgPlus = 1 << 0,
+
+    /// <summary>bit1: a category extension, drawn with less emphasis.</summary>
+    Extension = 1 << 1,
+
+    /// <summary>bit2: the group has writes that have to be made again on every file load.</summary>
+    PerRun = 1 << 2,
+
+    /// <summary>bit3: the group skips the challenge-mode check (RaC2's NG+ No Specials).</summary>
+    NoChallengeCheck = 1 << 3,
+}
+
+/// <summary>
+/// What MANIP_LIST's last event says happened, section 5.14. <c>event_seq</c> moves on with every
+/// new one, which is how the client shows each of them once.
+/// </summary>
+public enum ManipEventKind : byte
+{
+    None = 0,
+
+    /// <summary>The group's setup writes were made for the first time this boot.</summary>
+    Activated = 1,
+
+    /// <summary>The group's per-run writes were made again.</summary>
+    PerRunApplied = 2,
+
+    /// <summary>Refused: an NG+ group, and the file is not a challenge-mode file.</summary>
+    RefusedNotChallengeFile = 3,
+
+    /// <summary>Refused: a new-game group, and the file is a challenge-mode file.</summary>
+    RefusedChallengeFile = 4,
+
+    /// <summary>Refused: Apply now with no file loaded (the title screen or the menus).</summary>
+    RefusedNoFile = 5,
 }
 
 /// <summary>

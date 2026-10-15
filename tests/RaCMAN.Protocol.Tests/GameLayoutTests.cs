@@ -376,6 +376,69 @@ public class GameLayoutTests
         Assert.Empty(GamePanel.SubPagesWithContent(DiscTitle, GameId.Rac1, undescribed, unlocksHidden: true));
     }
 
+    private static ManipList Manips(params ManipHeader[] headers) =>
+        new(0, true, false, 0, ManipEventKind.None, 0,
+            new[] { new ManipGroup(1, ManipGroupFlags.NgPlus, "NG+", new[] { "NG+ no LC", "NG+" }) }, headers);
+
+    /// <summary>
+    /// Build 53 retired every feature the shipped file moved to Manips, so for a game with category
+    /// types that page is the manips area and nothing else: it is listed in the nav because
+    /// MANIP_LIST answered, and not listed for a game that answered UNSUPPORTED.
+    /// </summary>
+    [Fact]
+    public void TheManipsPageIsListedForAGameWithCategoryTypes()
+    {
+        var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");
+        var d = Describe(GameId.Rac2, Rac2Groups, fastLoads);
+
+        Assert.Equal(new[] { "Manips" },
+            GamePanel.SubPagesWithContent("NPEA00386", GameId.Rac2, d, unlocksHidden: false, Manips()));
+        Assert.Empty(GamePanel.SubPagesWithContent("NPEA00386", GameId.Rac2, d, unlocksHidden: false));
+    }
+
+    /// <summary>
+    /// Deadlocked's two fixes are drawn under the Fixes heading of the manips area once MANIP_LIST
+    /// lists them, and no longer in Cheats where qwark's group puts them.
+    /// </summary>
+    [Fact]
+    public void DeadlockedsFixesMoveFromCheatsToTheManipsArea()
+    {
+        var crash = Make(30, FeatureKind.Toggle, 0, "Crash patches");
+        var softlocks = Make(31, FeatureKind.Toggle, 0, "Fix reset softlocks");
+        var infinite = Make(0, FeatureKind.Toggle, 0, "Infinite ammo");
+        var d = Describe(GameId.Rac4, Rac4Groups, infinite, crash, softlocks);
+
+        var sections = GamePanel.SectionsFor("NPEA00423", GameId.Rac4, d, Manips(new ManipHeader("Fixes", new ushort[] { 30, 31 })));
+        Assert.Equal(new[] { "Crash patches", "Fix reset softlocks" }, sections["Manips"].Select(f => f.Label));
+        Assert.Equal(new[] { "Infinite ammo" }, sections["Cheats"].Select(f => f.Label));
+
+        // A console older than build 53 has no MANIP_LIST, and they stay in Cheats.
+        var old = GamePanel.SectionsFor("NPEA00423", GameId.Rac4, d);
+        Assert.Equal(new[] { "Infinite ammo", "Crash patches", "Fix reset softlocks" }, old["Cheats"].Select(f => f.Label));
+        Assert.False(old.ContainsKey("Manips"));
+    }
+
+    /// <summary>
+    /// UYA's trophy refresh is one the shipped file moves to Savefile. Listed under MANIP_LIST's
+    /// Trophies header it goes to the manips area instead, with the toggle build 53 adds for it:
+    /// the header is the console saying where the control belongs, and it wins over the move.
+    /// </summary>
+    [Fact]
+    public void UyasTrophyControlsGoUnderTrophiesWhateverTheLayoutMoves()
+    {
+        var refresh = Make(21, FeatureKind.Action, 2, "Refresh trophy state");
+        var auto = Make(40, FeatureKind.Toggle, 2, "Auto-refresh trophies");
+        var titanium = Make(23, FeatureKind.Action, 2, "Unlock all titanium bolts");
+        var d = Describe(GameId.Rac3, Rac3Groups, refresh, auto, titanium);
+
+        Assert.Equal("Savefile", GameLayout.SectionFor("NPEA00387", GameId.Rac3, refresh, d));
+
+        var sections = GamePanel.SectionsFor("NPEA00387", GameId.Rac3, d, Manips(new ManipHeader("Trophies", new ushort[] { 21, 40 })));
+        Assert.Equal(new[] { "Refresh trophy state", "Auto-refresh trophies" }, sections["Manips"].Select(f => f.Label));
+        Assert.False(sections.ContainsKey("Savefile"));
+        Assert.Equal(new[] { "Unlock all titanium bolts" }, sections["Collectables"].Select(f => f.Label));
+    }
+
     /// <summary>
     /// The older spelling: a copy of the file edited before the key was renamed still reads, and
     /// means exactly the sub-page list.

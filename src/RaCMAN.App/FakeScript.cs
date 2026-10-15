@@ -16,11 +16,12 @@ namespace RaCMAN.App;
 /// </summary>
 public static class FakeScript
 {
-    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac4, "
+    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac3, rac4, "
                                 + "unknown, drop, combos-off, combos-on, sfpatch, switchesin, switchesout, start, "
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
-                                + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir]";
+                                + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
+                                + "manip[:kind[:group]]";
 
     /// <summary>The folder <c>consolemod</c> puts on the fake console when the step names none.</summary>
     public const string DefaultConsoleMod = "old-savefile-helper";
@@ -113,6 +114,18 @@ public static class FakeScript
             return;
         }
 
+        // A manip event, as the console records one on a file load or an Apply now: "manip:3" is a
+        // refusal for an NG+ group on a fresh file, for the selected group unless one is named.
+        // The kind defaults to 1, the first activation of a boot.
+        if (parts[0] == "manip")
+        {
+            byte kindNumber = parts.Length > 1 && byte.TryParse(parts[1], out var k) ? k : (byte)ManipEventKind.Activated;
+            byte? group = parts.Length > 2 && byte.TryParse(parts[2], out var g) ? g : null;
+            ushort seq = fake.RaiseManipEvent((ManipEventKind)kindNumber, group);
+            Console.WriteLine($"fake-script manip seq={seq} kind={(ManipEventKind)kindNumber} group={group?.ToString() ?? "selected"}");
+            return;
+        }
+
         // A mod folder only the console has, flagged to load at boot: what a test leaves behind
         // and the Mods panel lists as console-only. A folder name over 31 bytes is one qwark lists
         // cut short, the way a ZIP installed under its temporary folder's name used to end up.
@@ -170,10 +183,24 @@ public static class FakeScript
                 };
                 break;
 
+            // UYA, whose manips area has a Trophies heading: the refresh button and its toggle
+            // come with it, so there is something under the heading.
+            case "rac3":
+                fake.Describe = FakeQwarkServer.WithManipHeaderFeatures(fake.Describe with { Game = GameId.Rac3 }, GameId.Rac3);
+                fake.Session = session with
+                {
+                    State = SessionState.Ingame,
+                    Game = GameId.Rac3,
+                    TitleId = "NPEA00387",
+                    Generation = session.Generation + 1,
+                };
+                break;
+
             // Deadlocked, so a headless run can exercise the game whose route file and game-time
-            // normalisation differ most from the other three.
+            // normalisation differ most from the other three. Its two fixes come with it, so the
+            // manips area has something under its Fixes heading.
             case "rac4":
-                fake.Describe = fake.Describe with { Game = GameId.Rac4 };
+                fake.Describe = FakeQwarkServer.WithManipHeaderFeatures(fake.Describe with { Game = GameId.Rac4 }, GameId.Rac4);
                 fake.Session = session with
                 {
                     State = SessionState.Ingame,

@@ -246,6 +246,9 @@ if (exitAfter > 0)
                       // checked for the refusals a launch used to spray across the screen.
                       $"lasterror=\"{state.LastError ?? "(none)"}\" " +
                       $"autosplitevents={state.AutosplitEvents.Length} " +
+
+                      // The manips area as MANIP_LIST last described it, and whether it was drawn.
+                      $"manips=\"{ManipsArea.Summary(state)}\" " +
                       $"autosplit={state.Autosplitter.Received}/{state.Autosplitter.Acted}" +
                       $"+{state.Autosplitter.Adjustments}adj " +
                       $"livesplit={state.LiveSplit.Status} version=\"{state.LiveSplit.Version ?? "(none)"}\" " +

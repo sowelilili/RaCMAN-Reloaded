@@ -1,0 +1,219 @@
+using ImGuiNET;
+using RaCMAN.Protocol;
+
+namespace RaCMAN.App.Panels;
+
+/// <summary>
+/// The manip categories at the top of the Manips section (revision 1.21): the category type
+/// dropdown, the auto-reset and remember switches, Apply now, the warning about per-run manips and
+/// a line for the console's last event. The headings MANIP_LIST names under it (Deadlocked's Fixes,
+/// UYA's Trophies) are drawn by <see cref="GamePanel"/>, which owns the feature controls, from
+/// <see cref="HeaderBlocks"/>.
+/// <para>
+/// Everything here is drawn from <see cref="AppState.Manips"/>, MANIP_LIST's last answer, and each
+/// control sends one request and reads the list again. The client keeps no selection and no option
+/// of its own: qwark applies the category on a file load whether or not a PC is connected, so the
+/// console is the only place either can live.
+/// </para>
+/// <para>
+/// Refresh policy: MANIP_LIST is read when the area comes on screen and every
+/// <see cref="PollSeconds"/> while it stays there; <see cref="AppState"/> also reads it after every
+/// manip request, on every way back into a game and after a planet change, which is how an event
+/// from a file load is toasted while some other panel is open.
+/// </para>
+/// </summary>
+public static class ManipsArea
+{
+    /// <summary>How often the list is read while the area is on screen.</summary>
+    public const float PollSeconds = 1.5f;
+
+    /// <summary>How long the area may go undrawn before it counts as opened again.</summary>
+    private const long ReopenAfterMs = 500;
+
+    private const float ComboWidth = 260f;
+
+    private static long _lastDrawnMs = long.MinValue / 2;
+    private static float _sincePoll;
+
+    /// <summary>Whether the area has been drawn this run, for the headless summary.</summary>
+    public static bool Drawn { get; private set; }
+
+    /// <summary>
+    /// The warning under the controls, or null for none: auto-reset is off and the selected group
+    /// has per-run writes, which then happen only on Apply now. An NG+ group can be reset every run;
+    /// a new-game group has to be, since a run that starts with last run's values is not a fresh
+    /// game.
+    /// </summary>
+    public static string? Warning(ManipList list)
+    {
+        if (list.AutoReset) return null;
+        if (list.SelectedGroup is not { HasPerRun: true } group) return null;
+
+        string verb = group.IsNgPlus ? "can" : "must";
+        return $"{group.Name} has manips that {verb} be reset every run. Turn on auto-reset to apply them automatically.";
+    }
+
+    /// <summary>The status line under the controls: the console's last event, whatever its kind, or null for none.</summary>
+    public static string? LastEventLine(ManipList list) =>
+        ManipEvents.NoticeFor(list) is { } notice ? $"Last: {notice.Text}" : null;
+
+    /// <summary>
+    /// The headings drawn under the controls: each header MANIP_LIST names, in its order, with the
+    /// features of <paramref name="features"/> it lists, in the header's order and whatever their
+    /// kind. A feature two headers list goes under the first, and a header with nothing to draw
+    /// under it is left out rather than drawn as a heading over nothing.
+    /// </summary>
+    public static IReadOnlyList<GameLayout.FeatureBlock> HeaderBlocks(ManipList list, IEnumerable<Feature> features)
+    {
+        var byId = new Dictionary<byte, Feature>();
+        foreach (var feature in features) byId.TryAdd(feature.Id, feature);
+
+        var taken = new HashSet<byte>();
+        var blocks = new List<GameLayout.FeatureBlock>();
+        foreach (var header in list.Headers)
+        {
+            var listed = header.FeatureIds
+                .Where(id => byId.ContainsKey(id) && taken.Add(id))
+                .Select(id => byId[id])
+                .ToArray();
+
+            if (listed.Length > 0) blocks.Add(new GameLayout.FeatureBlock(header.Name, listed));
+        }
+
+        return blocks;
+    }
+
+    /// <summary>
+    /// What the headless summary prints: "hidden" while there is no list, otherwise the selection,
+    /// the two options, the groups, the headings with the features under each, the last event and
+    /// whether there is a warning.
+    /// </summary>
+    public static string Summary(AppState state)
+    {
+        if (state.Manips is not { } list) return "hidden";
+
+        string Name(string text) => text.Replace(' ', '_');
+        string groups = string.Join(",", list.Groups.Select(g =>
+            Name(g.Name) + (g.IsExtension ? "*" : string.Empty) + (g.HasPerRun ? "!" : string.Empty)));
+        string headers = string.Join(" ", HeaderBlocks(list, state.Describe.Features).Select(b =>
+            $"{Name(b.Heading!)}:{string.Join(",", b.Features.Select(f => Name(f.Label)))}"));
+
+        return $"selected={Name(list.GroupName(list.Selected))} auto={(list.AutoReset ? "on" : "off")} "
+               + $"remember={(list.Remember ? "on" : "off")} groups=[{groups}] "
+               + $"headers=[{headers}] event={list.EventSeq}:{list.EventKind} "
+               + $"toasts={state.ManipToasts} drawn={(Drawn ? "yes" : "no")} "
+               + $"warning={(Warning(list) is null ? "no" : "yes")}";
+    }
+
+    public static void Draw(AppState state, ManipList list)
+    {
+        Poll(state);
+        Drawn = true;
+
+        ImGui.PushID("manips");
+
+        DrawCategoryType(state, list);
+
+        // Both switches are the console's: what is drawn is what MANIP_LIST said, and a click sends
+        // the pair with the one that changed.
+        bool autoReset = list.AutoReset;
+        if (ImGui.Checkbox("Auto-reset", ref autoReset)) state.SetManipOptions(autoReset, list.Remember);
+        Ui.Tooltip("Apply the category's per-run manips again every time a save is loaded or a new game is started.");
+
+        ImGui.SameLine();
+        bool remember = list.Remember;
+        if (ImGui.Checkbox("Remember category", ref remember)) state.SetManipOptions(list.AutoReset, remember);
+        Ui.Tooltip("Keep this category when the game is restarted. When this is off, the game starts at None.");
+
+        bool none = list.SelectedGroup is null;
+        ImGui.BeginDisabled(none);
+        if (ImGui.Button("Apply now")) state.ApplyManips();
+        ImGui.EndDisabled();
+        Ui.Tooltip(none
+            ? "Pick a category type first."
+            : "Apply the category's manips now. A save must be loaded.");
+
+        if (Warning(list) is { } warning) Ui.Warning(warning);
+        if (LastEventLine(list) is { } line) Ui.Hint(line);
+
+        ImGui.PopID();
+    }
+
+    /// <summary>
+    /// Reads the list when the area comes back on screen and on a timer while it stays. The timer
+    /// counts only while a game is up, where the op answers; the read itself knows the rest.
+    /// </summary>
+    private static void Poll(AppState state)
+    {
+        long now = Environment.TickCount64;
+        bool reopened = now - _lastDrawnMs > ReopenAfterMs;
+        _lastDrawnMs = now;
+
+        if (reopened)
+        {
+            _sincePoll = 0;
+            state.RefreshManips();
+            return;
+        }
+
+        if (!state.Ingame)
+        {
+            _sincePoll = 0;
+            return;
+        }
+
+        _sincePoll += ImGui.GetIO().DeltaTime;
+        if (_sincePoll < PollSeconds) return;
+
+        _sincePoll = 0;
+        state.RefreshManips();
+    }
+
+    /// <summary>
+    /// None and then the groups in the console's order. Extensions are greyed but can be picked,
+    /// and every entry lists its leaderboard categories on hover, one per line, as does the closed
+    /// dropdown for the selected group.
+    /// </summary>
+    private static void DrawCategoryType(AppState state, ManipList list)
+    {
+        var selected = list.SelectedGroup;
+        string preview = list.GroupName(list.Selected);
+
+        ImGui.SetNextItemWidth(ComboWidth);
+        if (!ImGui.BeginCombo("Category type", preview))
+        {
+            if (selected is not null) CategoriesTooltip(selected);
+            return;
+        }
+
+        if (ImGui.Selectable(ManipList.NoneName, list.Selected == ManipList.None) && list.Selected != ManipList.None)
+        {
+            state.SelectManipGroup(ManipList.None);
+        }
+
+        Ui.Tooltip("No manips: nothing is written.");
+
+        foreach (var group in list.Groups)
+        {
+            ImGui.PushID(group.Id);
+
+            if (group.IsExtension) ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
+            bool picked = ImGui.Selectable(group.Name, group.Id == list.Selected);
+            if (group.IsExtension) ImGui.PopStyleColor();
+
+            CategoriesTooltip(group);
+            ImGui.PopID();
+
+            if (picked && group.Id != list.Selected) state.SelectManipGroup(group.Id);
+        }
+
+        ImGui.EndCombo();
+    }
+
+    /// <summary>The categories a group applies to, one per line, on hover.</summary>
+    private static void CategoriesTooltip(ManipGroup group)
+    {
+        if (group.Categories.Length == 0) return;
+        Ui.Tooltip(string.Join("\n", group.Categories));
+    }
+}

@@ -115,6 +115,16 @@ public static class GameLayout
     public const string PlayerSection = "Player";
 
     /// <summary>
+    /// An ordinary section too, and the one the manips area is drawn in: the category type, the
+    /// two options, Apply now and the headings MANIP_LIST names (Deadlocked's Fixes, UYA's
+    /// Trophies), all from MANIP_LIST. It is a sub-page of the Game page in the shipped file, where
+    /// the old manip buttons were, and it exists for a game with category types even when no
+    /// feature is in it. The features a heading lists are drawn here whatever the layout says
+    /// about them.
+    /// </summary>
+    public const string ManipsSection = "Manips";
+
+    /// <summary>
     /// The section names the client owns. A panel decides where each of these is drawn, so none of
     /// them may become a sub-page or a stacked header however the layout file is written.
     /// </summary>
@@ -122,7 +132,7 @@ public static class GameLayout
         section is QuickSection or ValuesSection or OptionsSection or UnlocksSection;
 
     /// <summary>The sub-pages of the Game page when the file says nothing about them.</summary>
-    private static readonly string[] DefaultSubPages = { "Manips", "Cosmetics", "Debug" };
+    private static readonly string[] DefaultSubPages = { ManipsSection, "Cosmetics", "Debug" };
 
     /// <summary>The Unlocks panel's own tabs when the file says nothing about them.</summary>
     private static readonly string[] DefaultUnlocksTabs = { "Collectables" };

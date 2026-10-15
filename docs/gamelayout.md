@@ -74,3 +74,8 @@ Debug page.
 `Player` is an ordinary section. The Game page also takes three features wherever they are: the two
 save file actions, and an action the game calls "Die". A section with nothing else left in it draws
 no heading.
+
+`Manips` is an ordinary section too. On a game with manip categories it starts with the category
+controls, and the client shows it even when no feature is in it. The console can also list features
+under headings of its own there: Deadlocked's **Fixes** and UYA's **Trophies**. Those features are
+always drawn under their heading, so a `moves` entry for one of them has no effect.

@@ -1172,3 +1172,224 @@ public readonly record struct ConsoleSaveFile(string Name, uint Size, uint Crc)
         return bytes;
     }
 }
+
+/// <summary>
+/// One category type of MANIP_LIST, section 5.14 (revision 1.21): its id, its flags, its name and
+/// the leaderboard categories it applies to, one per entry. What it writes is qwark's alone.
+/// </summary>
+public sealed record ManipGroup(byte Id, ManipGroupFlags Flags, string Name, string[] Categories)
+{
+    /// <summary>A challenge-mode group. False for a new-game, any%-style one.</summary>
+    public bool IsNgPlus => (Flags & ManipGroupFlags.NgPlus) != 0;
+
+    /// <summary>A category extension, which the dropdown draws with less emphasis.</summary>
+    public bool IsExtension => (Flags & ManipGroupFlags.Extension) != 0;
+
+    /// <summary>The group has writes qwark makes again on every file load while auto-reset is on.</summary>
+    public bool HasPerRun => (Flags & ManipGroupFlags.PerRun) != 0;
+
+    /// <summary>The group skips the challenge-mode check.</summary>
+    public bool SkipsChallengeCheck => (Flags & ManipGroupFlags.NoChallengeCheck) != 0;
+}
+
+/// <summary>
+/// One heading of the manips area, from MANIP_LIST (revision 1.21): its name and the DESCRIBE
+/// features drawn under it, whatever their kind, in this order. Deadlocked's "Fixes" and UYA's
+/// "Trophies" are the two there are.
+/// </summary>
+public sealed record ManipHeader(string Name, ushort[] Features)
+{
+    /// <summary>The ids that can name a DESCRIBE feature, whose ids are a byte, in the header's order.</summary>
+    public IReadOnlyList<byte> FeatureIds =>
+        Features.Where(id => id <= byte.MaxValue).Select(id => (byte)id).Distinct().ToArray();
+}
+
+/// <summary>
+/// The MANIP_LIST reply, section 5.14 (revision 1.21, build 53):
+/// <code>
+/// u8 selected, u8 auto_reset, u8 remember, u8 ngroups,
+/// u16 event_seq, u8 event_kind, u8 event_group,
+/// group[ngroups]: u8 id, u8 flags, u8 name_len, char name[name_len], u8 cats_len, char cats[cats_len]
+/// u8 nheaders
+/// header[nheaders]: u8 name_len, char name[name_len], u8 nfeatures, u16 feature_id[nfeatures]
+/// </code>
+/// <c>cats</c> is the category names joined with a line feed. The headers are the headings the
+/// manips area draws, each with the features listed under it (Deadlocked's "Fixes", UYA's
+/// "Trophies", none elsewhere). The selection, both options and the last event are the console's:
+/// the client draws them from here and keeps none of them.
+/// </summary>
+public sealed record ManipList(
+    byte Selected,
+    bool AutoReset,
+    bool Remember,
+    ushort EventSeq,
+    ManipEventKind EventKind,
+    byte EventGroup,
+    ManipGroup[] Groups,
+    ManipHeader[] Headers)
+{
+    /// <summary>The eight fixed bytes in front of the groups.</summary>
+    public const int HeaderSize = 8;
+
+    /// <summary>Group 0, which writes nothing and is what the console starts at.</summary>
+    public const byte None = 0;
+
+    /// <summary>What the dropdown calls group 0.</summary>
+    public const string NoneName = "None";
+
+    /// <summary>The selected group, or null for None (or an id the list does not carry).</summary>
+    public ManipGroup? SelectedGroup => Group(Selected);
+
+    public ManipGroup? Group(byte id) => id == None ? null : Array.Find(Groups, g => g.Id == id);
+
+    /// <summary>A group's name for a sentence: "None" for group 0, a stand-in for one the list lacks.</summary>
+    public string GroupName(byte id) => id == None ? NoneName : Group(id)?.Name ?? $"Group {id}";
+
+    /// <summary>
+    /// Every feature id some header lists, which the Game page draws in the manips area and not in
+    /// its own group. A feature two headers list is drawn under the first of them.
+    /// </summary>
+    public IReadOnlyList<byte> HeaderFeatureIds => Headers.SelectMany(h => h.FeatureIds).Distinct().ToArray();
+
+    /// <summary>
+    /// A reply that stops anywhere short of its own counts is a truncated reply and throws, rather
+    /// than hand the panel half a group list or a header that is missing a feature. Bytes after the
+    /// last header are left for a later revision.
+    /// </summary>
+    public static ManipList Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < HeaderSize)
+        {
+            throw new ProtocolException($"MANIP_LIST needs {HeaderSize} bytes of header, got {payload.Length}");
+        }
+
+        var r = new SpanReader(payload);
+        byte selected = r.ReadU8();
+        bool autoReset = r.ReadU8() != 0;
+        bool remember = r.ReadU8() != 0;
+        int count = r.ReadU8();
+        ushort seq = r.ReadU16();
+        var kind = (ManipEventKind)r.ReadU8();
+        byte eventGroup = r.ReadU8();
+
+        var groups = new ManipGroup[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (r.Remaining < 2)
+            {
+                throw new ProtocolException($"MANIP_LIST stops inside group {i} of {count}, before its name");
+            }
+
+            byte id = r.ReadU8();
+            var flags = (ManipGroupFlags)r.ReadU8();
+            string name = ReadText(ref r, $"group {i}'s name");
+            string cats = ReadText(ref r, $"group {i}'s categories");
+            groups[i] = new ManipGroup(id, flags, name, SplitCategories(cats));
+        }
+
+        if (r.Remaining < 1)
+        {
+            throw new ProtocolException($"MANIP_LIST stops after its {count} groups, before the header count");
+        }
+
+        int headerCount = r.ReadU8();
+        var headers = new ManipHeader[headerCount];
+        for (int i = 0; i < headerCount; i++)
+        {
+            string name = ReadText(ref r, $"header {i}'s name");
+
+            if (r.Remaining < 1)
+            {
+                throw new ProtocolException($"MANIP_LIST stops inside header {i} of {headerCount}, before its feature count");
+            }
+
+            int featureCount = r.ReadU8();
+            if (r.Remaining < featureCount * 2)
+            {
+                throw new ProtocolException(
+                    $"MANIP_LIST header {i} names {featureCount} features but carries {r.Remaining} bytes, {featureCount * 2} were needed");
+            }
+
+            var features = new ushort[featureCount];
+            for (int f = 0; f < featureCount; f++) features[f] = r.ReadU16();
+            headers[i] = new ManipHeader(name, features);
+        }
+
+        return new ManipList(selected, autoReset, remember, seq, kind, eventGroup, groups, headers);
+    }
+
+    /// <summary>The other direction, for the fake console the tests drive.</summary>
+    public byte[] ToBytes()
+    {
+        if (Groups.Length > byte.MaxValue) throw new ArgumentException("MANIP_LIST carries at most 255 groups");
+        if (Headers.Length > byte.MaxValue) throw new ArgumentException("MANIP_LIST carries at most 255 headers");
+        if (Headers.Any(h => h.Features.Length > byte.MaxValue))
+        {
+            throw new ArgumentException("a header lists at most 255 features");
+        }
+
+        var groups = Groups
+            .Select(g => (Group: g, Name: Field(g.Name, "name"), Cats: Field(string.Join("\n", g.Categories), "categories")))
+            .ToArray();
+        var headers = Headers.Select(h => (Header: h, Name: Field(h.Name, "header name"))).ToArray();
+
+        int size = HeaderSize
+                   + groups.Sum(g => 2 + 1 + g.Name.Length + 1 + g.Cats.Length)
+                   + 1 + headers.Sum(h => 1 + h.Name.Length + 1 + h.Header.Features.Length * 2);
+
+        var bytes = new byte[size];
+        var w = new SpanWriter(bytes);
+        w.WriteU8(Selected);
+        w.WriteU8((byte)(AutoReset ? 1 : 0));
+        w.WriteU8((byte)(Remember ? 1 : 0));
+        w.WriteU8((byte)Groups.Length);
+        w.WriteU16(EventSeq);
+        w.WriteU8((byte)EventKind);
+        w.WriteU8(EventGroup);
+
+        foreach (var (group, name, cats) in groups)
+        {
+            w.WriteU8(group.Id);
+            w.WriteU8((byte)group.Flags);
+            w.WriteU8((byte)name.Length);
+            w.WriteBytes(name);
+            w.WriteU8((byte)cats.Length);
+            w.WriteBytes(cats);
+        }
+
+        w.WriteU8((byte)Headers.Length);
+        foreach (var (header, name) in headers)
+        {
+            w.WriteU8((byte)name.Length);
+            w.WriteBytes(name);
+            w.WriteU8((byte)header.Features.Length);
+            foreach (var id in header.Features) w.WriteU16(id);
+        }
+
+        return bytes;
+    }
+
+    /// <summary>A <c>u8</c> length and that many bytes of UTF-8, or a truncation named after <paramref name="what"/>.</summary>
+    private static string ReadText(ref SpanReader r, string what)
+    {
+        if (r.Remaining < 1) throw new ProtocolException($"MANIP_LIST stops before {what}");
+
+        int length = r.ReadU8();
+        if (r.Remaining < length)
+        {
+            throw new ProtocolException($"MANIP_LIST names {length} bytes of {what} but carries {r.Remaining}");
+        }
+
+        return Encoding.UTF8.GetString(r.ReadSpan(length)).TrimEnd('\0');
+    }
+
+    private static string[] SplitCategories(string cats) =>
+        cats.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static byte[] Field(string text, string what)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        if (bytes.Length > byte.MaxValue) throw new ArgumentException($"a {what} is at most 255 bytes");
+        return bytes;
+    }
+}

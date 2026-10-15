@@ -1414,6 +1414,32 @@ public sealed class QwarkClient : IDisposable
     public Task ConfigSaveAsync(CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.ConfigSave, null, cancellationToken);
 
+    // ---------------------------------------------------------------- 5.14 manip categories
+
+    /// <summary>
+    /// MANIP_LIST, revision 1.21: the running game's category types, the selection, the two options
+    /// and the last event. UNSUPPORTED for a game with no groups and outside a game. A reply that
+    /// stops short of its own counts throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<ManipList> ManipListAsync(CancellationToken cancellationToken = default) =>
+        ManipList.Parse(await RequestAsync(Opcode.ManipList, null, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>MANIP_SELECT: <paramref name="group"/> is a MANIP_LIST id, or <see cref="ManipList.None"/>.</summary>
+    public Task ManipSelectAsync(byte group, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.ManipSelect, new[] { group }, cancellationToken);
+
+    /// <summary>MANIP_OPTIONS: both options every time, as the console keeps them.</summary>
+    public Task ManipOptionsAsync(bool autoReset, bool remember, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.ManipOptions, new[] { autoReset ? (byte)1 : (byte)0, remember ? (byte)1 : (byte)0 },
+            cancellationToken);
+
+    /// <summary>
+    /// MANIP_APPLY: the selected group's setup and per-run writes, now. A refusal of the
+    /// challenge-mode check is BUSY, and the event MANIP_LIST reports next says which one it was.
+    /// </summary>
+    public Task ManipApplyAsync(CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.ManipApply, null, cancellationToken);
+
     // ---------------------------------------------------------------- 5.11 autosplitting
 
     /// <summary>

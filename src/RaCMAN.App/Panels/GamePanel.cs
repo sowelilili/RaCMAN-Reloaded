@@ -106,15 +106,17 @@ public static class GamePanel
     /// drawn as tabs are listed here instead (<see cref="GameLayout.SubPagesFor"/>).
     /// </summary>
     public static IReadOnlyList<string> SubPagesWithContent(AppState state) =>
-        SubPagesWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.UnlocksUnsupported);
+        SubPagesWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.UnlocksUnsupported,
+            state.Manips);
 
     /// <summary>
     /// <see cref="SubPagesWithContent(AppState)"/> from a description alone, so what the nav lists
-    /// can be read, and tested, without a window.
+    /// can be read, and tested, without a window. <paramref name="manips"/> is MANIP_LIST, which
+    /// gives the Manips section something to draw however few features are in it.
     /// </summary>
     public static IReadOnlyList<string> SubPagesWithContent(
-        string title, GameId game, DescribeResult describe, bool unlocksHidden) =>
-        WithContent(GameLayout.SubPagesFor(unlocksHidden), title, game, describe);
+        string title, GameId game, DescribeResult describe, bool unlocksHidden, ManipList? manips = null) =>
+        WithContent(GameLayout.SubPagesFor(unlocksHidden), title, game, describe, manips);
 
     /// <summary>
     /// The tabs the Unlocks panel draws beside its unlock categories: the sections the layout hands
@@ -123,23 +125,23 @@ public static class GamePanel
     /// so this needs no flag of its own.
     /// </summary>
     public static IReadOnlyList<string> UnlocksTabsWithContent(AppState state) =>
-        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe);
+        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.Manips);
 
     /// <summary><see cref="UnlocksTabsWithContent(AppState)"/> from a description alone.</summary>
     public static IReadOnlyList<string> UnlocksTabsWithContent(
-        string title, GameId game, DescribeResult describe) =>
-        WithContent(GameLayout.UnlocksTabs, title, game, describe);
+        string title, GameId game, DescribeResult describe, ManipList? manips = null) =>
+        WithContent(GameLayout.UnlocksTabs, title, game, describe, manips);
 
     /// <summary>
     /// The listed sections a described game actually has something in, keeping the layout's order.
     /// A section a panel places itself is never one of them, however the file lists it.
     /// </summary>
     private static IReadOnlyList<string> WithContent(
-        IEnumerable<string> listed, string title, GameId game, DescribeResult describe)
+        IEnumerable<string> listed, string title, GameId game, DescribeResult describe, ManipList? manips)
     {
         if (describe.Features.Length == 0) return Array.Empty<string>();
 
-        var sections = Assign(title, game, describe, out _);
+        var sections = Assign(title, game, describe, manips, out _);
         return listed.Where(s => !GameLayout.IsReserved(s) && sections.ContainsKey(s)).ToArray();
     }
 
@@ -153,7 +155,7 @@ public static class GamePanel
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<Feature>();
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _);
         return sections.TryGetValue(section, out var features) ? features : Array.Empty<Feature>();
     }
 
@@ -208,7 +210,7 @@ public static class GamePanel
         if (describe.Features.Length == 0 || string.IsNullOrWhiteSpace(section)) return null;
         if (GameLayout.IsReserved(section)) return null;
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, out _);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _);
         if (!sections.ContainsKey(section)) return null;
 
         return GameLayout.IsUnlocksTab(section, state.UnlocksUnsupported) ? PanelNav.Unlocks : PanelNav.Game;
@@ -249,23 +251,34 @@ public static class GamePanel
     /// <summary>
     /// Every section the game has and what is in each of them, the quick block's own rows already
     /// gone. This is what the page draws from, and what the layout tests read the sorting out of.
+    /// With <paramref name="manips"/> the Manips section is there whether or not a feature is in
+    /// it, and holds the features MANIP_LIST lists under its headers.
     /// </summary>
     public static IReadOnlyDictionary<string, List<Feature>> SectionsFor(
-        string title, GameId game, DescribeResult describe) =>
-        Assign(title, game, describe, out _);
+        string title, GameId game, DescribeResult describe, ManipList? manips = null) =>
+        Assign(title, game, describe, manips, out _);
 
-    /// <summary>Puts every feature in its section (client layout first, qwark group as the default).</summary>
+    /// <summary>
+    /// Puts every feature in its section (client layout first, qwark group as the default). Two
+    /// claims come before the layout: the quick block's rows, which no section draws, and the
+    /// features MANIP_LIST lists under its headers (Deadlocked's Fixes, UYA's Trophies), which go
+    /// to the Manips section and leave their own group. A game with category types always has a
+    /// Manips section, for the area itself.
+    /// </summary>
     private static Dictionary<string, List<Feature>> Assign(
-        string title, GameId game, DescribeResult describe, out List<string> firstSeen)
+        string title, GameId game, DescribeResult describe, ManipList? manips, out List<string> firstSeen)
     {
         var claimed = QuickClaims(describe);
+        var headed = manips?.HeaderFeatureIds ?? Array.Empty<byte>();
         var sections = new Dictionary<string, List<Feature>>(StringComparer.Ordinal);
         firstSeen = new List<string>();
         foreach (var feature in describe.Features)
         {
             if (claimed.Contains(feature.Id)) continue;
 
-            string section = GameLayout.SectionFor(title, game, feature, describe);
+            string section = headed.Contains(feature.Id)
+                ? GameLayout.ManipsSection
+                : GameLayout.SectionFor(title, game, feature, describe);
             if (!sections.TryGetValue(section, out var list))
             {
                 list = new List<Feature>();
@@ -274,8 +287,22 @@ public static class GamePanel
             }
             list.Add(feature);
         }
+
+        if (manips is not null && !sections.ContainsKey(GameLayout.ManipsSection))
+        {
+            sections[GameLayout.ManipsSection] = new List<Feature>();
+            firstSeen.Add(GameLayout.ManipsSection);
+        }
+
         return sections;
     }
+
+    /// <summary>
+    /// Whether a section has anything to draw: a feature, or, for the Manips section, the manips
+    /// area of a game that has category types.
+    /// </summary>
+    private static bool HasContent(AppState state, string section, List<Feature> features) =>
+        features.Count > 0 || (section == GameLayout.ManipsSection && state.Manips is not null);
 
     public static void Draw(AppState state)
     {
@@ -285,7 +312,7 @@ public static class GamePanel
         string title = state.DescribedTitle;
         var game = state.DescribedGame;
         var order = new List<string>();
-        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, out order) : null;
+        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, state.Manips, out order) : null;
 
         if (ResolveSubPage(state, sections) is { } side)
         {
@@ -334,7 +361,7 @@ public static class GamePanel
         foreach (var section in GameLayout.TabOrder(title, game, used))
         {
             if (elsewhere.Contains(section)) continue;
-            if (!sections.TryGetValue(section, out var features) || features.Count == 0) continue;
+            if (!sections.TryGetValue(section, out var features) || !HasContent(state, section, features)) continue;
 
             ImGui.PushID(section);
             if (SectionHeader(state, section))
@@ -600,6 +627,31 @@ public static class GamePanel
         int toggleColumns = 2,
         bool leadingSpace = true)
     {
+        // The Manips section starts with the manips area, then each header MANIP_LIST names, with
+        // the features it lists under it in its order, whatever their kind; anything else the
+        // layout sent here follows.
+        if (section == GameLayout.ManipsSection && state.Manips is { } manips)
+        {
+            ManipsArea.Draw(state, manips);
+
+            var headings = ManipsArea.HeaderBlocks(manips, features);
+            for (int i = 0; i < headings.Count; i++)
+            {
+                ImGui.Spacing();
+                Ui.Heading(headings[i].Heading!);
+                ImGui.PushID($"manip-header-{i}");
+                DrawFeatureBlock(state, describe, headings[i].Features, section, toggleColumns, leadingSpace: false);
+                ImGui.PopID();
+            }
+
+            var headed = manips.HeaderFeatureIds;
+            features = features.Where(f => !headed.Contains(f.Id)).ToArray();
+            if (features.Count == 0) return;
+
+            ImGui.Spacing();
+            leadingSpace = false;
+        }
+
         var blocks = section is null
             ? new[] { new GameLayout.FeatureBlock(null, features) }
             : GameLayout.Blocks(state.DescribedTitle, state.DescribedGame, section, features);
