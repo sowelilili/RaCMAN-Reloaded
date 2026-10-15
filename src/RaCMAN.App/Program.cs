@@ -224,11 +224,12 @@ if (exitAfter > 0)
                       $"switchpatch={state.Rpcs3Patch.LastStatus.Switches.State} " +
 
                       // What the Connection panel's RPCS3 section said about qwark's patches, and
-                      // what the Game page drew each code-patching feature and each set-aside
-                      // button as, the last time each was drawn.
+                      // what the Game page drew each code-patching feature, each set-aside button
+                      // and each planet-load reset box as, the last time each was drawn.
                       $"qwarkpatches=\"{state.Rpcs3Patch.LastStatus.Message}\" " +
                       $"writescode=[{GamePanel.CodeFeatureSummary}] " +
                       $"asidebuttons=[{GamePanel.AsideButtonSummary}] " +
+                      $"planetboxes=[{PositionsPanel.PlanetBoxSummary}] " +
 
                       // What the Mods panel's Status column said for each mod under RPCS3, the last
                       // time it was drawn: empty unless the run ended on that panel.

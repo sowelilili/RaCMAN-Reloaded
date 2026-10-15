@@ -56,9 +56,6 @@ public static class SaveFilesPanel
 
     private const string DeleteId = "###savefiles-delete";
 
-    /// <summary>What a row's tooltip adds, since nothing else on the row says the menu is there.</summary>
-    private const string RowMenuHint = "Right-click it to rename or delete it.\nF2 and Delete do the same for the selected save.";
-
     /// <summary>Seconds since SAVEFILE_INFO was last re-read while it said the helper had not run.</summary>
     private static float _sinceInfo;
 
@@ -357,20 +354,11 @@ public static class SaveFilesPanel
                 }
 
                 // A right-click selects the row it opens the menu on, as a file manager does, so the
-                // highlighted row is always the one the menu is about.
+                // highlighted row is always the one the menu is about. The row has no hover text:
+                // the Where column says where the save lives, and the menu is found by right-clicking.
                 if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) _fileIndex = i;
 
-                // Read before the menu is drawn: the selectable spans the row, so this is the row's
-                // tooltip wherever the pointer settles on it, and it says where the save lives as
-                // well as where its menu is.
-                bool hovered = ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal);
-                bool menuOpen = DrawRowMenu(entry, title);
-                if (hovered && !menuOpen)
-                {
-                    ImGui.BeginTooltip();
-                    ImGui.TextUnformatted(Tooltip(entry));
-                    ImGui.EndTooltip();
-                }
+                DrawRowMenu(entry, title);
 
                 ImGui.TableNextColumn();
 
@@ -405,11 +393,10 @@ public static class SaveFilesPanel
     /// <summary>
     /// A row's right-click menu: Rename and Delete, the two things that used to be buttons under
     /// the list. Each only asks its question here; nothing changes until the user answers it.
-    /// Returns whether the menu is open, so the row's tooltip stays out of its way.
     /// </summary>
-    private static bool DrawRowMenu(SaveFileEntry entry, string title)
+    private static void DrawRowMenu(SaveFileEntry entry, string title)
     {
-        if (!ImGui.BeginPopupContextItem("row-menu")) return false;
+        if (!ImGui.BeginPopupContextItem("row-menu")) return;
 
         const string busyReason = "Wait for the save, load or change under way to finish.";
 
@@ -420,7 +407,6 @@ public static class SaveFilesPanel
         if (_busy) Ui.Tooltip(busyReason);
 
         ImGui.EndPopup();
-        return true;
     }
 
     private static void AskRename(SaveFileEntry entry, string title)
@@ -435,19 +421,6 @@ public static class SaveFilesPanel
         _pendingRename = null;
         _pendingDelete = new FileQuestion(entry, title, Category);
     }
-
-    private static string Tooltip(SaveFileEntry entry) => (entry.Location switch
-    {
-        SaveFileLocation.Console =>
-            $"{entry.Name}\nOn the console only. Loading it sends nothing.",
-        SaveFileLocation.Pc =>
-            $"{entry.Name}\nOn this PC only. Loading it uploads it to the console once.",
-        _ when entry.Differs =>
-            $"{entry.Name}\nBoth copies exist and hold different bytes "
-            + $"(console {entry.ConsoleCrc:x8}, PC {entry.PcCrc:x8}).\n"
-            + "Loading it sends this PC's copy and replaces the console's.",
-        _ => $"{entry.Name}\nBoth copies exist and agree (CRC {entry.ConsoleCrc:x8}).",
-    }) + "\n" + RowMenuHint;
 
     // ---------------------------------------------------------------- the two questions
 
@@ -671,7 +644,7 @@ public static class SaveFilesPanel
         if (ImGui.Button("Save on console") || (saveNow && canSave)) StartSave(state, title);
         ImGui.EndDisabled();
 
-        // Rename and Delete are on each row's right-click menu, which the row's tooltip points at.
+        // Rename and Delete are on each row's right-click menu, and on F2 and Delete.
         ImGui.SameLine();
         ImGui.BeginDisabled(!enabled || load is null || selected is null);
         if (ImGui.Button("Load into game")) StartLoad(state, title, selected!.Value);

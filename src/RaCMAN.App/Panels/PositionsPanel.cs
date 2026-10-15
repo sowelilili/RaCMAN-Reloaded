@@ -36,6 +36,20 @@ public static class PositionsPanel
 
     private static float _sinceRefresh;
 
+    /// <summary>The reset boxes the planet controls last drew, and the flags they showed. For the headless summary.</summary>
+    private static (IReadOnlyList<PlanetResetBox> Boxes, PlanetFlags Flags)? _boxesDrawn;
+
+    /// <summary>"Label:on" or "Label:off" for each reset box the planet controls last drew, in row order.</summary>
+    public static string PlanetBoxSummary =>
+        _boxesDrawn is { } drawn ? ResetBoxSummary(drawn.Boxes, drawn.Flags) : string.Empty;
+
+    /// <summary>
+    /// The reset boxes as the row shows them: each label, and whether the console's flag has the
+    /// box ticked. Spaces become underscores so the summary splits on spaces.
+    /// </summary>
+    public static string ResetBoxSummary(IReadOnlyList<PlanetResetBox> boxes, PlanetFlags flags) =>
+        string.Join(" ", boxes.Select(box => $"{box.Label.Replace(' ', '_')}:{((flags & box.Bit) != 0 ? "on" : "off")}"));
+
     /// <summary>
     /// One coordinate as the panel shows it: two decimals, right-aligned in
     /// <see cref="CoordinateWidth"/>. Null is an empty slot, which gets the same width so the
@@ -107,6 +121,7 @@ public static class PositionsPanel
     public static void Reset(AppState state)
     {
         ClearData();
+        _boxesDrawn = null;
         state.PositionNames.Forget();
     }
 
@@ -190,18 +205,16 @@ public static class PositionsPanel
             state.Run(() => state.Client.PlanetSelectAsync(planet, flags));
         }
 
-        // Only the games that do these two on the way into a planet are offered them.
-        var boxes = PlanetResetOptions.For(state.DescribedGame, state.LevelFlagsUnsupported);
-        if (boxes.LevelFlags)
+        // A game is offered the boxes for the bits its own planet load acts on, whatever the Level
+        // flags panel can or cannot read for it, and each box shows the console's stored flag.
+        var boxes = PlanetResetOptions.For(state.DescribedGame).Boxes();
+        for (int i = 0; i < boxes.Count; i++)
         {
-            ResetBox(state, "Reset level flags", choices.PlanetAt(pick), flags, PlanetFlags.ResetLevelFlags);
+            if (i > 0) ImGui.SameLine();
+            ResetBox(state, boxes[i].Label, choices.PlanetAt(pick), flags, boxes[i].Bit);
         }
 
-        if (boxes.SpecialBolts)
-        {
-            if (boxes.LevelFlags) ImGui.SameLine();
-            ResetBox(state, "Reset special bolts", choices.PlanetAt(pick), flags, PlanetFlags.ResetSpecialBolts);
-        }
+        _boxesDrawn = (boxes, flags);
 
         if (ImGui.Button("Load planet"))
         {

@@ -95,20 +95,51 @@ public sealed class PlanetChoices
 }
 
 /// <summary>
-/// Which of the two boxes beside "Load planet" a game has. Both are things the game itself does on
-/// the way into a planet, so a game that has neither must not be offered them: the request would
-/// carry a flag the console has nothing to do with, and the box would be a promise the game does
-/// not keep.
+/// Which of the two boxes beside "Load planet" a game has. Each is a bit of the planet flags that
+/// the game's own planet load acts on, so a game is offered exactly the bits its load uses: a box
+/// for a bit the load ignores would be a promise the game does not keep, and a bit the load uses
+/// with no box drawn for it would still act on every load, out of sight. The flags are one
+/// console-wide setting (qwark's <c>selected.planet_flags</c>), not one per game, so a bit ticked
+/// in one game is the same bit in the next, and the box is the only place it shows.
 /// </summary>
 public readonly record struct PlanetResetOptions(bool LevelFlags, bool SpecialBolts)
 {
     /// <summary>
-    /// RaC1 has special bolts but no level flags, Deadlocked has neither, and RaC2 and UYA have
-    /// both. <paramref name="levelFlagsUnsupported"/> is the console's own answer to
-    /// LEVELFLAGS_GET, so a game whose flags this build cannot reach loses the box as well.
-    /// A game the client has no name for is offered neither, the same as Deadlocked.
+    /// RaC1 resets both, its level flags and its gold bolts. RaC2 and UYA reset their level flags
+    /// and have no per-planet special bolt, so their loads ignore that bit, and Deadlocked's load
+    /// ignores both. A game the client has no name for is offered neither, the same as Deadlocked.
+    /// <para>
+    /// This is not the Level flags panel's question, and whether LEVELFLAGS_GET is answered does
+    /// not come into it. qwark withholds RaC1's flag viewer, so RaC1 answers UNSUPPORTED there,
+    /// but RaC1's PLANET_LOAD still resets the flags (PROTOCOL.md, level flags), the one thing the
+    /// old client ever did with them. Reading the one as the other hid RaC1's box while its bit
+    /// kept resetting the flags on every load.
+    /// </para>
     /// </summary>
-    public static PlanetResetOptions For(GameId game, bool levelFlagsUnsupported) => new(
-        LevelFlags: game is GameId.Rac2 or GameId.Rac3 && !levelFlagsUnsupported,
-        SpecialBolts: game is GameId.Rac1 or GameId.Rac2 or GameId.Rac3);
+    public static PlanetResetOptions For(GameId game) => new(
+        LevelFlags: game is GameId.Rac1 or GameId.Rac2 or GameId.Rac3,
+        SpecialBolts: game is GameId.Rac1);
+
+    private static readonly PlanetResetBox LevelFlagsBox = new("Reset level flags", PlanetFlags.ResetLevelFlags);
+    private static readonly PlanetResetBox SpecialBoltsBox = new("Reset special bolts", PlanetFlags.ResetSpecialBolts);
+
+    private static readonly PlanetResetBox[] BothBoxes = { LevelFlagsBox, SpecialBoltsBox };
+    private static readonly PlanetResetBox[] LevelFlagsOnly = { LevelFlagsBox };
+    private static readonly PlanetResetBox[] SpecialBoltsOnly = { SpecialBoltsBox };
+
+    /// <summary>
+    /// The boxes the row draws, left to right: level flags, then special bolts beside it. The
+    /// panel draws exactly this list, so what a game is offered is pinned here rather than in the
+    /// drawing. Shared arrays, because the row asks once a frame.
+    /// </summary>
+    public IReadOnlyList<PlanetResetBox> Boxes() => (LevelFlags, SpecialBolts) switch
+    {
+        (true, true) => BothBoxes,
+        (true, false) => LevelFlagsOnly,
+        (false, true) => SpecialBoltsOnly,
+        _ => Array.Empty<PlanetResetBox>(),
+    };
 }
+
+/// <summary>One box beside "Load planet": what it says, and the planet flag it shows and turns.</summary>
+public readonly record struct PlanetResetBox(string Label, PlanetFlags Bit);

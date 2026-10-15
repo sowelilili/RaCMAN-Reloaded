@@ -1032,55 +1032,93 @@ public class PositionRefreshTests
     }
 }
 
-/// <summary>Which boxes the Positions panel offers beside "Load planet", and for which games.</summary>
+/// <summary>
+/// Which boxes the Game page's planet controls offer beside "Load planet", and for which games: the
+/// bits each game's own PLANET_LOAD acts on in qwark, no more and no fewer.
+/// </summary>
 public class PlanetResetOptionTests
 {
+    /// <summary>
+    /// The regression this pins: RaC1's "Reset level flags" box went missing because the client read
+    /// RaC1's LEVELFLAGS_GET UNSUPPORTED (qwark withholds the flag viewer) as "RaC1 has no level
+    /// flags", while RaC1's PLANET_LOAD went on resetting them whenever the stored bit was set.
+    /// The row is both boxes, level flags first and special bolts beside it.
+    /// </summary>
     [Fact]
-    public void RaC1HasSpecialBoltsAndNoLevelFlags()
+    public void RaC1OffersResetLevelFlagsBesideResetSpecialBolts()
     {
-        // The console is what says so, and for RaC1 it answers LEVELFLAGS_GET UNSUPPORTED.
-        var boxes = PlanetResetOptions.For(GameId.Rac1, levelFlagsUnsupported: true);
+        var options = PlanetResetOptions.For(GameId.Rac1);
 
-        Assert.False(boxes.LevelFlags);
-        Assert.True(boxes.SpecialBolts);
+        Assert.True(options.LevelFlags);
+        Assert.True(options.SpecialBolts);
+        Assert.Equal(
+            new[]
+            {
+                new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags),
+                new PlanetResetBox("Reset special bolts", PlanetFlags.ResetSpecialBolts),
+            },
+            options.Boxes());
     }
 
+    /// <summary>
+    /// RaC2's and UYA's loads reset the level flags and leave bit 1 alone: neither has a per-planet
+    /// special bolt to take back, so a box for it would do nothing in that game while turning on
+    /// RaC1's gold bolt reset, the setting being one for the whole console.
+    /// </summary>
     [Fact]
-    public void RaC2AndUyaHaveBoth()
+    public void RaC2AndUyaOfferTheLevelFlagsBoxOnly()
     {
         foreach (var game in new[] { GameId.Rac2, GameId.Rac3 })
         {
-            var boxes = PlanetResetOptions.For(game, levelFlagsUnsupported: false);
-            Assert.True(boxes.LevelFlags);
-            Assert.True(boxes.SpecialBolts);
+            var options = PlanetResetOptions.For(game);
+
+            Assert.True(options.LevelFlags);
+            Assert.False(options.SpecialBolts);
+            Assert.Equal(
+                new[] { new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags) },
+                options.Boxes());
         }
     }
 
     [Fact]
     public void DeadlockedHasNeither()
     {
-        var boxes = PlanetResetOptions.For(GameId.Rac4, levelFlagsUnsupported: true);
+        var options = PlanetResetOptions.For(GameId.Rac4);
 
-        Assert.False(boxes.LevelFlags);
-        Assert.False(boxes.SpecialBolts);
-    }
-
-    [Fact]
-    public void AConsoleThatRefusesLevelFlagsTakesTheBoxAwayWhateverTheGame()
-    {
-        var boxes = PlanetResetOptions.For(GameId.Rac2, levelFlagsUnsupported: true);
-
-        Assert.False(boxes.LevelFlags);
-        Assert.True(boxes.SpecialBolts);
+        Assert.False(options.LevelFlags);
+        Assert.False(options.SpecialBolts);
+        Assert.Empty(options.Boxes());
     }
 
     [Fact]
     public void NoGameMeansNoBoxes()
     {
-        var boxes = PlanetResetOptions.For(GameId.None, levelFlagsUnsupported: false);
+        var options = PlanetResetOptions.For(GameId.None);
 
-        Assert.False(boxes.LevelFlags);
-        Assert.False(boxes.SpecialBolts);
+        Assert.False(options.LevelFlags);
+        Assert.False(options.SpecialBolts);
+        Assert.Empty(options.Boxes());
+    }
+
+    /// <summary>
+    /// Each box shows the console's stored flag as it is, a bit left on in another game included:
+    /// the boxes are where a stored choice is seen and changed, never where it is quietly cleared.
+    /// </summary>
+    [Fact]
+    public void TheBoxesShowTheStoredFlagsAsTheyAre()
+    {
+        var rac1 = PlanetResetOptions.For(GameId.Rac1).Boxes();
+
+        Assert.Equal("Reset_level_flags:on Reset_special_bolts:off",
+            PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.ResetLevelFlags));
+        Assert.Equal("Reset_level_flags:off Reset_special_bolts:on",
+            PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.ResetSpecialBolts));
+        Assert.Equal("Reset_level_flags:off Reset_special_bolts:off",
+            PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.None));
+
+        // A bit the game does not act on has no box to show it in, and is not read as one that does.
+        var rac2 = PlanetResetOptions.For(GameId.Rac2).Boxes();
+        Assert.Equal("Reset_level_flags:off", PositionsPanel.ResetBoxSummary(rac2, PlanetFlags.ResetSpecialBolts));
     }
 }
 
