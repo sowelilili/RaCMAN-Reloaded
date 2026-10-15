@@ -1,3 +1,5 @@
+using RaCMAN.Protocol;
+
 namespace RaCMAN.App;
 
 /// <summary>
@@ -121,23 +123,10 @@ public static class DataFolderMigration
     /// <summary>
     /// The folders under <c>mods/</c> the release staged, as <c>TITLEID</c> and
     /// <c>TITLEID/modfolder</c> entries. Null when there is no manifest at all, which means nothing
-    /// there can be told apart and nothing should be taken.
+    /// there can be told apart and nothing should be taken. The mod library reads the same list
+    /// to leave out a shipped folder its release no longer ships.
     /// </summary>
-    public static HashSet<string>? ReadShippedManifest(string modsFolder)
-    {
-        var path = Path.Combine(modsFolder, AppPaths.ShippedModsManifest);
-        if (!File.Exists(path)) return null;
-
-        var entries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var line in File.ReadAllLines(path))
-        {
-            var entry = line.Trim().Replace('\\', '/').Trim('/');
-            if (entry.Length == 0 || entry[0] == '#') continue;
-            entries.Add(entry);
-        }
-
-        return entries;
-    }
+    public static HashSet<string>? ReadShippedManifest(string modsFolder) => ModLibrary.ReadShippedManifest(modsFolder);
 
     /// <summary>Copies a folder and everything under it, never replacing a file already there.</summary>
     private static void CopyTree(DirectoryInfo source, DirectoryInfo destination)

@@ -25,13 +25,39 @@ public static class SaveFilesPanel
     private static SaveFileEntry[] _entries = Array.Empty<SaveFileEntry>();
     private static int _fileIndex = -1;
     private static string _name = string.Empty;
-    private static string _renameTo = string.Empty;
 
     private static bool _busy;
     private static bool _listing;
     private static string _status = string.Empty;
     private static long _transferred;
-    private static bool _confirmDelete;
+
+    /// <summary>
+    /// A save picked from a row's menu, with the title and category it was listed under, so the
+    /// answer acts on the file that was asked about even if the list has moved on meanwhile.
+    /// </summary>
+    private sealed record FileQuestion(SaveFileEntry Entry, string Title, string Category);
+
+    /// <summary>The rename the user picked from a row's menu, waiting for a new name.</summary>
+    private static FileQuestion? _pendingRename;
+
+    /// <summary>The question the rename dialog was last opened for, so it is opened once per question.</summary>
+    private static FileQuestion? _shownRename;
+
+    /// <summary>What the rename dialog's box holds: the new name, without the .sav suffix.</summary>
+    private static string _renameTo = string.Empty;
+
+    /// <summary>The delete the user picked from a row's menu, waiting for the answer to its question.</summary>
+    private static FileQuestion? _pendingDelete;
+
+    /// <summary>The question the delete dialog was last opened for, so it is opened once per question.</summary>
+    private static FileQuestion? _shownDelete;
+
+    private const string RenameId = "###savefiles-rename";
+
+    private const string DeleteId = "###savefiles-delete";
+
+    /// <summary>What a row's tooltip adds, since nothing else on the row says the menu is there.</summary>
+    private const string RowMenuHint = "Right-click it to rename or delete it.\nF2 and Delete do the same for the selected save.";
 
     /// <summary>Seconds since SAVEFILE_INFO was last re-read while it said the helper had not run.</summary>
     private static float _sinceInfo;
@@ -73,18 +99,26 @@ public static class SaveFilesPanel
         _entries = Array.Empty<SaveFileEntry>();
         _fileIndex = -1;
         _name = string.Empty;
-        _renameTo = string.Empty;
         ClearTransfer();
     }
 
-    /// <summary>The progress readout describes a transfer against a session that is now gone.</summary>
+    /// <summary>
+    /// The progress readout describes a transfer against a session that is now gone, and a rename or
+    /// delete still waiting for its answer was asked about a list that is now gone with it.
+    /// </summary>
     public static void ClearTransfer()
     {
         _status = string.Empty;
         _transferred = 0;
-        _confirmDelete = false;
+        DropQuestions();
         _busy = false;
         _listing = false;
+    }
+
+    private static void DropQuestions()
+    {
+        _pendingRename = null;
+        _pendingDelete = null;
     }
 
     private static string Category =>
@@ -101,14 +135,17 @@ public static class SaveFilesPanel
         var session = state.Session;
         string title = session.TitleId;
 
+        // A rename or a delete still waiting for its answer goes with the list it was asked about.
         if (!state.Connected)
         {
+            DropQuestions();
             Ui.Hint("Connect to a console to manage save files.");
             return;
         }
 
         if (string.IsNullOrEmpty(title))
         {
+            DropQuestions();
             Ui.Hint("No game is running, so there is no savefile library to show.");
             return;
         }
@@ -196,7 +233,7 @@ public static class SaveFilesPanel
         DrawCategoryRow(state, title);
 
         ImGui.Spacing();
-        DrawFileList(state);
+        DrawFileList(title);
 
         ImGui.Spacing();
         DrawActions(state, title, save, load, enabled);
@@ -208,6 +245,9 @@ public static class SaveFilesPanel
             ImGui.TextColored(_busy ? Ui.Yellow : Ui.Grey, _status);
             if (_transferred > 0) Ui.Hint($"{_transferred} bytes");
         }
+
+        DrawRenameQuestion(state);
+        DrawDeleteQuestion(state);
     }
 
     private static void DrawCategoryRow(AppState state, string title)
@@ -274,7 +314,7 @@ public static class SaveFilesPanel
         });
     }
 
-    private static void DrawFileList(AppState state)
+    private static void DrawFileList(string title)
     {
         if (!ImGui.BeginChild("##savefiles", new Vector2(-1, 220), ImGuiChildFlags.Borders))
         {
@@ -301,6 +341,10 @@ public static class SaveFilesPanel
                 var entry = _entries[i];
 
                 ImGui.TableNextRow();
+
+                // The row's menu is "row-menu" on every row, so each row's id is pushed around it:
+                // the file's own name, which keeps a menu on its file when a rescan reorders the list.
+                ImGui.PushID(entry.Name);
                 ImGui.TableNextColumn();
 
                 // The row shows the name without the .sav every file in here ends in; the id after
@@ -310,8 +354,22 @@ public static class SaveFilesPanel
                         ImGuiSelectableFlags.SpanAllColumns))
                 {
                     _fileIndex = i;
-                    _renameTo = entry.DisplayName;
-                    _confirmDelete = false;
+                }
+
+                // A right-click selects the row it opens the menu on, as a file manager does, so the
+                // highlighted row is always the one the menu is about.
+                if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) _fileIndex = i;
+
+                // Read before the menu is drawn: the selectable spans the row, so this is the row's
+                // tooltip wherever the pointer settles on it, and it says where the save lives as
+                // well as where its menu is.
+                bool hovered = ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal);
+                bool menuOpen = DrawRowMenu(entry, title);
+                if (hovered && !menuOpen)
+                {
+                    ImGui.BeginTooltip();
+                    ImGui.TextUnformatted(Tooltip(entry));
+                    ImGui.EndTooltip();
                 }
 
                 ImGui.TableNextColumn();
@@ -320,26 +378,65 @@ public static class SaveFilesPanel
                 // "both, differ" is the one case where loading sends the file: this PC's copy is
                 // the one the user picked, so it is the one that wins.
                 Ui.Text(entry.Differs ? Ui.Yellow : Ui.Grey, entry.Where);
-                if (ImGui.IsItemHovered(ImGuiHoveredFlags.DelayNormal))
+
+                if (Ui.Debug)
                 {
-                    ImGui.BeginTooltip();
-                    ImGui.TextUnformatted(Tooltip(entry));
-                    ImGui.EndTooltip();
+                    ImGui.TableNextColumn();
+                    ImGui.TextUnformatted(entry.Size > 0 ? $"{entry.Size / 1024} KB" : "-");
                 }
 
-                if (!Ui.Debug) continue;
-
-                ImGui.TableNextColumn();
-                ImGui.TextUnformatted(entry.Size > 0 ? $"{entry.Size / 1024} KB" : "-");
+                ImGui.PopID();
             }
 
             ImGui.EndTable();
         }
 
+        // F2 and Delete, the keys a file manager has for the same two things, while the list has
+        // the keyboard: they ask the same questions the row's menu does, of the selected save.
+        if (Selected is { } chosen && !_busy && ImGui.IsWindowFocused())
+        {
+            if (ImGui.IsKeyPressed(ImGuiKey.F2, false)) AskRename(chosen, title);
+            else if (ImGui.IsKeyPressed(ImGuiKey.Delete, false)) AskDelete(chosen, title);
+        }
+
         ImGui.EndChild();
     }
 
-    private static string Tooltip(SaveFileEntry entry) => entry.Location switch
+    /// <summary>
+    /// A row's right-click menu: Rename and Delete, the two things that used to be buttons under
+    /// the list. Each only asks its question here; nothing changes until the user answers it.
+    /// Returns whether the menu is open, so the row's tooltip stays out of its way.
+    /// </summary>
+    private static bool DrawRowMenu(SaveFileEntry entry, string title)
+    {
+        if (!ImGui.BeginPopupContextItem("row-menu")) return false;
+
+        const string busyReason = "Wait for the save, load or change under way to finish.";
+
+        if (ImGui.MenuItem("Rename...", "F2", false, !_busy)) AskRename(entry, title);
+        if (_busy) Ui.Tooltip(busyReason);
+
+        if (ImGui.MenuItem("Delete...", "Delete", false, !_busy)) AskDelete(entry, title);
+        if (_busy) Ui.Tooltip(busyReason);
+
+        ImGui.EndPopup();
+        return true;
+    }
+
+    private static void AskRename(SaveFileEntry entry, string title)
+    {
+        _pendingDelete = null;
+        _pendingRename = new FileQuestion(entry, title, Category);
+        _renameTo = entry.DisplayName;
+    }
+
+    private static void AskDelete(SaveFileEntry entry, string title)
+    {
+        _pendingRename = null;
+        _pendingDelete = new FileQuestion(entry, title, Category);
+    }
+
+    private static string Tooltip(SaveFileEntry entry) => (entry.Location switch
     {
         SaveFileLocation.Console =>
             $"{entry.Name}\nOn the console only. Loading it sends nothing.",
@@ -350,7 +447,214 @@ public static class SaveFilesPanel
             + $"(console {entry.ConsoleCrc:x8}, PC {entry.PcCrc:x8}).\n"
             + "Loading it sends this PC's copy and replaces the console's.",
         _ => $"{entry.Name}\nBoth copies exist and agree (CRC {entry.ConsoleCrc:x8}).",
+    }) + "\n" + RowMenuHint;
+
+    // ---------------------------------------------------------------- the two questions
+
+    /// <summary>What the rename dialog makes of the name typed into it.</summary>
+    public enum RenameCheck
+    {
+        /// <summary>A new name nothing else in the category has: Rename goes ahead.</summary>
+        Ok,
+
+        /// <summary>Nothing typed yet.</summary>
+        Blank,
+
+        /// <summary>The name the save already has.</summary>
+        Unchanged,
+
+        /// <summary>Another save in the category already has that name.</summary>
+        Taken,
+    }
+
+    /// <summary>
+    /// The file name a rename to <paramref name="typed"/> gives the save, the same way a save is
+    /// named: kept inside the library and given the .sav suffix.
+    /// </summary>
+    public static string RenameTarget(string typed) =>
+        SaveFileLibrary.EnsureExtension(SaveFileLibrary.Sanitise(typed, "savefile"));
+
+    /// <summary>
+    /// Whether <paramref name="typed"/> is a name <paramref name="entry"/> can be renamed to among
+    /// the category's <paramref name="entries"/>. Another save's name is refused whatever its case,
+    /// since one of the two sides may well ignore case; the save's own name in another case is a
+    /// rename like any other.
+    /// </summary>
+    public static RenameCheck CheckRename(string typed, SaveFileEntry entry, IReadOnlyList<SaveFileEntry> entries)
+    {
+        if (string.IsNullOrWhiteSpace(typed)) return RenameCheck.Blank;
+
+        string target = RenameTarget(typed);
+        if (string.Equals(target, entry.Name, StringComparison.Ordinal)) return RenameCheck.Unchanged;
+
+        foreach (var other in entries)
+        {
+            if (string.Equals(other.Name, entry.Name, StringComparison.Ordinal)) continue;
+            if (string.Equals(other.Name, target, StringComparison.OrdinalIgnoreCase)) return RenameCheck.Taken;
+        }
+
+        return RenameCheck.Ok;
+    }
+
+    /// <summary>What the rename dialog says will be renamed, by where the save lives.</summary>
+    public static string RenameWhere(SaveFileEntry entry) => entry.Location switch
+    {
+        SaveFileLocation.Console => "Only the console has this save, so only its copy is renamed.",
+        SaveFileLocation.Pc => "Only this PC has this save, so only its copy is renamed.",
+        _ => "The console's copy and this PC's are both renamed.",
     };
+
+    /// <summary>What the delete dialog says will be deleted, by where the save lives.</summary>
+    public static string DeleteWhere(SaveFileEntry entry) => entry.Location switch
+    {
+        SaveFileLocation.Console => $"{entry.DisplayName} is deleted from the console. This PC has no copy of it.",
+        SaveFileLocation.Pc => $"{entry.DisplayName} is deleted from this PC. The console has no copy of it.",
+        _ => $"{entry.DisplayName} is deleted from the console and from this PC.",
+    };
+
+    /// <summary>
+    /// The rename dialog: a box holding the new name, which has the keyboard when the dialog opens,
+    /// so typing and Enter is the whole of a rename. Rename is greyed out until the name is a new
+    /// one, and says why when another save already has it.
+    /// </summary>
+    private static void DrawRenameQuestion(AppState state)
+    {
+        var question = _pendingRename;
+        if (question is null)
+        {
+            _shownRename = null;
+            return;
+        }
+
+        string label = $"Rename {question.Entry.DisplayName}{RenameId}";
+        if (!ReferenceEquals(question, _shownRename))
+        {
+            _shownRename = question;
+            ImGui.OpenPopup(label);
+        }
+        else if (!ImGui.IsPopupOpen(label))
+        {
+            _pendingRename = null;
+            _shownRename = null;
+            return;
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(label, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!open) _pendingRename = null;
+            return;
+        }
+
+        Ui.Paragraph($"New name for {question.Entry.DisplayName}:");
+
+        if (ImGui.IsWindowAppearing()) ImGui.SetKeyboardFocusHere();
+        ImGui.SetNextItemWidth(320);
+        bool submitted = Ui.SubmitTextWithHint("##renameto", "New name", ref _renameTo, 64);
+
+        var check = CheckRename(_renameTo, question.Entry, _entries);
+        if (check == RenameCheck.Taken)
+        {
+            Ui.Warning($"A save called {SaveFileLibrary.DisplayName(RenameTarget(_renameTo))} is already in this category.");
+        }
+
+        ImGui.Spacing();
+        Ui.Hint(RenameWhere(question.Entry));
+        ImGui.Separator();
+
+        bool canRename = check == RenameCheck.Ok && !_busy;
+        ImGui.BeginDisabled(!canRename);
+        bool confirm = ImGui.Button("Rename", new Vector2(140, 0)) || (submitted && canRename);
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new Vector2(120, 0));
+
+        if (confirm)
+        {
+            _pendingRename = null;
+            StartRename(state, question.Title, question.Category, question.Entry, RenameTarget(_renameTo));
+            ImGui.CloseCurrentPopup();
+        }
+        else if (cancel || !open)
+        {
+            _pendingRename = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
+    /// <summary>
+    /// The question before a save is deleted, the way the Mods panel asks before an uninstall: what
+    /// goes, from where, then Delete and Cancel, with Cancel the answer Enter gives.
+    /// </summary>
+    private static void DrawDeleteQuestion(AppState state)
+    {
+        var question = _pendingDelete;
+        if (question is null)
+        {
+            _shownDelete = null;
+            return;
+        }
+
+        string label = $"Delete {question.Entry.DisplayName}?{DeleteId}";
+        if (!ReferenceEquals(question, _shownDelete))
+        {
+            _shownDelete = question;
+            ImGui.OpenPopup(label);
+        }
+        else if (!ImGui.IsPopupOpen(label))
+        {
+            _pendingDelete = null;
+            _shownDelete = null;
+            return;
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(label, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!open) _pendingDelete = null;
+            return;
+        }
+
+        Ui.Paragraph(DeleteWhere(question.Entry));
+        ImGui.Spacing();
+        Ui.Hint("A deleted save cannot be brought back.");
+        ImGui.Separator();
+
+        ImGui.BeginDisabled(_busy);
+        bool confirm = ImGui.Button("Delete", new Vector2(140, 0));
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new Vector2(120, 0));
+
+        // Enter on a dialog that has just opened answers no.
+        ImGui.SetItemDefaultFocus();
+
+        if (confirm)
+        {
+            _pendingDelete = null;
+            StartDelete(state, question.Title, question.Category, question.Entry);
+            ImGui.CloseCurrentPopup();
+        }
+        else if (cancel || !open)
+        {
+            _pendingDelete = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
 
     private static void DrawActions(AppState state, string title, Feature? save, Feature? load, bool enabled)
     {
@@ -367,39 +671,20 @@ public static class SaveFilesPanel
         if (ImGui.Button("Save on console") || (saveNow && canSave)) StartSave(state, title);
         ImGui.EndDisabled();
 
+        // Rename and Delete are on each row's right-click menu, which the row's tooltip points at.
         ImGui.SameLine();
         ImGui.BeginDisabled(!enabled || load is null || selected is null);
         if (ImGui.Button("Load into game")) StartLoad(state, title, selected!.Value);
         ImGui.EndDisabled();
-
-        ImGui.BeginDisabled(selected is null || _busy);
-
-        ImGui.SetNextItemWidth(260);
-        bool renamed = Ui.SubmitTextWithHint("##rename", "Rename to", ref _renameTo, 64);
-        ImGui.SameLine();
-        if (ImGui.Button("Rename") || renamed) StartRename(state, title, selected!.Value);
-
-        ImGui.SameLine();
-        if (_confirmDelete)
-        {
-            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
-            if (ImGui.Button($"Delete '{selected?.DisplayName}'?"))
-            {
-                _confirmDelete = false;
-                StartDelete(state, title, selected!.Value);
-            }
-
-            ImGui.PopStyleColor();
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel")) _confirmDelete = false;
-        }
-        else if (ImGui.Button("Delete..."))
-        {
-            _confirmDelete = true;
-        }
-
-        ImGui.EndDisabled();
     }
+
+    /// <summary>
+    /// The toast for a save or a load that did not happen: one the console refused outright says
+    /// so, with its reason (the game busy, no save yet), and one that stopped on the way says it did
+    /// not finish, with what stopped it.
+    /// </summary>
+    public static string FailureToast(bool load, Exception ex) =>
+        $"The {(load ? "load" : "save")} {(ex is SaveFileTransfer.RefusedException ? "was refused" : "did not finish")}: {ex.Message}";
 
     /// <summary>
     /// SAVEFILE_STORE, poll SAVEFILE_INFO to completion, then mirror the file down when mirroring
@@ -440,13 +725,14 @@ public static class SaveFilesPanel
             }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
                                           or SaveFileTransfer.TransferFailedException
+                                          or SaveFileTransfer.RefusedException
                                           or QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
                 state.Post(() =>
                 {
                     _status = ex.Message;
-                    state.AddToast($"The save did not finish: {ex.Message}", ToastKind.Error);
+                    state.AddToast(FailureToast(false, ex), ToastKind.Error);
                 });
             }
             finally
@@ -494,13 +780,14 @@ public static class SaveFilesPanel
             }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
                                           or SaveFileTransfer.TransferFailedException
+                                          or SaveFileTransfer.RefusedException
                                           or QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
                 state.Post(() =>
                 {
                     _status = ex.Message;
-                    state.AddToast($"The load did not finish: {ex.Message}", ToastKind.Error);
+                    state.AddToast(FailureToast(true, ex), ToastKind.Error);
                 });
             }
             finally
@@ -510,13 +797,12 @@ public static class SaveFilesPanel
         });
     }
 
-    /// <summary>Both copies, and the CRC sidecar the console keeps beside its own.</summary>
-    private static void StartRename(AppState state, string title, SaveFileEntry entry)
+    /// <summary>
+    /// Both copies, and the CRC sidecar the console keeps beside its own. <paramref name="renamed"/>
+    /// is a whole file name, .sav and all (<see cref="RenameTarget"/>), so the file on both sides keeps it.
+    /// </summary>
+    private static void StartRename(AppState state, string title, string category, SaveFileEntry entry, string renamed)
     {
-        // The box holds a name without a suffix, the library takes whole file names: the .sav
-        // goes back on here so the file on both sides keeps it.
-        string renamed = SaveFileLibrary.EnsureExtension(SaveFileLibrary.Sanitise(_renameTo, "savefile"));
-        string category = Category;
         var library = state.SaveFiles;
 
         _busy = true;
@@ -544,9 +830,8 @@ public static class SaveFilesPanel
         });
     }
 
-    private static void StartDelete(AppState state, string title, SaveFileEntry entry)
+    private static void StartDelete(AppState state, string title, string category, SaveFileEntry entry)
     {
-        string category = Category;
         var library = state.SaveFiles;
 
         _busy = true;
@@ -558,7 +843,7 @@ public static class SaveFilesPanel
                     .ConfigureAwait(false);
                 state.Post(() =>
                 {
-                    state.AddToast("Deleted", ToastKind.Success);
+                    state.AddToast($"Deleted '{entry.DisplayName}'", ToastKind.Success);
                     _fileIndex = -1;
                     Rescan(state, title);
                 });

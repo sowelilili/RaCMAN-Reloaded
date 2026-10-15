@@ -116,11 +116,76 @@ public sealed class ModLibrary
 {
     public const string ConsoleRoot = "/dev_hdd0/qwark/mods";
 
+    /// <summary>
+    /// The shipped library's list of what the release put in it, one <c>TITLEID</c> or
+    /// <c>TITLEID/modfolder</c> per line, written by publish.ps1. See <see cref="ReadShippedManifest"/>.
+    /// </summary>
+    public const string ShippedManifestName = "shipped.txt";
+
+    private readonly Lazy<HashSet<string>?> _shippedManifest;
+
     public ModLibrary(string rootPath, string? shippedRootPath = null)
     {
         RootPath = rootPath;
         ShippedRootPath = shippedRootPath;
+
+        // Read once: the application folder is the release's and does not change under a running
+        // client. A manifest that cannot be read counts as none, which is how the library behaved
+        // before there was one.
+        _shippedManifest = new Lazy<HashSet<string>?>(() =>
+        {
+            if (shippedRootPath is null) return null;
+
+            try
+            {
+                return ReadShippedManifest(shippedRootPath);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        });
     }
+
+    /// <summary>
+    /// The folders under a shipped <c>mods/</c> its release staged, as <c>TITLEID</c> and
+    /// <c>TITLEID/modfolder</c> entries, compared without regard to case. Null when there is no
+    /// manifest at all: a development tree, where everything in the folder is the repo's.
+    /// </summary>
+    public static HashSet<string>? ReadShippedManifest(string modsFolder)
+    {
+        var path = System.IO.Path.Combine(modsFolder, ShippedManifestName);
+        if (!File.Exists(path)) return null;
+
+        var entries = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var line in File.ReadAllLines(path))
+        {
+            var entry = line.Trim().Replace('\\', '/').Trim('/');
+            if (entry.Length == 0 || entry[0] == '#') continue;
+            entries.Add(entry);
+        }
+
+        return entries;
+    }
+
+    /// <summary>
+    /// Whether a mod folder in the shipped library is one its release shipped. With a manifest,
+    /// only the folders it lists are: a folder it does not list is left over from an older release
+    /// (a new one unzipped over an old one leaves the mods it stopped shipping behind) and is not
+    /// offered, though it is never deleted, since nothing writes the application folder. With no
+    /// manifest every folder is the release's.
+    /// </summary>
+    public bool IsShippedFolder(string titleId, string dirName) =>
+        _shippedManifest.Value is not { } listed || listed.Contains($"{titleId}/{dirName}");
+
+    /// <summary>
+    /// The shipped mod of a folder name, or null when the release ships none by that name: no
+    /// shipped library, a folder its manifest does not list, or no patch.txt in it.
+    /// </summary>
+    public LocalMod? ReadShipped(string titleId, string dirName) =>
+        ShippedTitleFolder(titleId) is { } folder && IsShippedFolder(titleId, dirName)
+            ? Read(System.IO.Path.Combine(folder, dirName), shipped: true)
+            : null;
 
     /// <summary>
     /// The user's library root, holding one folder per title id. Everything written by this class
@@ -149,7 +214,8 @@ public sealed class ModLibrary
     /// Every mod for a title, the user's and the release's together, sorted by name: folders without
     /// a patch.txt and mods marked invisible are skipped, and a user mod is used instead of a
     /// shipped one with the same folder name, which is how a shipped mod is edited without the next
-    /// update overwriting the edit.
+    /// update overwriting the edit. A shipped folder the release's manifest does not list is skipped
+    /// too (<see cref="IsShippedFolder"/>).
     /// </summary>
     public IReadOnlyList<LocalMod> Scan(string titleId)
     {
@@ -157,18 +223,23 @@ public sealed class ModLibrary
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         // The user's folder first, so its DirName claims the name before the shipped one is read.
-        ScanInto(TitleFolder(titleId), shipped: false, mods, seen);
-        if (ShippedTitleFolder(titleId) is { } shippedFolder) ScanInto(shippedFolder, shipped: true, mods, seen);
+        ScanInto(TitleFolder(titleId), shipped: false, mods, seen, keep: null);
+        if (ShippedTitleFolder(titleId) is { } shippedFolder)
+        {
+            ScanInto(shippedFolder, shipped: true, mods, seen, keep: dirName => IsShippedFolder(titleId, dirName));
+        }
 
         return mods.OrderBy(m => m.Name, StringComparer.OrdinalIgnoreCase).ToList();
     }
 
-    private static void ScanInto(string folder, bool shipped, List<LocalMod> mods, HashSet<string> seen)
+    private static void ScanInto(string folder, bool shipped, List<LocalMod> mods, HashSet<string> seen, Func<string, bool>? keep)
     {
         if (!System.IO.Directory.Exists(folder)) return;
 
         foreach (var dir in System.IO.Directory.EnumerateDirectories(folder))
         {
+            if (keep is not null && !keep(System.IO.Path.GetFileName(dir))) continue;
+
             var mod = Read(dir, shipped);
             if (mod is not { Visible: true }) continue;
             if (!seen.Add(mod.DirName)) continue;
@@ -381,9 +452,7 @@ public sealed class ModLibrary
             // What this ZIP would replace: the user's copy if there is one, else the shipped mod of
             // that folder name, since the install lands in front of it either way.
             var installed = Read(System.IO.Path.Combine(TitleFolder(titleId), mod.DirName))
-                            ?? (ShippedTitleFolder(titleId) is { } shipped
-                                ? Read(System.IO.Path.Combine(shipped, mod.DirName), shipped: true)
-                                : null);
+                            ?? ReadShipped(titleId, mod.DirName);
             var kind = ZipInstallKind.New;
             if (installed is not null)
             {

@@ -294,9 +294,7 @@ public static class ModsPanel
             look = new Rpcs3UninstallLook(folder, file, disk?.Folder.Problem ?? "RPCS3's folder has not been looked at yet");
         }
 
-        bool shippedBehind = row.Local is { Shipped: false } mine
-                             && state.Mods.ShippedTitleFolder(title) is { } shipped
-                             && ModLibrary.Read(Path.Combine(shipped, mine.DirName), shipped: true) is not null;
+        bool shippedBehind = row.Local is { Shipped: false } mine && state.Mods.ReadShipped(title, mine.DirName) is not null;
 
         return ModUninstall.Plan(row, title, rpcs3, look, shippedBehind);
     }

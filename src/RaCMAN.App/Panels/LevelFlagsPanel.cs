@@ -21,19 +21,13 @@ public static class LevelFlagsPanel
     /// <summary>What "Check all" writes to every byte: all eight bits set.</summary>
     public const byte AllBits = 0xFF;
 
-    /// <summary>Which of the row's two confirmations is showing. One at most, so there is one field.</summary>
-    private enum Armed
-    {
-        None,
-        Reset,
-        CheckAll,
-    }
-
     private static byte[] _flags = Array.Empty<byte>();
     private static int _loadedPlanet = -1;
     private static int _planet = -1;
     private static float _sinceRefresh;
-    private static Armed _armed;
+
+    /// <summary>True while "Check all" is waiting for its second click.</summary>
+    private static bool _checkAllArmed;
 
     /// <summary>The red of a confirmation button: the second click that writes game memory.</summary>
     private static readonly Vector4 ConfirmColour = new(0.6f, 0.2f, 0.2f, 1f);
@@ -56,7 +50,7 @@ public static class LevelFlagsPanel
         _flags = Array.Empty<byte>();
         _loadedPlanet = -1;
         _sinceRefresh = 0;
-        _armed = Armed.None;
+        _checkAllArmed = false;
     }
 
     public static void Draw(AppState state)
@@ -102,53 +96,42 @@ public static class LevelFlagsPanel
         }
 
         // Resetting or checking a planet's flags writes game memory, so unlike the reads above it
-        // needs a game to write to. The rest of the row keeps working between sessions. Each asks
-        // for a second click, and arming one puts the other back, so there is only ever one
-        // confirmation on the row to click.
+        // needs a game to write to. The rest of the row keeps working between sessions. Reset goes
+        // at once: its confirmation made a row that is already wide wider still, and could end up
+        // past the window's edge where it could not be clicked. Pressing it puts an armed Check
+        // all back, so the row never has a question left waiting.
         ImGui.BeginDisabled(!state.Ingame);
         ImGui.SameLine();
-        if (_armed == Armed.Reset)
+        if (ImGui.Button("Reset flags"))
         {
-            ImGui.PushStyleColor(ImGuiCol.Button, ConfirmColour);
-            if (ImGui.Button("Confirm reset"))
+            _checkAllArmed = false;
+            byte planet = (byte)_planet;
+            state.Run(async () =>
             {
-                _armed = Armed.None;
-                byte planet = (byte)_planet;
-                state.Run(async () =>
-                {
-                    await state.Client.LevelFlagsResetAsync(planet).ConfigureAwait(false);
-                    state.Post(() => Load(state));
-                }, $"Level flags reset on planet {planet}");
-            }
-
-            ImGui.PopStyleColor();
-            ImGui.SameLine();
-            if (ImGui.Button("Cancel##reset")) _armed = Armed.None;
-        }
-        else if (ImGui.Button("Reset flags..."))
-        {
-            _armed = Armed.Reset;
+                await state.Client.LevelFlagsResetAsync(planet).ConfigureAwait(false);
+                state.Post(() => Load(state));
+            }, $"Level flags reset on planet {planet}");
         }
 
         // Check all also needs the bytes themselves: their count is how many it writes.
         ImGui.SameLine();
         ImGui.BeginDisabled(_flags.Length == 0);
-        if (_armed == Armed.CheckAll)
+        if (_checkAllArmed)
         {
             ImGui.PushStyleColor(ImGuiCol.Button, ConfirmColour);
             if (ImGui.Button("Confirm check all"))
             {
-                _armed = Armed.None;
+                _checkAllArmed = false;
                 CheckAll(state);
             }
 
             ImGui.PopStyleColor();
             ImGui.SameLine();
-            if (ImGui.Button("Cancel##checkall")) _armed = Armed.None;
+            if (ImGui.Button("Cancel##checkall")) _checkAllArmed = false;
         }
         else
         {
-            if (ImGui.Button("Check all...")) _armed = Armed.CheckAll;
+            if (ImGui.Button("Check all...")) _checkAllArmed = true;
             Ui.Tooltip("Sets every flag bit of this planet: each byte in the table is written as FF.");
         }
 

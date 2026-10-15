@@ -977,6 +977,197 @@ public class SaveFileTests : IDisposable
         }
     }
 
+    // ------------------------------------------- errors 6 and 7: the game refuses
+
+    [Fact]
+    public void ErrorSevenIsNoSaveAndRoundTripsInTheInfoReply()
+    {
+        Assert.Equal(6, (byte)SaveFileError.NotIdle);
+        Assert.Equal(7, (byte)SaveFileError.NoSave);
+
+        var info = new SaveFileInfo(true, true, true, 0, 0x200000, Error: SaveFileError.NoSave);
+        var bytes = info.ToBytes();
+
+        // The error byte follows size, done and total, and three bytes of padding follow it.
+        Assert.Equal(7, bytes[16]);
+        Assert.Equal(SaveFileError.NoSave, SaveFileInfo.Parse(bytes).Error);
+    }
+
+    [Fact]
+    public void ErrorsSixAndSevenAreNamedInWordsForEachRequest()
+    {
+        // Six: the game is somewhere a save cannot be taken or put back. Since build 53 that is
+        // RaC1 and RaC2 as well, and a load needs a moment the game would pause in.
+        foreach (var request in Enum.GetValues<SaveFileRequest>())
+        {
+            string busy = SaveFileError.NotIdle.Describe(request);
+            Assert.Contains("the game is busy", busy, StringComparison.Ordinal);
+            foreach (var where in new[] { "cutscene", "menu", "vendor", "dialog", "planet load" })
+            {
+                Assert.Contains(where, busy, StringComparison.Ordinal);
+            }
+        }
+
+        // Seven: no save to act on, which is a different thing for each request.
+        Assert.Equal("the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
+            SaveFileError.NoSave.Describe(SaveFileRequest.Store));
+        Assert.Equal(SaveFileError.NoSave.Describe(SaveFileRequest.Store), SaveFileError.NoSave.Describe());
+        Assert.StartsWith("there is no save to load yet", SaveFileError.NoSave.Describe(SaveFileRequest.Load));
+        Assert.Contains("Force autosave in RaC1", SaveFileError.NoSave.Describe(SaveFileRequest.Load));
+        Assert.Equal("that file is not a save of this game, so nothing was loaded",
+            SaveFileError.NoSave.Describe(SaveFileRequest.Restore));
+
+        // The other errors read the same whatever was asked for.
+        Assert.Equal(SaveFileError.FileMissing.Describe(), SaveFileError.FileMissing.Describe(SaveFileRequest.Restore));
+
+        // Five, six and seven are why a request was refused; the rest are why a copy stopped.
+        Assert.True(SaveFileError.BufferBusy.IsRefusal());
+        Assert.True(SaveFileError.NotIdle.IsRefusal());
+        Assert.True(SaveFileError.NoSave.IsRefusal());
+        Assert.False(SaveFileError.None.IsRefusal());
+        Assert.False(SaveFileError.IoError.IsRefusal());
+        Assert.False(SaveFileError.HelperMissing.IsRefusal());
+    }
+
+    [Theory]
+    [InlineData(SaveFileError.NotIdle)]
+    [InlineData(SaveFileError.NoSave)]
+    public async Task AStoreTheGameRefusesSaysWhyAndWritesNothing(SaveFileError refusal)
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            server.SaveFileRefusal = refusal;
+
+            var refused = await Assert.ThrowsAsync<SaveFileTransfer.RefusedException>(
+                () => SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true));
+
+            Assert.Equal(refusal, refused.Error);
+            Assert.Equal(SaveFileRequest.Store, refused.Request);
+            Assert.Equal(refusal.Describe(SaveFileRequest.Store), refused.Message);
+            Assert.Equal(Status.Busy, refused.Status.Status);
+
+            // Refused before anything was raised or written, on either side.
+            Assert.Empty(server.SaveFileLibraryOrder);
+            Assert.Empty(await client.SaveFileListAsync("any%"));
+            Assert.Empty(library.Files(Title, "any%"));
+        }
+    }
+
+    [Fact]
+    public async Task ARestoreTheGameRefusesAsBusySaysSoButNoSaveYetDoesNotStopOne()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+
+            server.SaveFileRefusal = SaveFileError.NotIdle;
+            var refused = await Assert.ThrowsAsync<SaveFileTransfer.RefusedException>(
+                () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.Equal(SaveFileError.NotIdle, refused.Error);
+            Assert.Equal(SaveFileRequest.Restore, refused.Request);
+            Assert.Null(server.LoadedSaveFile);
+
+            // A RESTORE brings a save of its own, so a game with none yet still takes it.
+            server.SaveFileRefusal = SaveFileError.NoSave;
+            Assert.False(await SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.NotNull(server.LoadedSaveFile);
+        }
+    }
+
+    [Fact]
+    public async Task ARestoreOfAFileThatIsNotASaveOfThisGameStopsWithErrorSeven()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+
+            // qwark copies the file in, finds it is not a save of the running game, and raises nothing.
+            server.SaveFileTransferError = SaveFileError.NoSave;
+            var failed = await Assert.ThrowsAsync<SaveFileTransfer.TransferFailedException>(
+                () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+
+            Assert.Equal(SaveFileError.NoSave, failed.Error);
+            Assert.Equal("that file is not a save of this game, so nothing was loaded", failed.Message);
+            Assert.Null(server.LoadedSaveFile);
+        }
+    }
+
+    [Theory]
+    [InlineData(SaveFileError.NotIdle, SaveFileRequest.Store)]
+    [InlineData(SaveFileError.NotIdle, SaveFileRequest.Load)]
+    [InlineData(SaveFileError.NoSave, SaveFileRequest.Store)]
+    [InlineData(SaveFileError.NoSave, SaveFileRequest.Load)]
+    public async Task TheSetAsideAndLoadActionsTheGameRefusesSayWhy(SaveFileError refusal, SaveFileRequest request)
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var action = request == SaveFileRequest.Store ? server.Describe.SaveAsideAction! : server.Describe.LoadAsideAction!;
+            server.SaveFileRefusal = refusal;
+
+            var refused = await Assert.ThrowsAsync<SaveFileTransfer.RefusedException>(
+                () => SaveFileTransfer.TriggerAsync(client, action.Id, request));
+
+            Assert.Equal(refusal, refused.Error);
+            Assert.Equal(refusal.Describe(request), refused.Message);
+            Assert.Empty(server.SaveFileOrder);
+            Assert.Null(server.LoadedSaveFile);
+
+            // Once the game is ready the same button goes through.
+            server.SaveFileRefusal = SaveFileError.None;
+            await SaveFileTransfer.TriggerAsync(client, action.Id, request);
+            Assert.Single(server.SaveFileOrder);
+        }
+    }
+
+    [Fact]
+    public async Task ABusyWithNoReasonBehindItStaysABusy()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            // A BUSY with no refusal's reason in SAVEFILE_INFO goes on as it came, and so does any
+            // status that is not BUSY at all.
+            var plain = await Assert.ThrowsAsync<QwarkStatusException>(() => SaveFileTransfer.RaiseAsync(client,
+                SaveFileRequest.Store, _ => Task.FromException(new QwarkStatusException(Opcode.SaveFileStore, Status.Busy))));
+            Assert.Equal(Status.Busy, plain.Status);
+
+            var missing = await Assert.ThrowsAsync<QwarkStatusException>(() => SaveFileTransfer.RaiseAsync(client,
+                SaveFileRequest.Restore, token => client.SaveFileRestoreAsync("any%", "gone.sav", token)));
+            Assert.Equal(Status.NotFound, missing.Status);
+
+            // A refusal leaves its reason in SAVEFILE_INFO's error, but a game starting refuses
+            // SAVEFILE_INFO as well, so nothing pins the old reason on the launch's BUSY.
+            server.SaveFileRefusal = SaveFileError.NoSave;
+            var action = server.Describe.SaveAsideAction!;
+            await Assert.ThrowsAsync<SaveFileTransfer.RefusedException>(
+                () => SaveFileTransfer.TriggerAsync(client, action.Id, SaveFileRequest.Store));
+
+            server.Booting = true;
+            var busy = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => SaveFileTransfer.TriggerAsync(client, action.Id, SaveFileRequest.Store));
+            Assert.Equal(Status.Busy, busy.Status);
+        }
+    }
+
     [Fact]
     public async Task ATransferThatNeverFinishesGivesUpRatherThanHanging()
     {

@@ -769,6 +769,9 @@ public static class GamePanel
     /// </summary>
     public static bool AsideBlocked(SessionInfo session, SaveFileInfo info) => !SaveFilesPanel.HelperIn(session, info);
 
+    /// <summary>The toast for a set-aside or load button the console refused, by the button's label and the reason in words.</summary>
+    public static string AsideRefusedToast(string label, string reason) => $"{label} was refused: {reason}";
+
     /// <summary>What each set-aside button was last drawn as, by label: true when it could be pressed. For the headless summary.</summary>
     private static readonly SortedDictionary<string, bool> AsideButtonsDrawn = new(StringComparer.Ordinal);
 
@@ -786,8 +789,24 @@ public static class GamePanel
         ImGui.PushID(action.Id);
         if (ImGui.Button(action.Label, size) && !blocked)
         {
+            // A refusal comes back as BUSY with SAVEFILE_INFO's error saying why - the game busy,
+            // or no save yet - and that reason is what the toast says. Every other answer is
+            // toasted as any other button's is.
             byte id = action.Id;
-            state.Run(() => state.Client.FeatureTriggerAsync(id));
+            string label = action.Label;
+            var request = action.SavesAside ? SaveFileRequest.Store : SaveFileRequest.Load;
+            state.Run(async () =>
+            {
+                try
+                {
+                    await SaveFileTransfer.TriggerAsync(state.Client, id, request).ConfigureAwait(false);
+                }
+                catch (SaveFileTransfer.RefusedException refused)
+                {
+                    string text = AsideRefusedToast(label, refused.Message);
+                    state.Post(() => state.AddToast(text, ToastKind.Error));
+                }
+            });
         }
 
         ImGui.PopID();

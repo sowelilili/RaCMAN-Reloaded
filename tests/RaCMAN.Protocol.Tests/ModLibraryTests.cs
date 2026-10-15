@@ -227,6 +227,96 @@ public class ModLibraryTests : IDisposable
         Assert.False(Assert.Single(library.Scan(TitleId)).Shipped);
     }
 
+    // ---------------------------------------------------------------- a mod the release stopped shipping
+
+    /// <summary>
+    /// The shipped library as a release that stopped shipping <c>retired</c> leaves it when it is
+    /// unzipped over the one before: the old folder still there, and a manifest that no longer lists it.
+    /// </summary>
+    private (ModLibrary Library, string User, string Shipped) LibrariesWithALeftover()
+    {
+        var (_, user, shipped) = TwoLibraries();
+        MakeModFolder(Path.Combine(shipped, TitleId), "flight", "1.0.0");
+        MakeModFolder(Path.Combine(shipped, TitleId), "retired", "1.0.0");
+        File.WriteAllText(Path.Combine(shipped, ModLibrary.ShippedManifestName),
+            $"# what this release shipped\n{TitleId}\n{TitleId}/flight\n");
+
+        // A new library, so the manifest written above is the one it reads.
+        return (new ModLibrary(user, shipped), user, shipped);
+    }
+
+    [Fact]
+    public void AShippedFolderTheManifestNoLongerListsIsLeftOutAndLeftAlone()
+    {
+        var (library, _, shipped) = LibrariesWithALeftover();
+
+        var mod = Assert.Single(library.Scan(TitleId));
+        Assert.Equal("flight", mod.DirName);
+        Assert.True(mod.Shipped);
+
+        Assert.True(library.IsShippedFolder(TitleId, "flight"));
+        Assert.True(library.IsShippedFolder(TitleId, "FLIGHT"));
+        Assert.False(library.IsShippedFolder(TitleId, "retired"));
+        Assert.Null(library.ReadShipped(TitleId, "retired"));
+        Assert.NotNull(library.ReadShipped(TitleId, "flight"));
+
+        // Nothing writes the application folder, so the leftover is still on disk.
+        Assert.True(File.Exists(Path.Combine(shipped, TitleId, "retired", "patch.txt")));
+    }
+
+    [Fact]
+    public void TheUsersOwnCopyOfAModTheReleaseStoppedShippingStaysListedAsTheirs()
+    {
+        var (library, user, _) = LibrariesWithALeftover();
+        MakeModFolder(Path.Combine(user, TitleId), "retired", "1.0.1");
+
+        var mods = library.Scan(TitleId);
+
+        Assert.Equal(2, mods.Count);
+        var mine = mods.Single(m => m.DirName == "retired");
+        Assert.False(mine.Shipped);
+        Assert.Equal("1.0.1", mine.Version);
+    }
+
+    [Fact]
+    public void AZipOfAModTheReleaseStoppedShippingIsANewInstall()
+    {
+        var (library, _, _) = LibrariesWithALeftover();
+
+        using var candidate = library.OpenZip(BuildZip("retired", "1.0.0"), TitleId);
+
+        Assert.Equal(ZipInstallKind.New, candidate.Kind);
+        Assert.Null(candidate.Installed);
+    }
+
+    [Fact]
+    public void WithNoManifestEveryShippedFolderIsTheReleases()
+    {
+        var (library, _, shipped) = TwoLibraries();
+        MakeModFolder(Path.Combine(shipped, TitleId), "flight", "1.0.0");
+        MakeModFolder(Path.Combine(shipped, TitleId), "retired", "1.0.0");
+
+        Assert.Equal(2, library.Scan(TitleId).Count(m => m.Shipped));
+        Assert.True(library.IsShippedFolder(TitleId, "retired"));
+        Assert.NotNull(library.ReadShipped(TitleId, "retired"));
+    }
+
+    [Fact]
+    public void TheManifestIsReadAsPublishWritesIt()
+    {
+        Directory.CreateDirectory(_root);
+        File.WriteAllText(Path.Combine(_root, ModLibrary.ShippedManifestName),
+            "﻿# a comment\r\n\r\nNPEA00423\r\nNPEA00423\\il-ghost\r\n/libs/standard/\r\n");
+
+        var listed = ModLibrary.ReadShippedManifest(_root);
+
+        Assert.NotNull(listed);
+        Assert.Equal(3, listed!.Count);
+        Assert.Contains("npea00423/IL-GHOST", listed);
+        Assert.Contains("libs/standard", listed);
+        Assert.Null(ModLibrary.ReadShippedManifest(Path.Combine(_root, "nowhere")));
+    }
+
     private string BuildZip(string dirName, string version, bool extraEmptyFolder = false)
     {
         var staging = Path.Combine(_root, "staging", Guid.NewGuid().ToString("N"));
@@ -375,5 +465,11 @@ public class ShippedModLibraryTests
     public void TheFreecamIsNotShippedBecauseItFightsTheSavefileHelper()
     {
         Assert.False(Directory.Exists(Path.Combine(LibraryPath(), "NPEA00387", "coolcam")));
+    }
+
+    [Fact]
+    public void TheDeadlockedCrashPatchesAreNotShippedBecauseQwarkAppliesThemItself()
+    {
+        Assert.False(Directory.Exists(Path.Combine(LibraryPath(), "NPEA00423", "crash-patch")));
     }
 }

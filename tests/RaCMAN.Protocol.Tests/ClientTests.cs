@@ -1205,12 +1205,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(51, true)]     // the build before the one this client ships with
-    [InlineData(52, false)]    // exactly the expected build: mods larger than one frame can go to RPCS3 as paged MOD_PATCH replies
-    [InlineData(53, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(52, true)]     // the build before the one this client ships with
+    [InlineData(53, false)]    // exactly the expected build: the RaC1/RaC2 savefile helper pauses the game before loading and moved out of game memory
+    [InlineData(54, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(52, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(53, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 

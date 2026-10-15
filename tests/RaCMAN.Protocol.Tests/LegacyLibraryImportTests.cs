@@ -456,6 +456,25 @@ public class LegacyLibraryImportTests : IDisposable
     }
 
     [Fact]
+    public void TheOldCrashPatchesStayBehindNowThatQwarkCarriesThem()
+    {
+        // While this client shipped crash-patch, an old copy of it was one "already here". The
+        // release no longer ships it, so only the shipped list keeps it out of the user's library,
+        // where it would be a second copy of what qwark's Crash patches toggle already writes.
+        WriteShipped(AppPaths.ShippedModsManifest, "NPEA00423\nNPEA00423/il-ghost\n");
+        WriteOld("mods/NPEA00423/crash-patch/patch.txt", "#- name: DL Crash Patches\n0x80883c: 0x14151617\n");
+
+        var result = Run(LegacyModExclusions.Load(ShippedListPath()));
+
+        Assert.Equal(0, result.Mods);
+        Assert.Equal(0, result.ModsAlreadyHere);
+        Assert.False(Directory.Exists(Path.Combine(Mods, "NPEA00423", "crash-patch")));
+
+        var left = Assert.Single(result.Excluded);
+        Assert.Equal(("NPEA00423", "crash-patch", "built into qwark"), (left.TitleId, left.DirName, left.Reason));
+    }
+
+    [Fact]
     public void TheListIsReadByTitleAndFolderWhateverTheCase()
     {
         var exclusions = Excluding(

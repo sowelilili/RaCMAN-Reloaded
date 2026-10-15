@@ -169,17 +169,47 @@ public enum SaveFileError : byte
     BufferBusy = 5,
 
     /// <summary>
-    /// The game was not sitting still when the request was made (build 43): a planet load, a
-    /// cutscene, a lobby or a mode change in flight. Deadlocked only; the console refused before
-    /// touching the game or a file.
+    /// The game was not somewhere a save can be taken or put back (build 43): a planet load, a
+    /// cutscene, a menu, a lobby or a mode change in flight. Deadlocked since build 43, RaC1 and
+    /// RaC2 since build 53, whose loads also need a moment the game would let the player pause
+    /// (no vendor, no dialog, not the moment of arriving on a planet). The console refuses before
+    /// touching the game or a file, or the helper drops the request on the frame it would act.
     /// </summary>
     NotIdle = 6,
+
+    /// <summary>
+    /// There was no save to act on (build 53, revision 1.20). A set-aside found the game holding no
+    /// save yet: RaC1 and RaC2 have none until they have saved or loaded once since the game
+    /// started, which on a new game is the first autosave. A load found nothing set aside that is
+    /// a save of this game and no save of the game's own to fill it from, and a RESTORE found that
+    /// the file it copied in is not a save of the running game, so it loaded nothing.
+    /// </summary>
+    NoSave = 7,
+}
+
+/// <summary>
+/// Which of the savefile helper's requests an error came back from. Most errors mean the same thing
+/// for all three; "no save" (<see cref="SaveFileError.NoSave"/>) does not.
+/// </summary>
+public enum SaveFileRequest
+{
+    /// <summary>Taking a save: the set-aside action, or the set-aside a SAVEFILE_STORE raises.</summary>
+    Store,
+
+    /// <summary>The load action: putting back what is set aside.</summary>
+    Load,
+
+    /// <summary>SAVEFILE_RESTORE: loading a file of the console's library.</summary>
+    Restore,
 }
 
 public static class SaveFileErrorExtensions
 {
-    /// <summary>What to put in a toast. Plain words: the user did not ask about aside buffers.</summary>
-    public static string Describe(this SaveFileError error) => error switch
+    /// <summary>
+    /// What to put in a toast. Plain words: the user did not ask about aside buffers.
+    /// <paramref name="request"/> is what was asked for, which only "no save" needs.
+    /// </summary>
+    public static string Describe(this SaveFileError error, SaveFileRequest request = SaveFileRequest.Store) => error switch
     {
         SaveFileError.None => "no error",
         SaveFileError.FileMissing => "the console no longer has that file",
@@ -187,9 +217,24 @@ public static class SaveFileErrorExtensions
         SaveFileError.ShortFile => "the file is not the size this game's save has to be",
         SaveFileError.HelperMissing => "the game stopped while the console was copying",
         SaveFileError.BufferBusy => "the console was already busy with another save",
-        SaveFileError.NotIdle => "the game is not sitting still: wait for the load, cutscene or menu to finish",
+        SaveFileError.NotIdle =>
+            "the game is busy: try again once you are in control, out of any cutscene, menu, vendor, dialog or planet load",
+        SaveFileError.NoSave => request switch
+        {
+            SaveFileRequest.Restore => "that file is not a save of this game, so nothing was loaded",
+            SaveFileRequest.Load =>
+                "there is no save to load yet: wait for an autosave (or use Force autosave in RaC1), or set a save aside first",
+            _ => "the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
+        },
         _ => $"error {(byte)error}",
     };
+
+    /// <summary>
+    /// The errors a BUSY answer to a set-aside, a load, a STORE or a RESTORE carries: why the
+    /// console refused it outright rather than why a copy stopped.
+    /// </summary>
+    public static bool IsRefusal(this SaveFileError error) =>
+        error is SaveFileError.BufferBusy or SaveFileError.NotIdle or SaveFileError.NoSave;
 }
 
 /// <summary>

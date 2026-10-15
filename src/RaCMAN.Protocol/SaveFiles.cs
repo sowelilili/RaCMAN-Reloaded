@@ -519,7 +519,7 @@ public static class SaveFileTransfer
         }
 
         status?.Report($"FEATURE_TRIGGER {saveActionId} (set aside)");
-        await client.FeatureTriggerAsync(saveActionId, cancellationToken).ConfigureAwait(false);
+        await TriggerAsync(client, saveActionId, SaveFileRequest.Store, cancellationToken).ConfigureAwait(false);
 
         status?.Report("Waiting for the save...");
         info = await WaitAsync(client, i => !i.SetAsidePending, timeout, cancellationToken)
@@ -605,7 +605,7 @@ public static class SaveFileTransfer
         await client.SaveFileUploadAsync(data, bytes, cancellationToken).ConfigureAwait(false);
 
         status?.Report($"FEATURE_TRIGGER {loadActionId} (load set aside)");
-        await client.FeatureTriggerAsync(loadActionId, cancellationToken).ConfigureAwait(false);
+        await TriggerAsync(client, loadActionId, SaveFileRequest.Load, cancellationToken).ConfigureAwait(false);
 
         status?.Report("Waiting for game...");
         await WaitAsync(client, i => !i.LoadPending, timeout, cancellationToken).ConfigureAwait(false);
@@ -615,17 +615,94 @@ public static class SaveFileTransfer
 
     /// <summary>
     /// Thrown when the console's own copy stopped early. The <see cref="Error"/> is what
-    /// SAVEFILE_INFO reported, so the panel can name it rather than say "it failed".
+    /// SAVEFILE_INFO reported, so the panel can name it rather than say "it failed"; the message
+    /// is that name, in the words <see cref="SaveFileErrorExtensions.Describe"/> has for it.
     /// </summary>
     public sealed class TransferFailedException : Exception
     {
-        public TransferFailedException(SaveFileError error)
-            : base($"the console could not finish: {error.Describe()}")
+        public TransferFailedException(SaveFileError error, SaveFileRequest request = SaveFileRequest.Store)
+            : base(error.Describe(request))
         {
             Error = error;
+            Request = request;
         }
 
         public SaveFileError Error { get; }
+
+        public SaveFileRequest Request { get; }
+    }
+
+    /// <summary>
+    /// Thrown when the console refused a set-aside, a load, a STORE or a RESTORE outright: it
+    /// answered BUSY, and SAVEFILE_INFO's error said why (<see cref="SaveFileErrorExtensions.IsRefusal"/>).
+    /// Nothing was raised at the game and no file was touched. The message is the reason in plain
+    /// words; <see cref="Status"/> is the BUSY the request itself got.
+    /// </summary>
+    public sealed class RefusedException : Exception
+    {
+        public RefusedException(SaveFileError error, SaveFileRequest request, QwarkStatusException status)
+            : base(error.Describe(request), status)
+        {
+            Error = error;
+            Request = request;
+            Status = status;
+        }
+
+        public SaveFileError Error { get; }
+
+        public SaveFileRequest Request { get; }
+
+        public QwarkStatusException Status { get; }
+    }
+
+    /// <summary>
+    /// Sends one of the requests that raise something at the game - the set-aside or load action,
+    /// SAVEFILE_STORE, SAVEFILE_RESTORE - and, when the console answers BUSY, asks SAVEFILE_INFO
+    /// why. qwark sets its error before it answers, so a 5, 6 or 7 there is this refusal's reason
+    /// and is thrown as a <see cref="RefusedException"/>. Any other BUSY - the one a game starting
+    /// or stopping gives every request - goes on as it came, and so does every other status.
+    /// </summary>
+    public static async Task RaiseAsync(
+        QwarkClient client,
+        SaveFileRequest request,
+        Func<CancellationToken, Task> send,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            await send(cancellationToken).ConfigureAwait(false);
+        }
+        catch (QwarkStatusException busy) when (busy.Status == Status.Busy)
+        {
+            if (await RefusalAsync(client, cancellationToken).ConfigureAwait(false) is { } reason)
+            {
+                throw new RefusedException(reason, request, busy);
+            }
+
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// The game panel's set-aside and load buttons: FEATURE_TRIGGER of the flagged action, refused
+    /// in words (<see cref="RaiseAsync"/>) rather than as a bare BUSY.
+    /// </summary>
+    public static Task TriggerAsync(QwarkClient client, byte actionId, SaveFileRequest request,
+        CancellationToken cancellationToken = default) =>
+        RaiseAsync(client, request, token => client.FeatureTriggerAsync(actionId, token), cancellationToken);
+
+    /// <summary>SAVEFILE_INFO's error when it is a refusal's reason, or null when it is not, or the console will not say.</summary>
+    private static async Task<SaveFileError?> RefusalAsync(QwarkClient client, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
+            return info.Error.IsRefusal() ? info.Error : null;
+        }
+        catch (QwarkStatusException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -639,6 +716,7 @@ public static class SaveFileTransfer
     /// </summary>
     public static async Task<SaveFileInfo> WaitForTransferAsync(
         QwarkClient client,
+        SaveFileRequest request,
         TimeSpan? timeout = null,
         IProgress<long>? bytes = null,
         CancellationToken cancellationToken = default)
@@ -653,7 +731,9 @@ public static class SaveFileTransfer
 
             if (!info.TransferPending)
             {
-                if (info.Error != SaveFileError.None) throw new TransferFailedException(info.Error);
+                // A STORE whose set-aside the helper dropped, or a RESTORE whose file turned out not
+                // to be a save, ends here too, with the same 6 or 7 a refusal carries.
+                if (info.Error != SaveFileError.None) throw new TransferFailedException(info.Error, request);
                 return info;
             }
 
@@ -691,10 +771,13 @@ public static class SaveFileTransfer
         CancellationToken cancellationToken = default)
     {
         status?.Report($"Asking the console to save '{SaveFileLibrary.DisplayName(name)}'...");
-        await client.SaveFileStoreAsync(category, name, cancellationToken).ConfigureAwait(false);
+        await RaiseAsync(client, SaveFileRequest.Store,
+                token => client.SaveFileStoreAsync(category, name, token), cancellationToken)
+            .ConfigureAwait(false);
 
         status?.Report("Waiting for save...");
-        var info = await WaitForTransferAsync(client, timeout, bytes, cancellationToken).ConfigureAwait(false);
+        var info = await WaitForTransferAsync(client, SaveFileRequest.Store, timeout, bytes, cancellationToken)
+            .ConfigureAwait(false);
 
         if (!mirror) return string.Empty;
 
@@ -767,10 +850,13 @@ public static class SaveFileTransfer
         }
 
         status?.Report($"Asking the console to load '{entry.DisplayName}'...");
-        await client.SaveFileRestoreAsync(category, entry.Name, cancellationToken).ConfigureAwait(false);
+        await RaiseAsync(client, SaveFileRequest.Restore,
+                token => client.SaveFileRestoreAsync(category, entry.Name, token), cancellationToken)
+            .ConfigureAwait(false);
 
         status?.Report("Waiting for game...");
-        await WaitForTransferAsync(client, timeout, bytes, cancellationToken).ConfigureAwait(false);
+        await WaitForTransferAsync(client, SaveFileRequest.Restore, timeout, bytes, cancellationToken)
+            .ConfigureAwait(false);
 
         return uploaded;
     }

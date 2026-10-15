@@ -2086,3 +2086,105 @@ public class SaveFileCategoryTests
         }));
     }
 }
+
+/// <summary>
+/// What the Save files panel and the Game panel's set-aside buttons say when the console refuses a
+/// save or a load (errors 5, 6 and 7, answered BUSY) or a copy stops on the way.
+/// </summary>
+public class SaveFileRefusalToastTests
+{
+    private static SaveFileTransfer.RefusedException Refused(SaveFileError error, SaveFileRequest request) =>
+        new(error, request, new QwarkStatusException(Opcode.SaveFileStore, Status.Busy));
+
+    [Fact]
+    public void ARefusedSaveOrLoadSaysItWasRefusedAndWhy()
+    {
+        Assert.Equal(
+            "The save was refused: the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
+            SaveFilesPanel.FailureToast(load: false, Refused(SaveFileError.NoSave, SaveFileRequest.Store)));
+
+        Assert.Equal(
+            "The load was refused: " + SaveFileError.NotIdle.Describe(SaveFileRequest.Restore),
+            SaveFilesPanel.FailureToast(load: true, Refused(SaveFileError.NotIdle, SaveFileRequest.Restore)));
+    }
+
+    [Fact]
+    public void ACopyThatStoppedStillSaysItDidNotFinish()
+    {
+        Assert.Equal(
+            "The load did not finish: that file is not a save of this game, so nothing was loaded",
+            SaveFilesPanel.FailureToast(load: true,
+                new SaveFileTransfer.TransferFailedException(SaveFileError.NoSave, SaveFileRequest.Restore)));
+
+        Assert.Equal(
+            "The save did not finish: the console could not read or write the file",
+            SaveFilesPanel.FailureToast(load: false, new SaveFileTransfer.TransferFailedException(SaveFileError.IoError)));
+    }
+
+    [Fact]
+    public void TheSetAsideButtonsNameThemselvesAndTheReason()
+    {
+        var refused = Refused(SaveFileError.NoSave, SaveFileRequest.Load);
+
+        Assert.Equal(
+            "Load set-aside file was refused: there is no save to load yet: wait for an autosave (or use Force autosave in RaC1), or set a save aside first",
+            GamePanel.AsideRefusedToast("Load set-aside file", refused.Message));
+    }
+}
+
+/// <summary>
+/// The Save files panel's row menu, as far as it goes without ImGui: the name a rename gives, when
+/// the rename dialog's button is greyed out, and what the two dialogs say will happen to which copy.
+/// </summary>
+public class SaveFileRowMenuTests
+{
+    private static SaveFileEntry Entry(string name, bool console = true, bool pc = true) =>
+        new(name, console, pc, 0x1111u, 0x1111u, 0x1000u, 0x1000L);
+
+    private static readonly SaveFileEntry[] Category =
+    {
+        Entry("veldin.sav"),
+        Entry("Kerwan.sav", pc: false),
+        Entry("novalis.sav", console: false),
+    };
+
+    [Theory]
+    [InlineData("kerwan any%", "kerwan any%.sav")]
+    [InlineData("  orxon.sav  ", "orxon.sav")]
+    [InlineData("a/b\\c", "abc.sav")]
+    public void ARenameNamesTheFileTheWayASaveIsNamed(string typed, string expected)
+    {
+        Assert.Equal(expected, SaveFilesPanel.RenameTarget(typed));
+    }
+
+    [Fact]
+    public void RenameWantsANewNameNoOtherSaveInTheCategoryHas()
+    {
+        var veldin = Category[0];
+
+        Assert.Equal(SaveFilesPanel.RenameCheck.Blank, SaveFilesPanel.CheckRename("   ", veldin, Category));
+        Assert.Equal(SaveFilesPanel.RenameCheck.Unchanged, SaveFilesPanel.CheckRename("veldin", veldin, Category));
+        Assert.Equal(SaveFilesPanel.RenameCheck.Unchanged, SaveFilesPanel.CheckRename("veldin.sav", veldin, Category));
+
+        // Another save's name is taken whatever its case, since one of the two sides may ignore case.
+        Assert.Equal(SaveFilesPanel.RenameCheck.Taken, SaveFilesPanel.CheckRename("kerwan", veldin, Category));
+        Assert.Equal(SaveFilesPanel.RenameCheck.Taken, SaveFilesPanel.CheckRename("NOVALIS", veldin, Category));
+
+        Assert.Equal(SaveFilesPanel.RenameCheck.Ok, SaveFilesPanel.CheckRename("veldin 2", veldin, Category));
+
+        // The save's own name in another case is a rename like any other.
+        Assert.Equal(SaveFilesPanel.RenameCheck.Ok, SaveFilesPanel.CheckRename("Veldin", veldin, Category));
+    }
+
+    [Fact]
+    public void TheDialogsSayWhichCopiesAreRenamedOrDeleted()
+    {
+        Assert.Equal("veldin is deleted from the console and from this PC.", SaveFilesPanel.DeleteWhere(Category[0]));
+        Assert.Equal("Kerwan is deleted from the console. This PC has no copy of it.", SaveFilesPanel.DeleteWhere(Category[1]));
+        Assert.Equal("novalis is deleted from this PC. The console has no copy of it.", SaveFilesPanel.DeleteWhere(Category[2]));
+
+        Assert.Contains("both renamed", SaveFilesPanel.RenameWhere(Category[0]));
+        Assert.StartsWith("Only the console", SaveFilesPanel.RenameWhere(Category[1]));
+        Assert.StartsWith("Only this PC", SaveFilesPanel.RenameWhere(Category[2]));
+    }
+}

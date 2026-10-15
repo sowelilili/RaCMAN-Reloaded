@@ -925,6 +925,15 @@ public sealed class FakeQwarkServer : IDisposable
     /// </summary>
     public SaveFileError SaveFileTransferError { get; set; } = SaveFileError.None;
 
+    /// <summary>
+    /// What the running game says when it is asked whether a save can be taken or put back, for as
+    /// long as it is set. <see cref="SaveFileError.NotIdle"/> (build 43) is a game that is not
+    /// sitting still, and refuses both actions, STORE and RESTORE; <see cref="SaveFileError.NoSave"/>
+    /// (build 53) is one with no save yet, and refuses both actions and STORE. A refusal is BUSY with
+    /// SAVEFILE_INFO's error set, and raises nothing at the game.
+    /// </summary>
+    public SaveFileError SaveFileRefusal { get; set; } = SaveFileError.None;
+
     /// <summary>Every STORE and RESTORE the console was asked for, in order.</summary>
     public List<string> SaveFileLibraryOrder { get; } = new();
 
@@ -1520,6 +1529,14 @@ public sealed class FakeQwarkServer : IDisposable
                     // The savefile helper's two halves are the only triggers with a side effect
                     // the client can observe: one fills the aside buffer, the other consumes it.
                     // Both stay "pending" for a poll or two, as the console's helper does.
+                    if ((action.SavesAside || action.LoadsAside) && !SaveFileHelperMissing
+                        && SaveFileRefusal is SaveFileError.NotIdle or SaveFileError.NoSave)
+                    {
+                        // Builds 43 and 53: the game is asked first, and a refusal raises nothing.
+                        _transferError = SaveFileRefusal;
+                        return (Status.Busy, null);
+                    }
+
                     if (action.SavesAside)
                     {
                         if (SaveFileHelperMissing) return (Status.Unsupported, null);
@@ -2239,6 +2256,16 @@ public sealed class FakeQwarkServer : IDisposable
                     if (TransferRunning || _loadPending > 0 || _setAsidePending > 0)
                     {
                         _transferError = SaveFileError.BufferBusy;
+                        return (Status.Busy, null);
+                    }
+
+                    // Builds 43 and 53: a game that is not sitting still refuses both before a file
+                    // is touched, and one with no save yet refuses a STORE. A RESTORE brings its own
+                    // save, so "no save" only stops one after the copy (SaveFileTransferError).
+                    if (SaveFileRefusal == SaveFileError.NotIdle
+                        || (SaveFileRefusal == SaveFileError.NoSave && opcode == Opcode.SaveFileStore))
+                    {
+                        _transferError = SaveFileRefusal;
                         return (Status.Busy, null);
                     }
 

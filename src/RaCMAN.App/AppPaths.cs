@@ -36,7 +36,7 @@ public static class AppPaths
     public const string SettingsFileName = "racman-reloaded.settings.json";
 
     /// <summary>The mod library's list of what the release shipped; see <see cref="DataFolderMigration"/>.</summary>
-    public const string ShippedModsManifest = "shipped.txt";
+    public const string ShippedModsManifest = RaCMAN.Protocol.ModLibrary.ShippedManifestName;
 
     private static string? _root;
 
