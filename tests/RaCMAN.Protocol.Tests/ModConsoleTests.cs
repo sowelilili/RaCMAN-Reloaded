@@ -758,7 +758,7 @@ public class ModConsoleTests : IDisposable
         server.AddConsoleMod(GuidFolder, "Last Ground Display");
         server.Start();
 
-        using var state = new AppState(new Settings { AutoReconnect = false, ModsPath = UserRoot });
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false }, ModsPath = UserRoot });
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 

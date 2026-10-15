@@ -191,7 +191,7 @@ public class CodeSwitchTests
     {
         using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
         server.Start();
-        using var state = new AppState(new Settings { AutoReconnect = false });
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 

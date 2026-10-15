@@ -43,9 +43,7 @@ public class SprxUpdateTests
     {
         var settings = new Settings
         {
-            AutoReconnect = false,
-            SprxPath = sprxPath,
-            StandaloneConnection = standalone,
+            Ps3 = { AutoReconnect = false, SprxPath = sprxPath, StandaloneConnection = standalone },
         };
 
         var state = new AppState(settings);

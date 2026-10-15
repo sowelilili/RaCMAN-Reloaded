@@ -140,7 +140,8 @@ public static class SettingsPanel
     /// </summary>
     private static void DrawConnection(Settings settings)
     {
-        int mode = settings.StandaloneConnection ? 1 : 0;
+        // The mode is the console's: RPCS3 has nothing to load and never asks webMAN anything.
+        int mode = settings.Ps3.StandaloneConnection ? 1 : 0;
         int chosen = mode;
 
         ImGui.TextUnformatted("Mode");
@@ -151,7 +152,7 @@ public static class SettingsPanel
 
         if (chosen != mode)
         {
-            settings.StandaloneConnection = chosen == 1;
+            settings.Ps3.StandaloneConnection = chosen == 1;
             settings.Save();
         }
 
@@ -281,11 +282,11 @@ public static class SettingsPanel
         var settings = state.Settings;
         var autosplit = settings.Autosplit;
 
-        int pine = settings.Rpcs3PinePort;
+        int pine = settings.Rpcs3.PinePort;
         ImGui.SetNextItemWidth(140);
         if (ImGui.InputInt("RPCS3 IPC port", ref pine))
         {
-            settings.Rpcs3PinePort = Math.Clamp(pine, 1, 65535);
+            settings.Rpcs3.PinePort = Math.Clamp(pine, 1, 65535);
             settings.Save();
         }
 
@@ -576,7 +577,7 @@ public static class SettingsPanel
 
         if (config.Ip is { } ip)
         {
-            settings.LastHost = ip;
+            settings.Ps3.Host = ip;
             settings.Save();
             ConnectionPanel.UseHost(ip);
             done.Add($"IP {ip}");

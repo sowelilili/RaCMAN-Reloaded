@@ -459,7 +459,7 @@ public sealed class Rpcs3PatchController
     private void EnsureDisk(SessionInfo session)
     {
         string title = session.TitleId;
-        string folderSetting = _state.Settings.Rpcs3Folder;
+        string folderSetting = _state.Settings.Rpcs3.Folder;
         string key = $"{title}|{session.Generation}|{folderSetting}|{_bump}";
         if (key == _diskKey) return;
 

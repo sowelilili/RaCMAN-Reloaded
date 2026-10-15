@@ -15,13 +15,18 @@ public enum InputDisplayMode
     Window,
 }
 
-/// <summary>Client preferences. Nothing about the game lives here: qwark owns all of that.</summary>
+/// <summary>
+/// Client preferences. Nothing about the game lives here: qwark owns all of that.
+/// <para>
+/// The two targets keep their own sections, <c>"ps3"</c> and <c>"rpcs3"</c>, and everything else in
+/// the file is shared. Up to 1.2.2 the two were flat keys side by side, and the RPCS3 Connect wrote
+/// the helper's address, 127.0.0.1, into the one key that held the console's: the console then
+/// opened on 127.0.0.1 after any session that ended under RPCS3. A section is only ever written by
+/// its own target, so switching, connecting, disconnecting and closing leave the other one alone.
+/// </para>
+/// </summary>
 public sealed class Settings
 {
-    /// <summary>The PS3 the address box points at. Unused while <see cref="Rpcs3Target"/> is on.</summary>
-    [JsonPropertyName("lastHost")]
-    public string LastHost { get; set; } = "192.168.1.";
-
     /// <summary>
     /// Which qwark this client talks to: "ps3" (the module on a console, over the network) or
     /// "rpcs3" (qwark-rpcs3.exe on this PC, driving RPCS3 through its IPC server). Anything
@@ -41,53 +46,34 @@ public sealed class Settings
         set => Target = value ? Rpcs3TargetName : Ps3TargetName;
     }
 
-    /// <summary>
-    /// How a connection to a console is made: "webman" (the default) has every connect, the
-    /// automatic reconnects included, ask webMAN whether qwark is loaded and send it when it is
-    /// not, so a console whose module crashed comes back on its own; "standalone" only ever
-    /// connects, which is what a console that loads qwark at boot wants. Anything unrecognised
-    /// reads as "webman", so a file from before this key keeps the behaviour it had.
-    /// </summary>
-    [JsonPropertyName("connectionMode")]
-    public string ConnectionMode { get; set; } = WebManModeName;
+    // Null until something asks for a section or the file supplies one, which is how Load tells a
+    // file that has the section from one written before sections existed: it looks straight after
+    // deserializing, before anything has asked.
+    private Ps3Settings? _ps3;
+    private Rpcs3Settings? _rpcs3;
 
-    public const string WebManModeName = "webman";
-
-    public const string StandaloneModeName = "standalone";
-
-    /// <summary>True only when <see cref="ConnectionMode"/> explicitly says "standalone".</summary>
-    [JsonIgnore]
-    public bool StandaloneConnection
+    /// <summary>Everything about playing on a console: its address and port, how qwark gets onto it, and reconnecting.</summary>
+    [JsonPropertyName(Ps3TargetName)]
+    public Ps3Settings Ps3
     {
-        get => string.Equals(ConnectionMode, StandaloneModeName, StringComparison.OrdinalIgnoreCase);
-        set => ConnectionMode = value ? StandaloneModeName : WebManModeName;
+        get => _ps3 ??= new Ps3Settings();
+        set => _ps3 = value;
     }
 
-    /// <summary>True while a connect is allowed to ask webMAN about the module and load it.</summary>
+    /// <summary>Everything about playing on RPCS3: the helper, RPCS3's IPC port and folder, and reconnecting.</summary>
+    [JsonPropertyName(Rpcs3TargetName)]
+    public Rpcs3Settings Rpcs3
+    {
+        get => _rpcs3 ??= new Rpcs3Settings();
+        set => _rpcs3 = value;
+    }
+
+    /// <summary>"Reconnect automatically" as the chosen target has it. Each target keeps its own answer.</summary>
     [JsonIgnore]
-    public bool WebManConnection => !StandaloneConnection;
+    public bool AutoReconnect => Rpcs3Target ? Rpcs3.AutoReconnect : Ps3.AutoReconnect;
 
-    /// <summary>The port RPCS3's IPC server listens on, which qwark-rpcs3.exe is pointed at.</summary>
-    [JsonPropertyName("rpcs3PinePort")]
-    public int Rpcs3PinePort { get; set; } = Rpcs3Host.DefaultPinePort;
-
-    /// <summary>
-    /// An explicit qwark-rpcs3.exe, for a layout the search does not cover. Empty is the normal
-    /// case: the helper ships beside this executable.
-    /// </summary>
-    [JsonPropertyName("rpcs3QwarkPath")]
-    public string Rpcs3QwarkPath { get; set; } = string.Empty;
-
-    /// <summary>
-    /// RPCS3's own folder, where the savefile helper patch goes: the folder rpcs3.exe runs from on
-    /// Windows, <c>~/.config/rpcs3</c> on Linux. Empty is the normal case, and then the client finds
-    /// it by itself (<see cref="Rpcs3Patches.Locate"/>); set, it wins over anything found.
-    /// </summary>
-    [JsonPropertyName("rpcs3Folder")]
-    public string Rpcs3Folder { get; set; } = string.Empty;
-
-    [JsonPropertyName("autoReconnect")]
-    public bool AutoReconnect { get; set; } = true;
+    /// <summary>A port from the file, or <paramref name="fallback"/> when it is not one: the file is hand-editable.</summary>
+    internal static int ValidPort(int value, int fallback) => value is >= 1 and <= 65535 ? value : fallback;
 
     /// <summary>UI theme, "light" (the default) or "dark". Anything unrecognised reads as light.</summary>
     [JsonPropertyName("theme")]
@@ -132,12 +118,6 @@ public sealed class Settings
     /// </summary>
     [JsonIgnore]
     public bool AutoRefreshesTables => TableRefreshSeconds > 0f;
-
-    [JsonPropertyName("webManSlot")]
-    public int WebManSlot { get; set; } = 5;
-
-    [JsonPropertyName("sprxPath")]
-    public string SprxPath { get; set; } = "qwark.sprx";
 
     [JsonPropertyName("modsPath")]
     public string ModsPath { get; set; } = "mods";
@@ -418,6 +398,93 @@ public sealed class Settings
         if (changed) Save();
     }
 
+    // ---------------------------------------------------------------- the keys 1.2.2 and older read
+
+    // The flat keys the two targets' settings lived in until 1.2.2. They are read for one thing,
+    // filling a section the file does not have yet (BringTargetsForward), and a file that has the
+    // section ignores them: edit the section. Every save writes them again as copies of the
+    // sections, after everything else, because an older build may be opened on the same data
+    // folder: it finds the console's address, its ports and the RPCS3 folder where it looks for
+    // them, and a file it saves, which drops the sections it has never heard of, comes back
+    // through BringTargetsForward with nothing lost.
+    private const int LegacyKeysLast = 1;
+
+    [JsonInclude, JsonPropertyName("lastHost"), JsonPropertyOrder(LegacyKeysLast)]
+    internal string? LegacyLastHost { get; set; }
+
+    [JsonInclude, JsonPropertyName("connectionMode"), JsonPropertyOrder(LegacyKeysLast)]
+    internal string? LegacyConnectionMode { get; set; }
+
+    [JsonInclude, JsonPropertyName("webManSlot"), JsonPropertyOrder(LegacyKeysLast)]
+    internal int? LegacyWebManSlot { get; set; }
+
+    [JsonInclude, JsonPropertyName("sprxPath"), JsonPropertyOrder(LegacyKeysLast)]
+    internal string? LegacySprxPath { get; set; }
+
+    [JsonInclude, JsonPropertyName("autoReconnect"), JsonPropertyOrder(LegacyKeysLast)]
+    internal bool? LegacyAutoReconnect { get; set; }
+
+    [JsonInclude, JsonPropertyName("rpcs3PinePort"), JsonPropertyOrder(LegacyKeysLast)]
+    internal int? LegacyRpcs3PinePort { get; set; }
+
+    [JsonInclude, JsonPropertyName("rpcs3QwarkPath"), JsonPropertyOrder(LegacyKeysLast)]
+    internal string? LegacyRpcs3QwarkPath { get; set; }
+
+    [JsonInclude, JsonPropertyName("rpcs3Folder"), JsonPropertyOrder(LegacyKeysLast)]
+    internal string? LegacyRpcs3Folder { get; set; }
+
+    /// <summary>
+    /// Builds each target section a file does not have out of the flat keys it does, value for
+    /// value; a key the file lacks too takes the default it always had. The one switch both
+    /// targets shared, "autoReconnect", goes to both.
+    /// <para>
+    /// A console address of 127.0.0.1 comes across as it is, even from a file whose last target
+    /// was RPCS3, where it is most likely the bug's doing. Nothing else in such a file remembers
+    /// the address it replaced, and 127.0.0.1 is also what a console target pointed at the qwark
+    /// simulator holds, so anything put in its place would be a guess. It is the user's to retype
+    /// once; nothing writes over it again.
+    /// </para>
+    /// </summary>
+    private void BringTargetsForward()
+    {
+        if (_ps3 is null)
+        {
+            var ps3 = new Ps3Settings();
+            if (LegacyLastHost is { } host) ps3.Host = host;
+            if (LegacyConnectionMode is { } mode) ps3.ConnectionMode = mode;
+            if (LegacyWebManSlot is { } slot) ps3.WebManSlot = slot;
+            if (LegacySprxPath is { } sprx) ps3.SprxPath = sprx;
+            if (LegacyAutoReconnect is { } reconnect) ps3.AutoReconnect = reconnect;
+            _ps3 = ps3;
+        }
+
+        if (_rpcs3 is null)
+        {
+            var rpcs3 = new Rpcs3Settings();
+            if (LegacyRpcs3PinePort is { } pine) rpcs3.PinePort = pine;
+            if (LegacyRpcs3QwarkPath is { } helper) rpcs3.QwarkPath = helper;
+            if (LegacyRpcs3Folder is { } folder) rpcs3.Folder = folder;
+            if (LegacyAutoReconnect is { } reconnect) rpcs3.AutoReconnect = reconnect;
+            _rpcs3 = rpcs3;
+        }
+    }
+
+    /// <summary>
+    /// Copies the sections into the flat keys for an older build to read. "autoReconnect" is the
+    /// chosen target's, because an older build applies its one switch to whichever target it opens on.
+    /// </summary>
+    private void MirrorLegacyKeys()
+    {
+        LegacyLastHost = Ps3.Host;
+        LegacyConnectionMode = Ps3.ConnectionMode;
+        LegacyWebManSlot = Ps3.WebManSlot;
+        LegacySprxPath = Ps3.SprxPath;
+        LegacyAutoReconnect = AutoReconnect;
+        LegacyRpcs3PinePort = Rpcs3.PinePort;
+        LegacyRpcs3QwarkPath = Rpcs3.QwarkPath;
+        LegacyRpcs3Folder = Rpcs3.Folder;
+    }
+
     [JsonIgnore]
     public string Path { get; private set; } = string.Empty;
 
@@ -435,6 +502,7 @@ public sealed class Settings
                 if (loaded is not null)
                 {
                     loaded.Path = path;
+                    loaded.BringTargetsForward();
                     loaded.Autosplit.Migrate();
                     loaded.Firewall.MigrateFrom(loaded.FirewallOffered);
                     return loaded;
@@ -458,6 +526,7 @@ public sealed class Settings
             // Everything this build knows its own answer to is written down before the file is,
             // so that nothing has to be guessed from the file again the next time it is read.
             Autosplit.Settle();
+            MirrorLegacyKeys();
 
             // The data folder may not exist yet: this is the first thing written into it.
             if (System.IO.Path.GetDirectoryName(Path) is { Length: > 0 } folder) Directory.CreateDirectory(folder);
@@ -470,6 +539,142 @@ public sealed class Settings
     }
 
     private static readonly JsonSerializerOptions SerializerOptions = new() { WriteIndented = true };
+}
+
+/// <summary>
+/// The console target, the settings file's <c>"ps3"</c> section. Only the console's own Connect
+/// writes here: the RPCS3 target reads and writes none of it.
+/// </summary>
+public sealed class Ps3Settings
+{
+    /// <summary>What the address box holds before anybody has typed into it.</summary>
+    public const string DefaultHost = "192.168.1.";
+
+    public const string WebManModeName = "webman";
+
+    public const string StandaloneModeName = "standalone";
+
+    /// <summary>The module beside this executable, which is where the release puts it.</summary>
+    public const string DefaultSprxPath = "qwark.sprx";
+
+    private string _host = DefaultHost;
+    private int _port = QwarkClient.DefaultPort;
+    private string _sprxPath = DefaultSprxPath;
+
+    /// <summary>The console's address, as the PS3 address box last connected to it.</summary>
+    [JsonPropertyName("host")]
+    public string Host
+    {
+        get => _host;
+        set => _host = value ?? DefaultHost;
+    }
+
+    /// <summary>
+    /// The port qwark answers on. No box sets it: a console's module always listens on the default,
+    /// and only a simulator started with its own <c>--port</c> is elsewhere.
+    /// </summary>
+    [JsonPropertyName("port")]
+    public int Port
+    {
+        get => _port;
+        set => _port = Settings.ValidPort(value, QwarkClient.DefaultPort);
+    }
+
+    /// <summary>
+    /// How a connection to a console is made: "webman" (the default) has every connect, the
+    /// automatic reconnects included, ask webMAN whether qwark is loaded and send it when it is
+    /// not, so a console whose module crashed comes back on its own; "standalone" only ever
+    /// connects, which is what a console that loads qwark at boot wants. Anything unrecognised
+    /// reads as "webman", so a file from before this key keeps the behaviour it had.
+    /// </summary>
+    [JsonPropertyName("connectionMode")]
+    public string ConnectionMode { get; set; } = WebManModeName;
+
+    /// <summary>True only when <see cref="ConnectionMode"/> explicitly says "standalone".</summary>
+    [JsonIgnore]
+    public bool StandaloneConnection
+    {
+        get => string.Equals(ConnectionMode, StandaloneModeName, StringComparison.OrdinalIgnoreCase);
+        set => ConnectionMode = value ? StandaloneModeName : WebManModeName;
+    }
+
+    /// <summary>True while a connect is allowed to ask webMAN about the module and load it.</summary>
+    [JsonIgnore]
+    public bool WebManConnection => !StandaloneConnection;
+
+    /// <summary>The VSH slot webMAN loads qwark.sprx into.</summary>
+    [JsonPropertyName("webManSlot")]
+    public int WebManSlot { get; set; } = 5;
+
+    /// <summary>The qwark.sprx sent to the console: a bare name is beside this executable.</summary>
+    [JsonPropertyName("sprxPath")]
+    public string SprxPath
+    {
+        get => _sprxPath;
+        set => _sprxPath = value ?? DefaultSprxPath;
+    }
+
+    /// <summary>Whether a dropped connection to the console is retried until it comes back.</summary>
+    [JsonPropertyName("autoReconnect")]
+    public bool AutoReconnect { get; set; } = true;
+}
+
+/// <summary>
+/// The RPCS3 target, the settings file's <c>"rpcs3"</c> section. The helper always runs on this PC,
+/// so there is no address here at all, and nothing the console target does reads or writes it.
+/// </summary>
+public sealed class Rpcs3Settings
+{
+    private int _pinePort = Rpcs3Host.DefaultPinePort;
+    private int _helperPort = QwarkClient.DefaultPort;
+    private string _folder = string.Empty;
+    private string _qwarkPath = string.Empty;
+
+    /// <summary>The port RPCS3's IPC server listens on, which qwark-rpcs3.exe is pointed at.</summary>
+    [JsonPropertyName("pinePort")]
+    public int PinePort
+    {
+        get => _pinePort;
+        set => _pinePort = Settings.ValidPort(value, Rpcs3Host.DefaultPinePort);
+    }
+
+    /// <summary>
+    /// The port qwark-rpcs3.exe serves this client on, on 127.0.0.1. No box sets it, and it is read
+    /// when the client starts: the default is right unless something else on this PC holds it.
+    /// </summary>
+    [JsonPropertyName("helperPort")]
+    public int HelperPort
+    {
+        get => _helperPort;
+        set => _helperPort = Settings.ValidPort(value, QwarkClient.DefaultPort);
+    }
+
+    /// <summary>
+    /// RPCS3's own folder, where the savefile helper patch goes: the folder rpcs3.exe runs from on
+    /// Windows, <c>~/.config/rpcs3</c> on Linux. Empty is the normal case, and then the client finds
+    /// it by itself (<see cref="Rpcs3Patches.Locate"/>); set, it wins over anything found.
+    /// </summary>
+    [JsonPropertyName("folder")]
+    public string Folder
+    {
+        get => _folder;
+        set => _folder = value ?? string.Empty;
+    }
+
+    /// <summary>
+    /// An explicit qwark-rpcs3.exe, for a layout the search does not cover. Empty is the normal
+    /// case: the helper ships beside this executable.
+    /// </summary>
+    [JsonPropertyName("qwarkPath")]
+    public string QwarkPath
+    {
+        get => _qwarkPath;
+        set => _qwarkPath = value ?? string.Empty;
+    }
+
+    /// <summary>Whether a dropped connection to the helper is retried until it comes back.</summary>
+    [JsonPropertyName("autoReconnect")]
+    public bool AutoReconnect { get; set; } = true;
 }
 
 /// <summary>

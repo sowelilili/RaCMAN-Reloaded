@@ -144,18 +144,16 @@ if (fakeServer)
 }
 else if (connectTo is not null)
 {
-    settings.LastHost = connectTo;
-
     // Exactly what the Connect button does: against a console that means qwark first and webMAN
-    // only if nothing answers, and against the RPCS3 helper there is nothing to load.
-    if (settings.Rpcs3Target) state.Run(() => state.Client.ConnectAsync(connectTo));
-    else ConnectionPanel.ConnectToPs3(state, connectTo);
+    // only if nothing answers, and against the RPCS3 helper there is nothing to load. Only the
+    // console remembers the host it was given.
+    ConnectionPanel.ConnectOnStart(state, connectTo);
 }
 else if (settings.Rpcs3Target)
 {
     // The RPCS3 target is a helper on this PC, so there is nothing to type and nothing to wait
     // for: start it and connect, exactly as the panel's Connect button would.
-    bool ready = state.Rpcs3.Ensure(settings.Rpcs3QwarkPath, settings.Rpcs3PinePort, out string rpcs3Message);
+    bool ready = state.Rpcs3.Ensure(settings.Rpcs3.QwarkPath, settings.Rpcs3.PinePort, out string rpcs3Message);
     Console.WriteLine($"rpcs3: {rpcs3Message}");
     if (ready)
     {
@@ -172,7 +170,7 @@ else if (settings.Rpcs3Target)
                 return;
             }
 
-            await state.Client.ConnectAsync(ConnectionPanel.LocalHost).ConfigureAwait(false);
+            await state.Client.ConnectAsync(ConnectionPanel.LocalHost, state.Rpcs3.QwarkPort).ConfigureAwait(false);
         });
     }
 }

@@ -99,6 +99,8 @@ public sealed class AppState : IDisposable
     public AppState(Settings settings, bool updatesAllowed = false)
     {
         Settings = settings;
+
+        // The chosen target's reconnect switch; SwitchTarget hands the client the other one's.
         Client = new QwarkClient { AutoReconnect = settings.AutoReconnect };
 
         // The user's own files are in the data folder; the shipped mod library is beside the
@@ -109,7 +111,7 @@ public sealed class AppState : IDisposable
         PositionNames = new PositionNameStore(AppPaths.Positions);
         SaveFiles = new SaveFileLibrary(AppPaths.InData(settings.SaveFilesPath));
         WebMan = new WebManLoader();
-        Rpcs3 = new Rpcs3Host(rootFolder: AppPaths.Rpcs3Root);
+        Rpcs3 = new Rpcs3Host(qwarkPort: settings.Rpcs3.HelperPort, rootFolder: AppPaths.Rpcs3Root);
         Rpcs3Patch = new Rpcs3PatchController(this, Rpcs3Environment.Current);
         Rpcs3Mods = new Rpcs3ModsController(this, Rpcs3Environment.Current);
         LiveSplit = new LiveSplitClient();
@@ -411,6 +413,29 @@ public sealed class AppState : IDisposable
 
     public string? LastError { get; private set; }
 
+    // ---------------------------------------------------------------- the target
+
+    /// <summary>
+    /// The Connection panel's PS3 / RPCS3 choice. <see cref="Settings.Target"/> is the only value
+    /// that changes: each target keeps its own section, so neither one's address, ports or folder
+    /// is touched, and the client takes up the reconnect switch of the target it now serves. The
+    /// connection that is up belongs to the other target, so it goes with the choice.
+    /// </summary>
+    public void SwitchTarget(bool rpcs3)
+    {
+        if (Settings.Rpcs3Target == rpcs3) return;
+
+        Settings.Rpcs3Target = rpcs3;
+        Settings.Save();
+        Client.AutoReconnect = Settings.AutoReconnect;
+
+        if (Client.WantsConnection)
+        {
+            Run(() => Client.DisconnectAsync());
+            ResetPanels();
+        }
+    }
+
     // ---------------------------------------------------------------- the webMAN detour
 
     /// <summary>
@@ -429,7 +454,7 @@ public sealed class AppState : IDisposable
     /// </summary>
     private Task BeforeReconnectAsync(CancellationToken token)
     {
-        if (Settings.StandaloneConnection || Settings.Rpcs3Target) return Task.CompletedTask;
+        if (Settings.Rpcs3Target || Settings.Ps3.StandaloneConnection) return Task.CompletedTask;
         if (Client.Host is not { Length: > 0 } host) return Task.CompletedTask;
 
         long now = Environment.TickCount64;
@@ -454,11 +479,11 @@ public sealed class AppState : IDisposable
         var status = await WebMan.PluginStatusAsync(host, cancellationToken: token).ConfigureAwait(false);
         if (status.State != VshPluginState.NotLoaded) return;
 
-        string sprx = Ps3Connect.ResolveSprx(Settings.SprxPath);
+        string sprx = Ps3Connect.ResolveSprx(Settings.Ps3.SprxPath);
         if (!File.Exists(sprx)) return;
 
         Post(() => AddToast($"No VSH slot holds {WebManLoader.SprxName}: loading it"));
-        await WebMan.LoadAsync(host, sprx, Settings.WebManSlot, cancellationToken: token).ConfigureAwait(false);
+        await WebMan.LoadAsync(host, sprx, Settings.Ps3.WebManSlot, cancellationToken: token).ConfigureAwait(false);
         await Task.Delay(Ps3Connect.LoadWait, token).ConfigureAwait(false);
         Post(() => AddToast($"{WebManLoader.SprxName} loaded through webMAN; reconnecting", ToastKind.Success));
     }
@@ -481,14 +506,14 @@ public sealed class AppState : IDisposable
     private void MaybeUpdateConsoleModule(SessionInfo session)
     {
         if (_sprxUpdateTried || QwarkUpdateStaged != 0) return;
-        if (!Settings.StandaloneConnection || Settings.Rpcs3Target) return;
+        if (Settings.Rpcs3Target || !Settings.Ps3.StandaloneConnection) return;
         if (!QwarkStale) return;
         if (session.State is not (SessionState.Xmb or SessionState.Ingame)) return;
         if (Panels.SaveFilesPanel.Busy || SaveFile.TransferPending) return;
 
         // No module beside this client is nothing to report: a build from a source tree has none,
         // and the user has done nothing to be told about.
-        string sprx = Ps3Connect.ResolveSprx(Settings.SprxPath);
+        string sprx = Ps3Connect.ResolveSprx(Settings.Ps3.SprxPath);
         if (!File.Exists(sprx)) return;
 
         // Before the work starts, so a failure does not come back a frame later for another go.

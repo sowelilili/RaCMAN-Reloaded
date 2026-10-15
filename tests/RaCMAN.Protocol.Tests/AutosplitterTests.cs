@@ -1790,7 +1790,7 @@ public class AutosplitterTests
     [Fact]
     public async Task AProbeThatFindsNothingSaysNothing()
     {
-        var settings = new Settings { AutoReconnect = false };
+        var settings = new Settings { Ps3 = { AutoReconnect = false } };
         settings.Autosplit.Enabled = true;
         settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = FreePort();
@@ -1966,7 +1966,7 @@ public class AutosplitterTests
     public async Task AProbeAttemptRaisesNoToastAndNoPopup()
     {
         int port = FreePort();
-        var settings = new Settings { AutoReconnect = false };
+        var settings = new Settings { Ps3 = { AutoReconnect = false } };
         settings.Autosplit.Enabled = true;
         settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = port;

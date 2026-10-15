@@ -162,7 +162,7 @@ public sealed class Rpcs3Host : IDisposable
     /// Where qwark-rpcs3.exe is: beside this executable, which is where the release layout puts
     /// it; else in the sibling qwark repo, the "..\..\..\..\qwark" of a development build, found
     /// by walking up from the build output so a worktree or a different configuration still hits
-    /// it; else whatever <paramref name="overridePath"/> (the rpcs3QwarkPath setting) names. Null
+    /// it; else whatever <paramref name="overridePath"/> (the RPCS3 section's qwarkPath) names. Null
     /// when none of those exists.
     /// </summary>
     public static string? Find(string baseDirectory, string? overridePath = null)
@@ -232,7 +232,7 @@ public sealed class Rpcs3Host : IDisposable
         if (exe is null)
         {
             Problem = $"{ExeName} was not found beside this client. Build it in ../qwark, or set "
-                      + "\"rpcs3QwarkPath\" in the settings file.";
+                      + "\"qwarkPath\" in the settings file's \"rpcs3\" section.";
             message = Problem;
             return false;
         }
@@ -280,6 +280,30 @@ public sealed class Rpcs3Host : IDisposable
         return PortInUse(QwarkPort);
     }
 
+    /// <summary>
+    /// The helper's command line: RPCS3's IPC port, the port to serve this client on when the
+    /// settings moved it (the helper's own default is <see cref="QwarkClient.DefaultPort"/>, so the
+    /// usual case passes nothing), and the folder it maps <c>/dev_hdd0</c> to.
+    /// </summary>
+    public static IReadOnlyList<string> Arguments(int pinePort, int qwarkPort, string? rootFolder)
+    {
+        var arguments = new List<string> { "--pine-port", pinePort.ToString(CultureInfo.InvariantCulture) };
+
+        if (qwarkPort != QwarkClient.DefaultPort)
+        {
+            arguments.Add("--port");
+            arguments.Add(qwarkPort.ToString(CultureInfo.InvariantCulture));
+        }
+
+        if (rootFolder is { Length: > 0 } root)
+        {
+            arguments.Add("--root");
+            arguments.Add(root);
+        }
+
+        return arguments;
+    }
+
     private void Start(string exe, int pinePort)
     {
         var info = new ProcessStartInfo(exe)
@@ -291,9 +315,6 @@ public sealed class Rpcs3Host : IDisposable
             RedirectStandardError = true,
             WorkingDirectory = Path.GetDirectoryName(exe) ?? BaseDirectory,
         };
-
-        info.ArgumentList.Add("--pine-port");
-        info.ArgumentList.Add(pinePort.ToString(CultureInfo.InvariantCulture));
 
         if (RootFolder is { Length: > 0 } root)
         {
@@ -307,10 +328,9 @@ public sealed class Rpcs3Host : IDisposable
             {
                 // Let the helper say what it makes of the folder; it is the one that has to use it.
             }
-
-            info.ArgumentList.Add("--root");
-            info.ArgumentList.Add(root);
         }
+
+        foreach (var argument in Arguments(pinePort, QwarkPort, RootFolder)) info.ArgumentList.Add(argument);
 
         var process = new Process { StartInfo = info, EnableRaisingEvents = true };
         process.OutputDataReceived += (_, e) => Record(e.Data);

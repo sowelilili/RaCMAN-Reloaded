@@ -1386,7 +1386,7 @@ public class Rpcs3PatchTests : IDisposable
     private static async Task<AppState> ConnectRpcs3Async(FakeQwarkServer server, string root)
     {
         // The folder is set, so the search never looks at this PC's own RPCS3.
-        var state = new AppState(new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = root });
+        var state = new AppState(new Settings { Rpcs3Target = true, Rpcs3 = { AutoReconnect = false, Folder = root } });
         state.Rpcs3Patch.Environment = Windows();
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
@@ -1610,7 +1610,7 @@ public class Rpcs3PatchTests : IDisposable
     {
         using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
         server.Start();
-        using var state = new AppState(new Settings { AutoReconnect = false, Rpcs3Target = true, Rpcs3Folder = MakeRpcs3() });
+        using var state = new AppState(new Settings { Rpcs3Target = true, Rpcs3 = { AutoReconnect = false, Folder = MakeRpcs3() } });
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 
@@ -1634,7 +1634,7 @@ public class Rpcs3PatchTests : IDisposable
     {
         using var server = new FakeQwarkServer();
         server.Start();
-        using var state = new AppState(new Settings { AutoReconnect = false });
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 
@@ -1648,7 +1648,7 @@ public class Rpcs3PatchTests : IDisposable
     {
         using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
         server.Start();
-        using var state = new AppState(new Settings { AutoReconnect = false });
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 
@@ -1665,14 +1665,14 @@ public class Rpcs3PatchTests : IDisposable
     [Fact]
     public void TheRpcs3FolderSettingRoundTripsAndDefaultsToEmpty()
     {
-        Assert.Equal(string.Empty, new Settings().Rpcs3Folder);
+        Assert.Equal(string.Empty, new Settings().Rpcs3.Folder);
 
         string path = Path.Combine(_root, "settings.json");
         var saved = Settings.Load(path);
-        saved.Rpcs3Folder = @"D:\Emulators\rpcs3";
+        saved.Rpcs3.Folder = @"D:\Emulators\rpcs3";
         saved.Save();
 
-        Assert.Contains("\"rpcs3Folder\"", File.ReadAllText(path));
-        Assert.Equal(@"D:\Emulators\rpcs3", Settings.Load(path).Rpcs3Folder);
+        Assert.Contains("\"folder\"", File.ReadAllText(path));
+        Assert.Equal(@"D:\Emulators\rpcs3", Settings.Load(path).Rpcs3.Folder);
     }
 }

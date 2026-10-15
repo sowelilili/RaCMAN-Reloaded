@@ -15,7 +15,6 @@ public static class ConnectionPanel
     private static string _sprxPath = string.Empty;
     private static string _notifyText = "Hello from RaCMAN Reloaded";
     private static int _slot = 5;
-    private static int _pinePort = Rpcs3Host.DefaultPinePort;
     private static string _rpcs3Folder = string.Empty;
     private static bool _rpcs3FolderRead;
     private static bool _confirmBootInstall;
@@ -30,7 +29,10 @@ public static class ConnectionPanel
     private static IReadOnlyList<QwarkPatchPart> _patchDialogParts = Array.Empty<QwarkPatchPart>();
     private static bool _patchDialogRequested;
 
-    /// <summary>Puts a host into the address box (the settings import uses it), whether or not the panel has been drawn yet.</summary>
+    /// <summary>
+    /// Puts a host into the PS3 address box (the settings import uses it), whether or not the
+    /// panel has been drawn yet. The box is the console's alone: nothing about RPCS3 goes in it.
+    /// </summary>
     public static void UseHost(string host)
     {
         _host = host;
@@ -41,10 +43,9 @@ public static class ConnectionPanel
     {
         if (!_initialised)
         {
-            _host = state.Settings.LastHost;
-            _sprxPath = state.Settings.SprxPath;
-            _slot = state.Settings.WebManSlot;
-            _pinePort = state.Settings.Rpcs3PinePort;
+            _host = state.Settings.Ps3.Host;
+            _sprxPath = state.Settings.Ps3.SprxPath;
+            _slot = state.Settings.Ps3.WebManSlot;
             _initialised = true;
         }
 
@@ -71,7 +72,7 @@ public static class ConnectionPanel
             if (rpcs3) ConnectToRpcs3(state);
             else
             {
-                state.Settings.LastHost = _host;
+                state.Settings.Ps3.Host = _host.Trim();
                 state.Settings.Save();
                 ConnectToPs3(state, _host);
             }
@@ -89,11 +90,13 @@ public static class ConnectionPanel
 
         ImGui.EndDisabled();
 
+        // Each target has its own answer, and this box is the one for the target above it.
         bool autoReconnect = state.Client.AutoReconnect;
         if (ImGui.Checkbox("Reconnect automatically", ref autoReconnect))
         {
             state.Client.AutoReconnect = autoReconnect;
-            state.Settings.AutoReconnect = autoReconnect;
+            if (rpcs3) state.Settings.Rpcs3.AutoReconnect = autoReconnect;
+            else state.Settings.Ps3.AutoReconnect = autoReconnect;
             state.Settings.Save();
         }
 
@@ -138,13 +141,13 @@ public static class ConnectionPanel
             // The boxes that edit these two are hidden, so the stored values are the only ones
             // there are; taking them here also picks up an import that landed after this panel was
             // first drawn.
-            _sprxPath = state.Settings.SprxPath;
-            _slot = state.Settings.WebManSlot;
+            _sprxPath = state.Settings.Ps3.SprxPath;
+            _slot = state.Settings.Ps3.WebManSlot;
 
             // Standalone is the mode for a console that loads qwark itself, and the boot plugin is
             // how it comes to: that install is the setup step, not a debug detail, so it is the one
             // part of this section a standalone user sees.
-            if (state.Settings.StandaloneConnection) DrawBootInstall(state, withPathBox: true);
+            if (state.Settings.Ps3.StandaloneConnection) DrawBootInstall(state, withPathBox: true);
 
             DrawConsoleSection(state);
             return;
@@ -180,8 +183,8 @@ public static class ConnectionPanel
             }
             else
             {
-                state.Settings.SprxPath = _sprxPath;
-                state.Settings.WebManSlot = _slot;
+                state.Settings.Ps3.SprxPath = _sprxPath;
+                state.Settings.Ps3.WebManSlot = _slot;
                 state.Settings.Save();
 
                 string ip = _host.Trim();
@@ -264,7 +267,7 @@ public static class ConnectionPanel
         // it waits for the same confirmation a press would.
         if (ImGui.Button("Install to boot_plugins.txt") || (install && _confirmBootInstall))
         {
-            state.Settings.SprxPath = _sprxPath;
+            state.Settings.Ps3.SprxPath = _sprxPath;
             state.Settings.Save();
 
             string ip = _host.Trim();
@@ -312,12 +315,12 @@ public static class ConnectionPanel
     /// </summary>
     private static void DrawUpdateModuleButton(AppState state, string sprx)
     {
-        if (!Ui.Debug || !state.Settings.StandaloneConnection) return;
+        if (!Ui.Debug || !state.Settings.Ps3.StandaloneConnection) return;
 
         ImGui.BeginDisabled(!state.Connected || !File.Exists(sprx));
         if (ImGui.Button("Update qwark.sprx on the console now"))
         {
-            state.Settings.SprxPath = _sprxPath;
+            state.Settings.Ps3.SprxPath = _sprxPath;
             state.Settings.Save();
             state.UpdateConsoleModule(sprx);
         }
@@ -337,16 +340,18 @@ public static class ConnectionPanel
     public static void ConnectToPs3(AppState state, string host)
     {
         string ip = host.Trim();
-        string sprx = Ps3Connect.ResolveSprx(state.Settings.SprxPath);
-        int slot = state.Settings.WebManSlot;
-        bool webMan = state.Settings.WebManConnection;
+        var ps3 = state.Settings.Ps3;
+        string sprx = Ps3Connect.ResolveSprx(ps3.SprxPath);
+        int slot = ps3.WebManSlot;
+        int port = ps3.Port;
+        bool webMan = ps3.WebManConnection;
 
         state.Run(async () =>
         {
             var outcome = await Ps3Connect.RunAsync(
                 webMan,
                 ip,
-                connect: () => state.Connected ? Task.CompletedTask : state.Client.ConnectAsync(ip),
+                connect: () => state.Connected ? Task.CompletedTask : state.Client.ConnectAsync(ip, port),
                 pluginStatus: () => state.WebMan.PluginStatusAsync(ip),
                 load: () => File.Exists(sprx)
                     ? state.WebMan.LoadAsync(ip, sprx, slot,
@@ -422,34 +427,24 @@ public static class ConnectionPanel
         ImGui.SameLine();
         ImGui.RadioButton("RPCS3", ref chosen, 1);
 
-        if (chosen != target)
-        {
-            state.Settings.Rpcs3Target = chosen == 1;
-            state.Settings.Save();
-
-            // The connection that is up belongs to the other target, so it goes with the choice.
-            if (state.Client.WantsConnection)
-            {
-                state.Run(() => state.Client.DisconnectAsync());
-                state.ResetPanels();
-            }
-        }
+        // Only the choice itself is written: each target keeps its own settings, and the connection
+        // that is up belongs to the other target, so it goes with the choice.
+        if (chosen != target) state.SwitchTarget(chosen == 1);
 
         ImGui.Spacing();
         return chosen == 1;
     }
 
-    /// <summary>Starts the helper if nothing is serving the port yet, then connects to this PC.</summary>
+    /// <summary>
+    /// Starts the helper if nothing is serving the port yet, then connects to this PC. Nothing is
+    /// written to the settings: the helper is always on 127.0.0.1, and the console's address,
+    /// which this used to overwrite with that, is not RPCS3's to touch.
+    /// </summary>
     public static void ConnectToRpcs3(AppState state)
     {
-        // The port lives on the Settings panel now, so take it from there rather than from a copy
-        // this panel made when it was first drawn.
-        _pinePort = state.Settings.Rpcs3PinePort;
-
-        state.Settings.LastHost = LocalHost;
-        state.Settings.Save();
-
-        if (!state.Rpcs3.Ensure(state.Settings.Rpcs3QwarkPath, _pinePort, out string message))
+        // The IPC port lives on the Settings panel, so it is read here, at the press.
+        var rpcs3 = state.Settings.Rpcs3;
+        if (!state.Rpcs3.Ensure(rpcs3.QwarkPath, rpcs3.PinePort, out string message))
         {
             state.AddToast(message, ToastKind.Error);
             return;
@@ -468,8 +463,27 @@ public static class ConnectionPanel
                 return;
             }
 
-            await state.Client.ConnectAsync(LocalHost).ConfigureAwait(false);
+            await state.Client.ConnectAsync(LocalHost, state.Rpcs3.QwarkPort).ConfigureAwait(false);
         });
+    }
+
+    /// <summary>
+    /// <c>--connect</c>: what the Connect button does, to the host given. For the console that host
+    /// is its address and is remembered as one, the way the address box remembers what it connected
+    /// to. For RPCS3 it is wherever a helper is serving, which is never the console's address, so
+    /// nothing is remembered and the console's section is left as it was.
+    /// </summary>
+    public static void ConnectOnStart(AppState state, string host)
+    {
+        string ip = host.Trim();
+        if (state.Settings.Rpcs3Target)
+        {
+            state.Run(() => state.Client.ConnectAsync(ip, state.Rpcs3.QwarkPort));
+            return;
+        }
+
+        state.Settings.Ps3.Host = ip;
+        ConnectToPs3(state, ip);
     }
 
     /// <summary>
@@ -513,7 +527,7 @@ public static class ConnectionPanel
         bool rpcs3Reached = state.Connected && (state.Ingame || host.PineConnected);
         if (!rpcs3Reached)
         {
-            int port = state.Settings.Rpcs3PinePort;
+            int port = state.Settings.Rpcs3.PinePort;
             Ui.Hint($"Turn RPCS3's IPC server on (Manage/Network Services/IPC) and leave it on port {port}. "
                     + "Start the game in RPCS3, then Connect. The port is on this client's Settings panel.");
         }
@@ -530,7 +544,7 @@ public static class ConnectionPanel
 
         if (Ui.Debug)
         {
-            Ui.DebugHint(host.Find(state.Settings.Rpcs3QwarkPath) ?? $"{Rpcs3Host.ExeName} not found");
+            Ui.DebugHint(host.Find(state.Settings.Rpcs3.QwarkPath) ?? $"{Rpcs3Host.ExeName} not found");
             foreach (var line in host.Lines) Ui.DebugHint(line);
         }
     }
@@ -637,14 +651,14 @@ public static class ConnectionPanel
     {
         if (!_rpcs3FolderRead)
         {
-            _rpcs3Folder = state.Settings.Rpcs3Folder;
+            _rpcs3Folder = state.Settings.Rpcs3.Folder;
             _rpcs3FolderRead = true;
         }
 
         ImGui.SetNextItemWidth(360);
         if (Ui.SubmitTextWithHint("RPCS3 folder", "found automatically", ref _rpcs3Folder, 512))
         {
-            state.Settings.Rpcs3Folder = _rpcs3Folder.Trim();
+            state.Settings.Rpcs3.Folder = _rpcs3Folder.Trim();
             state.Settings.Save();
             state.Rpcs3Patch.Recheck();
         }
@@ -782,8 +796,8 @@ public static class ConnectionPanel
 
         // The RPCS3 helper is a program on this PC that the client's own update replaces; the mode
         // setting is about consoles and says nothing about it.
-        string sprx = Ps3Connect.ResolveSprx(state.Settings.SprxPath);
-        string fix = !state.Settings.StandaloneConnection || state.Settings.Rpcs3Target
+        string sprx = Ps3Connect.ResolveSprx(state.Settings.Ps3.SprxPath);
+        string fix = !state.Settings.Ps3.StandaloneConnection || state.Settings.Rpcs3Target
             ? "Re-upload qwark.sprx with the button below and the console will reload it."
             : File.Exists(sprx)
                 ? "The client is putting the new qwark.sprx on the console by itself; it will say here when "

@@ -1517,9 +1517,8 @@ public class Rpcs3ModsTests : IDisposable
         // The folder is set, so the search never looks at this PC's own RPCS3.
         var settings = new Settings
         {
-            AutoReconnect = false,
             Rpcs3Target = true,
-            Rpcs3Folder = root,
+            Rpcs3 = { AutoReconnect = false, Folder = root },
             ModsPath = Path.Combine(_root, "library"),
         };
 

@@ -302,7 +302,7 @@ public sealed class Rpcs3ModsController
 
     private void EnsureDisk(string title)
     {
-        string folderSetting = _state.Settings.Rpcs3Folder;
+        string folderSetting = _state.Settings.Rpcs3.Folder;
         string key = $"{title}|{_state.Session.Generation}|{folderSetting}|{_bump}";
         if (key == _diskKey) return;
 

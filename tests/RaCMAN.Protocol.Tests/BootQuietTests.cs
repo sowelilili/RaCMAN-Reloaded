@@ -28,7 +28,7 @@ public class BootQuietTests
 
     private static async Task<AppState> ConnectedStateAsync(FakeQwarkServer server)
     {
-        var state = new AppState(new Settings { AutoReconnect = false });
+        var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
         state.Client.AutoReconnect = false;
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
         return state;

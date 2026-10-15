@@ -64,7 +64,7 @@ public class SettingsTests
 
             var loaded = Settings.Load(path);
 
-            Assert.Equal("192.168.1.50", loaded.LastHost);
+            Assert.Equal("192.168.1.50", loaded.Ps3.Host);
             Assert.False(loaded.AutoReconnect);
             Assert.Equal("light", loaded.Theme);
             Assert.True(loaded.LightTheme);
@@ -400,9 +400,9 @@ public class SettingsTests
 
         Assert.Equal("ps3", settings.Target);
         Assert.False(settings.Rpcs3Target);
-        Assert.Equal(Rpcs3Host.DefaultPinePort, settings.Rpcs3PinePort);
-        Assert.Equal(28012, settings.Rpcs3PinePort);
-        Assert.Equal(string.Empty, settings.Rpcs3QwarkPath);
+        Assert.Equal(Rpcs3Host.DefaultPinePort, settings.Rpcs3.PinePort);
+        Assert.Equal(28012, settings.Rpcs3.PinePort);
+        Assert.Equal(string.Empty, settings.Rpcs3.QwarkPath);
     }
 
     [Fact]
@@ -414,16 +414,16 @@ public class SettingsTests
             string path = Path.Combine(folder, "racman-reloaded.settings.json");
             var saved = Settings.Load(path);
             saved.Rpcs3Target = true;
-            saved.Rpcs3PinePort = 28099;
-            saved.Rpcs3QwarkPath = @"D:\qwark\qwark-rpcs3.exe";
+            saved.Rpcs3.PinePort = 28099;
+            saved.Rpcs3.QwarkPath = @"D:\qwark\qwark-rpcs3.exe";
             saved.Save();
 
             var loaded = Settings.Load(path);
 
             Assert.Equal("rpcs3", loaded.Target);
             Assert.True(loaded.Rpcs3Target);
-            Assert.Equal(28099, loaded.Rpcs3PinePort);
-            Assert.Equal(@"D:\qwark\qwark-rpcs3.exe", loaded.Rpcs3QwarkPath);
+            Assert.Equal(28099, loaded.Rpcs3.PinePort);
+            Assert.Equal(@"D:\qwark\qwark-rpcs3.exe", loaded.Rpcs3.QwarkPath);
 
             // And back again, so the radio button is not a one-way door.
             loaded.Rpcs3Target = false;
@@ -459,9 +459,9 @@ public class SettingsTests
 
             Assert.False(loaded.Rpcs3Target);
             Assert.Equal("ps3", loaded.Target);
-            Assert.Equal(28012, loaded.Rpcs3PinePort);
-            Assert.Equal(string.Empty, loaded.Rpcs3QwarkPath);
-            Assert.Equal("192.168.1.50", loaded.LastHost);
+            Assert.Equal(28012, loaded.Rpcs3.PinePort);
+            Assert.Equal(string.Empty, loaded.Rpcs3.QwarkPath);
+            Assert.Equal("192.168.1.50", loaded.Ps3.Host);
         }
         finally
         {
@@ -476,9 +476,9 @@ public class SettingsTests
     {
         var settings = new Settings();
 
-        Assert.Equal("webman", settings.ConnectionMode);
-        Assert.False(settings.StandaloneConnection);
-        Assert.True(settings.WebManConnection);
+        Assert.Equal("webman", settings.Ps3.ConnectionMode);
+        Assert.False(settings.Ps3.StandaloneConnection);
+        Assert.True(settings.Ps3.WebManConnection);
     }
 
     [Theory]
@@ -488,10 +488,10 @@ public class SettingsTests
     [InlineData("nonsense", false)]
     public void OnlyStandaloneTurnsTheWebManDetourOff(string mode, bool standalone)
     {
-        var settings = new Settings { ConnectionMode = mode };
+        var settings = new Settings { Ps3 = { ConnectionMode = mode } };
 
-        Assert.Equal(standalone, settings.StandaloneConnection);
-        Assert.Equal(!standalone, settings.WebManConnection);
+        Assert.Equal(standalone, settings.Ps3.StandaloneConnection);
+        Assert.Equal(!standalone, settings.Ps3.WebManConnection);
     }
 
     [Fact]
@@ -502,19 +502,19 @@ public class SettingsTests
         {
             string path = Path.Combine(folder, "racman-reloaded.settings.json");
             var saved = Settings.Load(path);
-            saved.StandaloneConnection = true;
+            saved.Ps3.StandaloneConnection = true;
             saved.Save();
 
             var loaded = Settings.Load(path);
 
-            Assert.Equal("standalone", loaded.ConnectionMode);
-            Assert.True(loaded.StandaloneConnection);
+            Assert.Equal("standalone", loaded.Ps3.ConnectionMode);
+            Assert.True(loaded.Ps3.StandaloneConnection);
 
             // And back again, so the radio button is not a one-way door.
-            loaded.StandaloneConnection = false;
+            loaded.Ps3.StandaloneConnection = false;
             loaded.Save();
-            Assert.Equal("webman", Settings.Load(path).ConnectionMode);
-            Assert.True(Settings.Load(path).WebManConnection);
+            Assert.Equal("webman", Settings.Load(path).Ps3.ConnectionMode);
+            Assert.True(Settings.Load(path).Ps3.WebManConnection);
         }
         finally
         {
@@ -533,9 +533,9 @@ public class SettingsTests
 
             var loaded = Settings.Load(path);
 
-            Assert.Equal("webman", loaded.ConnectionMode);
-            Assert.False(loaded.StandaloneConnection);
-            Assert.Equal(3, loaded.WebManSlot);
+            Assert.Equal("webman", loaded.Ps3.ConnectionMode);
+            Assert.False(loaded.Ps3.StandaloneConnection);
+            Assert.Equal(3, loaded.Ps3.WebManSlot);
         }
         finally
         {
