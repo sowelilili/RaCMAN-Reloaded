@@ -2225,4 +2225,125 @@ public class SaveFileRowMenuTests
         Assert.StartsWith("Only the console", SaveFilesPanel.RenameWhere(Category[1]));
         Assert.StartsWith("Only this PC", SaveFilesPanel.RenameWhere(Category[2]));
     }
+
+    [Fact]
+    public void ARenameToANameTheConsoleWouldNotListIsGreyedOutWithItsReason()
+    {
+        var veldin = Category[0];
+
+        // 28 characters and the .sav are the console's 32 bytes; one more is too long. A rename
+        // used to go through, the save then dropped out of the console's listing and every load of
+        // it failed.
+        string longest = new('a', SaveFileNames.MaxFileStem);
+        Assert.Equal(SaveFilesPanel.RenameCheck.Ok, SaveFilesPanel.CheckRename(longest, veldin, Category));
+        Assert.Equal(SaveFilesPanel.RenameCheck.Invalid, SaveFilesPanel.CheckRename(longest + "a", veldin, Category));
+        Assert.Equal("That name is too long: at most 28 characters.", SaveFilesPanel.NameProblem(longest + "a"));
+
+        Assert.Equal(SaveFilesPanel.RenameCheck.Invalid, SaveFilesPanel.CheckRename("Véldin", veldin, Category));
+        Assert.Equal(SaveFilesPanel.RenameCheck.Invalid, SaveFilesPanel.CheckRename("a..b", veldin, Category));
+        Assert.Null(SaveFilesPanel.NameProblem("Any% NG+ (co-op)"));
+        Assert.Null(SaveFilesPanel.NameProblem("   "));
+    }
+
+    [Fact]
+    public void ACategoryNameIsHeldToTheSameRule()
+    {
+        // Thirty-two characters for a category, which has no .sav to make room for.
+        string longest = new('c', SaveFileNames.MaxBytes);
+        Assert.True(SaveFilesPanel.CanCreateCategory(longest));
+        Assert.False(SaveFilesPanel.CanCreateCategory(longest + "c"));
+        Assert.Equal("That name is too long: at most 32 characters.", SaveFilesPanel.CategoryProblem(longest + "c"));
+
+        Assert.False(SaveFilesPanel.CanCreateCategory("Ånother"));
+        Assert.False(SaveFilesPanel.CanCreateCategory("a..b"));
+        Assert.Null(SaveFilesPanel.CategoryProblem("any%"));
+        Assert.Null(SaveFilesPanel.CategoryProblem(""));
+        Assert.Equal("That name belongs to the premade savefiles. Pick another one.",
+            SaveFilesPanel.CategoryProblem(PremadeSaveFiles.Category));
+    }
+}
+
+/// <summary>
+/// The names qwark takes for a savefile or a category, by its own rules: savefile_name_ok in
+/// src/core/savefile.c and the ".." of path_ok in src/core/net.c.
+/// </summary>
+public class SaveFileNameTests
+{
+    [Theory]
+    [InlineData("NG+.sav", true)]
+    [InlineData("Any% (co-op) ~ [100].sav", true)]
+    [InlineData("misc", false)]
+    [InlineData("(premade savefiles) rac1", false)]
+    [InlineData("a b c", false)]
+    public void WhatTheConsoleTakes(string name, bool file)
+    {
+        Assert.Null(SaveFileNames.Problem(name, file));
+    }
+
+    [Theory]
+    [InlineData("", "Type a name.")]
+    [InlineData("café.sav", "Use plain letters, digits, spaces and punctuation: no accents or other symbols.")]
+    [InlineData("tab\there.sav", "Use plain letters, digits, spaces and punctuation: no accents or other symbols.")]
+    [InlineData("编.sav", "Use plain letters, digits, spaces and punctuation: no accents or other symbols.")]
+    [InlineData(".hidden.sav", "A name cannot start with a dot.")]
+    [InlineData("a/b.sav", "A name cannot have / \\ or : in it.")]
+    [InlineData("a\\b.sav", "A name cannot have / \\ or : in it.")]
+    [InlineData("c:drive.sav", "A name cannot have / \\ or : in it.")]
+    [InlineData("a..b.sav", "A name cannot have two dots in a row.")]
+    public void WhatTheConsoleRefusesAndWhy(string name, string why)
+    {
+        Assert.Equal(why, SaveFileNames.Problem(name, file: true));
+    }
+
+    [Fact]
+    public void ThirtyTwoBytesWithTheSavIncluded()
+    {
+        Assert.Equal(32, SaveFileNames.MaxBytes);
+        Assert.Null(SaveFileNames.Problem(new string('x', 28) + ".sav", file: true));
+        Assert.Equal("That name is too long: at most 28 characters.",
+            SaveFileNames.Problem(new string('x', 29) + ".sav", file: true));
+
+        Assert.Null(SaveFileNames.Problem(new string('x', 32), file: false));
+        Assert.Equal("That name is too long: at most 32 characters.",
+            SaveFileNames.Problem(new string('x', 33), file: false));
+    }
+
+    [Fact]
+    public async Task ARenameTheConsoleWouldNotListTouchesNeitherSide()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "racman-names-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            using var server = new RaCMAN.Protocol.Testing.FakeQwarkServer();
+            server.Start();
+            using var client = new QwarkClient { AutoReconnect = false };
+            await client.ConnectAsync("127.0.0.1", server.Port);
+
+            var library = new SaveFileLibrary(root);
+            library.WriteAtomic("NPEA00385", "misc", "veldin.sav", new byte[] { 1, 2, 3 });
+            string path = QwarkClient.SaveFileConsolePath("NPEA00385", "misc", "veldin.sav");
+            server.Files[path] = new byte[] { 1, 2, 3 };
+
+            var entry = new SaveFileEntry("veldin.sav", true, true, 0x1111u, 0x1111u, 3, 3);
+            string tooLong = new string('v', 29) + ".sav";
+
+            var refused = await Assert.ThrowsAsync<IOException>(
+                () => SaveFileTransfer.RenameAsync(client, library, "NPEA00385", "misc", entry, tooLong));
+            Assert.Contains("too long", refused.Message);
+
+            Assert.True(File.Exists(library.FilePath("NPEA00385", "misc", "veldin.sav")));
+            Assert.True(server.Files.ContainsKey(path));
+            Assert.DoesNotContain(Opcode.FileRename, server.RequestLog());
+        }
+        finally
+        {
+            try
+            {
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+            catch (IOException)
+            {
+            }
+        }
+    }
 }

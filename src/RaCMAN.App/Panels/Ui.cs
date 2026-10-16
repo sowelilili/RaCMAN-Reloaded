@@ -106,11 +106,50 @@ public static class Ui
     {
         if (!ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) return;
 
+        SetTooltip(text);
+    }
+
+    // ---------------------------------------------------------------- text that is not a format
+    //
+    // ImGui.NET hands the string of Text, TextColored, TextWrapped, TextDisabled, BulletText and
+    // SetTooltip to the native side as a printf format. A per cent sign in it is then a conversion:
+    // "Any% (co-op)" loses a piece, and a "%s" in a save's name, a mod's description or a label
+    // the console sent reads a pointer that was never passed. Everything below draws its string as
+    // it is, and the App draws no text through those six (PrintfTextTests holds it to that).
+
+    /// <summary>
+    /// The tooltip itself, shown now: SetTooltip without the printf, for the call sites that make
+    /// their own hover test. Wrapped as <see cref="Tooltip"/> is.
+    /// </summary>
+    public static void SetTooltip(string text)
+    {
         ImGui.BeginTooltip();
         ImGui.PushTextWrapPos(ImGui.GetFontSize() * 24f);
         ImGui.TextUnformatted(text);
         ImGui.PopTextWrapPos();
         ImGui.EndTooltip();
+    }
+
+    /// <summary>TextWrapped without the printf: the current text colour, wrapped at the window's edge.</summary>
+    public static void TextWrapped(string text)
+    {
+        ImGui.PushTextWrapPos(0f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+    }
+
+    /// <summary>TextDisabled without the printf: the theme's colour for text that cannot be used.</summary>
+    public static void TextDisabled(string text) =>
+        Text(ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled], text);
+
+    /// <summary>
+    /// BulletText without the printf. ImGui's Bullet leaves the cursor on its own line, one frame
+    /// padding past the bullet, which is where BulletText puts its text too.
+    /// </summary>
+    public static void BulletText(string text)
+    {
+        ImGui.Bullet();
+        ImGui.TextUnformatted(text);
     }
 
     /// <summary>
@@ -138,7 +177,7 @@ public static class Ui
 
         // AllowWhenDisabled so the path can still be read where there is no file manager to ask,
         // and the tooltip is built by hand because SetTooltip is printf underneath, for the same
-        // reason as below.
+        // reason as below. Not wrapped: a path broken over lines is harder to read than a wide one.
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
         {
             ImGui.BeginTooltip();

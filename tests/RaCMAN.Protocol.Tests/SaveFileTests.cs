@@ -996,17 +996,28 @@ public class SaveFileTests : IDisposable
     [Fact]
     public void ErrorsSixAndSevenAreNamedInWordsForEachRequest()
     {
-        // Six: the game is somewhere a save cannot be taken or put back. Since build 53 that is
-        // RaC1 and RaC2 as well, and a load needs a moment the game would pause in.
-        foreach (var request in Enum.GetValues<SaveFileRequest>())
+        // Six: the game is somewhere a save cannot be taken or put back. Since build 53 the RaC1-3
+        // helper pauses the game from almost anywhere, so the words no longer send the player out
+        // of a menu, a vendor or a dialog: what is left is a load under way, space, a screen that
+        // cannot pause and multiplayer. Only Deadlocked refuses a set-aside.
+        foreach (var request in new[] { SaveFileRequest.Load, SaveFileRequest.Restore })
         {
             string busy = SaveFileError.NotIdle.Describe(request);
-            Assert.Contains("the game is busy", busy, StringComparison.Ordinal);
-            foreach (var where in new[] { "cutscene", "menu", "vendor", "dialog", "planet load" })
+            Assert.StartsWith("the game can't load a save right now", busy, StringComparison.Ordinal);
+            foreach (var where in new[] { "planet load", "space", "can't pause", "multiplayer", "Try again" })
             {
                 Assert.Contains(where, busy, StringComparison.Ordinal);
             }
+
+            foreach (var gone in new[] { "vendor", "dialog", "in control" })
+            {
+                Assert.DoesNotContain(gone, busy, StringComparison.Ordinal);
+            }
         }
+
+        string aside = SaveFileError.NotIdle.Describe(SaveFileRequest.Store);
+        Assert.StartsWith("the game can't set a save aside right now", aside, StringComparison.Ordinal);
+        Assert.Contains("multiplayer", aside, StringComparison.Ordinal);
 
         // Seven: no save to act on, which is a different thing for each request.
         Assert.Equal("the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",

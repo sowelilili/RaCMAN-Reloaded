@@ -78,7 +78,7 @@ public static class GamePanel
         ImGui.EndDisabled();
 
         // AllowWhenDisabled: a greyed-out control is exactly the one whose tooltip is the point.
-        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NeedsQwarkPatches);
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(Ui.NeedsQwarkPatches);
     }
 
     /// <summary>
@@ -331,7 +331,7 @@ public static class GamePanel
         }
 
         bool enabled = state.Ingame;
-        if (!enabled) ImGui.TextColored(Ui.Yellow, OutsideIngame(state));
+        if (!enabled) Ui.Text(Ui.Yellow, OutsideIngame(state));
 
         ImGui.BeginDisabled(!enabled);
 
@@ -402,7 +402,7 @@ public static class GamePanel
     private static void DrawSectionPage(AppState state, string section, IReadOnlyList<Feature> features)
     {
         bool enabled = state.Ingame;
-        if (!enabled) ImGui.TextColored(Ui.Yellow, OutsideIngame(state));
+        if (!enabled) Ui.Text(Ui.Yellow, OutsideIngame(state));
 
         ImGui.BeginDisabled(!enabled);
         ImGui.PushID(section);
@@ -467,7 +467,7 @@ public static class GamePanel
         {
             ImGui.TableNextRow();
             ImGui.TableNextColumn();
-            ImGui.TextColored(Ui.Grey, i.ToString());
+            Ui.Text(Ui.Grey, i.ToString());
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(describe.Readouts[i]);
             ImGui.TableNextColumn();
@@ -598,7 +598,7 @@ public static class GamePanel
         ImGui.PopID();
 
         if (feature.HasRange && ImGui.IsItemHovered())
-            ImGui.SetTooltip($"{feature.RangeMin}..{feature.RangeMax}" + (feature.MirrorReadout is null ? "  (no live readout)" : ""));
+            Ui.SetTooltip($"{feature.RangeMin}..{feature.RangeMax}" + (feature.MirrorReadout is null ? "  (no live readout)" : ""));
 
         if (!sent) return;
 
@@ -852,6 +852,9 @@ public static class GamePanel
                 try
                 {
                     await SaveFileTransfer.TriggerAsync(state.Client, id, request).ConfigureAwait(false);
+
+                    // A load may start a run, and with it the manips or their refusal.
+                    if (request == SaveFileRequest.Load) state.Post(state.RefreshManips);
                 }
                 catch (SaveFileTransfer.RefusedException refused)
                 {
@@ -864,7 +867,7 @@ public static class GamePanel
         ImGui.PopID();
 
         // AllowWhenDisabled: the greyed-out button is the one whose tooltip is the point.
-        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NeedsSaveFileHelper);
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(Ui.NeedsSaveFileHelper);
     }
 
     /// <summary>The gap between the widest label in a column and that column's "on boot" boxes.</summary>
@@ -937,7 +940,7 @@ public static class GamePanel
             // A code-patching toggle that can be pressed says what it is. A LIVE toggle gets no
             // tooltip: that the console reads it back out of the game is how every toggle here
             // behaves as far as the user is concerned, so saying so was noise.
-            if (!blocked && feature.WritesCode && ImGui.IsItemHovered()) ImGui.SetTooltip("Patches game code");
+            if (!blocked && feature.WritesCode && ImGui.IsItemHovered()) Ui.SetTooltip("Patches game code");
 
             // A live toggle is a game-memory byte qwark polls: there is nothing to apply on boot
             // and FEATURE_SET_AUTO is refused for it, so the box is left out. The column offsets
@@ -959,7 +962,7 @@ public static class GamePanel
                 }
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 {
-                    ImGui.SetTooltip(blocked ? Ui.NeedsQwarkPatches : "Auto-apply this toggle when the game boots");
+                    Ui.SetTooltip(blocked ? Ui.NeedsQwarkPatches : "Auto-apply this toggle when the game boots");
                 }
             }
 
@@ -1001,7 +1004,7 @@ public static class GamePanel
             var options = state.EnumOptions.TryGetValue(feature.Id, out var loaded) ? loaded : Array.Empty<string>();
             if (options.Length == 0)
             {
-                ImGui.TextColored(Ui.Grey, $"{feature.Label}: loading options...");
+                Ui.Text(Ui.Grey, $"{feature.Label}: loading options...");
                 ImGui.PopID();
                 return;
             }
@@ -1021,7 +1024,7 @@ public static class GamePanel
             if (current < 0)
             {
                 ImGui.SameLine();
-                ImGui.TextColored(Ui.Yellow, $"readout says {live}");
+                Ui.Text(Ui.Yellow, $"readout says {live}");
             }
         }
         else // Color

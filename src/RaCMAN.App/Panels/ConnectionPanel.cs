@@ -102,7 +102,7 @@ public static class ConnectionPanel
 
         ImGui.Spacing();
         var statusColour = state.Connected ? Ui.Green : state.Client.WantsConnection ? Ui.Yellow : Ui.Grey;
-        ImGui.TextColored(statusColour, state.StatusLine());
+        Ui.Text(statusColour, state.StatusLine());
 
         if (state.Connected)
         {
@@ -713,7 +713,7 @@ public static class ConnectionPanel
         Ui.Paragraph($"RaCMAN will write {(both ? "these patches" : "this patch")} for {state.Session.GameName} into RPCS3:");
         foreach (var part in parts)
         {
-            ImGui.BulletText($"{part.Description()}: {part.Purpose()}.");
+            Ui.BulletText($"{part.Description()}: {part.Purpose()}.");
         }
 
         ImGui.Spacing();

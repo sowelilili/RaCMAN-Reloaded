@@ -656,9 +656,10 @@ public sealed class FakeQwarkServer : IDisposable
 
     /// <summary>
     /// UYA's trophy reset ACTION, which build 53 lists under its Trophies heading. It deletes the
-    /// console's UYA trophy record. Until qwark renamed it it was "Refresh trophy state".
+    /// console's UYA trophy record. Until qwark renamed it it was "Refresh trophy state", and for a
+    /// while in build 53 "Reset trophies (freezes ~3 s)", until the reset stopped freezing the game.
     /// </summary>
-    public const string TrophyResetLabel = "Reset trophies (freezes ~3 s)";
+    public const string TrophyResetLabel = "Reset trophies";
 
     /// <summary>The trophy reset's id in qwark's UYA table, which the fake gives it too.</summary>
     public const byte TrophyResetId = 21;
@@ -766,12 +767,31 @@ public sealed class FakeQwarkServer : IDisposable
         return describe with { Features = features.ToArray() };
     }
 
+    /// <summary>
+    /// The groups of each game that have setup writes, as qwark's tables have them (the writes
+    /// themselves are the real module's business). The wire says only whether a group has per-run
+    /// writes, and what a selection or Apply now raises depends on both: all of RaC1's groups and
+    /// RaC2's Any% and 100% are per-run writes alone, UYA's and Deadlocked's NG+ groups are setups
+    /// alone, and the rest have both.
+    /// </summary>
+    public static IReadOnlySet<byte> ManipSetupGroupsFor(GameId game) => game switch
+    {
+        GameId.Rac2 => new HashSet<byte> { 1, 2, 5, 6 },
+        GameId.Rac3 => new HashSet<byte> { 1, 2, 3 },
+        GameId.Rac4 => new HashSet<byte> { 1 },
+        _ => new HashSet<byte>(),
+    };
+
     /// <summary>Off answers all four manip ops UNSUPPORTED, as a game with no groups does.</summary>
     public bool ManipsSupported { get; set; } = true;
 
+    /// <summary>On answers all four manip ops UNKNOWN_OP, as a module older than build 53 does.</summary>
+    public bool ManipsUnknown { get; set; }
+
     /// <summary>
-    /// Whether a file is loaded, for MANIP_APPLY: the title screen and the menus have none, and
-    /// the console refuses there with event 5.
+    /// Whether a file is in play: the title screen and the menus have none. MANIP_APPLY is refused
+    /// there with event 5, and a group picked there has its setup made at the next run's start
+    /// rather than at once.
     /// </summary>
     public bool ManipFileLoaded { get; set; } = true;
 
@@ -781,30 +801,52 @@ public sealed class FakeQwarkServer : IDisposable
     /// <summary>How many MANIP_APPLY requests have arrived, refused ones included.</summary>
     public int ManipApplyCount { get; private set; }
 
-    /// <summary>What the console keeps per game: the selection and the two options from its config.</summary>
+    /// <summary>
+    /// What the console keeps per game: the selection and the two options from its config, and
+    /// what this boot has done, which a new boot forgets.
+    /// </summary>
     private sealed class ManipConfig
     {
         public byte Selected;
         public bool AutoReset = true;
         public bool Remember;
 
-        /// <summary>The boot the groups below were activated on, which a new one forgets.</summary>
+        /// <summary>The boot the two below belong to.</summary>
         public uint Generation;
 
-        public readonly HashSet<byte> Activated = new();
+        /// <summary>The selected group's setup is in this boot (qwark's g_setup_done).</summary>
+        public bool SetupDone;
+
+        /// <summary>The groups announced as activated this boot (qwark's g_announced).</summary>
+        public readonly HashSet<byte> Announced = new();
     }
 
     private readonly Dictionary<GameId, ManipConfig> _manipConfigs = new();
+
+    /// <summary>The module's event number: never reset, across boots and games alike.</summary>
     private ushort _manipSeq;
+
     private ManipEventKind _manipKind;
     private byte _manipGroup;
 
+    /// <summary>The boot the event's kind and group belong to; a new boot clears both, not the number.</summary>
+    private uint _manipEventGeneration;
+
     /// <summary>
     /// The running game's manip config, moved to the running boot first: a new boot forgets which
-    /// setups were made, and forgets the selection too unless "remember category" is on.
+    /// setups were made and which groups were announced, and the selection too unless "remember
+    /// category" is on. The event's kind and group go with the boot as well, as manips_enter clears
+    /// them on every INGAME entry.
     /// </summary>
     private ManipConfig ManipConfigFor(GameId game)
     {
+        if (_manipEventGeneration != _session.Generation)
+        {
+            _manipEventGeneration = _session.Generation;
+            _manipKind = ManipEventKind.None;
+            _manipGroup = 0;
+        }
+
         if (!_manipConfigs.TryGetValue(game, out var config))
         {
             config = new ManipConfig { Generation = _session.Generation };
@@ -814,7 +856,8 @@ public sealed class FakeQwarkServer : IDisposable
         if (config.Generation != _session.Generation)
         {
             config.Generation = _session.Generation;
-            config.Activated.Clear();
+            config.SetupDone = false;
+            config.Announced.Clear();
             if (!config.Remember) config.Selected = ManipList.None;
         }
 
@@ -839,10 +882,39 @@ public sealed class FakeQwarkServer : IDisposable
     {
         lock (_gate)
         {
-            _manipSeq++;
-            _manipKind = kind;
-            _manipGroup = group ?? ManipConfigFor(_session.Game).Selected;
-            return _manipSeq;
+            var config = ManipConfigFor(_session.Game);
+            return ManipEvent(kind, group ?? config.Selected);
+        }
+    }
+
+    /// <summary>The event itself, under the gate.</summary>
+    private ushort ManipEvent(ManipEventKind kind, byte group)
+    {
+        _manipSeq++;
+        _manipKind = kind;
+        _manipGroup = group;
+        return _manipSeq;
+    }
+
+    /// <summary>
+    /// A run starting, as the running game's trigger sees one (qwark's manips_file_loaded): the
+    /// selected group's setup if this boot has not had it, and its per-run writes while auto-reset
+    /// is on, after the challenge-mode check. Nothing happens with None selected, nor for a group
+    /// with nothing due. The planet does not move: in RaC1, RaC2 and UYA a save loaded on the first
+    /// planet starts a run where it is.
+    /// </summary>
+    public void ManipRunStart()
+    {
+        lock (_gate)
+        {
+            if (!ManipsAvailable(out var groups)) return;
+
+            var config = ManipConfigFor(_session.Game);
+            var group = Array.Find(groups, g => g.Id == config.Selected);
+            if (group is null) return;
+
+            bool setup = !config.SetupDone;
+            ManipAttempt(config, group, setup, config.AutoReset);
         }
     }
 
@@ -870,17 +942,41 @@ public sealed class FakeQwarkServer : IDisposable
     /// The challenge-mode check, both ways: an NG+ group needs a challenge-mode file and a
     /// new-game group a fresh one, unless the group skips the check. Null when the group may write.
     /// </summary>
-    private ManipEventKind? ManipRefusal(ManipGroup group)
+    private ManipEventKind? ChallengeRefusal(ManipGroup group)
     {
-        if (!ManipFileLoaded) return ManipEventKind.RefusedNoFile;
         if (group.SkipsChallengeCheck) return null;
         if (group.IsNgPlus && ChallengeCounter == 0) return ManipEventKind.RefusedNotChallengeFile;
         if (!group.IsNgPlus && ChallengeCounter > 0) return ManipEventKind.RefusedChallengeFile;
         return null;
     }
 
+    /// <summary>
+    /// One application of a group, as qwark's attempt() makes it: the parts asked for that the
+    /// group has writes in, after the challenge-mode check. A group with nothing due raises nothing;
+    /// a refusal is its event and BUSY; otherwise the group's first application this boot is
+    /// "activated" and every later one "applied", one event either way.
+    /// </summary>
+    private Status ManipAttempt(ManipConfig config, ManipGroup group, bool setup, bool perRun)
+    {
+        setup &= ManipSetupGroupsFor(_session.Game).Contains(group.Id);
+        perRun &= group.HasPerRun;
+        if (!setup && !perRun) return Status.Ok;
+
+        if (ChallengeRefusal(group) is { } refusal)
+        {
+            ManipEvent(refusal, group.Id);
+            return Status.Busy;
+        }
+
+        if (setup) config.SetupDone = true;
+
+        ManipEvent(config.Announced.Add(group.Id) ? ManipEventKind.Activated : ManipEventKind.PerRunApplied, group.Id);
+        return Status.Ok;
+    }
+
     private (Status, byte[]?) HandleManips(Opcode opcode, byte[] payload)
     {
+        if (ManipsUnknown) return (Status.UnknownOp, null);
         if (!ManipsAvailable(out var groups)) return (Status.Unsupported, null);
 
         var config = ManipConfigFor(_session.Game);
@@ -900,20 +996,23 @@ public sealed class FakeQwarkServer : IDisposable
                 var group = Array.Find(groups, g => g.Id == id);
                 if (id != ManipList.None && group is null) return (Status.BadArg, null);
 
-                config.Selected = id;
+                // The same group again is nothing: no setup rewritten, no refusal raised.
+                if (id == config.Selected) return (Status.Ok, null);
 
-                // A group picked while a file it suits is loaded has its setup made at once, which
-                // is the first time this boot and so says so.
-                if (group is not null && ManipRefusal(group) is null && config.Activated.Add(id))
-                {
-                    RaiseManipEvent(ManipEventKind.Activated, id);
-                }
+                config.Selected = id;
+                config.SetupDone = false;
+
+                // A group picked while a file is in play has its setup made at once, after the
+                // check: the group's first application this boot says it was activated, a later one
+                // that it was applied, and a file the group does not suit says so. The answer is OK
+                // whatever happened, as qwark's is; the event is what tells.
+                if (group is not null && ManipFileLoaded) ManipAttempt(config, group, setup: true, perRun: false);
 
                 return (Status.Ok, null);
             }
 
             case Opcode.ManipOptions:
-                if (payload.Length < 2) return (Status.BadArg, null);
+                if (payload.Length < 2 || payload[0] > 1 || payload[1] > 1) return (Status.BadArg, null);
                 config.AutoReset = payload[0] != 0;
                 config.Remember = payload[1] != 0;
                 return (Status.Ok, null);
@@ -924,15 +1023,13 @@ public sealed class FakeQwarkServer : IDisposable
                 var group = Array.Find(groups, g => g.Id == config.Selected);
                 if (group is null) return (Status.Ok, null);
 
-                if (ManipRefusal(group) is { } refusal)
+                if (!ManipFileLoaded)
                 {
-                    RaiseManipEvent(refusal, group.Id);
+                    ManipEvent(ManipEventKind.RefusedNoFile, group.Id);
                     return (Status.Busy, null);
                 }
 
-                if (config.Activated.Add(group.Id)) RaiseManipEvent(ManipEventKind.Activated, group.Id);
-                else if (group.HasPerRun) RaiseManipEvent(ManipEventKind.PerRunApplied, group.Id);
-                return (Status.Ok, null);
+                return (ManipAttempt(config, group, setup: true, perRun: true), null);
             }
 
             default:

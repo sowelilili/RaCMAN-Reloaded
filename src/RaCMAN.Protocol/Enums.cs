@@ -185,10 +185,17 @@ public enum ManipEventKind : byte
 {
     None = 0,
 
-    /// <summary>The group's setup writes were made for the first time this boot.</summary>
+    /// <summary>
+    /// The group's first application this boot, whatever it wrote: its setup, or its per-run
+    /// writes alone for a group that has no setup (build 53).
+    /// </summary>
     Activated = 1,
 
-    /// <summary>The group's per-run writes were made again.</summary>
+    /// <summary>
+    /// A later application of the group: its per-run writes at a run's start, or its setup put in
+    /// again after the group was announced this boot (Apply now, or the group picked again). The
+    /// name is the first of the two; the event says only that the group's manips went in.
+    /// </summary>
     PerRunApplied = 2,
 
     /// <summary>Refused: an NG+ group, and the file is not a challenge-mode file.</summary>
@@ -236,17 +243,19 @@ public enum SaveFileError : byte
     BufferBusy = 5,
 
     /// <summary>
-    /// The game was not somewhere a save can be taken or put back (build 43): a planet load, a
-    /// cutscene, a menu, a lobby or a mode change in flight. Deadlocked since build 43, RaC1 and
-    /// RaC2 since build 53, whose loads also need a moment the game would let the player pause
-    /// (no vendor, no dialog, not the moment of arriving on a planet). The console refuses before
-    /// touching the game or a file, or the helper drops the request on the frame it would act.
+    /// The game was not somewhere a save can be taken or put back (build 43). Deadlocked since
+    /// build 43: anything but ordinary play or its pause, or a mode change queued (a menu, a lobby,
+    /// a mission starting). RaC1, RaC2 and UYA since build 53, for a load only: the helper pauses
+    /// the game from almost anywhere, so what is left is a planet load under way, a RaC1 movie,
+    /// RaC2's title screen, space, debug mode, multiplayer or a lobby, and the helper's ten-second
+    /// wait for the pause running out. The console refuses before touching the game or a file, or
+    /// the helper drops the request on the frame it would act.
     /// </summary>
     NotIdle = 6,
 
     /// <summary>
     /// There was no save to act on (build 53, revision 1.20). A set-aside found the game holding no
-    /// save yet: RaC1 and RaC2 have none until they have saved or loaded once since the game
+    /// save yet: RaC1, RaC2 and UYA have none until they have saved or loaded once since the game
     /// started, which on a new game is the first autosave. A load found nothing set aside that is
     /// a save of this game and no save of the game's own to fill it from, and a RESTORE found that
     /// the file it copied in is not a save of the running game, so it loaded nothing.
@@ -284,8 +293,14 @@ public static class SaveFileErrorExtensions
         SaveFileError.ShortFile => "the file is not the size this game's save has to be",
         SaveFileError.HelperMissing => "the game stopped while the console was copying",
         SaveFileError.BufferBusy => "the console was already busy with another save",
-        SaveFileError.NotIdle =>
-            "the game is busy: try again once you are in control, out of any cutscene, menu, vendor, dialog or planet load",
+        // Not "leave the menu": the RaC1-3 helper pauses the game from almost anywhere since build
+        // 53, so what is left is a load under way, space, a screen that cannot pause and
+        // multiplayer. A set-aside is refused only by Deadlocked, for the same kinds of moment.
+        SaveFileError.NotIdle => request == SaveFileRequest.Store
+            ? "the game can't set a save aside right now (a load, a cutscene or a mode change is under way, "
+              + "or it's in multiplayer). Try again in a moment"
+            : "the game can't load a save right now (a planet load is under way, or it's in space, "
+              + "a menu that can't pause, or multiplayer). Try again in a moment",
         SaveFileError.NoSave => request switch
         {
             SaveFileRequest.Restore => "that file is not a save of this game, so nothing was loaded",

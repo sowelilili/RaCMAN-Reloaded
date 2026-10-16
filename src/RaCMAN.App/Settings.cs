@@ -404,9 +404,11 @@ public sealed class Settings
     // filling a section the file does not have yet (BringTargetsForward), and a file that has the
     // section ignores them: edit the section. Every save writes them again as copies of the
     // sections, after everything else, because an older build may be opened on the same data
-    // folder: it finds the console's address, its ports and the RPCS3 folder where it looks for
-    // them, and a file it saves, which drops the sections it has never heard of, comes back
-    // through BringTargetsForward with nothing lost.
+    // folder: it finds the console's address, the RPCS3 ports and folder and the rest where it
+    // looks for them. A file it saves drops the sections it has never heard of and comes back
+    // through BringTargetsForward with what the flat keys held, which is not all of it: there is
+    // no flat key for the console's port or the helper's, so those two go back to their defaults,
+    // and the one flat reconnect switch, the chosen target's, becomes both targets' again.
     private const int LegacyKeysLast = 1;
 
     [JsonInclude, JsonPropertyName("lastHost"), JsonPropertyOrder(LegacyKeysLast)]
@@ -438,11 +440,14 @@ public sealed class Settings
     /// value; a key the file lacks too takes the default it always had. The one switch both
     /// targets shared, "autoReconnect", goes to both.
     /// <para>
-    /// A console address of 127.0.0.1 comes across as it is, even from a file whose last target
-    /// was RPCS3, where it is most likely the bug's doing. Nothing else in such a file remembers
-    /// the address it replaced, and 127.0.0.1 is also what a console target pointed at the qwark
-    /// simulator holds, so anything put in its place would be a guess. It is the user's to retype
-    /// once; nothing writes over it again.
+    /// One value is not taken: a loopback console address in a file whose last target was RPCS3.
+    /// That is 1.2.2's bug, which wrote the helper's 127.0.0.1 over the console's address whenever
+    /// the client closed while connected to RPCS3. Taken as it is, the console target would connect
+    /// to the RPCS3 helper on this PC, which answers on the same port, and look as if it had found
+    /// the console. Nothing in such a file remembers the address it replaced, so the box goes back
+    /// to its default and the user is asked for the console's address once. A file whose target
+    /// was the console keeps a loopback address, which is a console target pointed at the qwark
+    /// simulator.
     /// </para>
     /// </summary>
     private void BringTargetsForward()
@@ -450,7 +455,7 @@ public sealed class Settings
         if (_ps3 is null)
         {
             var ps3 = new Ps3Settings();
-            if (LegacyLastHost is { } host) ps3.Host = host;
+            if (LegacyLastHost is { } host && !(Rpcs3Target && IsLoopback(host))) ps3.Host = host;
             if (LegacyConnectionMode is { } mode) ps3.ConnectionMode = mode;
             if (LegacyWebManSlot is { } slot) ps3.WebManSlot = slot;
             if (LegacySprxPath is { } sprx) ps3.SprxPath = sprx;
@@ -469,9 +474,18 @@ public sealed class Settings
         }
     }
 
+    /// <summary>Whether an address names this PC: "localhost", or a loopback IP such as 127.0.0.1 or ::1.</summary>
+    public static bool IsLoopback(string? host)
+    {
+        var trimmed = (host ?? string.Empty).Trim();
+        if (string.Equals(trimmed, "localhost", StringComparison.OrdinalIgnoreCase)) return true;
+        return System.Net.IPAddress.TryParse(trimmed.Trim('[', ']'), out var address) && System.Net.IPAddress.IsLoopback(address);
+    }
+
     /// <summary>
     /// Copies the sections into the flat keys for an older build to read. "autoReconnect" is the
-    /// chosen target's, because an older build applies its one switch to whichever target it opens on.
+    /// chosen target's, because an older build applies its one switch to whichever target it opens
+    /// on. The console's port and the helper's have no flat key; an older build never had either.
     /// </summary>
     private void MirrorLegacyKeys()
     {

@@ -104,8 +104,10 @@ public sealed class AppState : IDisposable
         Client = new QwarkClient { AutoReconnect = settings.AutoReconnect };
 
         // The user's own files are in the data folder; the shipped mod library is beside the
-        // executable, where the updater is free to replace it.
-        Mods = new ModLibrary(AppPaths.InData(settings.ModsPath), AppPaths.ShippedMods);
+        // executable, where the updater is free to replace it. A retired mod an older release left
+        // there is the one thing in it that is not offered (ModLibrary.IsShippedFolder).
+        Mods = new ModLibrary(AppPaths.InData(settings.ModsPath), AppPaths.ShippedMods,
+            retired: (title, folder) => LegacyModExclusions.Shipped.Excludes(title, folder));
         Watchlists = new WatchlistStore(AppPaths.Watchlists);
         ColourPresets = new ColourPresetStore(AppPaths.Colours);
         PositionNames = new PositionNameStore(AppPaths.Positions);
@@ -147,6 +149,11 @@ public sealed class AppState : IDisposable
 
             // A new connection, so the standalone update gets its one attempt again.
             _sprxUpdateTried = false;
+
+            // And the manip events start again from whatever the console holds now: the module on
+            // the other end may be a new one, whose event numbers mean nothing next to the old
+            // one's (see ManipEvents).
+            _manipEvents.Forget();
 
             // The restart notice is done with when the console comes back running the build that
             // was put on it, and it belongs to that console: connecting to another one, or to the
@@ -416,15 +423,20 @@ public sealed class AppState : IDisposable
 
     private bool _manipsAgain;
 
-    /// <summary>
-    /// Seconds until the second read after a planet change, or 0 for none. A file load changes the
-    /// planet, and whether qwark has recorded the load's event by the time telemetry shows the new
-    /// planet is a race, so the read is made at once and once more a moment later.
-    /// </summary>
-    private float _manipFollowUp;
+    /// <summary>Seconds since the last timed MANIP_LIST; see <see cref="ManipPollSeconds"/>.</summary>
+    private float _sinceManipPoll;
 
-    /// <summary>How long after a planet change the second MANIP_LIST goes out.</summary>
-    public const float ManipFollowUpSeconds = 2f;
+    /// <summary>
+    /// How often MANIP_LIST is read while a game with manip groups is up, on whatever panel. qwark
+    /// applies them, or refuses to, at the start of a run, and telemetry carries nothing that says
+    /// one has started: in RaC1, RaC2 and UYA it is the end of a load into the first planet, which
+    /// comes seconds after the planet number changed, or with no change at all when a save is loaded
+    /// on that planet (how runners reset, and how the premade saves are used); in Deadlocked it is a
+    /// flag no packet has. MANIP_LIST is answered on the console's network thread and is a few
+    /// hundred bytes, so asking every second and a half costs nothing worth saving, and an event is
+    /// toasted within that of happening.
+    /// </summary>
+    public const float ManipPollSeconds = 1.5f;
 
     public IReadOnlyList<LocalMod> LocalMods { get; private set; } = Array.Empty<LocalMod>();
 
@@ -839,7 +851,8 @@ public sealed class AppState : IDisposable
         if (session.CurrentPlanet != _lastPlanet && session.State == SessionState.Ingame && !UnknownGame)
         {
             // 0xFF is "not known yet", which every session change sets; only a real move counts as
-            // the load that may have applied, or refused, the selected manips.
+            // a load that may have applied, or refused, the selected manips. Read at once for the
+            // games whose run starts as the planet changes; the timer below catches the rest.
             bool moved = _lastPlanet != 0xFF;
             _lastPlanet = session.CurrentPlanet;
             RefreshPositions(quiet: true);
@@ -847,18 +860,24 @@ public sealed class AppState : IDisposable
             if (moved && Manips is not null)
             {
                 RefreshManips();
-                _manipFollowUp = ManipFollowUpSeconds;
+                _sinceManipPoll = 0;
             }
         }
 
-        if (_manipFollowUp > 0)
+        // The timed read (see ManipPollSeconds). Only while the game has groups: a game that
+        // answered UNSUPPORTED, and a module too old to know the op, have no list and are not asked.
+        if (Manips is not null && Ingame && !UnknownGame)
         {
-            _manipFollowUp -= deltaSeconds;
-            if (_manipFollowUp <= 0)
+            _sinceManipPoll += deltaSeconds;
+            if (_sinceManipPoll >= ManipPollSeconds)
             {
-                _manipFollowUp = 0;
+                _sinceManipPoll = 0;
                 RefreshManips();
             }
+        }
+        else
+        {
+            _sinceManipPoll = 0;
         }
 
         // PREVIOUS_LIST is a bulk op, and section 4.1 sets the pending flag on the way through a
@@ -923,7 +942,7 @@ public sealed class AppState : IDisposable
         UnlocksUnsupported = false;
         LevelFlagsUnsupported = false;
         Manips = null;
-        _manipFollowUp = 0;
+        _sinceManipPoll = 0;
     }
 
     /// <summary>
@@ -1107,10 +1126,12 @@ public sealed class AppState : IDisposable
 
     /// <summary>
     /// Reads MANIP_LIST, quietly: on every way back into a game, after every manip request, after a
-    /// planet change, and on a timer while the manips area is on screen. Only INGAME, where the op
-    /// answers for the game; at the XMB the area keeps what it has, greyed out. One read at a time:
-    /// a read asked for while one is out goes out when that one is answered, so the answer after a
-    /// change is never one that left before it. UNSUPPORTED and UNKNOWN_OP hide the area.
+    /// planet change, after a load this client asked for, when the manips area comes on screen, and
+    /// every <see cref="ManipPollSeconds"/> while a game with groups is up. Only INGAME, where the
+    /// op answers for the game; at the XMB the area keeps what it has, greyed out. One read at a
+    /// time: a read asked for while one is out goes out when that one is answered, so the answer
+    /// after a change is never one that left before it. UNSUPPORTED and UNKNOWN_OP hide the area,
+    /// and with it the timed reads.
     /// </summary>
     public void RefreshManips()
     {
@@ -1172,7 +1193,7 @@ public sealed class AppState : IDisposable
         if (key != ManipKey) return null;
 
         Manips = list;
-        if (_manipEvents.Observe(key, list) is not { Toast: { } kind } notice) return null;
+        if (_manipEvents.Observe(list) is not { Toast: { } kind } notice) return null;
 
         AddToast(notice.Text, kind);
         ManipToasts++;

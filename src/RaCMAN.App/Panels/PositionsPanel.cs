@@ -219,7 +219,13 @@ public static class PositionsPanel
         if (ImGui.Button("Load planet"))
         {
             byte planet = (byte)choices.PlanetAt(pick);
-            state.Run(() => state.Client.PlanetLoadAsync(planet, (byte)flags));
+            state.Run(async () =>
+            {
+                await state.Client.PlanetLoadAsync(planet, (byte)flags).ConfigureAwait(false);
+
+                // A load into the first planet starts a run, and with it the manips or their refusal.
+                state.Post(state.RefreshManips);
+            });
         }
 
         return true;

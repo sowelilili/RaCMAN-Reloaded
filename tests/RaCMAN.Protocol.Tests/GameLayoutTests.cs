@@ -56,7 +56,7 @@ public class GameLayoutTests
     /// exist), and their own DESCRIBE group.
     /// </summary>
     private static Feature TrophyReset() =>
-        new(21, FeatureKind.Action, Rac3Trophies, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset trophies (freezes ~3 s)");
+        new(21, FeatureKind.Action, Rac3Trophies, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset trophies");
 
     private static Feature TrophyAutoReset() =>
         new(39, FeatureKind.Toggle, Rac3Trophies, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset trophies on Veldin load");
@@ -451,7 +451,7 @@ public class GameLayoutTests
         var d = Describe(GameId.Rac3, Rac3Groups, reset, auto, titanium);
 
         var sections = GamePanel.SectionsFor("NPEA00387", GameId.Rac3, d, Manips(new ManipHeader("Trophies", new ushort[] { 21, 39 })));
-        Assert.Equal(new[] { "Reset trophies (freezes ~3 s)", "Reset trophies on Veldin load" }, sections["Manips"].Select(f => f.Label));
+        Assert.Equal(new[] { "Reset trophies", "Reset trophies on Veldin load" }, sections["Manips"].Select(f => f.Label));
         Assert.False(sections.ContainsKey("Trophies"));
         Assert.False(sections.ContainsKey("Savefile"));
         Assert.Equal(new[] { "Unlock all titanium bolts" }, sections["Collectables"].Select(f => f.Label));
@@ -460,7 +460,7 @@ public class GameLayoutTests
         Assert.Equal("Trophies", Assert.Single(blocks).Heading);
 
         var without = GamePanel.SectionsFor("NPEA00387", GameId.Rac3, d);
-        Assert.Equal(new[] { "Reset trophies (freezes ~3 s)", "Reset trophies on Veldin load" }, without["Trophies"].Select(f => f.Label));
+        Assert.Equal(new[] { "Reset trophies", "Reset trophies on Veldin load" }, without["Trophies"].Select(f => f.Label));
 
         // The label it had before is not in the shipped file either: a move by that name would
         // match nothing a build 53 console describes.

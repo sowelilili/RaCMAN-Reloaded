@@ -26,6 +26,13 @@ namespace RaCMAN.App.Panels;
 public static class SaveFilesPanel
 {
     private static string _title = string.Empty;
+
+    /// <summary>
+    /// The game the list was read for. BCES01503 holds three under one title, each with its own
+    /// helper and its own premade savefiles, so a new game under the same title is a new list.
+    /// </summary>
+    private static GameId _game;
+
     private static string[] _categories = { SaveFileLibrary.DefaultCategory };
     private static int _categoryIndex;
     private static string _newCategory = string.Empty;
@@ -72,6 +79,13 @@ public static class SaveFilesPanel
     /// <summary>How many premade savefiles the release ships for the game on screen.</summary>
     private static int _premadeCount;
 
+    /// <summary>
+    /// Whether the last scan asked the console for its side. A scan made before SAVEFILE_INFO said
+    /// the console has a library for this game did not, and the next frame that finds it readable
+    /// scans again.
+    /// </summary>
+    private static bool _consoleListed;
+
     /// <summary>Category and file count, for the smoke-run summary.</summary>
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
 
@@ -106,6 +120,7 @@ public static class SaveFilesPanel
     public static void Reset()
     {
         _title = string.Empty;
+        _game = GameId.None;
         _categories = new[] { SaveFileLibrary.DefaultCategory };
         _categoryIndex = 0;
         _newCategory = string.Empty;
@@ -113,6 +128,7 @@ public static class SaveFilesPanel
         _fileIndex = -1;
         _name = string.Empty;
         _premadeCount = 0;
+        _consoleListed = false;
         ClearTransfer();
     }
 
@@ -227,7 +243,12 @@ public static class SaveFilesPanel
             ImGui.Spacing();
         }
 
-        if (!string.Equals(_title, title, StringComparison.Ordinal)) Rescan(state, title);
+        // A new title or game, or the console's library becoming readable after the last scan left
+        // it out. After a connect or a game switch SAVEFILE_INFO answers after the scan the new
+        // title makes, so that scan read only this PC's side: the console-only saves were missing
+        // and the premade rows all said "PC" until somebody pressed Rescan.
+        if (!string.Equals(_title, title, StringComparison.Ordinal) || _game != session.Game) Rescan(state, title, session.Game);
+        else if (!_consoleListed && ConsoleReadable(state)) Rescan(state, title);
 
         bool premade = IsPremade;
 
@@ -256,7 +277,7 @@ public static class SaveFilesPanel
             Ui.DebugHint($"Console: {info.Size} bytes in the helper's aside buffer, " +
                          $"installed={info.Installed} running={info.Running}");
             Ui.DebugHint($"Actions: '{save!.Label}' (id {save.Id}, SAVE_ASIDE), '{load!.Label}' (id {load.Id}, LOAD_ASIDE)");
-            Ui.DebugHint($"Console library: {QwarkClient.SaveFileConsoleFolder(title, Category)}");
+            Ui.DebugHint($"Console library: {QwarkClient.SaveFileConsoleFolder(title, ConsoleCategoryOf(state, title, Category))}");
         }
 
         ImGui.Spacing();
@@ -278,7 +299,7 @@ public static class SaveFilesPanel
         {
             ImGui.Spacing();
             ImGui.Separator();
-            ImGui.TextColored(_busy ? Ui.Yellow : Ui.Grey, _status);
+            Ui.Text(_busy ? Ui.Yellow : Ui.Grey, _status);
             if (_transferred > 0) Ui.Hint($"{_transferred} bytes");
         }
 
@@ -318,19 +339,31 @@ public static class SaveFilesPanel
 
         ImGui.EndDisabled();
 
-        if (IsReadOnly(SaveFileLibrary.Sanitise(_newCategory, SaveFileLibrary.DefaultCategory)))
-        {
-            Ui.Tooltip("That name belongs to the premade savefiles. Pick another one.");
-        }
+        // Why it is greyed out, under the row, while there is something typed to be wrong.
+        if (CategoryProblem(_newCategory) is { } problem) Ui.Warning(problem);
     }
 
     /// <summary>
-    /// Whether a typed name makes a category: anything that is not blank, except the premade
-    /// savefiles' own name, which is not the user's to have.
+    /// What is wrong with a typed category name, or null when it makes one (or nothing is typed
+    /// yet): a name the console would refuse (<see cref="SaveFileNames"/>), or the premade
+    /// savefiles' own, which is not the user's to have.
+    /// </summary>
+    public static string? CategoryProblem(string? typed)
+    {
+        if (string.IsNullOrWhiteSpace(typed)) return null;
+
+        string wanted = SaveFileLibrary.Sanitise(typed, SaveFileLibrary.DefaultCategory);
+        if (IsReadOnly(wanted)) return "That name belongs to the premade savefiles. Pick another one.";
+
+        return SaveFileNames.Problem(wanted, file: false);
+    }
+
+    /// <summary>
+    /// Whether a typed name makes a category: anything that is not blank and that the console
+    /// takes, except the premade savefiles' own name.
     /// </summary>
     public static bool CanCreateCategory(string? typed) =>
-        !string.IsNullOrWhiteSpace(typed)
-        && !IsReadOnly(SaveFileLibrary.Sanitise(typed, SaveFileLibrary.DefaultCategory));
+        !string.IsNullOrWhiteSpace(typed) && CategoryProblem(typed) is null;
 
     /// <summary>A category is made on both sides, so the next save has somewhere to go either way.</summary>
     private static void CreateCategory(AppState state, string title)
@@ -515,7 +548,7 @@ public static class SaveFilesPanel
     {
         try
         {
-            var copy = state.PremadeSaveFiles.CopyTo(state.SaveFiles, title, entry.Name, category);
+            var copy = state.PremadeSaveFiles.CopyTo(state.SaveFiles, title, entry.Name, category, _game);
             state.AddToast(CopyToast(entry, copy), ToastKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -553,6 +586,9 @@ public static class SaveFilesPanel
 
         /// <summary>Another save in the category already has that name.</summary>
         Taken,
+
+        /// <summary>A name the console would refuse, or take and then never list; <see cref="NameProblem"/> says why.</summary>
+        Invalid,
     }
 
     /// <summary>
@@ -561,6 +597,14 @@ public static class SaveFilesPanel
     /// </summary>
     public static string RenameTarget(string typed) =>
         SaveFileLibrary.EnsureExtension(SaveFileLibrary.Sanitise(typed, "savefile"));
+
+    /// <summary>
+    /// Why the file name <paramref name="typed"/> becomes would not do on the console, or null when
+    /// it would (or nothing is typed yet). One check for a rename and for a save, the console's own
+    /// (<see cref="SaveFileNames"/>).
+    /// </summary>
+    public static string? NameProblem(string? typed) =>
+        string.IsNullOrWhiteSpace(typed) ? null : SaveFileNames.Problem(RenameTarget(typed), file: true);
 
     /// <summary>
     /// Whether <paramref name="typed"/> is a name <paramref name="entry"/> can be renamed to among
@@ -574,6 +618,7 @@ public static class SaveFilesPanel
 
         string target = RenameTarget(typed);
         if (string.Equals(target, entry.Name, StringComparison.Ordinal)) return RenameCheck.Unchanged;
+        if (NameProblem(typed) is not null) return RenameCheck.Invalid;
 
         foreach (var other in entries)
         {
@@ -648,6 +693,10 @@ public static class SaveFilesPanel
         if (check == RenameCheck.Taken)
         {
             Ui.Warning($"A save called {SaveFileLibrary.DisplayName(RenameTarget(_renameTo))} is already in this category.");
+        }
+        else if (check == RenameCheck.Invalid && NameProblem(_renameTo) is { } problem)
+        {
+            Ui.Warning(problem);
         }
 
         ImGui.Spacing();
@@ -756,7 +805,8 @@ public static class SaveFilesPanel
         // button's own greying out asks.
         // Nothing is saved into the premade savefiles: they are the release's.
         bool premade = IsPremade;
-        bool canSave = enabled && save is not null && !string.IsNullOrWhiteSpace(_name) && !premade;
+        string? problem = NameProblem(_name);
+        bool canSave = enabled && save is not null && !string.IsNullOrWhiteSpace(_name) && problem is null && !premade;
         ImGui.BeginDisabled(!canSave);
         if (ImGui.Button("Save on console") || (saveNow && canSave)) StartSave(state, title);
         ImGui.EndDisabled();
@@ -767,6 +817,9 @@ public static class SaveFilesPanel
         ImGui.BeginDisabled(!enabled || load is null || selected is null);
         if (ImGui.Button("Load into game")) StartLoad(state, title, selected!.Value);
         ImGui.EndDisabled();
+
+        // Why Save is greyed out, under the row, for a name the console would not take.
+        if (problem is not null && !premade) Ui.Warning(problem);
     }
 
     /// <summary>
@@ -785,7 +838,7 @@ public static class SaveFilesPanel
     private static void StartSave(AppState state, string title)
     {
         string category = Category;
-        string name = SaveFileLibrary.EnsureExtension(SaveFileLibrary.Sanitise(_name, "savefile"));
+        string name = RenameTarget(_name);
         var library = state.SaveFiles;
         bool mirror = state.Settings.MirrorSaveFiles;
 
@@ -839,10 +892,10 @@ public static class SaveFilesPanel
     /// </summary>
     private static void StartLoad(AppState state, string title, SaveFileEntry entry)
     {
-        string category = Category;
-
         // A premade savefile's bytes come out of the application folder; everything after that is
-        // the same load, into the console's category of the same name.
+        // the same load, into the console's premade category (one per game under a title that
+        // holds several, ConsoleCategoryOf).
+        string category = ConsoleCategoryOf(state, title, Category);
         ISaveFileSource library = IsReadOnly(category) ? state.PremadeSaveFiles : state.SaveFiles;
 
         _busy = true;
@@ -870,6 +923,9 @@ public static class SaveFilesPanel
                         : "Loaded into the game from the console";
                     state.AddToast($"Loaded '{entry.DisplayName}'", ToastKind.Success);
                     if (uploaded) Rescan(state, title);
+
+                    // A load may start a run, and with it the manips or their refusal.
+                    state.RefreshManips();
                 });
             }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
@@ -954,17 +1010,37 @@ public static class SaveFilesPanel
         });
     }
 
-    private static void Rescan(AppState state, string title)
+    /// <summary>
+    /// Whether the console's side of the library can be read now: a game is up and SAVEFILE_INFO
+    /// said the console has a helper, and with it a library, for it.
+    /// </summary>
+    private static bool ConsoleReadable(AppState state) => state.Ingame && state.SaveFile.Supported;
+
+    /// <summary>
+    /// The console's own name for a category of the combo. The premade one is
+    /// <see cref="PremadeSaveFiles.ConsoleCategory"/>, which carries the game under a title that
+    /// holds several; every other category is the user's and is called the same on both sides.
+    /// </summary>
+    private static string ConsoleCategoryOf(AppState state, string title, string category) =>
+        IsReadOnly(category) ? state.PremadeSaveFiles.ConsoleCategory(title, _game) : category;
+
+    /// <summary>Whether an answer asked for <paramref name="title"/> and <paramref name="game"/> is still about the list on screen.</summary>
+    private static bool StillOn(string title, GameId game) =>
+        string.Equals(title, _title, StringComparison.Ordinal) && game == _game;
+
+    private static void Rescan(AppState state, string title, GameId? game = null)
     {
         // A new game means a new answer about the console's helper, and this panel is the only
         // thing that reads it, so a rescan is a good moment to make sure it is current.
-        bool arrived = !string.Equals(_title, title, StringComparison.Ordinal);
+        var playing = game ?? _game;
+        bool arrived = !StillOn(title, playing);
         if (arrived) state.RefreshSaveFileInfo();
 
         // Coming to a title opens the combo where that title was last left; a rescan after a save
         // or a delete leaves it exactly where the user put it.
         string wanted = arrived ? state.Settings.SaveFileCategoryFor(title) ?? string.Empty : Category;
         _title = title;
+        _game = playing;
 
         string[] local;
         try
@@ -986,8 +1062,8 @@ public static class SaveFilesPanel
         }
 
         // The premade savefiles are a category of their own, at the bottom, for a game the release
-        // ships some for.
-        _premadeCount = state.PremadeSaveFiles.Files(title).Length;
+        // ships some for: by the game as well as the title, since a title can hold several.
+        _premadeCount = state.PremadeSaveFiles.Files(title, playing).Length;
         bool premade = _premadeCount > 0;
 
         Select(Merge(local, Array.Empty<string>(), premade), wanted);
@@ -995,7 +1071,8 @@ public static class SaveFilesPanel
 
         // The console's categories are read on its own time, and the two lists are merged when the
         // answer comes back: the panel is drawn from whatever it has, never blocked on a request.
-        if (!state.Ingame || !state.SaveFile.Supported) return;
+        _consoleListed = ConsoleReadable(state);
+        if (!_consoleListed) return;
 
         _listing = true;
         state.RunQuiet(async () =>
@@ -1005,6 +1082,10 @@ public static class SaveFilesPanel
                 var categories = await state.Client.SaveFileCategoriesAsync().ConfigureAwait(false);
                 state.Post(() =>
                 {
+                    // An answer for a title or game the panel has since left would put that one's
+                    // categories in this one's combo.
+                    if (!StillOn(title, playing)) return;
+
                     string wanted = Category;
                     Select(Merge(_categories, categories, premade), wanted);
                     RescanFiles(state, title);
@@ -1127,6 +1208,7 @@ public static class SaveFilesPanel
     private static void RescanFiles(AppState state, string title)
     {
         string category = Category;
+        GameId game = _game;
         LocalSaveFile[] pc;
 
         try
@@ -1134,7 +1216,7 @@ public static class SaveFilesPanel
             // The premade savefiles are read where the release put them; the user's own library is
             // never asked about the premade category.
             pc = IsReadOnly(category)
-                ? state.PremadeSaveFiles.FilesWithCrc(title)
+                ? state.PremadeSaveFiles.FilesWithCrc(title, game)
                 : state.SaveFiles.FilesWithCrc(title, category);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -1146,18 +1228,21 @@ public static class SaveFilesPanel
         _entries = Rows(category, null, pc);
         if (_fileIndex >= _entries.Length) _fileIndex = -1;
 
-        if (!state.Ingame || !state.SaveFile.Supported) return;
+        if (!ConsoleReadable(state)) return;
 
+        string consoleCategory = ConsoleCategoryOf(state, title, category);
         _listing = true;
         state.RunQuiet(async () =>
         {
             try
             {
-                var console = await state.Client.SaveFileListAsync(category).ConfigureAwait(false);
+                var console = await state.Client.SaveFileListAsync(consoleCategory).ConfigureAwait(false);
                 state.Post(() =>
                 {
-                    // The category may have moved on while the console was answering.
-                    if (!string.Equals(category, Category, StringComparison.Ordinal)) return;
+                    // The list may have moved on while the console was answering: to another
+                    // category, or to another title or game whose category has the same name, whose
+                    // rows these are not.
+                    if (!string.Equals(category, Category, StringComparison.Ordinal) || !StillOn(title, game)) return;
 
                     string? keep = Selected?.Name;
                     _entries = Rows(category, console, pc);

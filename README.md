@@ -59,7 +59,7 @@ RPCS3 accepts one IPC client at a time. If another program holds the port, the c
 
 ## Manip categories
 
-Open **Game**, then **Manips**, and pick the category type of your run. Hover a type to see its leaderboard categories. The console applies the manips when you load a save or start a new game, also when no PC is connected. **Auto-reset** applies them again at every load, **Remember category** keeps your choice when the game restarts, and **Apply now** applies them at once. NG+ manips need a challenge-mode save, and the other manips need a new save. If the save does not match, the console writes nothing and the client tells you.
+Open **Game**, then **Manips**, and pick the category type of your run. Hover a type to see its leaderboard categories. The console applies the manips at the start of a run, also when no PC is connected. In the first three games, a run starts when a save or a new game loads the first planet. In Deadlocked, a run starts with a new game or a challenge-mode start. **Auto-reset** applies them again at every run start, and **Remember category** keeps your choice when the game restarts. To practise from a save on another planet, press **Apply now**. NG+ manips need a challenge-mode save, and the other manips need a new save. If the save does not match, the console writes nothing and the client tells you.
 
 The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
 

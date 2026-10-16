@@ -14,7 +14,8 @@ namespace RaCMAN.App;
 /// <para>
 /// Mods are the one thing that has to be sorted rather than copied wholesale, because the shipped
 /// library and the user's own used to share <c>mods/</c>. The release writes what it shipped into
-/// <c>mods/shipped.txt</c>, and everything not on that list is the user's. A folder with no such
+/// <c>mods/shipped.txt</c>, and everything not on that list is the user's, except a mod a release
+/// has dropped for good, which legacy-mod-exclusions.txt names. A folder with no such
 /// list is a development tree, where the mods are the repo's and nothing is at risk, so nothing is
 /// taken from it.
 /// </para>
@@ -40,12 +41,14 @@ public static class DataFolderMigration
     /// Copies whatever an older build left beside the executable into the data folder. Does nothing
     /// once the data folder has a settings file, and nothing at all when the two folders are the
     /// same one, which is what a platform with nowhere to put application data falls back to.
+    /// <paramref name="exclusions"/> is the list of mods no release ships any more, the running
+    /// client's own unless a test says otherwise.
     /// </summary>
-    public static Result Run(string applicationFolder, string dataFolder)
+    public static Result Run(string applicationFolder, string dataFolder, LegacyModExclusions? exclusions = null)
     {
         try
         {
-            return Copy(applicationFolder, dataFolder);
+            return Copy(applicationFolder, dataFolder, exclusions);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or NotSupportedException
                                        or ArgumentException)
@@ -55,7 +58,7 @@ public static class DataFolderMigration
         }
     }
 
-    private static Result Copy(string applicationFolder, string dataFolder)
+    private static Result Copy(string applicationFolder, string dataFolder, LegacyModExclusions? exclusions)
     {
         if (string.IsNullOrEmpty(applicationFolder) || string.IsNullOrEmpty(dataFolder)) return Result.NotNeeded;
         if (Same(applicationFolder, dataFolder)) return Result.NotNeeded;
@@ -80,7 +83,8 @@ public static class DataFolderMigration
             moved.Add(name);
         }
 
-        int mods = CopyUserMods(Path.Combine(applicationFolder, "mods"), Path.Combine(dataFolder, "mods"));
+        int mods = CopyUserMods(Path.Combine(applicationFolder, "mods"), Path.Combine(dataFolder, "mods"),
+            exclusions ?? LegacyModExclusions.Shipped);
         if (mods > 0) moved.Add(mods == 1 ? "1 mod" : $"{mods} mods");
 
         return new Result(true, moved);
@@ -88,9 +92,12 @@ public static class DataFolderMigration
 
     /// <summary>
     /// Copies the mods the user added, which are the ones the release did not ship. Returns how
-    /// many folders were taken.
+    /// many folders were taken. A mod the exclusion list names is not one of the user's even when
+    /// the manifest does not list it: it is a mod a release dropped, which a newer release unzipped
+    /// over the older one leaves behind (the Deadlocked crash-patch mod, which qwark carries now),
+    /// and copying it into the data folder would make it the user's and load it on top of qwark's.
     /// </summary>
-    private static int CopyUserMods(string source, string destination)
+    private static int CopyUserMods(string source, string destination, LegacyModExclusions exclusions)
     {
         if (!Directory.Exists(source)) return 0;
 
@@ -100,10 +107,11 @@ public static class DataFolderMigration
         int copied = 0;
         foreach (var title in new DirectoryInfo(source).GetDirectories())
         {
-            // A whole title folder the release never shipped, mods and all.
+            // A whole title folder the release never shipped, mods and all, but for a retired one.
             if (!shipped.Contains(title.Name))
             {
-                CopyTree(title, new DirectoryInfo(Path.Combine(destination, title.Name)));
+                CopyTree(title, new DirectoryInfo(Path.Combine(destination, title.Name)),
+                    skip: mod => exclusions.Excludes(title.Name, mod.Name));
                 copied++;
                 continue;
             }
@@ -111,6 +119,7 @@ public static class DataFolderMigration
             foreach (var mod in title.GetDirectories())
             {
                 if (shipped.Contains($"{title.Name}/{mod.Name}")) continue;
+                if (exclusions.Excludes(title.Name, mod.Name)) continue;
 
                 CopyTree(mod, new DirectoryInfo(Path.Combine(destination, title.Name, mod.Name)));
                 copied++;
@@ -128,8 +137,11 @@ public static class DataFolderMigration
     /// </summary>
     public static HashSet<string>? ReadShippedManifest(string modsFolder) => ModLibrary.ReadShippedManifest(modsFolder);
 
-    /// <summary>Copies a folder and everything under it, never replacing a file already there.</summary>
-    private static void CopyTree(DirectoryInfo source, DirectoryInfo destination)
+    /// <summary>
+    /// Copies a folder and everything under it, never replacing a file already there.
+    /// <paramref name="skip"/> leaves out a folder directly inside <paramref name="source"/>.
+    /// </summary>
+    private static void CopyTree(DirectoryInfo source, DirectoryInfo destination, Func<DirectoryInfo, bool>? skip = null)
     {
         Directory.CreateDirectory(destination.FullName);
 
@@ -141,6 +153,7 @@ public static class DataFolderMigration
 
         foreach (var child in source.GetDirectories())
         {
+            if (skip?.Invoke(child) == true) continue;
             CopyTree(child, new DirectoryInfo(Path.Combine(destination.FullName, child.Name)));
         }
     }

@@ -314,7 +314,7 @@ public sealed class AppWindow : GameWindow
                     {
                         // Greyed out and still listed, with the reason on hover: the panel is not
                         // gone, it is the console underneath that cannot do what it asks for.
-                        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(disabled);
+                        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(disabled);
                         continue;
                     }
 
@@ -347,8 +347,8 @@ public sealed class AppWindow : GameWindow
                 {
                     ImGui.Spacing();
                     ImGui.Separator();
-                    ImGui.TextColored(Ui.Grey, $"{ImGui.GetIO().Framerate:0} fps");
-                    if (_state.InFlight > 0) ImGui.TextColored(Ui.Yellow, $"{_state.InFlight} in flight");
+                    Ui.Text(Ui.Grey, $"{ImGui.GetIO().Framerate:0} fps");
+                    if (_state.InFlight > 0) Ui.Text(Ui.Yellow, $"{_state.InFlight} in flight");
                 }
             }
 
@@ -449,7 +449,7 @@ public sealed class AppWindow : GameWindow
         var session = _state.Session;
         var colour = _state.Connected ? Ui.Green : _state.Client.WantsConnection ? Ui.Yellow : Ui.Grey;
 
-        ImGui.TextColored(colour, _state.Connected ? "connected" : _state.Client.WantsConnection ? "reconnecting" : "offline");
+        Ui.Text(colour, _state.Connected ? "connected" : _state.Client.WantsConnection ? "reconnecting" : "offline");
         ImGui.SameLine();
         ImGui.TextUnformatted("|");
         ImGui.SameLine();
@@ -471,7 +471,7 @@ public sealed class AppWindow : GameWindow
             ImGui.SameLine();
             ImGui.TextUnformatted("|");
             ImGui.SameLine();
-            ImGui.TextColored(Ui.Yellow, "qwark.sprx is out of date");
+            Ui.Text(Ui.Yellow, "qwark.sprx is out of date");
         }
 
         // The same, for the fallback that is easy to run on for months without noticing: everything
@@ -481,7 +481,7 @@ public sealed class AppWindow : GameWindow
             ImGui.SameLine();
             ImGui.TextUnformatted("|");
             ImGui.SameLine();
-            ImGui.TextColored(Ui.Yellow, "TCP fallback");
+            Ui.Text(Ui.Yellow, "TCP fallback");
             Ui.Tooltip("The console's UDP telemetry is not reaching this PC, likely due to a "
                        + "firewall issue, so live state is being polled over TCP instead. "
                        + "Everything works; readouts and the input display just update more slowly. "

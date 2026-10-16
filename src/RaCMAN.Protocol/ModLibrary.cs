@@ -124,10 +124,19 @@ public sealed class ModLibrary
 
     private readonly Lazy<HashSet<string>?> _shippedManifest;
 
-    public ModLibrary(string rootPath, string? shippedRootPath = null)
+    /// <summary>Whether a <c>TITLEID</c>, <c>modfolder</c> pair is a mod no release ships any more; see <see cref="IsShippedFolder"/>.</summary>
+    private readonly Func<string, string, bool>? _retired;
+
+    /// <summary>
+    /// <paramref name="retired"/> names the mods a release has dropped for good, the client's
+    /// legacy-mod-exclusions.txt: a folder of one of those left in the shipped library by an older
+    /// release is not offered (<see cref="IsShippedFolder"/>).
+    /// </summary>
+    public ModLibrary(string rootPath, string? shippedRootPath = null, Func<string, string, bool>? retired = null)
     {
         RootPath = rootPath;
         ShippedRootPath = shippedRootPath;
+        _retired = retired;
 
         // Read once: the application folder is the release's and does not change under a running
         // client. A manifest that cannot be read counts as none, which is how the library behaved
@@ -169,18 +178,24 @@ public sealed class ModLibrary
     }
 
     /// <summary>
-    /// Whether a mod folder in the shipped library is one its release shipped. With a manifest,
-    /// only the folders it lists are: a folder it does not list is left over from an older release
-    /// (a new one unzipped over an old one leaves the mods it stopped shipping behind) and is not
-    /// offered, though it is never deleted, since nothing writes the application folder. With no
-    /// manifest every folder is the release's.
+    /// Whether a mod folder in the shipped library is offered. A folder the manifest lists is the
+    /// release's, and so is every folder when there is no manifest. A folder it does not list is
+    /// one of two things. A mod the release stopped shipping, left behind when a new release is
+    /// unzipped over an old one: the Deadlocked crash-patch mod, whose words qwark's Crash patches
+    /// toggle now writes, is why this exists, and offering it would load the same patch twice. Or a
+    /// mod the user dropped in there themselves, as 1.2.2 and older let them, which they expect to
+    /// see. The retired ones are named on the client's exclusion list, so only a folder that list
+    /// names is left out, and the rest are offered as before. Nothing is ever deleted: nothing
+    /// writes the application folder.
     /// </summary>
     public bool IsShippedFolder(string titleId, string dirName) =>
-        _shippedManifest.Value is not { } listed || listed.Contains($"{titleId}/{dirName}");
+        _shippedManifest.Value is not { } listed
+        || listed.Contains($"{titleId}/{dirName}")
+        || _retired?.Invoke(titleId, dirName) != true;
 
     /// <summary>
     /// The shipped mod of a folder name, or null when the release ships none by that name: no
-    /// shipped library, a folder its manifest does not list, or no patch.txt in it.
+    /// shipped library, a retired folder its manifest does not list, or no patch.txt in it.
     /// </summary>
     public LocalMod? ReadShipped(string titleId, string dirName) =>
         ShippedTitleFolder(titleId) is { } folder && IsShippedFolder(titleId, dirName)
@@ -214,8 +229,8 @@ public sealed class ModLibrary
     /// Every mod for a title, the user's and the release's together, sorted by name: folders without
     /// a patch.txt and mods marked invisible are skipped, and a user mod is used instead of a
     /// shipped one with the same folder name, which is how a shipped mod is edited without the next
-    /// update overwriting the edit. A shipped folder the release's manifest does not list is skipped
-    /// too (<see cref="IsShippedFolder"/>).
+    /// update overwriting the edit. A retired mod's folder an older release left in the shipped
+    /// library is skipped too (<see cref="IsShippedFolder"/>).
     /// </summary>
     public IReadOnlyList<LocalMod> Scan(string titleId)
     {

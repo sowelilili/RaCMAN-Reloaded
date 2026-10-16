@@ -211,7 +211,7 @@ public static class AutosplitterPanel
             if (Ui.Debug)
             {
                 ImGui.SameLine();
-                ImGui.TextColored(Ui.Grey, $"({desc.Code})");
+                Ui.Text(Ui.Grey, $"({desc.Code})");
             }
 
             if (!desc.PlanetRoute) continue;
@@ -230,7 +230,7 @@ public static class AutosplitterPanel
             ImGui.EndDisabled();
             if (ImGui.IsItemHovered())
             {
-                ImGui.SetTooltip("Only split when the planet you have just reached is the one the "
+                Ui.SetTooltip("Only split when the planet you have just reached is the one the "
                                  + "next split is named after, from "
                                  + $"{AutosplitRoutes.FileFor(game)}.");
             }
@@ -299,7 +299,7 @@ public static class AutosplitterPanel
 
         if (ImGui.IsItemHovered())
         {
-            ImGui.SetTooltip("Stop game time while the game is away, and put the time the run is "
+            Ui.SetTooltip("Stop game time while the game is away, and put the time the run is "
                              + "charged for it back on when it returns. Only Deadlocked's quit to "
                              + "the XMB reports one.");
         }
@@ -313,13 +313,13 @@ public static class AutosplitterPanel
         // shares this line once a game with eight subsplits has filled the panel above it.
         ImGui.TextUnformatted("Run events");
         ImGui.SameLine();
-        ImGui.TextColored(Ui.Grey, $"| {splitter.Received} received, {splitter.Acted} executed, "
+        Ui.Text(Ui.Grey, $"| {splitter.Received} received, {splitter.Acted} executed, "
                                    + $"{splitter.Adjustments} adjusted");
 
         if (!Ui.Debug)
         {
             ImGui.SameLine();
-            ImGui.TextColored(Ui.Grey, "| log in Settings");
+            Ui.Text(Ui.Grey, "| log in Settings");
             return;
         }
 
@@ -359,7 +359,7 @@ public static class AutosplitterPanel
                 ImGui.TextUnformatted(entry.Event);
 
                 ImGui.TableNextColumn();
-                ImGui.TextColored(entry.Acted ? Ui.Green : Ui.Grey, entry.Action);
+                Ui.Text(entry.Acted ? Ui.Green : Ui.Grey, entry.Action);
             }
 
             ImGui.EndTable();

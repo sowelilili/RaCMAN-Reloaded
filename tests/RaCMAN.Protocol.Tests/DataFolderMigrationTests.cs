@@ -163,6 +163,40 @@ public class DataFolderMigrationTests : IDisposable
     }
 
     [Fact]
+    public void AModAReleaseDroppedIsNotTakenForTheUsers()
+    {
+        // A new release unzipped over an older one: the crash-patch mod the older one shipped is
+        // still in the folder, and the new manifest does not list it. It is qwark's now, and copied
+        // into the data folder it would become the user's own and load on top of qwark's patch.
+        WriteApp("mods/" + AppPaths.ShippedModsManifest, "NPEA00423\nNPEA00423/il-ghost\n");
+        WriteApp("mods/NPEA00423/il-ghost/patch.txt", "#-name: IL ghost");
+        WriteApp("mods/NPEA00423/crash-patch/patch.txt", "#-name: Crash patches");
+        WriteApp("mods/NPEA00423/my-own-mod/patch.txt", "#-name: Mine");
+
+        // And a whole title folder the release does not ship, with a dropped mod in it.
+        WriteApp("mods/NPEA00387/coolcam/patch.txt", "#-name: Cool cam");
+        WriteApp("mods/NPEA00387/mine-too/patch.txt", "#-name: Also mine");
+
+        var exclusions = LegacyModExclusions.Parse("NPEA00423/crash-patch  built into qwark\nNPEA00387/coolcam  not shipped\n");
+        var result = DataFolderMigration.Run(App, Data, exclusions);
+
+        Assert.Contains("2 mods", result.Moved);
+        Assert.True(InData("mods/NPEA00423/my-own-mod/patch.txt"));
+        Assert.True(InData("mods/NPEA00387/mine-too/patch.txt"));
+        Assert.False(InData("mods/NPEA00423/crash-patch/patch.txt"));
+        Assert.False(InData("mods/NPEA00387/coolcam/patch.txt"));
+        Assert.False(InData("mods/NPEA00423/il-ghost/patch.txt"));
+    }
+
+    [Fact]
+    public void TheShippedExclusionListNamesTheCrashPatchMod()
+    {
+        // The list the client reads by default, which is what keeps the leftover out of the data
+        // folder and out of the Mods panel.
+        Assert.True(LegacyModExclusions.Shipped.Excludes("NPEA00423", "crash-patch"));
+    }
+
+    [Fact]
     public void OneMovedModIsCountedInTheSingular()
     {
         WriteApp("mods/" + AppPaths.ShippedModsManifest, "NPEA00385\n");

@@ -83,7 +83,7 @@ public static class FirewallModal
         if (_offer == FirewallOffer.Again)
         {
             // The case an update leaves behind: it worked, and now it does not.
-            ImGui.TextWrapped(
+            Ui.TextWrapped(
                 "You allowed RaCMAN through the firewall before, but no rule covers the copy that is "
                 + "running now. A firewall rule names one executable, and this one has moved or had its "
                 + "rule removed since — an update replaces the application folder, and a second copy of "
@@ -97,14 +97,14 @@ public static class FirewallModal
         }
         else
         {
-            ImGui.TextWrapped(
+            Ui.TextWrapped(
                 "The PS3 sends its live state (readouts, toggle state, the pad for combos) to this PC over UDP. "
                 + "Windows Firewall blocks that for a freshly unzipped app and often doesn't prompt, so RaCMAN "
                 + "would silently fall back to slower TCP polling.");
         }
 
         ImGui.Spacing();
-        ImGui.TextWrapped(
+        Ui.TextWrapped(
             "Add a firewall rule now? This asks for administrator approval and only adds an inbound rule for "
             + "RaCMAN. You can do it later from the Connection panel, or with \"Allow through Firewall.cmd\".");
         ImGui.Spacing();

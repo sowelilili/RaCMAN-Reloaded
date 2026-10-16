@@ -133,7 +133,7 @@ public static class UnlocksPanel
 
         if (!enabled)
         {
-            ImGui.TextColored(Ui.Yellow, $"Unlock edits need INGAME (state is {state.Session.State.DisplayName()}).");
+            Ui.Text(Ui.Yellow, $"Unlock edits need INGAME (state is {state.Session.State.DisplayName()}).");
         }
 
         if (state.UnlocksUnsupported)
@@ -313,7 +313,7 @@ public static class UnlocksPanel
         Ui.InputTextWithHint("##search", "Search", ref _filter);
 
         ImGui.SameLine();
-        ImGui.TextColored(Ui.Grey, filtering ? $"{visible.Length} of {rows.Length}" : $"{rows.Length} entries");
+        Ui.Text(Ui.Grey, filtering ? $"{visible.Length} of {rows.Length}" : $"{rows.Length} entries");
         ImGui.Spacing();
 
         // A column needs both halves: the game has to have named the slot, and some entry in this
@@ -352,7 +352,7 @@ public static class UnlocksPanel
             // The id is still what every UNLOCK_SET carries; it is only the column that is gone,
             // because the names needed the width more. It is on the name's tooltip for anyone
             // reading the wire, which is what the debug switch is for.
-            if (Ui.Debug && ImGui.IsItemHovered()) ImGui.SetTooltip($"id {unlock.Id}");
+            if (Ui.Debug && ImGui.IsItemHovered()) Ui.SetTooltip($"id {unlock.Id}");
 
             foreach (int slot in present)
             {

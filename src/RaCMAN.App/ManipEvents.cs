@@ -11,39 +11,48 @@ public readonly record struct ManipNotice(ManipEventKind Kind, string Text, Toas
 /// <summary>
 /// Turns MANIP_LIST's last event into at most one toast per event. The console keeps one event and
 /// a sequence number that moves on with every new one, so the client remembers the last number it
-/// saw per session and speaks only when it changes.
+/// saw and speaks only when it changes.
 /// <para>
-/// The first answer of a session is taken as the starting point and says nothing: an event that
-/// happened before this client looked (a connection made mid-run, a reconnect after the game
-/// rebooted) is old news, and the console has already shown its own notification for it.
+/// qwark's number belongs to the module, not to a game or a boot: it starts again only when the
+/// module does, and a game boot clears the event's kind and group but not the number (PROTOCOL.md
+/// section 5.14). So the number is followed for as long as one connection lasts, across reboots and
+/// game switches, and every change in that time is a new event. A new connection starts from
+/// scratch (<see cref="Forget"/>), because nothing on this side can tell the module it reached from
+/// a restarted one, whose numbers may meet the old ones by chance: the first answer after it is the
+/// starting point and says nothing. An event from before that answer happened while this client was
+/// not looking, and the console showed its own notification for it.
 /// </para>
 /// </summary>
 public sealed class ManipEvents
 {
-    private readonly Dictionary<string, ushort> _lastSeq = new(StringComparer.Ordinal);
+    private ushort? _lastSeq;
 
     /// <summary>
-    /// A session: the title and the boot. A reboot is a new session, so its first answer starts
-    /// from scratch however the console numbers its events across one.
+    /// The session a MANIP_LIST answer was asked for: the title and the boot. An answer that comes
+    /// back after the session has moved on describes a game that is no longer running and is not
+    /// taken; it has nothing to do with which events are new.
     /// </summary>
     public static string KeyFor(SessionInfo session) => $"{session.TitleId}#{session.Generation}";
 
+    /// <summary>A new connection: the next answer is the starting point, whatever its number.</summary>
+    public void Forget() => _lastSeq = null;
+
     /// <summary>
-    /// The event this answer brings that has not been seen before, or null: the session's first
-    /// answer, the same sequence number again, or a new event with nothing to say.
+    /// The event this answer brings that has not been seen before, or null: the first answer since
+    /// <see cref="Forget"/>, the same sequence number again, or a new event with nothing to say.
     /// </summary>
-    public ManipNotice? Observe(string key, ManipList list)
+    public ManipNotice? Observe(ManipList list)
     {
-        if (!_lastSeq.TryGetValue(key, out var last))
+        if (_lastSeq is not { } last)
         {
-            _lastSeq[key] = list.EventSeq;
+            _lastSeq = list.EventSeq;
             return null;
         }
 
         // Not "greater than": the number is sixteen bits and wraps, and any change is a new event.
         if (last == list.EventSeq) return null;
 
-        _lastSeq[key] = list.EventSeq;
+        _lastSeq = list.EventSeq;
         return NoticeFor(list);
     }
 
@@ -53,13 +62,15 @@ public sealed class ManipEvents
 
     /// <summary>
     /// The sentence for each kind. The refusals are errors: the runner asked for manips and has
-    /// not got them. The first activation of a boot is worth a line; a per-run reapply happens on
-    /// every load and is left to the status line.
+    /// not got them. A group's first application in a boot is worth a line. Kind 2 is any later
+    /// one, the per-run writes at a run's start or a setup put in again by Apply now or by picking
+    /// the group again, so it says only that the group's manips went in, and is left to the status
+    /// line.
     /// </summary>
     public static ManipNotice? NoticeFor(ManipEventKind kind, string group) => kind switch
     {
         ManipEventKind.Activated => new(kind, $"{group} manips activated", ToastKind.Info),
-        ManipEventKind.PerRunApplied => new(kind, $"{group} per-run manips applied", null),
+        ManipEventKind.PerRunApplied => new(kind, Applied(group), null),
         ManipEventKind.RefusedNotChallengeFile =>
             new(kind, $"{group} wasn't applied: this file isn't a challenge-mode file", ToastKind.Error),
         ManipEventKind.RefusedChallengeFile =>

@@ -1,0 +1,20 @@
+# The other title ids a game runs under, and the folder whose premade savefiles they take. One per
+# line:
+#
+#   TITLEID[/game]   folder
+#
+# game is rac1, rac2, rac3 or rac4, for a title id that holds more than one game. A title id with a
+# folder of its own needs no line. Only a title qwark runs the same executable under belongs here:
+# a save is the game's own save buffer, and another build of the game may lay it out differently.
+
+# RaC2 repacks: NPEA00386 under another title id, byte for byte where it matters. qwark gives them
+# NPEA00386's fingerprint and table (src/games/rac2.c).
+RC2ILYOOO        NPEA00386
+BLMODYOOO        NPEA00386
+
+# The disc trilogy holds RaC1, RaC2 and UYA under one title id. qwark finds which one is running by
+# each game's fingerprint and drives it with the same table as the NPEA title, so the console keeps
+# these per game ("(premade savefiles) rac1" and so on).
+BCES01503/rac1   NPEA00385
+BCES01503/rac2   NPEA00386
+BCES01503/rac3   NPEA00387

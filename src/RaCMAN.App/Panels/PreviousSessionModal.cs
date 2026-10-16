@@ -42,7 +42,7 @@ public static class PreviousSessionModal
 
         var previous = state.Previous ?? PreviousSession.Empty;
 
-        ImGui.TextWrapped("The game rebooted into the same title. These were active before and were not flagged to re-apply themselves.");
+        Ui.TextWrapped("The game rebooted into the same title. These were active before and were not flagged to re-apply themselves.");
         ImGui.Spacing();
 
         var describe = state.Describe;
@@ -58,15 +58,15 @@ public static class PreviousSessionModal
             {
                 if ((previous.Toggles & (1UL << i)) == 0) continue;
                 var feature = describe.Features.FirstOrDefault(f => f.Id == i);
-                ImGui.BulletText(feature?.Label ?? $"feature {i}");
+                Ui.BulletText(feature?.Label ?? $"feature {i}");
 
                 // A cheat that patches game code comes back only through qwark's code switches
                 // under RPCS3, by the Game page's rule: the row says so while they are not in.
                 if (feature is not null && GamePanel.CodeFeatureBlocked(feature, state.Session))
                 {
                     ImGui.SameLine();
-                    ImGui.TextColored(Ui.Grey, "needs qwark's patches in RPCS3");
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(Ui.NeedsQwarkPatches);
+                    Ui.Text(Ui.Grey, "needs qwark's patches in RPCS3");
+                    if (ImGui.IsItemHovered()) Ui.SetTooltip(Ui.NeedsQwarkPatches);
                 }
             }
         }, previous.Toggles != 0);
@@ -77,7 +77,7 @@ public static class PreviousSessionModal
             {
                 if ((previous.Mods & (1U << i)) == 0) continue;
                 var mod = state.ConsoleMods.FirstOrDefault(m => m.Index == i);
-                ImGui.BulletText(mod?.Name ?? $"mod {i}");
+                Ui.BulletText(mod?.Name ?? $"mod {i}");
             }
         }, previous.Mods != 0, noCode);
 
@@ -85,7 +85,7 @@ public static class PreviousSessionModal
         {
             foreach (var freeze in previous.Freezes)
             {
-                ImGui.BulletText($"0x{freeze.Address:X8} ({freeze.Size} bytes) = {freeze.Value}");
+                Ui.BulletText($"0x{freeze.Address:X8} ({freeze.Size} bytes) = {freeze.Value}");
             }
         }, previous.Freezes.Length > 0);
 
@@ -93,7 +93,7 @@ public static class PreviousSessionModal
         {
             foreach (var patch in previous.Patches)
             {
-                ImGui.BulletText($"0x{patch.FirstAddress:X8}, {patch.WordCount} words");
+                Ui.BulletText($"0x{patch.FirstAddress:X8}, {patch.WordCount} words");
             }
         }, previous.Patches.Length > 0, noCode);
 
@@ -162,7 +162,7 @@ public static class PreviousSessionModal
         if (!any)
         {
             ImGui.SameLine();
-            ImGui.TextColored(Ui.Grey, "(none)");
+            Ui.Text(Ui.Grey, "(none)");
             return;
         }
 

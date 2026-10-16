@@ -87,7 +87,8 @@ $ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00423', 'libs')
 $ShippedManifest = 'shipped.txt'
 
 # The premade savefiles the Save files panel offers under "(premade savefiles)": one folder per
-# title, read in place and never written, so they need no manifest. The folder must not be called
+# title, read in place and never written, so they need no manifest of what shipped. titles.txt
+# beside them names the other title ids that take one of those folders. The folder must not be called
 # savefiles\: DataFolderMigration copies a folder of that name beside the executable into the data
 # folder, as an older build's library.
 $PremadeSaveFiles = 'premade-savefiles'
@@ -198,7 +199,7 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
 }
 
 <#
-    Copies this repo's premade-savefiles\ folder, one folder per title, into the stage under the
+    Copies this repo's premade-savefiles\ folder, one folder per title and titles.txt, into the stage under the
     same name.
 #>
 function Copy-PremadeSaveFiles([string]$stageDir) {

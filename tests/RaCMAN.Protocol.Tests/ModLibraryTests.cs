@@ -231,7 +231,9 @@ public class ModLibraryTests : IDisposable
 
     /// <summary>
     /// The shipped library as a release that stopped shipping <c>retired</c> leaves it when it is
-    /// unzipped over the one before: the old folder still there, and a manifest that no longer lists it.
+    /// unzipped over the one before: the old folder still there, a manifest that no longer lists it,
+    /// and the client's exclusion list naming it, as legacy-mod-exclusions.txt names the Deadlocked
+    /// crash-patch mod.
     /// </summary>
     private (ModLibrary Library, string User, string Shipped) LibrariesWithALeftover()
     {
@@ -242,7 +244,40 @@ public class ModLibraryTests : IDisposable
             $"# what this release shipped\n{TitleId}\n{TitleId}/flight\n");
 
         // A new library, so the manifest written above is the one it reads.
-        return (new ModLibrary(user, shipped), user, shipped);
+        return (new ModLibrary(user, shipped, Retired), user, shipped);
+    }
+
+    /// <summary>The exclusion list of these tests: <c>retired</c>, under any title.</summary>
+    private static bool Retired(string titleId, string dirName) =>
+        string.Equals(dirName, "retired", StringComparison.OrdinalIgnoreCase);
+
+    [Fact]
+    public void AModTheUserDroppedIntoTheShippedLibraryIsStillListed()
+    {
+        // 1.2.2 listed every folder there, and a user who put a mod in the application's mods\
+        // folder by hand expects to see it. Only a retired mod is left out.
+        var (library, _, shipped) = LibrariesWithALeftover();
+        MakeModFolder(Path.Combine(shipped, TitleId), "dropped-in", "0.1.0");
+
+        var mods = library.Scan(TitleId);
+
+        Assert.Equal(new[] { "dropped-in", "flight" }, mods.Select(m => m.DirName).OrderBy(n => n, StringComparer.Ordinal));
+        Assert.True(library.IsShippedFolder(TitleId, "dropped-in"));
+        Assert.NotNull(library.ReadShipped(TitleId, "dropped-in"));
+        Assert.False(library.IsShippedFolder(TitleId, "retired"));
+    }
+
+    [Fact]
+    public void AReleaseThatShipsANameTheExclusionListHasStillOffersIt()
+    {
+        // The list is about leftovers: a folder the manifest lists is the release's own.
+        var (_, user, shipped) = TwoLibraries();
+        MakeModFolder(Path.Combine(shipped, TitleId), "retired", "2.0.0");
+        File.WriteAllText(Path.Combine(shipped, ModLibrary.ShippedManifestName), $"{TitleId}\n{TitleId}/retired\n");
+
+        var library = new ModLibrary(user, shipped, Retired);
+
+        Assert.Equal("2.0.0", Assert.Single(library.Scan(TitleId)).Version);
     }
 
     [Fact]

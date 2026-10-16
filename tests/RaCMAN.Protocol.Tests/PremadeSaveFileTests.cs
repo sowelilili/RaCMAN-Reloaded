@@ -277,6 +277,121 @@ public class PremadeSaveFileTests : IDisposable
         }
     }
 
+    // ---------------------------------------------------------------- other title ids
+
+    /// <summary>A titles.txt as the repository's: RaC2's repacks, and the trilogy per game.</summary>
+    private void ShipTitles()
+    {
+        Directory.CreateDirectory(Shipped);
+        File.WriteAllText(Path.Combine(Shipped, PremadeSaveFiles.TitlesFileName),
+            "# comment\r\n\r\nRC2ILYOOO  NPEA00386\nBCES01503/rac1\tNPEA00385\nBCES01503/RAC3 NPEA00387\n"
+            + "BROKEN\nESCAPE/rac2 ../../outside\n");
+    }
+
+    [Fact]
+    public void AnotherTitleIdTakesTheFolderOfTheGameItRuns()
+    {
+        Ship("NPEA00385", "NG+.sav", Pattern(64));
+        Ship("NPEA00386", "NG+ & NG+ no IMG.sav", Pattern(64, seed: 2));
+        Ship("NPEA00387", "NG+.sav", Pattern(64, seed: 3));
+        ShipTitles();
+        var premade = new PremadeSaveFiles(Shipped);
+
+        // A repack is one game under another title id, so it needs no game to be known.
+        Assert.Equal(new[] { "NG+ & NG+ no IMG.sav" }, premade.Files("RC2ILYOOO"));
+        Assert.Equal(new[] { "NG+ & NG+ no IMG.sav" }, premade.Files("RC2ILYOOO", GameId.Rac2));
+
+        // The trilogy holds three, so it goes by the game that is running, and by nothing else.
+        Assert.Equal(new[] { "NG+.sav" }, premade.Files("BCES01503", GameId.Rac1));
+        Assert.Equal(Pattern(64), premade.Read("BCES01503", "NG+.sav", GameId.Rac1));
+        Assert.Equal(Pattern(64, seed: 3), premade.Read("BCES01503", "NG+.sav", GameId.Rac3));
+        Assert.Empty(premade.Files("BCES01503", GameId.Rac2));
+        Assert.Empty(premade.Files("BCES01503"));
+        Assert.Empty(premade.Files("BCES01503", GameId.Rac4));
+
+        // A title with a folder of its own keeps it, and a line cannot reach outside the folder.
+        Assert.Equal(new[] { "NG+.sav" }, premade.Files("NPEA00385", GameId.Rac1));
+        Assert.Empty(premade.Files("ESCAPE", GameId.Rac2));
+        Assert.Empty(premade.Files("BROKEN"));
+    }
+
+    [Fact]
+    public void UnderATitleWithSeveralGamesTheConsoleKeepsEachGamesOwnCategory()
+    {
+        ShipTitles();
+        var premade = new PremadeSaveFiles(Shipped);
+
+        // One savefile folder per title on the console: RaC1's and UYA's NG+.sav would be one
+        // file there, so the trilogy's categories carry the game. Everywhere else they do not,
+        // and a console that already holds the premade saves keeps them.
+        Assert.Equal("(premade savefiles) rac1", premade.ConsoleCategory("BCES01503", GameId.Rac1));
+        Assert.Equal("(premade savefiles) rac3", premade.ConsoleCategory("BCES01503", GameId.Rac3));
+        Assert.Equal(Premade, premade.ConsoleCategory("NPEA00385", GameId.Rac1));
+        Assert.Equal(Premade, premade.ConsoleCategory("RC2ILYOOO", GameId.Rac2));
+        Assert.Equal(Premade, premade.ConsoleCategory("BCES01503", GameId.None));
+
+        foreach (var game in new[] { GameId.Rac1, GameId.Rac2, GameId.Rac3, GameId.Rac4 })
+        {
+            Assert.Null(SaveFileNames.Problem(premade.ConsoleCategory("BCES01503", game), file: false));
+        }
+
+        // Each is the premade category and names its game; none is ever one of the user's.
+        Assert.True(PremadeSaveFiles.IsCategory("(premade savefiles) rac1"));
+        Assert.True(SaveFilesPanel.IsReadOnly("(Premade Savefiles) RAC3"));
+        Assert.False(PremadeSaveFiles.IsCategory("(premade savefiles)x"));
+        Assert.Equal(GameId.Rac3, PremadeSaveFiles.GameIn("(premade savefiles) rac3"));
+        Assert.Equal(GameId.None, PremadeSaveFiles.GameIn(Premade));
+        Assert.Equal(GameId.None, PremadeSaveFiles.GameIn("any%"));
+        Assert.Equal(new[] { "any%", Premade },
+            SaveFilesPanel.Merge(new[] { "any%" }, new[] { "(premade savefiles) rac1", "(premade savefiles) rac3" }, premade: true));
+        Assert.False(SaveFilesPanel.CanCreateCategory("(premade savefiles) rac1"));
+    }
+
+    [Fact]
+    public async Task UnderTheTrilogyEachGamesPremadeSaveGoesToItsOwnFile()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            const string Trilogy = "BCES01503";
+            server.Session = server.Session with { TitleId = Trilogy };
+
+            var rac1 = Pattern(server.SaveFileBuffer.Length);
+            var uya = Pattern(server.SaveFileBuffer.Length, seed: 5);
+            Ship("NPEA00385", "NG+.sav", rac1);
+            Ship("NPEA00387", "NG+.sav", uya);
+            ShipTitles();
+            var premade = new PremadeSaveFiles(Shipped);
+            var before = ShippedSnapshot();
+
+            foreach (var (game, data) in new[] { (GameId.Rac1, rac1), (GameId.Rac3, uya) })
+            {
+                string category = premade.ConsoleCategory(Trilogy, game);
+                var entry = Assert.Single(SaveFilesPanel.Rows(Premade, null, premade.FilesWithCrc(Trilogy, game)));
+
+                Assert.True(await SaveFileTransfer.LoadAsync(client, premade, Trilogy, category, entry));
+                Assert.Equal(data, server.LoadedSaveFile);
+                Assert.Equal(data, server.Files[QwarkClient.SaveFileConsolePath(Trilogy, category, "NG+.sav")]);
+
+                // The row matches the console's copy in the game's own category, so the next load
+                // sends nothing.
+                var again = Assert.Single(SaveFilesPanel.Rows(Premade,
+                    await client.SaveFileListAsync(category), premade.FilesWithCrc(Trilogy, game)));
+                Assert.True(again.Agrees);
+            }
+
+            // Two files, one per game, and neither category is offered as the user's.
+            var categories = await client.SaveFileCategoriesAsync();
+            Assert.Contains("(premade savefiles) rac1", categories);
+            Assert.Contains("(premade savefiles) rac3", categories);
+            Assert.Equal(new[] { SaveFileLibrary.DefaultCategory, Premade },
+                SaveFilesPanel.Merge(null, categories, premade: true));
+
+            Assert.Equal(before, ShippedSnapshot());
+        }
+    }
+
     // ---------------------------------------------------------------- copying
 
     [Fact]
@@ -390,7 +505,7 @@ public class ShippedPremadeSaveFileTests
     };
 
     [Fact]
-    public void TheRepositoryShipsTheSixPremadeSavefilesAndNothingElse()
+    public void TheRepositoryShipsTheSixPremadeSavefilesTheTitleListAndNothingElse()
     {
         string root = LibraryPath();
 
@@ -400,8 +515,42 @@ public class ShippedPremadeSaveFileTests
             .ToArray();
 
         Assert.Equal(
-            Expected.Select(e => $"{e.Title}/{e.Name}").OrderBy(path => path, StringComparer.Ordinal),
+            Expected.Select(e => $"{e.Title}/{e.Name}").Append(PremadeSaveFiles.TitlesFileName)
+                .OrderBy(path => path, StringComparer.Ordinal),
             everything);
+    }
+
+    /// <summary>
+    /// The other title ids qwark runs these games under: RaC2's two repacks, which are NPEA00386,
+    /// and the disc trilogy, which holds RaC1, RaC2 and UYA and is told apart by the game running.
+    /// Deadlocked has no other title id in qwark, and so none here.
+    /// </summary>
+    [Theory]
+    [InlineData("RC2ILYOOO", GameId.Rac2, "NPEA00386")]
+    [InlineData("BLMODYOOO", GameId.Rac2, "NPEA00386")]
+    [InlineData("BCES01503", GameId.Rac1, "NPEA00385")]
+    [InlineData("BCES01503", GameId.Rac2, "NPEA00386")]
+    [InlineData("BCES01503", GameId.Rac3, "NPEA00387")]
+    public void EachOtherTitleIdTakesItsGamesSaves(string title, GameId game, string folder)
+    {
+        var premade = new PremadeSaveFiles(LibraryPath());
+
+        Assert.Equal(premade.Files(folder), premade.Files(title, game));
+        Assert.NotEmpty(premade.Files(title, game));
+        Assert.Null(SaveFileNames.Problem(premade.ConsoleCategory(title, game), file: false));
+    }
+
+    [Fact]
+    public void TheTrilogyKeepsEachGameApartOnTheConsole()
+    {
+        var premade = new PremadeSaveFiles(LibraryPath());
+
+        var categories = new[] { GameId.Rac1, GameId.Rac2, GameId.Rac3 }
+            .Select(game => premade.ConsoleCategory("BCES01503", game))
+            .ToArray();
+        Assert.Equal(3, categories.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(PremadeSaveFiles.Category, premade.ConsoleCategory("NPEA00385", GameId.Rac1));
+        Assert.Empty(premade.Files("BCES01503", GameId.Rac4));
     }
 
     [Fact]

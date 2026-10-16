@@ -261,21 +261,49 @@ public sealed class TargetSettingsTests : IDisposable
 
     /// <summary>
     /// A file 1.2.2 already broke: RPCS3 was the last target and the console's address is the
-    /// helper's. Nothing else in it remembers the address that was there, so it comes across as it
-    /// is rather than as a guess, with the rest of the file intact.
+    /// helper's. Taken as it is, the console target would reach the RPCS3 helper on this PC, which
+    /// answers on the same port. Nothing in the file remembers the address that was there, so the
+    /// box goes back to its default and the user is asked for it; the rest of the file is intact.
     /// </summary>
-    [Fact]
-    public void AFileThe122BugAlreadyDamagedKeepsItsAddressRatherThanAGuess()
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("localhost")]
+    [InlineData("::1")]
+    [InlineData("127.0.0.2")]
+    public void AFileThe122BugAlreadyDamagedAsksForTheConsolesAddressAgain(string loopback)
     {
-        File.WriteAllText(SettingsPath, V122File(ConnectionPanel.LocalHost, "rpcs3"));
+        File.WriteAllText(SettingsPath, V122File(loopback, "rpcs3"));
 
         var loaded = Settings.Load(SettingsPath);
 
         Assert.True(loaded.Rpcs3Target);
-        Assert.Equal(ConnectionPanel.LocalHost, loaded.Ps3.Host);
+        Assert.Equal(Ps3Settings.DefaultHost, loaded.Ps3.Host);
         Assert.Equal(3, loaded.Ps3.WebManSlot);
+        Assert.True(loaded.Ps3.StandaloneConnection);
         Assert.Equal(@"D:\Emulators\rpcs3", loaded.Rpcs3.Folder);
         Assert.Equal(28099, loaded.Rpcs3.PinePort);
+
+        // Once the file has its sections, nothing takes the address away again.
+        loaded.Save();
+        Assert.Equal(Ps3Settings.DefaultHost, Settings.Load(SettingsPath).Ps3.Host);
+    }
+
+    /// <summary>
+    /// A loopback address under the console target is a console target pointed at the qwark
+    /// simulator on purpose, and so is an ordinary address under either target.
+    /// </summary>
+    [Fact]
+    public void ALoopbackAddressTheConsoleTargetChoseIsKept()
+    {
+        File.WriteAllText(SettingsPath, V122File(ConnectionPanel.LocalHost, "ps3"));
+        Assert.Equal(ConnectionPanel.LocalHost, Settings.Load(SettingsPath).Ps3.Host);
+
+        File.WriteAllText(SettingsPath, V122File(ConsoleIp, "rpcs3"));
+        Assert.Equal(ConsoleIp, Settings.Load(SettingsPath).Ps3.Host);
+
+        Assert.False(Settings.IsLoopback(ConsoleIp));
+        Assert.False(Settings.IsLoopback(Ps3Settings.DefaultHost));
+        Assert.False(Settings.IsLoopback(null));
     }
 
     /// <summary>A file that has the sections reads them, whatever the copies for older builds say.</summary>
@@ -330,7 +358,9 @@ public sealed class TargetSettingsTests : IDisposable
     /// <summary>
     /// An older client reads this file with the serializer's defaults, which skip a key they do not
     /// know, and finds both targets' settings where it always looked. What it saves drops the
-    /// sections it has never heard of, and that file comes back here with nothing lost.
+    /// sections it has never heard of, and that file comes back here with what the flat keys held.
+    /// Three things have no flat key and do not come back: the console's port, the helper's port,
+    /// and the reconnect switch of the target that was not chosen, which takes the chosen one's.
     /// </summary>
     [Fact]
     public void AnOlderClientReadsTheNewFileAndWhatItSavesComesBack()
@@ -338,7 +368,10 @@ public sealed class TargetSettingsTests : IDisposable
         var settings = Settings.Load(SettingsPath);
         settings.Ps3.Host = ConsoleIp;
         settings.Ps3.WebManSlot = 2;
+        settings.Ps3.Port = 9700;
+        settings.Ps3.AutoReconnect = true;
         settings.Rpcs3.PinePort = 28099;
+        settings.Rpcs3.HelperPort = 9701;
         settings.Rpcs3.Folder = @"D:\Emulators\rpcs3";
         settings.Rpcs3.AutoReconnect = false;
         settings.Rpcs3Target = true;
@@ -364,6 +397,12 @@ public sealed class TargetSettingsTests : IDisposable
         Assert.Equal(28099, back.Rpcs3.PinePort);
         Assert.Equal(@"D:\Emulators\rpcs3", back.Rpcs3.Folder);
         Assert.True(back.Rpcs3Target);
+        Assert.False(back.Rpcs3.AutoReconnect);
+
+        // What an older build's save loses.
+        Assert.Equal(QwarkClient.DefaultPort, back.Ps3.Port);
+        Assert.Equal(QwarkClient.DefaultPort, back.Rpcs3.HelperPort);
+        Assert.False(back.Ps3.AutoReconnect);
     }
 
     // ---------------------------------------------------------------- helpers

@@ -399,6 +399,177 @@ public class ManipClientTests
             Assert.Equal(1, after.EventGroup);
         }
     }
+
+    // ------------------------------------------- the fake behaves as qwark's manips.c does
+
+    /// <summary>Moves the fake to UYA, whose groups all have setup writes.</summary>
+    private static void MakeUya(FakeQwarkServer server)
+    {
+        server.Describe = FakeQwarkServer.WithManipHeaderFeatures(server.Describe with { Game = GameId.Rac3 }, GameId.Rac3);
+        server.Session = server.Session with { Game = GameId.Rac3, TitleId = "NPEA00387" };
+    }
+
+    [Fact]
+    public async Task PickingASetupGroupOnAFileItDoesNotSuitIsRefusedAtOnceAndStillAnsweredOk()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            MakeUya(server);
+            server.ChallengeCounter = 0;
+
+            // NG+ no QE is a setup alone. With a file in play the setup goes in straight away,
+            // after the check, and a fresh file is refused there; the answer is OK all the same.
+            await client.ManipSelectAsync(1);
+            var list = await client.ManipListAsync();
+            Assert.Equal(1, list.Selected);
+            Assert.Equal(ManipEventKind.RefusedNotChallengeFile, list.EventKind);
+            Assert.Equal(1, list.EventGroup);
+
+            // On a challenge-mode file the NG+ group's setup goes in, and its first time this boot
+            // is announced.
+            server.ChallengeCounter = 1;
+            await client.ManipSelectAsync(2);
+            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
+        }
+    }
+
+    [Fact]
+    public async Task PickingAGroupWithNoFileInPlayOrOneWithNoSetupRaisesNothing()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            // RaC1's groups are per-run writes alone: nothing is due when one is picked.
+            server.ChallengeCounter = 0;
+            ushort seq = (await client.ManipListAsync()).EventSeq;
+            await client.ManipSelectAsync(1);
+            Assert.Equal(seq, (await client.ManipListAsync()).EventSeq);
+
+            // UYA's are setups, but at the title screen there is no file to check or write.
+            MakeUya(server);
+            server.ManipFileLoaded = false;
+            await client.ManipSelectAsync(1);
+            Assert.Equal(seq, (await client.ManipListAsync()).EventSeq);
+        }
+    }
+
+    [Fact]
+    public async Task ASetupPutInAgainIsAppliedNotActivated()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            MakeUya(server);
+            server.ChallengeCounter = 1;
+
+            await client.ManipSelectAsync(1);
+            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
+
+            // Apply now on a group that is a setup alone writes it again: kind 2, a new number.
+            ushort seq = (await client.ManipListAsync()).EventSeq;
+            await client.ManipApplyAsync();
+            var applied = await client.ManipListAsync();
+            Assert.Equal(ManipEventKind.PerRunApplied, applied.EventKind);
+            Assert.NotEqual(seq, applied.EventSeq);
+
+            // Another group, then this one again: the setup is due again and goes in at once, and
+            // this group was announced this boot already.
+            await client.ManipSelectAsync(2);
+            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
+            await client.ManipSelectAsync(1);
+            var again = await client.ManipListAsync();
+            Assert.Equal(ManipEventKind.PerRunApplied, again.EventKind);
+            Assert.Equal(1, again.EventGroup);
+
+            // Picking the group already picked is nothing at all.
+            await client.ManipSelectAsync(1);
+            Assert.Equal(again.EventSeq, (await client.ManipListAsync()).EventSeq);
+        }
+    }
+
+    [Fact]
+    public async Task AGroupsFirstApplicationInABootIsAnnouncedWhateverItWrote()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            // RaC1's NG+ (poki skip) has per-run writes alone. Its first application this boot,
+            // a run's start here, is "activated"; the next one is "applied".
+            server.ChallengeCounter = 1;
+            await client.ManipSelectAsync(1);
+
+            server.ManipRunStart();
+            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
+
+            server.ManipRunStart();
+            Assert.Equal(ManipEventKind.PerRunApplied, (await client.ManipListAsync()).EventKind);
+
+            // With auto-reset off a run's start has nothing due for a group with no setup.
+            await client.ManipOptionsAsync(autoReset: false, remember: false);
+            ushort seq = (await client.ManipListAsync()).EventSeq;
+            server.ManipRunStart();
+            Assert.Equal(seq, (await client.ManipListAsync()).EventSeq);
+        }
+    }
+
+    [Fact]
+    public async Task ANewBootClearsTheEventsKindAndGroupButNotItsNumber()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            ushort seq = server.RaiseManipEvent(ManipEventKind.RefusedChallengeFile, 3);
+            Assert.Equal(ManipEventKind.RefusedChallengeFile, (await client.ManipListAsync()).EventKind);
+
+            server.Session = server.Session with { Generation = server.Session.Generation + 1 };
+
+            var list = await client.ManipListAsync();
+            Assert.Equal(ManipEventKind.None, list.EventKind);
+            Assert.Equal(0, list.EventGroup);
+            Assert.Equal(seq, list.EventSeq);
+        }
+    }
+
+    [Theory]
+    [InlineData(2, 0)]
+    [InlineData(0, 2)]
+    [InlineData(0xFF, 1)]
+    public async Task AnOptionThatIsNeitherZeroNorOneIsBadArg(byte autoReset, byte remember)
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(
+                () => client.RequestAsync(Opcode.ManipOptions, new[] { autoReset, remember }));
+            Assert.Equal(Status.BadArg, refused.Status);
+
+            // Nothing changed.
+            Assert.Equal((true, false), (server.ManipOptionsFor(GameId.Rac1).AutoReset, server.ManipOptionsFor(GameId.Rac1).Remember));
+        }
+    }
+
+    [Fact]
+    public async Task AModuleOlderThanTheOpsAnswersUnknownOp()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.ManipsUnknown = true;
+
+            Assert.Equal(Status.UnknownOp, (await Assert.ThrowsAsync<QwarkStatusException>(() => client.ManipListAsync())).Status);
+            Assert.Equal(Status.UnknownOp, (await Assert.ThrowsAsync<QwarkStatusException>(() => client.ManipSelectAsync(1))).Status);
+            Assert.Equal(Status.UnknownOp, (await Assert.ThrowsAsync<QwarkStatusException>(() => client.ManipOptionsAsync(true, true))).Status);
+            Assert.Equal(Status.UnknownOp, (await Assert.ThrowsAsync<QwarkStatusException>(() => client.ManipApplyAsync())).Status);
+        }
+    }
 }
 
 /// <summary>The warning under the controls, and the one word in it that depends on the group.</summary>
@@ -461,34 +632,54 @@ public class ManipEventTests
     public void EachNewEventIsToastedOnce()
     {
         var events = new ManipEvents();
-        const string session = "NPEA00386#4";
 
-        // The first answer of a session is the starting point: whatever it carries happened before
-        // this client looked.
-        Assert.Null(events.Observe(session, Event(7, ManipEventKind.Activated)));
+        // The first answer of a connection is the starting point: whatever it carries happened
+        // before this client looked.
+        Assert.Null(events.Observe(Event(7, ManipEventKind.Activated)));
 
-        var refused = events.Observe(session, Event(8, ManipEventKind.RefusedNotChallengeFile));
+        var refused = events.Observe(Event(8, ManipEventKind.RefusedNotChallengeFile));
         Assert.Equal(ToastKind.Error, refused?.Toast);
         Assert.Equal("NG+ no IMG wasn't applied: this file isn't a challenge-mode file", refused?.Text);
 
         // The same event read again, however many times, is not new.
-        Assert.Null(events.Observe(session, Event(8, ManipEventKind.RefusedNotChallengeFile)));
-        Assert.Null(events.Observe(session, Event(8, ManipEventKind.RefusedNotChallengeFile)));
+        Assert.Null(events.Observe(Event(8, ManipEventKind.RefusedNotChallengeFile)));
+        Assert.Null(events.Observe(Event(8, ManipEventKind.RefusedNotChallengeFile)));
 
         // Another event of the same kind is.
-        Assert.NotNull(events.Observe(session, Event(9, ManipEventKind.RefusedNotChallengeFile)));
+        Assert.NotNull(events.Observe(Event(9, ManipEventKind.RefusedNotChallengeFile)));
     }
 
     [Fact]
-    public void ANewSessionStartsAgainAndTheNumberMayWrap()
+    public void TheNumberMayWrapAndANewConnectionStartsAgain()
     {
         var events = new ManipEvents();
-        Assert.Null(events.Observe("NPEA00386#4", Event(ushort.MaxValue, ManipEventKind.Activated)));
-        Assert.NotNull(events.Observe("NPEA00386#4", Event(0, ManipEventKind.Activated)));
+        Assert.Null(events.Observe(Event(ushort.MaxValue, ManipEventKind.Activated)));
+        Assert.NotNull(events.Observe(Event(0, ManipEventKind.Activated)));
 
-        // A reboot is a new session: its first answer is a starting point again, even with a
-        // number this client has never seen.
-        Assert.Null(events.Observe("NPEA00386#5", Event(3, ManipEventKind.RefusedNoFile)));
+        // A new connection may have reached a restarted module, whose numbers mean nothing next
+        // to the old one's: its first answer is a starting point, whatever number it carries, so
+        // an event from before it is not told again...
+        events.Forget();
+        Assert.Null(events.Observe(Event(3, ManipEventKind.RefusedNoFile)));
+
+        // ...and the next one is told even when its number is one the old module had used.
+        events.Forget();
+        Assert.Null(events.Observe(Event(0, ManipEventKind.None)));
+        Assert.NotNull(events.Observe(Event(1, ManipEventKind.RefusedNoFile)));
+    }
+
+    [Fact]
+    public void ARebootDoesNotStartAgainBecauseTheModulesNumberDoesNot()
+    {
+        // qwark's number belongs to the module: a game boot clears the event's kind and group and
+        // leaves the number, so an event the new boot raises before this client's first read of
+        // it is still a new number, and is still told.
+        var events = new ManipEvents();
+        Assert.Null(events.Observe(Event(4, ManipEventKind.Activated)));
+        Assert.Null(events.Observe(Event(4, ManipEventKind.None)));
+
+        var refused = events.Observe(Event(5, ManipEventKind.RefusedChallengeFile));
+        Assert.Equal(ToastKind.Error, refused?.Toast);
     }
 
     [Theory]
@@ -504,18 +695,20 @@ public class ManipEventTests
     }
 
     [Fact]
-    public void APerRunReapplyIsQuietAndNothingIsNothing()
+    public void ALaterApplicationIsQuietAndNothingIsNothing()
     {
         var events = new ManipEvents();
-        Assert.Null(events.Observe("s", Event(1, ManipEventKind.None)));
+        Assert.Null(events.Observe(Event(1, ManipEventKind.None)));
 
-        // A new event, but one that only goes on the status line.
-        var quiet = events.Observe("s", Event(2, ManipEventKind.PerRunApplied));
+        // A new event, but one that only goes on the status line. Kind 2 is the per-run writes at
+        // a run's start or a setup put in again, so it does not say "per-run".
+        var quiet = events.Observe(Event(2, ManipEventKind.PerRunApplied));
         Assert.NotNull(quiet);
         Assert.Null(quiet?.Toast);
-        Assert.Equal("Last: NG+ no IMG per-run manips applied", ManipsArea.LastEventLine(Event(2, ManipEventKind.PerRunApplied)));
+        Assert.Equal("NG+ no IMG manips applied", quiet?.Text);
+        Assert.Equal("Last: NG+ no IMG manips applied", ManipsArea.LastEventLine(Event(2, ManipEventKind.PerRunApplied)));
 
-        Assert.Null(events.Observe("s", Event(3, ManipEventKind.None)));
+        Assert.Null(events.Observe(Event(3, ManipEventKind.None)));
         Assert.Null(ManipsArea.LastEventLine(Event(3, ManipEventKind.None)));
         Assert.Null(ManipEvents.NoticeFor((ManipEventKind)9, "x"));
     }
@@ -726,18 +919,145 @@ public class ManipStateTests
 
         Assert.True(await PumpAsync(state, () => state.Manips is not null));
 
-        // A challenge-mode file is loaded, so picking an NG+ group makes its setup at once: the
-        // first activation of the boot, which is an info toast.
+        // A challenge-mode file is loaded. RaC1's groups are per-run writes alone, so picking one
+        // writes nothing yet; Apply now is its first application this boot, which is announced.
         server.ChallengeCounter = 1;
         state.SelectManipGroup(1);
+        Assert.True(await PumpAsync(state, () => state.Manips?.Selected == 1));
+        Assert.Equal(0, state.ManipToasts);
+
+        state.ApplyManips();
         Assert.True(await PumpAsync(state, () => ToastsSaying(state, "NG+ (poki skip) manips activated") == 1));
         Assert.Equal(ToastKind.Info, state.Toasts.Single(t => t.Text == "NG+ (poki skip) manips activated").Kind);
 
-        // Apply now again is the per-run reapply, which the console reports quietly; the button
+        // Apply now again is a later application, which the console reports quietly; the button
         // still says it went through.
         state.ApplyManips();
         Assert.True(await PumpAsync(state, () => ToastsSaying(state, "NG+ (poki skip) manips applied") == 1));
         Assert.Equal(ManipEventKind.PerRunApplied, state.Manips!.EventKind);
+        Assert.Equal(ToastKind.Success, state.Toasts.Single(t => t.Text == "NG+ (poki skip) manips applied").Kind);
+    }
+
+    [Fact]
+    public async Task PickingASetupGroupOnTheWrongFileIsToldAtOnce()
+    {
+        using var server = new FakeQwarkServer();
+        server.Describe = FakeQwarkServer.WithManipHeaderFeatures(server.Describe with { Game = GameId.Rac3 }, GameId.Rac3);
+        server.Session = server.Session with { Game = GameId.Rac3, TitleId = "NPEA00387" };
+        server.ChallengeCounter = 0;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Manips is not null));
+
+        // UYA's NG+ no QE is a setup, which goes in at once with a file in play: on a fresh file the
+        // console refuses, and the select's own OK is not the end of it.
+        state.SelectManipGroup(1);
+        Assert.True(await PumpAsync(state,
+            () => ToastsSaying(state, "NG+ no QE wasn't applied: this file isn't a challenge-mode file") == 1));
+    }
+
+    /// <summary>
+    /// The case the planet-change read missed: a save loaded on the first planet starts a run
+    /// without the planet number moving, and nobody has the manips area open. The timed read finds
+    /// the event all the same.
+    /// </summary>
+    [Fact]
+    public async Task ARunStartedWithoutThePlanetMovingIsToastedOnAnyPanel()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Manips is not null));
+        server.ChallengeCounter = 0;
+        state.SelectManipGroup(1);
+        Assert.True(await PumpAsync(state, () => state.Manips?.Selected == 1));
+        await PumpForAsync(state, 200);
+
+        byte planet = server.Session.CurrentPlanet;
+        server.ManipRunStart();
+
+        const string text = "NG+ (poki skip) wasn't applied: this file isn't a challenge-mode file";
+        Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1, timeoutMs: 6000));
+        Assert.Equal(planet, server.Session.CurrentPlanet);
+
+        // And once only, however many timed reads follow.
+        await PumpForAsync(state, (int)(AppState.ManipPollSeconds * 1000 * 2) + 200);
+        Assert.Equal(1, ToastsSaying(state, text));
+    }
+
+    [Fact]
+    public async Task AModuleWithoutTheOpsHasNoAreaAndIsNotAskedAgain()
+    {
+        using var server = new FakeQwarkServer();
+        server.ManipsUnknown = true;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Describe.Features.Length > 0
+                                                 && server.RequestLog().Contains(Opcode.ManipList)));
+        await PumpForAsync(state, 300);
+        server.ClearRequestLog();
+
+        // An older module is a game with no manips as far as the page is concerned: no area, no
+        // toast, and no timed reads of an op it does not know.
+        await PumpForAsync(state, (int)(AppState.ManipPollSeconds * 1000 * 2) + 300);
+
+        Assert.Null(state.Manips);
+        Assert.False(HasManipsSection(state));
+        Assert.DoesNotContain(Opcode.ManipList, server.RequestLog());
+        Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
+    }
+
+    /// <summary>
+    /// A connection to a module that restarted: its event numbers start again and can meet the old
+    /// module's by chance. Its first answer is a starting point, so an event from before it is not
+    /// replayed, and the next event is told even when the old module had used its number.
+    /// </summary>
+    [Fact]
+    public async Task AReconnectToARestartedModuleNeitherReplaysNorSwallows()
+    {
+        using var first = new FakeQwarkServer();
+        first.Start();
+        using var state = await ConnectedStateAsync(first);
+
+        Assert.True(await PumpAsync(state, () => state.Manips is not null));
+        await PumpForAsync(state, 200);
+
+        // One event on the first module: number 1, told once.
+        first.RaiseManipEvent(ManipEventKind.RefusedNotChallengeFile, 2);
+        const string told = "NG+ (no poki skip) wasn't applied: this file isn't a challenge-mode file";
+        state.RefreshManips();
+        Assert.True(await PumpAsync(state, () => state.ManipToasts == 1));
+        Assert.Equal(1, ToastsSaying(state, told));
+
+        // The module restarts. Before the client is back, the new one raises two events of its own
+        // (numbers 1 and 2), both shown on the console while no PC was looking.
+        using var second = new FakeQwarkServer();
+        second.RaiseManipEvent(ManipEventKind.RefusedNotChallengeFile, 2);
+        second.RaiseManipEvent(ManipEventKind.RefusedChallengeFile, 3);
+        second.Start();
+
+        await state.Client.ConnectAsync("127.0.0.1", second.Port);
+        Assert.True(await PumpAsync(state, () => state.Manips?.EventSeq == 2));
+        await PumpForAsync(state, 300);
+
+        Assert.Equal(1, state.ManipToasts);
+        Assert.Equal(0, ToastsSaying(state, "All Missions wasn't applied: this file is a challenge-mode file"));
+
+        // A third module restart, reached with nothing raised yet; its first event is number 1,
+        // which the first module had used too. It is told.
+        using var third = new FakeQwarkServer();
+        third.Start();
+        await state.Client.ConnectAsync("127.0.0.1", third.Port);
+        Assert.True(await PumpAsync(state, () => state.Manips is { EventSeq: 0 }));
+        await PumpForAsync(state, 200);
+
+        third.RaiseManipEvent(ManipEventKind.RefusedNotChallengeFile, 2);
+        state.RefreshManips();
+        Assert.True(await PumpAsync(state, () => state.ManipToasts == 2));
+        Assert.Contains(state.Toasts, toast => toast.Text == told);
     }
 
     [Fact]
@@ -813,7 +1133,7 @@ public class ManipHeaderTests
     private static readonly DescribeResult Uya = new(GameId.None, Groups, Array.Empty<string>(), new[]
     {
         Toggle(0, "Infinite ammo"),
-        Action(21, "Reset trophies (freezes ~3 s)"),
+        Action(21, "Reset trophies"),
         Action(22, "Unlock all skill points"),
         Toggle(39, "Reset trophies on Veldin load", group: 2),
     });
@@ -846,7 +1166,7 @@ public class ManipHeaderTests
 
         var block = Assert.Single(ManipsArea.HeaderBlocks(list, sections[GameLayout.ManipsSection]));
         Assert.Equal("Trophies", block.Heading);
-        Assert.Equal(new[] { "Reset trophies (freezes ~3 s)", "Reset trophies on Veldin load" }, block.Features.Select(f => f.Label));
+        Assert.Equal(new[] { "Reset trophies", "Reset trophies on Veldin load" }, block.Features.Select(f => f.Label));
         Assert.Equal(new[] { FeatureKind.Action, FeatureKind.Toggle }, block.Features.Select(f => f.Kind));
     }
 
@@ -860,7 +1180,7 @@ public class ManipHeaderTests
         var blocks = ManipsArea.HeaderBlocks(list, both.Features);
 
         Assert.Equal(new[] { "Trophies", "Fixes" }, blocks.Select(b => b.Heading));
-        Assert.Equal(new[] { "Reset trophies on Veldin load", "Reset trophies (freezes ~3 s)" }, blocks[0].Features.Select(f => f.Label));
+        Assert.Equal(new[] { "Reset trophies on Veldin load", "Reset trophies" }, blocks[0].Features.Select(f => f.Label));
         Assert.Equal(new[] { "Fix reset softlocks", "Crash patches" }, blocks[1].Features.Select(f => f.Label));
     }
 

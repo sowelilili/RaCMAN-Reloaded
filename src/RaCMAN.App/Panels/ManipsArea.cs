@@ -12,28 +12,24 @@ namespace RaCMAN.App.Panels;
 /// <para>
 /// Everything here is drawn from <see cref="AppState.Manips"/>, MANIP_LIST's last answer, and each
 /// control sends one request and reads the list again. The client keeps no selection and no option
-/// of its own: qwark applies the category on a file load whether or not a PC is connected, so the
-/// console is the only place either can live.
+/// of its own: qwark applies the category at the start of a run whether or not a PC is connected,
+/// so the console is the only place either can live.
 /// </para>
 /// <para>
-/// Refresh policy: MANIP_LIST is read when the area comes on screen and every
-/// <see cref="PollSeconds"/> while it stays there; <see cref="AppState"/> also reads it after every
-/// manip request, on every way back into a game and after a planet change, which is how an event
-/// from a file load is toasted while some other panel is open.
+/// Refresh policy: MANIP_LIST is read when the area comes on screen. Everything else is
+/// <see cref="AppState"/>'s, which reads it on a timer while a game with groups is up, whatever
+/// panel is open, as well as after every manip request, on every way back into a game, after a
+/// planet change and after a load this client asked for (<see cref="AppState.ManipPollSeconds"/>).
 /// </para>
 /// </summary>
 public static class ManipsArea
 {
-    /// <summary>How often the list is read while the area is on screen.</summary>
-    public const float PollSeconds = 1.5f;
-
     /// <summary>How long the area may go undrawn before it counts as opened again.</summary>
     private const long ReopenAfterMs = 500;
 
     private const float ComboWidth = 260f;
 
     private static long _lastDrawnMs = long.MinValue / 2;
-    private static float _sincePoll;
 
     /// <summary>Whether the area has been drawn this run, for the headless summary.</summary>
     public static bool Drawn { get; private set; }
@@ -118,7 +114,11 @@ public static class ManipsArea
         // the pair with the one that changed.
         bool autoReset = list.AutoReset;
         if (ImGui.Checkbox("Auto-reset", ref autoReset)) state.SetManipOptions(autoReset, list.Remember);
-        Ui.Tooltip("Apply the category's per-run manips again every time a save is loaded or a new game is started.");
+        // The console's trigger is the start of a run, not every load: a load into the first planet
+        // in RaC1, RaC2 and UYA, a new game or a challenge-mode start in Deadlocked.
+        Ui.Tooltip("Apply the category's per-run manips again at the start of every run: when a save or a "
+                   + "new game loads the first planet, or in Deadlocked a new game or a challenge-mode start. "
+                   + "To practise from a save on another planet, use Apply now.");
 
         ImGui.SameLine();
         bool remember = list.Remember;
@@ -131,7 +131,8 @@ public static class ManipsArea
         ImGui.EndDisabled();
         Ui.Tooltip(none
             ? "Pick a category type first."
-            : "Apply the category's manips now. A save must be loaded.");
+            : "Apply the category's manips now, for example after loading a save on another planet. "
+              + "A save must be loaded.");
 
         if (Warning(list) is { } warning) Ui.Warning(warning);
         if (LastEventLine(list) is { } line) Ui.Hint(line);
@@ -140,8 +141,9 @@ public static class ManipsArea
     }
 
     /// <summary>
-    /// Reads the list when the area comes back on screen and on a timer while it stays. The timer
-    /// counts only while a game is up, where the op answers; the read itself knows the rest.
+    /// Reads the list when the area comes back on screen, so what it shows is fresh the moment it is
+    /// looked at. The reads while it stays there are AppState's timer; the read itself knows when the
+    /// op answers.
     /// </summary>
     private static void Poll(AppState state)
     {
@@ -149,24 +151,7 @@ public static class ManipsArea
         bool reopened = now - _lastDrawnMs > ReopenAfterMs;
         _lastDrawnMs = now;
 
-        if (reopened)
-        {
-            _sincePoll = 0;
-            state.RefreshManips();
-            return;
-        }
-
-        if (!state.Ingame)
-        {
-            _sincePoll = 0;
-            return;
-        }
-
-        _sincePoll += ImGui.GetIO().DeltaTime;
-        if (_sincePoll < PollSeconds) return;
-
-        _sincePoll = 0;
-        state.RefreshManips();
+        if (reopened) state.RefreshManips();
     }
 
     /// <summary>

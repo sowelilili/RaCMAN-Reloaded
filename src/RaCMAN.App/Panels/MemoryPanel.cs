@@ -828,7 +828,7 @@ public static class MemoryPanel
                 Ui.PushTableInput();
                 if (ImGui.InputText("##name", ref name, 64)) saved.Name = name;
                 Ui.PopTableInput();
-                if (Ui.Debug && ImGui.IsItemHovered()) ImGui.SetTooltip($"watch id {watch.Id}");
+                if (Ui.Debug && ImGui.IsItemHovered()) Ui.SetTooltip($"watch id {watch.Id}");
 
                 ImGui.TableNextColumn();
                 Ui.CentreInRow(rowHeight);
@@ -1288,7 +1288,7 @@ public static class MemoryPanel
 
                 ImGui.TableNextColumn();
                 bool active = (state.Session.FreezeActive & (1UL << freeze.Id)) != 0;
-                ImGui.TextColored(active ? Ui.Green : Ui.Grey, freeze.Id.ToString());
+                Ui.Text(active ? Ui.Green : Ui.Grey, freeze.Id.ToString());
                 ImGui.TableNextColumn();
                 ImGui.TextUnformatted($"0x{freeze.Address:X8}");
                 ImGui.TableNextColumn();
@@ -1344,7 +1344,7 @@ public static class MemoryPanel
         }
 
         ImGui.EndDisabled();
-        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NoCodePatches);
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(Ui.NoCodePatches);
 
         ImGui.BeginDisabled(!enabled);
         ImGui.SameLine();

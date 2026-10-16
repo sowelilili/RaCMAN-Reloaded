@@ -160,8 +160,8 @@ public static class CombosPanel
             // combos are switched off: a combo recorded now fires once the helper is in.
             if (SetAsideComboBlocked(action, state.Session, state.SaveFile))
             {
-                ImGui.TextDisabled(Label(action));
-                if (ImGui.IsItemHovered()) ImGui.SetTooltip(Ui.NeedsSaveFileHelper);
+                Ui.TextDisabled(Label(action));
+                if (ImGui.IsItemHovered()) Ui.SetTooltip(Ui.NeedsSaveFileHelper);
             }
             else
             {
@@ -173,13 +173,13 @@ public static class CombosPanel
             if (_capturing == action)
             {
                 uint held = Capture.Captured;
-                ImGui.TextColored(Ui.Yellow, held == 0
+                Ui.Text(Ui.Yellow, held == 0
                     ? "Press a combo on the pad..."
                     : $"{PadButtons.Describe(held)}, release to store");
             }
             else
             {
-                ImGui.TextColored(mask == 0 ? Ui.Grey : Ui.Green, mask == 0 ? "disabled" : $"{PadButtons.Describe(mask)}  (0x{mask:X})");
+                Ui.Text(mask == 0 ? Ui.Grey : Ui.Green, mask == 0 ? "disabled" : $"{PadButtons.Describe(mask)}  (0x{mask:X})");
             }
 
             ImGui.TableNextColumn();

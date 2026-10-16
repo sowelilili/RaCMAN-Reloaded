@@ -938,7 +938,7 @@ public static class ModsPanel
         if (!string.IsNullOrEmpty(mod.Description))
         {
             ImGui.Spacing();
-            ImGui.TextWrapped(mod.Description);
+            Ui.TextWrapped(mod.Description);
         }
 
         // Every mod in this table is installed on this PC, so its description is the one already
@@ -1024,7 +1024,7 @@ public static class ModsPanel
         if (!ImGui.BeginPopupModal("Replace mod?", ref open, ImGuiWindowFlags.AlwaysAutoResize)) return;
 
         var candidate = _pendingZip;
-        ImGui.Text(candidate.Kind == ZipInstallKind.Downgrade
+        ImGui.TextUnformatted(candidate.Kind == ZipInstallKind.Downgrade
             ? $"The installed {candidate.Installed?.Name} is version {candidate.Installed?.Version}, newer than the ZIP's {candidate.Mod.Version}."
             : $"{candidate.Mod.Name} {candidate.Mod.Version} is already installed.");
 

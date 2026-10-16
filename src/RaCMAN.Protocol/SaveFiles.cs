@@ -353,6 +353,57 @@ public sealed class SaveFileLibrary : ISaveFileSource
     }
 }
 
+/// <summary>
+/// What qwark takes as a savefile or category name, and why it refuses one. The console checks the
+/// two the same way (savefile_name_ok in src/core/savefile.c): one to 32 bytes, printable ASCII
+/// only, no leading dot, no '/', '\' or ':'. A file's 32 bytes include its ".sav". Every path the
+/// file ops are given is refused if it has ".." anywhere in it (path_ok in src/core/net.c), and a
+/// rename, a delete and an upload go through those. The wire carries names in 32-byte fields, so a
+/// longer one would also be cut short on its way there.
+/// <para>
+/// What the console refuses it refuses after the fact, or not at all: STORE and RESTORE answer
+/// BAD_ARG, but a rename through the file ops goes through, the listing then skips the file, and
+/// every load of it after that fails. So the panel asks this before it sends anything, and says
+/// why in the user's words.
+/// </para>
+/// </summary>
+public static class SaveFileNames
+{
+    /// <summary>SAVEFILE_NAME_LEN: the longest name, in bytes, the console takes or lists.</summary>
+    public const int MaxBytes = 32;
+
+    /// <summary>The longest a file's name can be in front of its ".sav".</summary>
+    public const int MaxFileStem = MaxBytes - 4;
+
+    /// <summary>
+    /// Why the console would refuse <paramref name="name"/>, or null when it takes it. A file's
+    /// whole name is asked about, ".sav" and all (<paramref name="file"/>), so the length it gives
+    /// is the part the user typed.
+    /// </summary>
+    public static string? Problem(string? name, bool file)
+    {
+        if (string.IsNullOrEmpty(name)) return "Type a name.";
+
+        foreach (char c in name)
+        {
+            if (c < 0x20 || c > 0x7E) return "Use plain letters, digits, spaces and punctuation: no accents or other symbols.";
+        }
+
+        if (name.Length > MaxBytes)
+        {
+            return file
+                ? $"That name is too long: at most {MaxFileStem} characters."
+                : $"That name is too long: at most {MaxBytes} characters.";
+        }
+
+        if (name[0] == '.') return "A name cannot start with a dot.";
+        if (name.IndexOfAny(new[] { '/', '\\', ':' }) >= 0) return "A name cannot have / \\ or : in it.";
+        if (name.Contains("..", StringComparison.Ordinal)) return "A name cannot have two dots in a row.";
+
+        return null;
+    }
+}
+
 /// <summary>One file in the PC's mirror: its name, its size and its CRC32.</summary>
 public readonly record struct LocalSaveFile(string Name, long Size, uint Crc);
 
@@ -915,7 +966,11 @@ public static class SaveFileTransfer
             .ConfigureAwait(false);
     }
 
-    /// <summary>Renames a save on both sides, the sidecar with it.</summary>
+    /// <summary>
+    /// Renames a save on both sides, the sidecar with it. A name the console would not list is
+    /// refused before either side is touched: the file ops take it, and the save then drops out of
+    /// the console's listing and can no longer be loaded (<see cref="SaveFileNames"/>).
+    /// </summary>
     public static async Task RenameAsync(
         QwarkClient client,
         SaveFileLibrary library,
@@ -926,6 +981,7 @@ public static class SaveFileTransfer
         CancellationToken cancellationToken = default)
     {
         if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("they cannot be renamed");
+        if (SaveFileNames.Problem(newName, file: true) is { } problem) throw new IOException(problem);
 
         if (entry.OnPc) library.Rename(titleId, category, entry.Name, newName);
         if (!entry.OnConsole) return;
