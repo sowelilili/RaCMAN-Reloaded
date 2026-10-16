@@ -284,6 +284,24 @@ public sealed record Feature(
     public bool IsSigned => Kind == FeatureKind.Value && (Flags & FeatureFlags.Signed) != 0;
 
     /// <summary>
+    /// The console flags this feature CONFIRM (revision 1.21): it does something RaCMAN cannot take
+    /// back, and the user is asked first. Which requests that covers is the three members below.
+    /// </summary>
+    public bool Confirms => (Flags & FeatureFlags.Confirm) != 0;
+
+    /// <summary>A FEATURE_TRIGGER of this feature has to be confirmed first: a CONFIRM ACTION.</summary>
+    public bool ConfirmsTrigger => Kind == FeatureKind.Action && Confirms;
+
+    /// <summary>
+    /// A FEATURE_SET of <paramref name="value"/> has to be confirmed first: turning a CONFIRM
+    /// TOGGLE on. Turning it off undoes nothing, so it is never asked about.
+    /// </summary>
+    public bool ConfirmsSet(uint value) => Kind == FeatureKind.Toggle && Confirms && value != 0;
+
+    /// <summary>A FEATURE_SET_AUTO has to be confirmed first: asking for a CONFIRM TOGGLE on every boot.</summary>
+    public bool ConfirmsAuto(bool on) => Kind == FeatureKind.Toggle && Confirms && on;
+
+    /// <summary>
     /// True when there is a range worth showing the user: the console named one, or the row is
     /// signed and its width names one for it.
     /// </summary>
@@ -437,6 +455,44 @@ public sealed record DescribeResult(GameId Game, string[] Groups, string[] Reado
     public string GroupName(byte index) => index < Groups.Length ? Groups[index] : $"Group {index}";
 
     public string ReadoutName(int index) => index >= 0 && index < Readouts.Length ? Readouts[index] : $"readout[{index}]";
+}
+
+/// <summary>
+/// FEATURE_CONFIRM_TEXT's reply (revision 1.21): the question to put to the user before a CONFIRM
+/// feature is used, in the console's own words. The whole payload is the text, UTF-8 and at most
+/// <see cref="MaxBytes"/> bytes, with no length in front and no terminator after.
+/// </summary>
+public static class FeatureConfirmText
+{
+    public const int MaxBytes = 512;
+
+    /// <summary>
+    /// The text of a reply. A terminator is not part of the contract, but a C string handed over
+    /// with its NUL is still the same text, so the text ends at the first NUL if there is one. A
+    /// reply longer than <see cref="MaxBytes"/> throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public static string Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length > MaxBytes)
+        {
+            throw new ProtocolException($"FEATURE_CONFIRM_TEXT is at most {MaxBytes} bytes, got {payload.Length}");
+        }
+
+        int nul = payload.IndexOf((byte)0);
+        if (nul >= 0) payload = payload[..nul];
+        return Encoding.UTF8.GetString(payload);
+    }
+
+    /// <summary>The reply for <paramref name="text"/>, cut at <see cref="MaxBytes"/> on a character boundary. The fake console's side.</summary>
+    public static byte[] Encode(string text)
+    {
+        var bytes = Encoding.UTF8.GetBytes(text);
+        if (bytes.Length <= MaxBytes) return bytes;
+
+        int end = MaxBytes;
+        while (end > 0 && (bytes[end] & 0xC0) == 0x80) end--;
+        return bytes[..end];
+    }
 }
 
 /// <summary>WATCH_LIST entry.</summary>

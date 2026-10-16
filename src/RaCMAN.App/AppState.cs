@@ -114,6 +114,7 @@ public sealed class AppState : IDisposable
         Rpcs3 = new Rpcs3Host(qwarkPort: settings.Rpcs3.HelperPort, rootFolder: AppPaths.Rpcs3Root);
         Rpcs3Patch = new Rpcs3PatchController(this, Rpcs3Environment.Current);
         Rpcs3Mods = new Rpcs3ModsController(this, Rpcs3Environment.Current);
+        Confirms = new FeatureConfirmations(this);
         LiveSplit = new LiveSplitClient();
         Autosplitter = new Autosplitter(settings, LiveSplit, Post);
 
@@ -224,6 +225,12 @@ public sealed class AppState : IDisposable
     /// writes behind its Enabled checkboxes. Inert until that panel is drawn for RPCS3.
     /// </summary>
     public Rpcs3ModsController Rpcs3Mods { get; }
+
+    /// <summary>
+    /// The question before a feature the console flags CONFIRM is used (revision 1.21). Every
+    /// feature control sends its trigger, its toggle and its "on boot" box through here.
+    /// </summary>
+    public FeatureConfirmations Confirms { get; }
 
     /// <summary>
     /// The one way RPCS3's patch file and patch_config.yml are written, shared by the install of
@@ -704,6 +711,9 @@ public sealed class AppState : IDisposable
         }
 
         Telemetry = Client.LatestTelemetry;
+
+        // A question about a feature belongs to the game it was asked in, connected or not.
+        Confirms.Tick();
 
         // The autosplitter reads settings per game, and it follows the described game rather than
         // telemetry's own: a Deadlocked quit takes the session to the XMB with a pause still open,

@@ -340,10 +340,14 @@ public class ManipClientTests
             var trophies = Assert.Single(list.Headers);
             Assert.Equal("Trophies", trophies.Name);
 
-            // The refresh button and its toggle, by id, in that order.
+            // The reset button and its toggle, by id, in that order: qwark's 21 and 39, both of
+            // them asking before they act.
+            Assert.Equal(new ushort[] { 21, 39 }, trophies.Features);
             var labels = trophies.Features.Select(id => server.Describe.Features.Single(f => f.Id == id)).ToArray();
             Assert.Equal(new[] { FeatureKind.Action, FeatureKind.Toggle }, labels.Select(f => f.Kind));
-            Assert.Equal(FakeQwarkServer.TrophyRefreshLabel, labels[0].Label);
+            Assert.Equal(FakeQwarkServer.TrophyResetLabel, labels[0].Label);
+            Assert.Equal(FakeQwarkServer.TrophyAutoResetLabel, labels[1].Label);
+            Assert.All(labels, f => Assert.True(f.Confirms));
         }
     }
 
@@ -810,9 +814,9 @@ public class ManipHeaderTests
     private static readonly DescribeResult Uya = new(GameId.None, Groups, Array.Empty<string>(), new[]
     {
         Toggle(0, "Infinite ammo"),
-        Action(21, "Refresh trophy state"),
+        Action(21, "Reset trophies (freezes ~3 s)"),
         Action(22, "Unlock all skill points"),
-        Toggle(40, "Auto-refresh trophies", group: 2),
+        Toggle(39, "Reset trophies on Veldin load", group: 2),
     });
 
     private static ManipList List(params ManipHeader[] headers) =>
@@ -834,7 +838,7 @@ public class ManipHeaderTests
     [Fact]
     public void AButtonAndAToggleGoUnderTheirHeadingTogether()
     {
-        var list = List(Header("Trophies", 21, 40));
+        var list = List(Header("Trophies", 21, 39));
         var sections = GamePanel.SectionsFor(UnknownTitle, GameId.None, Uya, list);
 
         // Both leave Progress, where the button and the toggle were described, and the button that
@@ -843,7 +847,7 @@ public class ManipHeaderTests
 
         var block = Assert.Single(ManipsArea.HeaderBlocks(list, sections[GameLayout.ManipsSection]));
         Assert.Equal("Trophies", block.Heading);
-        Assert.Equal(new[] { "Refresh trophy state", "Auto-refresh trophies" }, block.Features.Select(f => f.Label));
+        Assert.Equal(new[] { "Reset trophies (freezes ~3 s)", "Reset trophies on Veldin load" }, block.Features.Select(f => f.Label));
         Assert.Equal(new[] { FeatureKind.Action, FeatureKind.Toggle }, block.Features.Select(f => f.Kind));
     }
 
@@ -852,12 +856,12 @@ public class ManipHeaderTests
     {
         var both = new DescribeResult(GameId.None, Groups, Array.Empty<string>(),
             Deadlocked.Features.Concat(Uya.Features.Skip(1)).ToArray());
-        var list = List(Header("Trophies", 40, 21), Header("Fixes", 12, 11));
+        var list = List(Header("Trophies", 39, 21), Header("Fixes", 12, 11));
 
         var blocks = ManipsArea.HeaderBlocks(list, both.Features);
 
         Assert.Equal(new[] { "Trophies", "Fixes" }, blocks.Select(b => b.Heading));
-        Assert.Equal(new[] { "Auto-refresh trophies", "Refresh trophy state" }, blocks[0].Features.Select(f => f.Label));
+        Assert.Equal(new[] { "Reset trophies on Veldin load", "Reset trophies (freezes ~3 s)" }, blocks[0].Features.Select(f => f.Label));
         Assert.Equal(new[] { "Fix reset softlocks", "Crash patches" }, blocks[1].Features.Select(f => f.Label));
     }
 
@@ -913,8 +917,18 @@ public class ManipHeaderTests
         Assert.Equal(3, FakeQwarkServer.WithManipHeaderFeatures(deadlocked, GameId.Rac4).Features.Length);
 
         var uya = FakeQwarkServer.WithManipHeaderFeatures(plain with { Game = GameId.Rac3 }, GameId.Rac3);
-        Assert.Equal(FeatureKind.Action, uya.Features.Single(f => f.Label == FakeQwarkServer.TrophyRefreshLabel).Kind);
-        Assert.Equal(FeatureKind.Toggle, uya.Features.Single(f => f.Label == FakeQwarkServer.TrophyAutoLabel).Kind);
+        var reset = uya.Features.Single(f => f.Label == FakeQwarkServer.TrophyResetLabel);
+        var auto = uya.Features.Single(f => f.Label == FakeQwarkServer.TrophyAutoResetLabel);
+        Assert.Equal((FeatureKind.Action, (byte)21), (reset.Kind, reset.Id));
+        Assert.Equal((FeatureKind.Toggle, (byte)39), (auto.Kind, auto.Id));
+        Assert.True(reset.Confirms && auto.Confirms);
+        Assert.DoesNotContain(deadlocked.Features, f => f.Confirms);
+
+        // An id the table already uses is not taken twice: the next free one is.
+        var crowded = plain with { Game = GameId.Rac3, Features = new[] { Toggle(21, "Something else") } };
+        var moved = FakeQwarkServer.WithManipHeaderFeatures(crowded, GameId.Rac3);
+        Assert.Equal(22, moved.Features.Single(f => f.Label == FakeQwarkServer.TrophyResetLabel).Id);
+        Assert.Equal(39, moved.Features.Single(f => f.Label == FakeQwarkServer.TrophyAutoResetLabel).Id);
 
         // RaC1 and RaC2 have no headings, so nothing is added.
         Assert.Single(FakeQwarkServer.WithManipHeaderFeatures(plain, GameId.Rac2).Features);

@@ -183,8 +183,9 @@ public static class FakeScript
                 };
                 break;
 
-            // UYA, whose manips area has a Trophies heading: the refresh button and its toggle
-            // come with it, so there is something under the heading.
+            // UYA, whose manips area has a Trophies heading: the trophy reset button and its
+            // Veldin-load toggle come with it, both flagged CONFIRM, so there is something under
+            // the heading and something that asks first.
             case "rac3":
                 fake.Describe = FakeQwarkServer.WithManipHeaderFeatures(fake.Describe with { Game = GameId.Rac3 }, GameId.Rac3);
                 fake.Session = session with

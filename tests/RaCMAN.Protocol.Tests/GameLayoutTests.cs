@@ -44,7 +44,22 @@ public class GameLayoutTests
 
     private static readonly string[] Rac1Groups = { "Cheats", "Player", "Progress", "Savefile", "Jankpot", "Debug" };
     private static readonly string[] Rac2Groups = { "Cheats", "Player", "Progress", "Collectables", "Savefile", "Cosmetics" };
-    private static readonly string[] Rac3Groups = { "Cheats", "Player", "Progress", "Savefile", "Cosmetics" };
+    /// <summary>UYA's DESCRIBE groups as of build 53, which added "Trophies" for the trophy reset and its toggle.</summary>
+    private static readonly string[] Rac3Groups = { "Cheats", "Player", "Progress", "Savefile", "Cosmetics", "Trophies" };
+
+    /// <summary>The index of "Trophies" in <see cref="Rac3Groups"/>.</summary>
+    private const byte Rac3Trophies = 5;
+
+    /// <summary>
+    /// UYA's trophy reset and its toggle as build 53 describes them: qwark's ids 21 and 39, the
+    /// labels qwark gave them when it flagged them CONFIRM ("Refresh trophy state" before that, and
+    /// a toggle that did not exist), and their own DESCRIBE group.
+    /// </summary>
+    private static Feature TrophyReset() =>
+        new(21, FeatureKind.Action, Rac3Trophies, 0, FeatureFlags.Confirm, 0xFF, 0, 0, "Reset trophies (freezes ~3 s)");
+
+    private static Feature TrophyAutoReset() =>
+        new(39, FeatureKind.Toggle, Rac3Trophies, 0, FeatureFlags.Confirm, 0xFF, 0, 0, "Reset trophies on Veldin load");
     private static readonly string[] Rac4Groups = { "Cheats", "Player", "Progress", "Savefile" };
 
     public GameLayoutTests()
@@ -130,15 +145,17 @@ public class GameLayoutTests
     [Fact]
     public void Rac3ProgressSplitsAcrossTheOtherSections()
     {
-        var trophy = Make(20, FeatureKind.Action, 2, "Refresh trophy state");
-        var titanium = Make(21, FeatureKind.Action, 2, "Unlock all titanium bolts");
+        var trophy = TrophyReset();
+        var titanium = Make(20, FeatureKind.Action, 2, "Unlock all titanium bolts");
         var resetTitanium = Make(22, FeatureKind.Action, 2, "Reset all titanium bolts");
         var upgrade = Make(23, FeatureKind.Action, 2, "Max all weapon levels");
         var downgrade = Make(24, FeatureKind.Action, 2, "Reset all weapon levels");
         var ngPlus = Make(25, FeatureKind.Action, 2, "Setup NG+ manips");
         var d = Describe(GameId.Rac3, Rac3Groups, trophy, titanium, resetTitanium, upgrade, downgrade, ngPlus);
 
-        Assert.Equal("Savefile", GameLayout.SectionFor("NPEA00387", GameId.Rac3, trophy, d));
+        // The trophy reset is no longer in Progress, and the file does not move it: it is in a
+        // DESCRIBE group of its own, which MANIP_LIST's Trophies heading takes over (below).
+        Assert.Equal("Trophies", GameLayout.SectionFor("NPEA00387", GameId.Rac3, trophy, d));
         Assert.Equal("Collectables", GameLayout.SectionFor("NPEA00387", GameId.Rac3, titanium, d));
         Assert.Equal("Collectables", GameLayout.SectionFor("NPEA00387", GameId.Rac3, resetTitanium, d));
 
@@ -230,11 +247,11 @@ public class GameLayoutTests
     public void ASectionNoHeadingNamesIsStillOneBlock()
     {
         var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");
-        var trophy = Make(20, FeatureKind.Action, 2, "Refresh trophy state");
+        var autosave = Make(20, FeatureKind.Action, 2, "Force autosave");
 
         Assert.Empty(GameLayout.HeadingsFor("NPEA00387", GameId.Rac3, "Savefile"));
 
-        var blocks = GameLayout.Blocks("NPEA00387", GameId.Rac3, "Savefile", new[] { fastLoads, trophy });
+        var blocks = GameLayout.Blocks("NPEA00387", GameId.Rac3, "Savefile", new[] { fastLoads, autosave });
         Assert.Single(blocks);
         Assert.Null(blocks[0].Heading);
         Assert.Equal(2, blocks[0].Features.Count);
@@ -419,24 +436,36 @@ public class GameLayoutTests
     }
 
     /// <summary>
-    /// UYA's trophy refresh is one the shipped file moves to Savefile. Listed under MANIP_LIST's
-    /// Trophies header it goes to the manips area instead, with the toggle build 53 adds for it:
-    /// the header is the console saying where the control belongs, and it wins over the move.
+    /// UYA's trophy reset (21) and its Veldin-load toggle (39) go under MANIP_LIST's Trophies
+    /// heading in the manips area. The heading lists them by id, so qwark renaming 21 from
+    /// "Refresh trophy state" moves nothing; the file's moves go by label, and the shipped file
+    /// names neither, so without the list (a module that does not answer it) the pair stays
+    /// together in its own DESCRIBE group rather than being split up by a move.
     /// </summary>
     [Fact]
     public void UyasTrophyControlsGoUnderTrophiesWhateverTheLayoutMoves()
     {
-        var refresh = Make(21, FeatureKind.Action, 2, "Refresh trophy state");
-        var auto = Make(40, FeatureKind.Toggle, 2, "Auto-refresh trophies");
+        var reset = TrophyReset();
+        var auto = TrophyAutoReset();
         var titanium = Make(23, FeatureKind.Action, 2, "Unlock all titanium bolts");
-        var d = Describe(GameId.Rac3, Rac3Groups, refresh, auto, titanium);
+        var d = Describe(GameId.Rac3, Rac3Groups, reset, auto, titanium);
 
-        Assert.Equal("Savefile", GameLayout.SectionFor("NPEA00387", GameId.Rac3, refresh, d));
-
-        var sections = GamePanel.SectionsFor("NPEA00387", GameId.Rac3, d, Manips(new ManipHeader("Trophies", new ushort[] { 21, 40 })));
-        Assert.Equal(new[] { "Refresh trophy state", "Auto-refresh trophies" }, sections["Manips"].Select(f => f.Label));
+        var sections = GamePanel.SectionsFor("NPEA00387", GameId.Rac3, d, Manips(new ManipHeader("Trophies", new ushort[] { 21, 39 })));
+        Assert.Equal(new[] { "Reset trophies (freezes ~3 s)", "Reset trophies on Veldin load" }, sections["Manips"].Select(f => f.Label));
+        Assert.False(sections.ContainsKey("Trophies"));
         Assert.False(sections.ContainsKey("Savefile"));
         Assert.Equal(new[] { "Unlock all titanium bolts" }, sections["Collectables"].Select(f => f.Label));
+
+        var blocks = ManipsArea.HeaderBlocks(Manips(new ManipHeader("Trophies", new ushort[] { 21, 39 })), sections["Manips"]);
+        Assert.Equal("Trophies", Assert.Single(blocks).Heading);
+
+        var without = GamePanel.SectionsFor("NPEA00387", GameId.Rac3, d);
+        Assert.Equal(new[] { "Reset trophies (freezes ~3 s)", "Reset trophies on Veldin load" }, without["Trophies"].Select(f => f.Label));
+
+        // The label it had before is not in the shipped file either: a move by that name would
+        // match nothing a build 53 console describes.
+        var old = Make(21, FeatureKind.Action, 2, "Refresh trophy state");
+        Assert.Equal("Progress", GameLayout.SectionFor("NPEA00387", GameId.Rac3, old, Describe(GameId.Rac3, Rac3Groups, old)));
     }
 
     /// <summary>
