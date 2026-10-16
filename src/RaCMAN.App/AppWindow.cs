@@ -368,7 +368,6 @@ public sealed class AppWindow : GameWindow
         // The moby inspectors and the modals are drawn outside the root window, so they survive a
         // panel switch. The inspectors go first, which leaves a modal on top of them.
         MobyInspector.Draw(_state);
-        FeatureConfirmModal.Draw(_state);
         PreviousSessionModal.Draw(_state);
         FirewallModal.Draw(_state);
         LiveSplitModal.Draw(_state);

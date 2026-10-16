@@ -7,10 +7,9 @@ namespace RaCMAN.Protocol.Testing;
 
 /// <summary>
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
-/// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, FEATURE_CONFIRM_TEXT of
-/// revision 1.21, the watch, freeze and memory primitives, POS_LIST with the POS_EDIT and
-/// POS_STORE of revision 1.13 over slots it really keeps, PLANET_LIST, MOBY_TABLE,
-/// UNLOCK_LIST/SET, the LEVELFLAGS ops,
+/// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
+/// memory primitives, POS_LIST with the POS_EDIT and POS_STORE of revision 1.13 over slots it
+/// really keeps, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
 /// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND/ENABLE, the two AUTOSPLIT ops
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
 /// ops of revision 1.10 over the same in-memory filesystem the file ops use, and the four MANIP ops
@@ -657,8 +656,7 @@ public sealed class FakeQwarkServer : IDisposable
 
     /// <summary>
     /// UYA's trophy reset ACTION, which build 53 lists under its Trophies heading. It deletes the
-    /// console's UYA trophy record, so it is flagged CONFIRM (revision 1.21). Until qwark renamed it
-    /// it was "Refresh trophy state".
+    /// console's UYA trophy record. Until qwark renamed it it was "Refresh trophy state".
     /// </summary>
     public const string TrophyResetLabel = "Reset trophies (freezes ~3 s)";
 
@@ -667,24 +665,12 @@ public sealed class FakeQwarkServer : IDisposable
 
     /// <summary>
     /// The toggle build 53 adds beside it to make the same reset on every Veldin load, off by
-    /// default and flagged CONFIRM as well. The client goes by the ids the header lists.
+    /// default. The client goes by the ids the header lists.
     /// </summary>
     public const string TrophyAutoResetLabel = "Reset trophies on Veldin load";
 
     /// <summary>The toggle's id in qwark's UYA table.</summary>
     public const byte TrophyAutoResetId = 39;
-
-    /// <summary>
-    /// What FEATURE_CONFIRM_TEXT answers for a CONFIRM feature, by DESCRIBE label. The wording is
-    /// the fake's own: the real one is qwark's. A CONFIRM feature not in here gets a made-up line.
-    /// </summary>
-    public Dictionary<string, string> ConfirmTexts { get; } = new(StringComparer.Ordinal)
-    {
-        [TrophyResetLabel] = "The fake console's question: this deletes the console's UYA trophy record, "
-                             + "and the game freezes for about 3 seconds.",
-        [TrophyAutoResetLabel] = "The fake console's question: every Veldin load will delete the console's UYA "
-                                 + "trophy record.",
-    };
 
     /// <summary>
     /// The headings each game's MANIP_LIST carries, with the DESCRIBE labels of the features listed
@@ -703,8 +689,8 @@ public sealed class FakeQwarkServer : IDisposable
     /// </summary>
     private static (FeatureKind Kind, FeatureFlags Flags, byte? Id) ManipHeaderFeature(string label) => label switch
     {
-        TrophyResetLabel => (FeatureKind.Action, FeatureFlags.Confirm, TrophyResetId),
-        TrophyAutoResetLabel => (FeatureKind.Toggle, FeatureFlags.Confirm, TrophyAutoResetId),
+        TrophyResetLabel => (FeatureKind.Action, FeatureFlags.None, TrophyResetId),
+        TrophyAutoResetLabel => (FeatureKind.Toggle, FeatureFlags.None, TrophyAutoResetId),
         _ when label == ManipFixLabels[0] => (FeatureKind.Toggle, FeatureFlags.WritesCode, null),
         _ => (FeatureKind.Toggle, FeatureFlags.None, null),
     };
@@ -757,8 +743,8 @@ public sealed class FakeQwarkServer : IDisposable
     /// The feature table with the features <paramref name="game"/>'s headings list added where it
     /// lacks them, for a fake session moved to that game, so a headless run has something to draw
     /// under each heading: Deadlocked's two fixes (toggles, the crash patches writing code) and
-    /// UYA's trophy reset button and its toggle, both CONFIRM, at qwark's ids 21 and 39 unless a
-    /// feature already has one of those.
+    /// UYA's trophy reset button and its toggle, at qwark's ids 21 and 39 unless a feature already
+    /// has one of those.
     /// </summary>
     public static DescribeResult WithManipHeaderFeatures(DescribeResult describe, GameId game)
     {
@@ -1528,7 +1514,7 @@ public sealed class FakeQwarkServer : IDisposable
     /// </summary>
     public static bool IsGameOp(Opcode opcode) => opcode is
         Opcode.Describe or Opcode.FeatureSet or Opcode.FeatureTrigger or Opcode.FeatureSetAuto
-        or Opcode.FeatureOptions or Opcode.SwitchPatch or Opcode.FeatureConfirmText
+        or Opcode.FeatureOptions or Opcode.SwitchPatch
         or Opcode.PreviousList or Opcode.PreviousReapply or Opcode.PreviousDismiss
         or Opcode.PosSelect or Opcode.PosSave or Opcode.PosLoad or Opcode.PosList or Opcode.PosClear
         or Opcode.PosEdit or Opcode.PosStore
@@ -1871,22 +1857,6 @@ public sealed class FakeQwarkServer : IDisposable
                     w.WriteU8((byte)options.Length);
                     foreach (var option in options) w.WriteFixedString(option, 24);
                     return (Status.Ok, buffer);
-                }
-
-                // Revision 1.21: the question for a CONFIRM feature. Outside a game there is no
-                // table to look it up in, and a feature without the flag has nothing to ask.
-                case Opcode.FeatureConfirmText:
-                {
-                    if (_session.State != SessionState.Ingame) return (Status.Unsupported, null);
-                    if (payload.Length < 1) return (Status.BadArg, null);
-
-                    var feature = Array.Find(Describe.Features, f => f.Id == payload[0]);
-                    if (feature is null || !feature.Confirms) return (Status.BadArg, null);
-
-                    string text = ConfirmTexts.TryGetValue(feature.Label, out var known)
-                        ? known
-                        : $"{feature.Label} is flagged CONFIRM on the fake console.";
-                    return (Status.Ok, FeatureConfirmText.Encode(text));
                 }
 
                 case Opcode.MemRead:

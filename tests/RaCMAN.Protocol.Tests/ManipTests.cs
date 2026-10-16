@@ -340,14 +340,13 @@ public class ManipClientTests
             var trophies = Assert.Single(list.Headers);
             Assert.Equal("Trophies", trophies.Name);
 
-            // The reset button and its toggle, by id, in that order: qwark's 21 and 39, both of
-            // them asking before they act.
+            // The reset button and its toggle, by id, in that order: qwark's 21 and 39.
             Assert.Equal(new ushort[] { 21, 39 }, trophies.Features);
             var labels = trophies.Features.Select(id => server.Describe.Features.Single(f => f.Id == id)).ToArray();
             Assert.Equal(new[] { FeatureKind.Action, FeatureKind.Toggle }, labels.Select(f => f.Kind));
             Assert.Equal(FakeQwarkServer.TrophyResetLabel, labels[0].Label);
             Assert.Equal(FakeQwarkServer.TrophyAutoResetLabel, labels[1].Label);
-            Assert.All(labels, f => Assert.True(f.Confirms));
+            Assert.All(labels, f => Assert.Equal(FeatureFlags.None, f.Flags));
         }
     }
 
@@ -921,8 +920,8 @@ public class ManipHeaderTests
         var auto = uya.Features.Single(f => f.Label == FakeQwarkServer.TrophyAutoResetLabel);
         Assert.Equal((FeatureKind.Action, (byte)21), (reset.Kind, reset.Id));
         Assert.Equal((FeatureKind.Toggle, (byte)39), (auto.Kind, auto.Id));
-        Assert.True(reset.Confirms && auto.Confirms);
-        Assert.DoesNotContain(deadlocked.Features, f => f.Confirms);
+        Assert.Equal(FeatureFlags.None, reset.Flags);
+        Assert.Equal(FeatureFlags.None, auto.Flags);
 
         // An id the table already uses is not taken twice: the next free one is.
         var crowded = plain with { Game = GameId.Rac3, Features = new[] { Toggle(21, "Something else") } };

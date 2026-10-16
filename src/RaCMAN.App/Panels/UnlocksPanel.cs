@@ -250,12 +250,11 @@ public static class UnlocksPanel
                 ImGui.PushID(feature.Id);
 
                 // One that patches game code is greyed under RPCS3 until qwark's code switches are
-                // in the game, by the Game page's own rule, and one the console flags CONFIRM is
-                // asked about first, by its rule too.
+                // in the game, by the Game page's own rule.
                 if (GamePanel.ActionButton(state, feature, new Vector2(-1, 0)))
                 {
                     byte id = feature.Id;
-                    state.Confirms.Send(feature, FeatureRequest.Trigger, 1, async () =>
+                    state.Run(async () =>
                     {
                         await state.Client.FeatureTriggerAsync(id).ConfigureAwait(false);
                         state.Post(() => state.RefreshUnlocks());

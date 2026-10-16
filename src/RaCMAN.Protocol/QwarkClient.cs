@@ -740,15 +740,6 @@ public sealed class QwarkClient : IDisposable
     }
 
     /// <summary>
-    /// FEATURE_CONFIRM_TEXT, revision 1.21: what to ask the user before using a feature flagged
-    /// CONFIRM, in the console's own words. BAD_ARG for a feature without the flag, UNSUPPORTED
-    /// outside a game, and UNKNOWN_OP from a module older than the op; each throws
-    /// <see cref="QwarkStatusException"/>, as any other refusal does.
-    /// </summary>
-    public async Task<string> FeatureConfirmTextAsync(byte id, CancellationToken cancellationToken = default) =>
-        FeatureConfirmText.Parse(await RequestAsync(Opcode.FeatureConfirmText, new[] { id }, cancellationToken).ConfigureAwait(false));
-
-    /// <summary>
     /// SWITCH_PATCH, revision 1.17: the running game's code switches as words and single bytes for
     /// an RPCS3 patch, laid out as SAVEFILE_PATCH's reply. NOT_INGAME outside a game; UNSUPPORTED
     /// for a game that has none. A reply that stops short of either list throws

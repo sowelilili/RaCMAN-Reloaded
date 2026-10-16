@@ -22,43 +22,13 @@ public static class CombosPanel
     /// <summary>A capture in flight must not survive a game or connection change.</summary>
     public static void Reset(AppState state) => EndCapture(state);
 
-    /// <summary>The row a capture is running on, or null.</summary>
-    public static ComboAction? Capturing => _capturing;
-
-    /// <summary>
-    /// The feature a combo does the work of, when the console flags that feature CONFIRM
-    /// (revision 1.21), or null for a combo that may be bound.
-    /// <para>
-    /// A combo is one of five console actions, chosen by number in COMBO_SET; it never names a
-    /// feature, so nothing like UYA's trophy reset can be put on the pad. Of the five, only "Load
-    /// set-aside file" is something a described ACTION does too: it is the request the LOAD_ASIDE
-    /// action raises. Should a game flag that action CONFIRM, its combo is not bound. The console
-    /// fires a combo by itself, PC or no PC, so there is nobody to ask at the moment it acts, and
-    /// one question asked when it is bound would stand in for every press after it.
-    /// </para>
-    /// </summary>
-    public static Feature? ConfirmFeatureFor(ComboAction action, DescribeResult describe) => action switch
-    {
-        ComboAction.LoadSetAsideFile when describe.LoadAsideAction is { ConfirmsTrigger: true } load => load,
-        _ => null,
-    };
-
-    /// <summary>Why a combo row cannot be captured, for its tooltip and the import's note.</summary>
-    public static string ConfirmRefusal(ComboAction action, Feature feature) =>
-        $"{feature.Label} asks for confirmation before it runs, and the console fires a combo with nobody "
-        + $"there to ask, so {Label(action)} cannot be put on a combo.";
-
     /// <summary>
     /// Starts a capture on one row. The console is watching the same pad the capture reads out of
     /// telemetry, so the buttons the user is about to press would fire the combos already stored:
-    /// COMBO_SUSPEND holds them off until the capture commits, is cancelled or is dropped. A row
-    /// whose action does the work of a CONFIRM feature (<see cref="ConfirmFeatureFor"/>) is never
-    /// captured, and nothing is sent for it.
+    /// COMBO_SUSPEND holds them off until the capture commits, is cancelled or is dropped.
     /// </summary>
     public static void BeginCapture(AppState state, ComboAction action)
     {
-        if (ConfirmFeatureFor(action, state.Describe) is not null) return;
-
         _capturing = action;
         Capture.Reset();
         Suspend(state, true);
@@ -200,22 +170,12 @@ public static class CombosPanel
 
             ImGui.TableNextColumn();
             uint mask = current.GetValueOrDefault(action);
-
-            // A combo whose action the console now asks about first is not captured; one stored
-            // before is left alone, since the console's combos are the user's, but it is shown as
-            // the problem it is, with Clear beside it.
-            var asks = ConfirmFeatureFor(action, state.Describe);
             if (_capturing == action)
             {
                 uint held = Capture.Captured;
                 ImGui.TextColored(Ui.Yellow, held == 0
                     ? "Press a combo on the pad..."
                     : $"{PadButtons.Describe(held)}, release to store");
-            }
-            else if (asks is not null && mask != 0)
-            {
-                Ui.Text(Ui.Yellow, $"{PadButtons.Describe(mask)}  (0x{mask:X}), runs without asking");
-                Ui.Tooltip(ConfirmRefusal(action, asks) + " Clear it to stop it running from the pad.");
             }
             else
             {
@@ -227,12 +187,9 @@ public static class CombosPanel
             {
                 if (ImGui.SmallButton("Cancel")) EndCapture(state);
             }
-            else
+            else if (ImGui.SmallButton("Capture"))
             {
-                ImGui.BeginDisabled(asks is not null);
-                if (ImGui.SmallButton("Capture")) BeginCapture(state, action);
-                ImGui.EndDisabled();
-                if (asks is not null) Ui.Tooltip(ConfirmRefusal(action, asks));
+                BeginCapture(state, action);
             }
 
             ImGui.SameLine();

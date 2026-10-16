@@ -229,10 +229,6 @@ if (exitAfter > 0)
                       $"qwarkpatches=\"{state.Rpcs3Patch.LastStatus.Message}\" " +
                       $"writescode=[{GamePanel.CodeFeatureSummary}] " +
                       $"asidebuttons=[{GamePanel.AsideButtonSummary}] " +
-
-                      // The features drawn that ask before they act, and the questions asked,
-                      // continued and cancelled (revision 1.21).
-                      $"confirmfeatures=[{GamePanel.ConfirmFeatureSummary}] confirms={state.Confirms.Summary} " +
                       $"planetboxes=[{PositionsPanel.PlanetBoxSummary}] " +
 
                       // What the Mods panel's Status column said for each mod under RPCS3, the last

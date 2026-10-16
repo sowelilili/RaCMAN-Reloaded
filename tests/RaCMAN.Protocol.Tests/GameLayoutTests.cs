@@ -52,14 +52,14 @@ public class GameLayoutTests
 
     /// <summary>
     /// UYA's trophy reset and its toggle as build 53 describes them: qwark's ids 21 and 39, the
-    /// labels qwark gave them when it flagged them CONFIRM ("Refresh trophy state" before that, and
-    /// a toggle that did not exist), and their own DESCRIBE group.
+    /// labels build 53 gave them ("Refresh trophy state" before that, and a toggle that did not
+    /// exist), and their own DESCRIBE group.
     /// </summary>
     private static Feature TrophyReset() =>
-        new(21, FeatureKind.Action, Rac3Trophies, 0, FeatureFlags.Confirm, 0xFF, 0, 0, "Reset trophies (freezes ~3 s)");
+        new(21, FeatureKind.Action, Rac3Trophies, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset trophies (freezes ~3 s)");
 
     private static Feature TrophyAutoReset() =>
-        new(39, FeatureKind.Toggle, Rac3Trophies, 0, FeatureFlags.Confirm, 0xFF, 0, 0, "Reset trophies on Veldin load");
+        new(39, FeatureKind.Toggle, Rac3Trophies, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset trophies on Veldin load");
     private static readonly string[] Rac4Groups = { "Cheats", "Player", "Progress", "Savefile" };
 
     public GameLayoutTests()

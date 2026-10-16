@@ -32,13 +32,6 @@ public enum Opcode : ushort
     /// </summary>
     SwitchPatch = 0x0025,
 
-    /// <summary>
-    /// Revision 1.21: <c>u8 id</c>, answered with what the user is to be asked before a feature
-    /// flagged CONFIRM is used, as UTF-8 of at most 512 bytes with no terminator. BAD_ARG for a
-    /// feature without the flag, UNSUPPORTED outside a game.
-    /// </summary>
-    FeatureConfirmText = 0x0026,
-
     // 5.4 Memory
     MemRead = 0x0030,
     MemWrite = 0x0031,
@@ -551,14 +544,6 @@ public enum FeatureFlags : byte
     /// (revision 1.7).
     /// </summary>
     Signed = 1 << 5,
-
-    /// <summary>
-    /// Using this feature does something RaCMAN cannot take back, so the client asks the user
-    /// first: before a FEATURE_TRIGGER of an ACTION, and before a FEATURE_SET or FEATURE_SET_AUTO
-    /// that turns a TOGGLE on. Turning one off is never asked about. FEATURE_CONFIRM_TEXT has the
-    /// question's wording (revision 1.21, build 53).
-    /// </summary>
-    Confirm = 1 << 6,
 }
 
 /// <summary>

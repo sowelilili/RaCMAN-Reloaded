@@ -36,7 +36,6 @@ public static class GamePanel
         LastSet.Clear();
         CodeFeaturesDrawn.Clear();
         AsideButtonsDrawn.Clear();
-        ConfirmFeaturesDrawn.Clear();
         SubPageNav.Open = null;
         ResetPresets();
     }
@@ -72,20 +71,6 @@ public static class GamePanel
         if (feature.WritesCode) CodeFeaturesDrawn[feature.Label] = !blocked;
         ImGui.BeginDisabled(blocked);
         return blocked;
-    }
-
-    /// <summary>
-    /// The features the console flags CONFIRM that were drawn this session, by label. For the
-    /// summary line of a headless run, which cannot click one to see the question.
-    /// </summary>
-    private static readonly SortedSet<string> ConfirmFeaturesDrawn = new(StringComparer.Ordinal);
-
-    /// <summary>Every CONFIRM feature drawn this session, its label with spaces as underscores.</summary>
-    public static string ConfirmFeatureSummary => string.Join(" ", ConfirmFeaturesDrawn.Select(label => label.Replace(' ', '_')));
-
-    private static void NoteConfirmFeature(Feature feature)
-    {
-        if (feature.Confirms) ConfirmFeaturesDrawn.Add(feature.Label);
     }
 
     private static void EndCodeFeature(bool blocked)
@@ -858,12 +843,11 @@ public static class GamePanel
         {
             // A refusal comes back as BUSY with SAVEFILE_INFO's error saying why - the game busy,
             // or no save yet - and that reason is what the toast says. Every other answer is
-            // toasted as any other button's is. Like every ACTION, one the console flags CONFIRM
-            // is asked about first.
+            // toasted as any other button's is.
             byte id = action.Id;
             string label = action.Label;
             var request = action.SavesAside ? SaveFileRequest.Store : SaveFileRequest.Load;
-            state.Confirms.Send(action, FeatureRequest.Trigger, 1, async () =>
+            state.Run(async () =>
             {
                 try
                 {
@@ -878,7 +862,6 @@ public static class GamePanel
         }
 
         ImGui.PopID();
-        NoteConfirmFeature(action);
 
         // AllowWhenDisabled: the greyed-out button is the one whose tooltip is the point.
         if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) ImGui.SetTooltip(Ui.NeedsSaveFileHelper);
@@ -941,18 +924,15 @@ public static class GamePanel
             // flag byte is what qwark writes, and it works like any other toggle. Until then the
             // box is drawn, so the cheat is still listed where it belongs, but it cannot be
             // pressed and the tooltip says how to get it.
-            //
-            // One the console flags CONFIRM is asked about before it is turned on (never before it
-            // is turned off); the box is drawn from telemetry, so a cancelled question leaves it
-            // as it was.
             bool blocked = BeginCodeFeature(state, feature);
             if (ImGui.Checkbox(feature.Label, ref on) && !blocked)
             {
-                state.Confirms.Set(feature, on ? 1u : 0u);
+                byte id = feature.Id;
+                uint value = on ? 1u : 0u;
+                state.Run(() => state.Client.FeatureSetAsync(id, value));
             }
 
             EndCodeFeature(blocked);
-            NoteConfirmFeature(feature);
 
             // A code-patching toggle that can be pressed says what it is. A LIVE toggle gets no
             // tooltip: that the console reads it back out of the game is how every toggle here
@@ -971,10 +951,12 @@ public static class GamePanel
                 bool changed = ImGui.Checkbox("on boot", ref auto);
                 ImGui.PopStyleColor();
                 ImGui.EndDisabled();
-
-                // Ticking it for a CONFIRM toggle is asked about too: the console would then turn
-                // the toggle on at every boot with nobody there to ask.
-                if (changed) state.Confirms.SetAuto(feature, auto);
+                if (changed)
+                {
+                    byte id = feature.Id;
+                    bool wanted = auto;
+                    state.Run(() => state.Client.FeatureSetAutoAsync(id, wanted));
+                }
                 if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
                 {
                     ImGui.SetTooltip(blocked ? Ui.NeedsQwarkPatches : "Auto-apply this toggle when the game boots");
@@ -987,10 +969,7 @@ public static class GamePanel
         ImGui.EndTable();
     }
 
-    /// <summary>
-    /// Actions as a grid of equal-width buttons, one that patches game code greyed as a toggle would
-    /// be, and one the console flags CONFIRM asking before it is triggered.
-    /// </summary>
+    /// <summary>Actions as a grid of equal-width buttons, one that patches game code greyed as a toggle would be.</summary>
     private static void DrawActionGrid(AppState state, Feature[] actions)
     {
         if (actions.Length == 0) return;
@@ -1002,8 +981,11 @@ public static class GamePanel
         {
             ImGui.TableNextColumn();
             ImGui.PushID(feature.Id);
-            if (ActionButton(state, feature, new Vector2(-1, 0))) state.Confirms.Trigger(feature);
-            NoteConfirmFeature(feature);
+            if (ActionButton(state, feature, new Vector2(-1, 0)))
+            {
+                byte id = feature.Id;
+                state.Run(() => state.Client.FeatureTriggerAsync(id));
+            }
             ImGui.PopID();
         }
 

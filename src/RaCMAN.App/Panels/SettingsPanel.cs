@@ -593,18 +593,6 @@ public static class SettingsPanel
         // console; it is a config.txt that happens to sit beside a library worth importing.
         var combos = config.HasAnything ? config.Combos : Array.Empty<LegacyConfig.ComboImport>();
 
-        // The rule the Combos panel's Capture follows: a combo that does the work of a feature the
-        // console flags CONFIRM is not bound, by an import any more than by hand.
-        var asking = combos
-            .Select(c => (c.Action, Feature: CombosPanel.ConfirmFeatureFor(c.Action, state.Describe)))
-            .Where(pair => pair.Feature is not null)
-            .ToArray();
-        if (asking.Length > 0)
-        {
-            combos = combos.Where(c => asking.All(pair => pair.Action != c.Action)).ToArray();
-            foreach (var (action, feature) in asking) state.AddToast($"Not imported: {CombosPanel.ConfirmRefusal(action, feature!)}");
-        }
-
         string title = state.Session.TitleId ?? string.Empty;
         var wanted = connected && title.Length > 0 && config.ModAutoByTitle.TryGetValue(title, out var list)
             ? list
