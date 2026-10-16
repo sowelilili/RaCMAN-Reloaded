@@ -110,6 +110,7 @@ public sealed class AppState : IDisposable
         ColourPresets = new ColourPresetStore(AppPaths.Colours);
         PositionNames = new PositionNameStore(AppPaths.Positions);
         SaveFiles = new SaveFileLibrary(AppPaths.InData(settings.SaveFilesPath));
+        PremadeSaveFiles = new PremadeSaveFiles(AppPaths.ShippedSaveFiles);
         WebMan = new WebManLoader();
         Rpcs3 = new Rpcs3Host(qwarkPort: settings.Rpcs3.HelperPort, rootFolder: AppPaths.Rpcs3Root);
         Rpcs3Patch = new Rpcs3PatchController(this, Rpcs3Environment.Current);
@@ -204,6 +205,9 @@ public sealed class AppState : IDisposable
 
     /// <summary>The PC-side savefile library, <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c>.</summary>
     public SaveFileLibrary SaveFiles { get; }
+
+    /// <summary>The savefiles the release ships, beside the executable: read, loaded, copied, never written.</summary>
+    public PremadeSaveFiles PremadeSaveFiles { get; }
 
     public WebManLoader WebMan { get; }
 

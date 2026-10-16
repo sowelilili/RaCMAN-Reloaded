@@ -5,16 +5,17 @@
 .DESCRIPTION
     Publishes src/RaCMAN.App framework-dependent for win-x64 (and, with -All, for linux-x64 and
     osx-x64 as well), then stages ..\build\RaCMAN-Reloaded\ with the published app, the
-    controller skins, the moby layout data, the mod library from this repo's mods\ folder,
-    ..\qwark\dist\qwark.sprx and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only),
-    and zips it to ..\build\RaCMAN-Reloaded.zip.
+    controller skins, the moby layout data, the mod library from this repo's mods\ folder, the
+    premade savefiles from its premade-savefiles\ folder, ..\qwark\dist\qwark.sprx and
+    ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
+    ..\build\RaCMAN-Reloaded.zip.
 
     The console side comes from qwark's committed dist\ folder, which `make dist` fills after a
     build, so a release can be cut without a PS3 SDK on the machine.
 
     Each runtime gets its own complete folder and zip: the app finds controllerskins\, data\,
-    mods\ and qwark.sprx beside its own executable, so the payload cannot be shared between
-    runtimes. win-x64 is the one that lands in RaCMAN-Reloaded\; -All adds
+    mods\, premade-savefiles\ and qwark.sprx beside its own executable, so the payload cannot be
+    shared between runtimes. win-x64 is the one that lands in RaCMAN-Reloaded\; -All adds
     RaCMAN-Reloaded-linux-x64\ and RaCMAN-Reloaded-osx-x64\.
 
     The release workflow calls this script too, with -Rid, -Version, -SelfContained and -NoZip,
@@ -84,6 +85,12 @@ $ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00423', 'libs')
 # What the client reads to tell a shipped mod from one the user added, when it moves an older
 # installation's files into the data folder. See DataFolderMigration.
 $ShippedManifest = 'shipped.txt'
+
+# The premade savefiles the Save files panel offers under "(premade savefiles)": one folder per
+# title, read in place and never written, so they need no manifest. The folder must not be called
+# savefiles\: DataFolderMigration copies a folder of that name beside the executable into the data
+# folder, as an older build's library.
+$PremadeSaveFiles = 'premade-savefiles'
 
 function Resolve-Full([string]$path) {
     if ([System.IO.Path]::IsPathRooted($path)) { return [System.IO.Path]::GetFullPath($path) }
@@ -186,6 +193,28 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
 
     Remove-LuaMods $modsDir
     Write-ShippedManifest $modsDir
+
+    Copy-PremadeSaveFiles $stageDir
+}
+
+<#
+    Copies this repo's premade-savefiles\ folder, one folder per title, into the stage under the
+    same name.
+#>
+function Copy-PremadeSaveFiles([string]$stageDir) {
+    $source = Combine $repo $PremadeSaveFiles
+    if (-not (Test-Path $source)) {
+        Write-Warning "$($PremadeSaveFiles): $source does not exist; the release will not carry the premade savefiles"
+        return
+    }
+
+    $destination = Join-Path $stageDir $PremadeSaveFiles
+    Copy-Item -Recurse -Force $source $destination
+
+    foreach ($title in (Get-ChildItem -Path $destination -Directory | Sort-Object Name)) {
+        $count = (Get-ChildItem -Path $title.FullName -File -Filter '*.sav').Count
+        Write-Host "  $PremadeSaveFiles\$($title.Name)  ($count files)"
+    }
 }
 
 <#

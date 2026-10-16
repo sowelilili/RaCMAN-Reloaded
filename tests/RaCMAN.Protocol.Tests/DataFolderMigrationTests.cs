@@ -61,6 +61,19 @@ public class DataFolderMigrationTests : IDisposable
     }
 
     [Fact]
+    public void ThePremadeSavefilesAReleaseShipsStayWhereTheyAre()
+    {
+        WriteApp(AppPaths.SettingsFileName, "{}");
+        WriteApp($"{RaCMAN.Protocol.PremadeSaveFiles.FolderName}/NPEA00385/NG+.sav", "bytes");
+
+        var result = DataFolderMigration.Run(App, Data);
+
+        Assert.Equal(new[] { "settings" }, result.Moved);
+        Assert.False(Directory.Exists(Path.Combine(Data, RaCMAN.Protocol.PremadeSaveFiles.FolderName)));
+        Assert.False(Directory.Exists(Path.Combine(Data, "savefiles")));
+    }
+
+    [Fact]
     public void TheOriginalsAreLeftWhereTheyWere()
     {
         WriteApp(AppPaths.SettingsFileName, "{}");

@@ -15,6 +15,13 @@ namespace RaCMAN.App.Panels;
 /// No address, no game knowledge and no savefile format ever reaches this client: what a save is
 /// is whatever the game put in the helper's aside buffer.
 /// </para>
+/// <para>
+/// A game the release ships premade savefiles for gets one more category, always last:
+/// <see cref="PremadeSaveFiles.Category"/>. Its files are read out of the application folder and
+/// are read-only: they load like any other save, uploaded to the console's category of the same
+/// name the first time, but nothing is stored into them, nothing in them is renamed or deleted,
+/// and the row menu offers a copy into the user's own library instead.
+/// </para>
 /// </summary>
 public static class SaveFilesPanel
 {
@@ -62,8 +69,17 @@ public static class SaveFilesPanel
     /// <summary>How often the panel asks again whether the helper has run a frame.</summary>
     private const float NotRunningPollSeconds = 1f;
 
+    /// <summary>How many premade savefiles the release ships for the game on screen.</summary>
+    private static int _premadeCount;
+
     /// <summary>Category and file count, for the smoke-run summary.</summary>
     public static string Summary => $"{_categories.Length}/{_entries.Length}";
+
+    /// <summary>
+    /// The premade savefiles of the game on screen and whether the list is open on them, for the
+    /// smoke-run summary: "2" or "2 shown".
+    /// </summary>
+    public static string PremadeSummary => _premadeCount + (IsPremade ? " shown" : string.Empty);
 
     /// <summary>
     /// Whether the savefile helper can be asked to do anything this session. On a console qwark
@@ -96,6 +112,7 @@ public static class SaveFilesPanel
         _entries = Array.Empty<SaveFileEntry>();
         _fileIndex = -1;
         _name = string.Empty;
+        _premadeCount = 0;
         ClearTransfer();
     }
 
@@ -124,6 +141,15 @@ public static class SaveFilesPanel
 
     private static SaveFileEntry? Selected =>
         _fileIndex >= 0 && _fileIndex < _entries.Length ? _entries[_fileIndex] : null;
+
+    /// <summary>Whether the list is open on the premade savefiles.</summary>
+    private static bool IsPremade => IsReadOnly(Category);
+
+    /// <summary>
+    /// Whether a category's files are read-only: the premade savefiles are, every category of the
+    /// user's is not. Rename, Delete and a save into it are offered only where this is false.
+    /// </summary>
+    public static bool IsReadOnly(string? category) => PremadeSaveFiles.IsCategory(category);
 
     public static void Draw(AppState state)
     {
@@ -203,20 +229,27 @@ public static class SaveFilesPanel
 
         if (!string.Equals(_title, title, StringComparison.Ordinal)) Rescan(state, title);
 
+        bool premade = IsPremade;
 
         // The category's own folder on this PC, since that is where a mirrored file lands; its
         // path is on the button's tooltip rather than printed, being absolute and long enough
-        // to wrap.
-        Ui.OpenFolderButton(state, state.SaveFiles.CategoryFolder(title, Category));
-        ImGui.SameLine();
+        // to wrap. The premade savefiles have none to offer: theirs is in the application folder,
+        // which is the release's and not somewhere to put files.
+        if (!premade)
+        {
+            Ui.OpenFolderButton(state, state.SaveFiles.CategoryFolder(title, Category));
+            ImGui.SameLine();
+        }
 
         ImGui.BeginDisabled(_busy);
         if (ImGui.SmallButton("Rescan")) Rescan(state, title);
 
         ImGui.SameLine();
-        Ui.Text(Ui.Grey, state.Settings.MirrorSaveFiles
-            ? "Saves are stored on the console and mirrored here."
-            : "Saves are stored on the console. Mirroring to this PC is off.");
+        Ui.Text(Ui.Grey, premade
+            ? "Premade savefiles ship with RaCMAN Reloaded and are read-only."
+            : state.Settings.MirrorSaveFiles
+                ? "Saves are stored on the console and mirrored here."
+                : "Saves are stored on the console. Mirroring to this PC is off.");
 
         if (hasHelper)
         {
@@ -230,7 +263,13 @@ public static class SaveFilesPanel
         DrawCategoryRow(state, title);
 
         ImGui.Spacing();
-        DrawFileList(title);
+        DrawFileList(state, title);
+
+        if (premade)
+        {
+            Ui.Hint("Load one into the game, or right-click it to copy it into your own savefiles, " +
+                    "where you can rename it and save over it.");
+        }
 
         ImGui.Spacing();
         DrawActions(state, title, save, load, enabled);
@@ -273,16 +312,31 @@ public static class SaveFilesPanel
 
         // The box stays live while the button beside it is greyed out, so Enter in it asks the same
         // two questions the button does.
-        bool canCreate = !string.IsNullOrWhiteSpace(_newCategory) && !_busy;
+        bool canCreate = CanCreateCategory(_newCategory) && !_busy;
         ImGui.BeginDisabled(!canCreate);
         if (ImGui.Button("Create category") || (create && canCreate)) CreateCategory(state, title);
 
         ImGui.EndDisabled();
+
+        if (IsReadOnly(SaveFileLibrary.Sanitise(_newCategory, SaveFileLibrary.DefaultCategory)))
+        {
+            Ui.Tooltip("That name belongs to the premade savefiles. Pick another one.");
+        }
     }
+
+    /// <summary>
+    /// Whether a typed name makes a category: anything that is not blank, except the premade
+    /// savefiles' own name, which is not the user's to have.
+    /// </summary>
+    public static bool CanCreateCategory(string? typed) =>
+        !string.IsNullOrWhiteSpace(typed)
+        && !IsReadOnly(SaveFileLibrary.Sanitise(typed, SaveFileLibrary.DefaultCategory));
 
     /// <summary>A category is made on both sides, so the next save has somewhere to go either way.</summary>
     private static void CreateCategory(AppState state, string title)
     {
+        if (!CanCreateCategory(_newCategory)) return;
+
         string wanted = SaveFileLibrary.Sanitise(_newCategory, SaveFileLibrary.DefaultCategory);
 
         try
@@ -311,7 +365,7 @@ public static class SaveFilesPanel
         });
     }
 
-    private static void DrawFileList(string title)
+    private static void DrawFileList(AppState state, string title)
     {
         if (!ImGui.BeginChild("##savefiles", new Vector2(-1, 220), ImGuiChildFlags.Borders))
         {
@@ -358,7 +412,7 @@ public static class SaveFilesPanel
                 // the Where column says where the save lives, and the menu is found by right-clicking.
                 if (ImGui.IsItemClicked(ImGuiMouseButton.Right)) _fileIndex = i;
 
-                DrawRowMenu(entry, title);
+                DrawRowMenu(state, entry, title);
 
                 ImGui.TableNextColumn();
 
@@ -381,7 +435,8 @@ public static class SaveFilesPanel
 
         // F2 and Delete, the keys a file manager has for the same two things, while the list has
         // the keyboard: they ask the same questions the row's menu does, of the selected save.
-        if (Selected is { } chosen && !_busy && ImGui.IsWindowFocused())
+        // A premade savefile has neither to ask.
+        if (Selected is { } chosen && !_busy && !IsPremade && ImGui.IsWindowFocused())
         {
             if (ImGui.IsKeyPressed(ImGuiKey.F2, false)) AskRename(chosen, title);
             else if (ImGui.IsKeyPressed(ImGuiKey.Delete, false)) AskDelete(chosen, title);
@@ -392,13 +447,22 @@ public static class SaveFilesPanel
 
     /// <summary>
     /// A row's right-click menu: Rename and Delete, the two things that used to be buttons under
-    /// the list. Each only asks its question here; nothing changes until the user answers it.
+    /// the list. Each only asks its question here; nothing changes until the user answers it. A
+    /// premade savefile has neither: its menu copies it into one of the user's own categories.
     /// </summary>
-    private static void DrawRowMenu(SaveFileEntry entry, string title)
+    private static void DrawRowMenu(AppState state, SaveFileEntry entry, string title)
     {
         if (!ImGui.BeginPopupContextItem("row-menu")) return;
 
         const string busyReason = "Wait for the save, load or change under way to finish.";
+
+        if (IsPremade)
+        {
+            DrawCopyMenu(state, entry, title);
+            if (_busy) Ui.Tooltip(busyReason);
+            ImGui.EndPopup();
+            return;
+        }
 
         if (ImGui.MenuItem("Rename...", "F2", false, !_busy)) AskRename(entry, title);
         if (_busy) Ui.Tooltip(busyReason);
@@ -407,6 +471,57 @@ public static class SaveFilesPanel
         if (_busy) Ui.Tooltip(busyReason);
 
         ImGui.EndPopup();
+    }
+
+    /// <summary>
+    /// "Copy to my savefiles", with the user's categories under it. The copy is a file in their
+    /// own library on this PC, like any save of theirs that the console has not seen yet.
+    /// </summary>
+    private static void DrawCopyMenu(AppState state, SaveFileEntry entry, string title)
+    {
+        if (!ImGui.BeginMenu("Copy to my savefiles", !_busy)) return;
+
+        foreach (var category in CopyTargets(_categories))
+        {
+            // The id is the category: its name is the user's, and a "##" in it is not an id.
+            ImGui.PushID(category);
+            if (ImGui.MenuItem(category.Replace("##", "#"))) CopyPremade(state, title, entry, category);
+            ImGui.PopID();
+        }
+
+        ImGui.EndMenu();
+    }
+
+    /// <summary>
+    /// The categories a premade savefile can be copied into: every one of the user's in the
+    /// combo's order, with <see cref="SaveFileLibrary.DefaultCategory"/> always among them, so a
+    /// game with no categories yet still has somewhere to put the copy.
+    /// </summary>
+    public static string[] CopyTargets(IEnumerable<string>? categories) =>
+        Merge((categories ?? Enumerable.Empty<string>()).Append(SaveFileLibrary.DefaultCategory), null);
+
+    /// <summary>The toast for a copy: where it went, under which name, or that it was there already.</summary>
+    public static string CopyToast(SaveFileEntry entry, PremadeCopy copy)
+    {
+        string landed = SaveFileLibrary.DisplayName(copy.Name);
+        if (copy.AlreadyThere) return $"{entry.DisplayName} is already in {copy.Category} as {landed}";
+
+        return string.Equals(copy.Name, entry.Name, StringComparison.Ordinal)
+            ? $"Copied {entry.DisplayName} to {copy.Category}"
+            : $"Copied {entry.DisplayName} to {copy.Category} as {landed}";
+    }
+
+    private static void CopyPremade(AppState state, string title, SaveFileEntry entry, string category)
+    {
+        try
+        {
+            var copy = state.PremadeSaveFiles.CopyTo(state.SaveFiles, title, entry.Name, category);
+            state.AddToast(CopyToast(entry, copy), ToastKind.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            state.AddToast($"Copy failed: {ex.Message}", ToastKind.Error);
+        }
     }
 
     private static void AskRename(SaveFileEntry entry, string title)
@@ -639,10 +754,13 @@ public static class SaveFilesPanel
 
         // The name box is typed in whether or not a save can be taken, so Enter in it asks what the
         // button's own greying out asks.
-        bool canSave = enabled && save is not null && !string.IsNullOrWhiteSpace(_name);
+        // Nothing is saved into the premade savefiles: they are the release's.
+        bool premade = IsPremade;
+        bool canSave = enabled && save is not null && !string.IsNullOrWhiteSpace(_name) && !premade;
         ImGui.BeginDisabled(!canSave);
         if (ImGui.Button("Save on console") || (saveNow && canSave)) StartSave(state, title);
         ImGui.EndDisabled();
+        if (premade) Ui.Tooltip("The premade savefiles are read-only. Pick one of your own categories to save into.");
 
         // Rename and Delete are on each row's right-click menu, and on F2 and Delete.
         ImGui.SameLine();
@@ -722,7 +840,10 @@ public static class SaveFilesPanel
     private static void StartLoad(AppState state, string title, SaveFileEntry entry)
     {
         string category = Category;
-        var library = state.SaveFiles;
+
+        // A premade savefile's bytes come out of the application folder; everything after that is
+        // the same load, into the console's category of the same name.
+        ISaveFileSource library = IsReadOnly(category) ? state.PremadeSaveFiles : state.SaveFiles;
 
         _busy = true;
         _transferred = 0;
@@ -864,7 +985,12 @@ public static class SaveFilesPanel
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
-        Select(Merge(local, Array.Empty<string>()), wanted);
+        // The premade savefiles are a category of their own, at the bottom, for a game the release
+        // ships some for.
+        _premadeCount = state.PremadeSaveFiles.Files(title).Length;
+        bool premade = _premadeCount > 0;
+
+        Select(Merge(local, Array.Empty<string>(), premade), wanted);
         RescanFiles(state, title);
 
         // The console's categories are read on its own time, and the two lists are merged when the
@@ -880,7 +1006,7 @@ public static class SaveFilesPanel
                 state.Post(() =>
                 {
                     string wanted = Category;
-                    Select(Merge(_categories, categories), wanted);
+                    Select(Merge(_categories, categories, premade), wanted);
                     RescanFiles(state, title);
                 });
             }
@@ -901,20 +1027,28 @@ public static class SaveFilesPanel
     /// order of the combo is decided: alphabetical, except that the default category goes to the
     /// bottom. It is the one nobody named — every save lands in it until the user says otherwise —
     /// so it has no business sitting in the middle of the categories they did name.
+    /// <para>
+    /// Below even that, when <paramref name="premade"/> says the release ships some for this game,
+    /// comes <see cref="PremadeSaveFiles.Category"/>. It is never taken from either side's list:
+    /// the console has a folder of that name once a premade savefile has been loaded, and that
+    /// folder is the premade category's, not one of the user's.
+    /// </para>
     /// </summary>
-    public static string[] Merge(IEnumerable<string>? local, IEnumerable<string>? console)
+    public static string[] Merge(IEnumerable<string>? local, IEnumerable<string>? console, bool premade = false)
     {
         var names = new List<string>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var name in (local ?? Enumerable.Empty<string>()).Concat(console ?? Enumerable.Empty<string>()))
         {
-            if (string.IsNullOrWhiteSpace(name) || !seen.Add(name)) continue;
+            if (string.IsNullOrWhiteSpace(name) || IsReadOnly(name) || !seen.Add(name)) continue;
             names.Add(name);
         }
 
         names.Sort(CompareCategories);
-        return names.Count == 0 ? new[] { SaveFileLibrary.DefaultCategory } : names.ToArray();
+        if (names.Count == 0) names.Add(SaveFileLibrary.DefaultCategory);
+        if (premade) names.Add(PremadeSaveFiles.Category);
+        return names.ToArray();
     }
 
     /// <summary>Alphabetical, with <see cref="SaveFileLibrary.DefaultCategory"/> last of all.</summary>
@@ -983,6 +1117,13 @@ public static class SaveFilesPanel
         return string.Join(", ", parts);
     }
 
+    /// <summary>
+    /// A category's rows from the two listings. The premade category lists the release's files and
+    /// nothing else, each one "both" once the console has its copy (<see cref="SaveFileMerge.BuildPremade"/>).
+    /// </summary>
+    public static SaveFileEntry[] Rows(string category, IEnumerable<ConsoleSaveFile>? console, IEnumerable<LocalSaveFile>? pc) =>
+        IsReadOnly(category) ? SaveFileMerge.BuildPremade(console, pc) : SaveFileMerge.Build(console, pc);
+
     private static void RescanFiles(AppState state, string title)
     {
         string category = Category;
@@ -990,7 +1131,11 @@ public static class SaveFilesPanel
 
         try
         {
-            pc = state.SaveFiles.FilesWithCrc(title, category);
+            // The premade savefiles are read where the release put them; the user's own library is
+            // never asked about the premade category.
+            pc = IsReadOnly(category)
+                ? state.PremadeSaveFiles.FilesWithCrc(title)
+                : state.SaveFiles.FilesWithCrc(title, category);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -998,7 +1143,7 @@ public static class SaveFilesPanel
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
-        _entries = SaveFileMerge.Build(null, pc);
+        _entries = Rows(category, null, pc);
         if (_fileIndex >= _entries.Length) _fileIndex = -1;
 
         if (!state.Ingame || !state.SaveFile.Supported) return;
@@ -1015,7 +1160,7 @@ public static class SaveFilesPanel
                     if (!string.Equals(category, Category, StringComparison.Ordinal)) return;
 
                     string? keep = Selected?.Name;
-                    _entries = SaveFileMerge.Build(console, pc);
+                    _entries = Rows(category, console, pc);
                     _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
                 });
             }

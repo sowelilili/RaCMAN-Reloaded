@@ -3,10 +3,10 @@
 ## packages both with Velopack and attaches them to the GitHub release the tag names.
 ##
 ## The payload comes from two places: this repository (the client, the skins, the layout and
-## autosplit data, and the mod library in mods/) and sowelilili/qwark (the PS3 module and the
-## RPCS3 helper, out of its committed dist/ folder). The staging
-## itself is publish.ps1's, run with switches rather than copied here, so the release layout has
-## one description.
+## autosplit data, the mod library in mods/ and the premade savefiles in premade-savefiles/)
+## and sowelilili/qwark (the PS3 module and the RPCS3 helper, out of its committed dist/
+## folder). The staging itself is publish.ps1's, run with switches rather than copied here, so
+## the release layout has one description.
 ##
 ## Velopack's own releases index lives in the release assets, so the two jobs run one after the
 ## other and the Linux one merges into the release the Windows one made.

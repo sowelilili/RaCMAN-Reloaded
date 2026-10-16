@@ -107,6 +107,11 @@ public class AppPathsTests
 
         Assert.StartsWith(AppPaths.Application, AppPaths.ShippedMods, StringComparison.Ordinal);
         Assert.StartsWith(AppPaths.Application, AppPaths.ShippedGameLayout, StringComparison.Ordinal);
+        Assert.StartsWith(AppPaths.Application, AppPaths.ShippedSaveFiles, StringComparison.Ordinal);
+
+        // Not "savefiles": a folder of that name beside the executable is an older build's library
+        // to the data folder migration, which would copy the release's files in as the user's.
+        Assert.NotEqual(Path.GetFileName(AppPaths.SaveFiles), Path.GetFileName(AppPaths.ShippedSaveFiles));
     }
 
     /// <summary>

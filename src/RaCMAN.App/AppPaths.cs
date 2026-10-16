@@ -7,7 +7,8 @@ namespace RaCMAN.App;
 /// <para>
 /// The <em>application</em> folder is where the executable sits. It holds only what the release
 /// ships and it is read-only as far as the user is concerned: the controller skins, the moby and
-/// autosplit data, the shipped mod library, <c>qwark.sprx</c> and <c>qwark-rpcs3.exe</c>. The
+/// autosplit data, the shipped mod library, the premade savefiles, <c>qwark.sprx</c> and
+/// <c>qwark-rpcs3.exe</c>. The
 /// updater replaces that whole folder when a new version lands, so nothing worth keeping may live
 /// in it.
 /// </para>
@@ -135,6 +136,12 @@ public static class AppPaths
     public static string GameLayoutOverride => Path.Combine(Root, "gamelayout.json");
 
     public static string ShippedMods => Path.Combine(Application, "mods");
+
+    /// <summary>
+    /// The premade savefiles the release ships, read in place and never written. Not
+    /// <c>savefiles</c>, which <see cref="DataFolderMigration"/> takes for an older build's library.
+    /// </summary>
+    public static string ShippedSaveFiles => Path.Combine(Application, RaCMAN.Protocol.PremadeSaveFiles.FolderName);
 
     public static string ShippedData => Path.Combine(Application, "data");
 

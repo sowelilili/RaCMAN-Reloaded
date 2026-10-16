@@ -1,6 +1,15 @@
 namespace RaCMAN.Protocol;
 
 /// <summary>
+/// Somewhere a load can read a save's bytes from: the user's own library, or the premade savefiles
+/// the release ships (<see cref="PremadeSaveFiles"/>), which are read and never written.
+/// </summary>
+public interface ISaveFileSource
+{
+    byte[] Read(string titleId, string category, string name);
+}
+
+/// <summary>
 /// The PC-side savefile library: <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/&lt;name&gt;.sav</c> in the
 /// data folder, the same layout the console keeps. Nothing here knows anything about the game: a
 /// saved file is whatever bytes the console's aside buffer held.
@@ -11,7 +20,7 @@ namespace RaCMAN.Protocol;
 /// is uploaded once and then lives over there.
 /// </para>
 /// </summary>
-public sealed class SaveFileLibrary
+public sealed class SaveFileLibrary : ISaveFileSource
 {
     /// <summary>The folder offered when a title has no categories yet.</summary>
     public const string DefaultCategory = "misc";
@@ -455,6 +464,17 @@ public static class SaveFileMerge
     }
 
     /// <summary>
+    /// The rows of <see cref="PremadeSaveFiles.Category"/>: the premade savefiles this release
+    /// ships, each one said to be on the console too when the console's copy in that category is
+    /// there. A file the console keeps there that this release does not ship - one an older release
+    /// shipped, say - is not listed: the category is read-only, so it is a row nobody could act on.
+    /// </summary>
+    public static SaveFileEntry[] BuildPremade(
+        IEnumerable<ConsoleSaveFile>? console,
+        IEnumerable<LocalSaveFile>? premade) =>
+        Build(console, premade).Where(e => e.OnPc).ToArray();
+
+    /// <summary>
     /// What a load has to do. The console's copy is used whenever it is the same bytes, which is
     /// the whole point of moving the library over there; the PC's copy wins when they differ,
     /// because the row the user picked is the one they can see the date and the size of.
@@ -561,6 +581,8 @@ public static class SaveFileTransfer
         IProgress<long>? bytes = null,
         CancellationToken cancellationToken = default)
     {
+        if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("nothing can be saved into them");
+
         var data = await DownloadAsync(client, saveActionId, timeout, status, bytes, cancellationToken)
             .ConfigureAwait(false);
 
@@ -757,6 +779,10 @@ public static class SaveFileTransfer
     /// fails leaves the console's copy exactly where it is, which is why it is reported separately
     /// rather than turning the whole save into a failure.
     /// </para>
+    /// <para>
+    /// The premade category is refused before anything is sent: its files are the release's, and a
+    /// save of the user's stored among the console's copies of them is one the list never shows.
+    /// </para>
     /// </summary>
     public static async Task<string> StoreAsync(
         QwarkClient client,
@@ -770,6 +796,8 @@ public static class SaveFileTransfer
         IProgress<long>? bytes = null,
         CancellationToken cancellationToken = default)
     {
+        if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("nothing can be saved into them");
+
         status?.Report($"Asking the console to save '{SaveFileLibrary.DisplayName(name)}'...");
         await RaiseAsync(client, SaveFileRequest.Store,
                 token => client.SaveFileStoreAsync(category, name, token), cancellationToken)
@@ -792,10 +820,12 @@ public static class SaveFileTransfer
     /// Uploads the PC's copy to the console with the file ops and writes the CRC sidecar beside
     /// it, exactly as the mod library writes <c>qwark.sum</c>. Writing the sum here is what saves
     /// the console reading a 2 MB file back to sum it the first time it lists the category.
+    /// <paramref name="library"/> is wherever the bytes come from: the user's library, or the
+    /// premade savefiles, whose console copies live in their own category.
     /// </summary>
     public static async Task UploadToConsoleAsync(
         QwarkClient client,
-        SaveFileLibrary library,
+        ISaveFileSource library,
         string titleId,
         string category,
         string name,
@@ -823,11 +853,12 @@ public static class SaveFileTransfer
     /// <summary>
     /// A load, end to end: RESTORE when the console already has these bytes, upload once and then
     /// RESTORE when it does not. Returns whether anything had to be uploaded, so the panel can say
-    /// so the one time it happens.
+    /// so the one time it happens. A premade savefile loads exactly this way, read from the
+    /// <see cref="PremadeSaveFiles"/> rather than the user's library.
     /// </summary>
     public static async Task<bool> LoadAsync(
         QwarkClient client,
-        SaveFileLibrary library,
+        ISaveFileSource library,
         string titleId,
         string category,
         SaveFileEntry entry,
@@ -873,6 +904,8 @@ public static class SaveFileTransfer
         SaveFileEntry entry,
         CancellationToken cancellationToken = default)
     {
+        if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("they cannot be deleted");
+
         if (entry.OnPc) library.Delete(titleId, category, entry.Name);
         if (!entry.OnConsole) return;
 
@@ -892,6 +925,8 @@ public static class SaveFileTransfer
         string newName,
         CancellationToken cancellationToken = default)
     {
+        if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("they cannot be renamed");
+
         if (entry.OnPc) library.Rename(titleId, category, entry.Name, newName);
         if (!entry.OnConsole) return;
 
