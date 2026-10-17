@@ -1091,6 +1091,144 @@ public class ClientTests
     }
 
     /// <summary>
+    /// qwark build 53 keeps the planet and the two reset boxes per game and reports the running
+    /// game's, the last game's outside one (PROTOCOL.md 5.5), so the boxes follow a game switch with
+    /// nothing kept on this side. On every frame the planet controls draw, through the XMB and
+    /// across the switch both ways, the boxes are the described game's own and never the game
+    /// before's. UYA, with no selection of its own yet, shows the console-wide pair a module before
+    /// build 53 kept, and a load of the selection (0xFF) is the running game's in both games.
+    /// </summary>
+    [Fact]
+    public async Task TheResetBoxesFollowAGameSwitch()
+    {
+        const PlanetFlags both = PlanetFlags.ResetLevelFlags | PlanetFlags.ResetSpecialBolts;
+        var rac1Planets = new[] { "Veldin", "Novalis", "Aridia", "Kerwan" };
+        var uyaPlanets = new[] { "(none)", "Veldin", "Florana" };
+
+        using var server = new FakeQwarkServer();
+        server.Session = server.Session with { QwarkVersion = FakeQwarkServer.PerGamePlanetSelectionBuild };
+        server.Planets = rac1Planets;
+        server.LegacyPlanetSelection = (1, PlanetFlags.ResetLevelFlags);
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        // What the boxes of each game's planet controls have to show, and the first frame that
+        // drew one game's controls with anything else.
+        var showing = new Dictionary<GameId, PlanetFlags>();
+        int drawn = 0;
+        string? stale = null;
+
+        string Boxes() => PositionsPanel.ResetBoxSummary(
+            PlanetResetOptions.For(state.DescribedGame, state.Session.QwarkVersion).Boxes(), state.Session.PlanetFlags);
+
+        // Frames as the render loop runs them, each checked the way PlanetLoadControls draws it:
+        // nothing while the planet list is empty, else the described game's planets and the
+        // session's flags.
+        async Task<bool> Frames(Func<bool> until, int timeoutMs = 5000)
+        {
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < timeoutMs)
+            {
+                state.Tick(1f / 60f);
+                if (state.Planets.Length > 0 && showing.TryGetValue(state.DescribedGame, out var want))
+                {
+                    drawn++;
+                    if (state.Session.PlanetFlags != want)
+                    {
+                        stale ??= $"{state.DescribedGame} drawn with {state.Session.PlanetFlags}, want {want}";
+                    }
+                }
+
+                if (until()) return true;
+                await Task.Delay(16);
+            }
+
+            return until();
+        }
+
+        // RaC1 has no selection of its own yet either, so it shows the old pair.
+        Assert.True(await PumpAsync(state, () =>
+            state.DescribedGame == GameId.Rac1 && state.Planets.Length == 4
+            && state.Session.PlanetFlags == PlanetFlags.ResetLevelFlags));
+        Assert.Equal(1, state.Session.SelectedPlanet);
+        Assert.Equal("Reset_level_flags:on Reset_special_bolts:off", Boxes());
+
+        await state.Client.PlanetSelectAsync(2, both);
+        Assert.True(await PumpAsync(state, () => state.Session.PlanetFlags == both));
+        Assert.Equal((byte)2, server.PlanetSelectionOf(GameId.Rac1)?.Planet);
+        Assert.Equal(((byte)1, PlanetFlags.ResetLevelFlags), server.LegacyPlanetSelection);
+        showing[GameId.Rac1] = both;
+
+        // The XMB: the page goes on drawing RaC1, greyed, and the boxes stay RaC1's.
+        server.Session = server.Session with { State = SessionState.Xmb, Game = GameId.None, TitleId = string.Empty };
+        Assert.True(await Frames(() => state.Session.State == SessionState.Xmb));
+        await Frames(() => false, 300);
+        Assert.Equal(4, state.Planets.Length);
+        Assert.Equal("Reset_level_flags:on Reset_special_bolts:on", Boxes());
+
+        // UYA, which reads the old pair: RaC1's ticks are not carried over for a single frame.
+        showing[GameId.Rac3] = PlanetFlags.ResetLevelFlags;
+        server.Describe = server.Describe with { Game = GameId.Rac3 };
+        server.Planets = uyaPlanets;
+        server.Session = server.Session with
+        {
+            State = SessionState.Ingame, Game = GameId.Rac3, TitleId = "NPEA00387",
+            Generation = server.Session.Generation + 1,
+        };
+        Assert.True(await Frames(() => state.DescribedGame == GameId.Rac3 && state.Planets.Length == 3));
+        await Frames(() => false, 200);
+        Assert.Equal("Reset_level_flags:on Reset_special_bolts:off", Boxes());
+
+        await state.Client.PlanetSelectAsync(1, PlanetFlags.ResetSpecialBolts);
+        Assert.True(await PumpAsync(state, () => state.Session.PlanetFlags == PlanetFlags.ResetSpecialBolts));
+        showing[GameId.Rac3] = PlanetFlags.ResetSpecialBolts;
+        Assert.Equal("Reset_level_flags:off Reset_special_bolts:on", Boxes());
+
+        await state.Client.PlanetLoadAsync();
+        Assert.Equal(((byte)1, PlanetFlags.ResetSpecialBolts), server.LastPlanetLoad);
+
+        // And back: RaC1's own selection, not UYA's.
+        server.Describe = server.Describe with { Game = GameId.Rac1 };
+        server.Planets = rac1Planets;
+        server.Session = server.Session with
+        {
+            Game = GameId.Rac1, TitleId = "NPEA00385", Generation = server.Session.Generation + 1,
+        };
+        Assert.True(await Frames(() => state.DescribedGame == GameId.Rac1 && state.Planets.Length == 4));
+        await Frames(() => false, 200);
+        Assert.Equal("Reset_level_flags:on Reset_special_bolts:on", Boxes());
+        Assert.Equal(2, state.Session.SelectedPlanet);
+
+        await state.Client.PlanetLoadAsync();
+        Assert.Equal(((byte)2, both), server.LastPlanetLoad);
+
+        Assert.True(drawn > 0);
+        Assert.Null(stale);
+    }
+
+    /// <summary>
+    /// Against a module before build 53 the planet selection is one for the console, and the fake
+    /// keeps it that way: the selection per game, and the switch above, are build 53's.
+    /// </summary>
+    [Fact]
+    public async Task AModuleBeforeBuild53KeepsOnePlanetSelectionForTheConsole()
+    {
+        using var server = new FakeQwarkServer();
+        server.Session = server.Session with { QwarkVersion = 52 };
+        server.Start();
+        using var client = new QwarkClient { AutoReconnect = false };
+        await client.ConnectAsync("127.0.0.1", server.Port);
+
+        await client.PlanetSelectAsync(3, PlanetFlags.ResetLevelFlags);
+        server.Session = server.Session with { Game = GameId.Rac3, TitleId = "NPEA00387" };
+
+        var packet = await client.GetStateAsync();
+        Assert.Equal(3, packet.Session.SelectedPlanet);
+        Assert.Equal(PlanetFlags.ResetLevelFlags, packet.Session.PlanetFlags);
+        Assert.Null(server.PlanetSelectionOf(GameId.Rac1));
+    }
+
+    /// <summary>
     /// PLANET_LIST since build 53: the names at their ids, then the order a menu lists them in.
     /// The state keeps both, the names still indexed by id for everything that looks one up.
     /// </summary>

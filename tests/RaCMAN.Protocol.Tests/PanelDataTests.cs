@@ -1153,8 +1153,7 @@ public class PlanetResetOptionTests
 
     /// <summary>
     /// RaC2's load resets the level flags and leaves bit 1 alone: it has no per-planet special bolt
-    /// to take back, so a box for it would do nothing in that game while turning on RaC1's gold
-    /// bolt reset, the setting being one for the whole console.
+    /// to take back, so a box for it would be a reset the load never makes.
     /// </summary>
     [Fact]
     public void RaC2OffersTheLevelFlagsBoxOnly()
@@ -1190,7 +1189,7 @@ public class PlanetResetOptionTests
 
     /// <summary>
     /// A module before build 53 ignores bit 1 in UYA, so against one the box is not drawn: it
-    /// would promise a reset the load does not make, and turn on RaC1's gold bolt reset besides.
+    /// would promise a reset the load does not make.
     /// </summary>
     [Fact]
     public void UyaAgainstAnOlderModuleOffersTheLevelFlagsBoxOnly()
@@ -1228,8 +1227,8 @@ public class PlanetResetOptionTests
     }
 
     /// <summary>
-    /// Each box shows the console's stored flag as it is, a bit left on in another game included:
-    /// the boxes are where a stored choice is seen and changed, never where it is quietly cleared.
+    /// Each box shows the flag the console holds for the running game as it is: the boxes are where
+    /// a stored choice is seen and changed, never where it is quietly cleared.
     /// </summary>
     [Fact]
     public void TheBoxesShowTheStoredFlagsAsTheyAre()

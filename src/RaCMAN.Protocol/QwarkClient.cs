@@ -910,9 +910,15 @@ public sealed class QwarkClient : IDisposable
         return PlanetList.Parse(payload);
     }
 
+    /// <summary>
+    /// PLANET_SELECT: the planet and the reset flags the load-planet combo and a 0xFF load use.
+    /// From qwark build 53 they are the running game's, and outside a game the last game's; the
+    /// session reports them back the same way (PROTOCOL.md 5.5).
+    /// </summary>
     public Task PlanetSelectAsync(byte planet, PlanetFlags flags, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.PlanetSelect, new[] { planet, (byte)flags }, cancellationToken);
 
+    /// <summary>PLANET_LOAD. <see cref="Selected"/> for either byte is the running game's selection.</summary>
     public Task PlanetLoadAsync(byte planet = Selected, byte flags = Selected, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.PlanetLoad, new[] { planet, flags }, cancellationToken);
 

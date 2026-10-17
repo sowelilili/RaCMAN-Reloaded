@@ -582,6 +582,62 @@ public sealed class FakeQwarkServer : IDisposable
     /// <summary>False answers PLANET_LIST with the names alone, as a module before build 53 does.</summary>
     public bool SendsPlanetOrder { get; set; } = true;
 
+    /// <summary>The first qwark build that keeps the planet selection, the reset boxes with it, per game.</summary>
+    public const byte PerGamePlanetSelectionBuild = 53;
+
+    private (byte Planet, PlanetFlags Flags) _legacyPlanetSelection;
+    private readonly Dictionary<GameId, (byte Planet, PlanetFlags Flags)> _planetSelections = new();
+    private GameId _selectionGame;
+
+    /// <summary>
+    /// The planet selection config.txt kept for the whole console before build 53,
+    /// <c>selected.planet</c> and <c>selected.planet_flags</c>. A module from before then has
+    /// nothing else, and PLANET_SELECT writes it whatever game is running; one of build 53 or later
+    /// never writes it and reads it only for a game that has no selection of its own yet.
+    /// </summary>
+    public (byte Planet, PlanetFlags Flags) LegacyPlanetSelection
+    {
+        get { lock (_gate) return _legacyPlanetSelection; }
+        set { lock (_gate) _legacyPlanetSelection = value; }
+    }
+
+    /// <summary>The planet and the flags the last PLANET_LOAD went to, with any 0xFF resolved, or null before one.</summary>
+    public (byte Planet, PlanetFlags Flags)? LastPlanetLoad { get; private set; }
+
+    /// <summary>What PLANET_SELECT stored for one game (build 53), or null while it has none of its own.</summary>
+    public (byte Planet, PlanetFlags Flags)? PlanetSelectionOf(GameId game)
+    {
+        lock (_gate) return _planetSelections.TryGetValue(game, out var own) ? own : null;
+    }
+
+    /// <summary>
+    /// Whose planet selection the session carries and PLANET_SELECT sets, as a module of build 53
+    /// or later decides it: the running game's, and outside a game the last one that was INGAME,
+    /// None before any has been. Caller holds the gate.
+    /// </summary>
+    private GameId SelectionGame()
+    {
+        if (_session.State == SessionState.Ingame && _session.Game != GameId.None) _selectionGame = _session.Game;
+        return _selectionGame;
+    }
+
+    /// <summary>The planet and the flags the session reports, for the module's build. Caller holds the gate.</summary>
+    private (byte Planet, PlanetFlags Flags) ReportedPlanetSelection()
+    {
+        if (_session.QwarkVersion < PerGamePlanetSelectionBuild) return _legacyPlanetSelection;
+
+        var game = SelectionGame();
+        if (game == GameId.None) return (0, PlanetFlags.None);
+        return _planetSelections.TryGetValue(game, out var own) ? own : _legacyPlanetSelection;
+    }
+
+    /// <summary>The session as HELLO, GET_STATE and telemetry send it. Caller holds the gate.</summary>
+    private SessionInfo ReportedSession()
+    {
+        var (planet, flags) = ReportedPlanetSelection();
+        return _session with { SelectedPlanet = planet, PlanetFlags = flags };
+    }
+
     /// <summary>
     /// What AUTOSPLIT_DESCRIBE reports. Empty means the running game has no watcher, which the op
     /// answers UNSUPPORTED, exactly as a game qwark has no autosplitter for would.
@@ -1870,7 +1926,7 @@ public sealed class FakeQwarkServer : IDisposable
                 case Opcode.Hello:
                     if (payload.Length < 1) return (Status.BadArg, null);
                     HelloCount++;
-                    return (Status.Ok, _session.ToBytes());
+                    return (Status.Ok, ReportedSession().ToBytes());
 
                 case Opcode.Heartbeat:
                     HeartbeatCount++;
@@ -2260,6 +2316,36 @@ public sealed class FakeQwarkServer : IDisposable
                     foreach (var planet in Planets) w.WriteFixedString(planet, 24);
                     w.WriteBytes(order);
                     return (Status.Ok, buffer);
+                }
+
+                case Opcode.PlanetSelect:
+                {
+                    if (payload.Length < 2) return (Status.BadArg, null);
+                    var selection = (payload[0], (PlanetFlags)payload[1]);
+
+                    if (_session.QwarkVersion < PerGamePlanetSelectionBuild)
+                    {
+                        _legacyPlanetSelection = selection;
+                        return (Status.Ok, null);
+                    }
+
+                    // Build 53: the selection's game, and nothing to keep one for before any game.
+                    var game = SelectionGame();
+                    if (game == GameId.None) return (Status.Unsupported, null);
+                    _planetSelections[game] = selection;
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.PlanetLoad:
+                {
+                    if (payload.Length < 2) return (Status.BadArg, null);
+
+                    // 0xFF is the selection, which since build 53 is the running game's own.
+                    var (planet, flags) = ReportedPlanetSelection();
+                    LastPlanetLoad = (
+                        payload[0] == QwarkClient.Selected ? planet : payload[0],
+                        payload[1] == QwarkClient.Selected ? flags : (PlanetFlags)payload[1]);
+                    return (Status.Ok, null);
                 }
 
                 case Opcode.ModList:
@@ -2848,7 +2934,7 @@ public sealed class FakeQwarkServer : IDisposable
             return new WatchValue(w.Id, w.Size, valid, value);
         }).ToArray();
 
-        return new TelemetryPacket(_session, watches);
+        return new TelemetryPacket(ReportedSession(), watches);
     }
 
     private async Task TelemetryLoopAsync()

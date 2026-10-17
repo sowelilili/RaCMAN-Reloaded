@@ -180,12 +180,13 @@ public static class PositionsPanel
     /// <summary>
     /// The planet controls: the combo with the filler names left out, the reset boxes the running
     /// game has, and Load planet across the rest of the row. The console owns the planet selection
-    /// the way it owns the slot (a combo's Load planet loads whatever it holds), so the combo and
-    /// the boxes show what telemetry reports and a change to either is sent as PLANET_SELECT the
-    /// moment it is made, which is why there is no Select button. The Game page's quick block is
-    /// the only page that draws them, and this is where they live because the planet list and the
-    /// slot table are the same panel's subject. False when the game named no planets, which draws
-    /// nothing at all: the quick block leaves out what a game has not got.
+    /// the way it owns the slot (a combo's Load planet loads whatever it holds), one per game since
+    /// qwark build 53, so the combo and the boxes show what telemetry reports for the running game
+    /// and a change to either is sent as PLANET_SELECT the moment it is made, which is why there
+    /// is no Select button. The Game page's quick block is the only page that draws them, and this
+    /// is where they live because the planet list and the slot table are the same panel's subject.
+    /// False when the game named no planets, which draws nothing at all: the quick block leaves out
+    /// what a game has not got.
     /// </summary>
     public static bool PlanetLoadControls(AppState state)
     {
@@ -207,8 +208,9 @@ public static class PositionsPanel
         }
 
         // A game is offered the boxes for the bits its own planet load acts on, whatever the Level
-        // flags panel can or cannot read for it, and each box shows the console's stored flag.
-        // Which bits that is can depend on the module's build (UYA's special bolts, build 53).
+        // flags panel can or cannot read for it, and each box shows the flag the console holds for
+        // that game. Which bits that is can depend on the module's build (UYA's special bolts,
+        // build 53).
         byte build = state.Hello?.QwarkVersion ?? state.Session.QwarkVersion;
         var boxes = PlanetResetOptions.For(state.DescribedGame, build).Boxes();
         for (int i = 0; i < boxes.Count; i++)

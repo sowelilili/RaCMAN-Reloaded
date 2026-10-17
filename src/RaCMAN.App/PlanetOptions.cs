@@ -123,9 +123,10 @@ public sealed class PlanetChoices
 /// Which of the two boxes beside "Load planet" a game has. Each is a bit of the planet flags that
 /// the game's own planet load acts on, so a game is offered exactly the bits its load uses: a box
 /// for a bit the load ignores would be a promise the game does not keep, and a bit the load uses
-/// with no box drawn for it would still act on every load, out of sight. The flags are one
-/// console-wide setting (qwark's <c>selected.planet_flags</c>), not one per game, so a bit ticked
-/// in one game is the same bit in the next, and the box is the only place it shows.
+/// with no box drawn for it would still act on every load, out of sight. qwark keeps the flags per
+/// game from build 53 (<c>selected.&lt;game&gt;.planet_flags</c>, beside the planet they go with)
+/// and reports the running game's, so a box shows and turns that game's bit and follows a game
+/// switch with nothing kept here.
 /// </summary>
 public readonly record struct PlanetResetOptions(bool LevelFlags, bool SpecialBolts)
 {
