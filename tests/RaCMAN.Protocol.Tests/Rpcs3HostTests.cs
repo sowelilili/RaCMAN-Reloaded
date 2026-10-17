@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using RaCMAN.App;
+using RaCMAN.Protocol.Testing;
 
 namespace RaCMAN.Protocol.Tests;
 
@@ -176,6 +177,102 @@ public class Rpcs3HostTests
             Assert.Equal("exited (code 3)", host.Status);
             Assert.NotNull(host.Problem);
             Assert.Contains("exited (code 3)", host.Problem, StringComparison.Ordinal);
+        }
+        finally
+        {
+            DeleteFolder(folder);
+        }
+    }
+
+    /// <summary>
+    /// The user's report: switching to RPCS3 took about a second, with a reconnect in it. A helper
+    /// booting into a game RPCS3 already runs has its port open and closes every new client as it
+    /// arrives, so the first connect was dropped and the reconnect loop's first retry, a second
+    /// later, was the one that stuck. The wait now asks with HELLOs of its own until one is kept,
+    /// and the client's connection is the first it makes.
+    /// </summary>
+    [Fact]
+    public async Task TheConnectWaitsForAHelperThatKeepsAClientNotJustAnOpenPort()
+    {
+        var folder = TempFolder();
+        using var server = new FakeQwarkServer { ClosesNewConnections = true };
+        server.Start();
+
+        try
+        {
+            using var host = new Rpcs3Host(folder, server.Port);
+            Assert.True(host.Ensure(null, 28012, out _));
+            Assert.True(host.Adopted);
+
+            var started = DateTime.UtcNow;
+            var ready = host.WaitForReadyAsync(TimeSpan.FromSeconds(10));
+
+            // The port is open the whole time, and still nothing is kept for a while.
+            await Task.Delay(400);
+            Assert.False(ready.IsCompleted, "the wait ended while the helper was still closing clients");
+            Assert.True(Rpcs3Host.PortInUse(server.Port));
+            server.ClosesNewConnections = false;
+
+            Assert.True(await ready);
+            var waited = DateTime.UtcNow - started;
+            Assert.True(waited >= TimeSpan.FromMilliseconds(400), $"ready after {waited}");
+            Assert.True(waited < TimeSpan.FromMilliseconds(1300),
+                $"ready {waited} after the start, where the helper kept clients from 400 ms");
+            Assert.True(server.ConnectionsClosedOnArrival >= 2,
+                $"{server.ConnectionsClosedOnArrival} probes were closed on arrival");
+
+            // And the client's own connect is then the one that holds, with no reconnect behind it.
+            using var client = new QwarkClient { AutoReconnect = true };
+            int disconnects = 0;
+            client.Disconnected += _ => Interlocked.Increment(ref disconnects);
+            int closedBefore = server.ConnectionsClosedOnArrival;
+            await client.ConnectAsync("127.0.0.1", server.Port);
+
+            Assert.True(client.IsConnected);
+            Assert.Equal(0, client.ReconnectAttempt);
+            Assert.Equal(0, Volatile.Read(ref disconnects));
+            Assert.Equal(closedBefore, server.ConnectionsClosedOnArrival);
+        }
+        finally
+        {
+            DeleteFolder(folder);
+        }
+    }
+
+    [Fact]
+    public async Task AHelloProbeTellsAKeptClientFromAClosedOneAndFromNothing()
+    {
+        Assert.False(await Rpcs3Host.AnswersHelloAsync(FreePort(), TimeSpan.FromSeconds(2)));
+
+        using var server = new FakeQwarkServer { ClosesNewConnections = true };
+        server.Start();
+
+        Assert.False(await Rpcs3Host.AnswersHelloAsync(server.Port, TimeSpan.FromSeconds(2)));
+        Assert.Equal(1, server.ConnectionsClosedOnArrival);
+
+        server.ClosesNewConnections = false;
+        Assert.True(await Rpcs3Host.AnswersHelloAsync(server.Port, TimeSpan.FromSeconds(2)));
+    }
+
+    /// <summary>A helper that never takes a client is given the whole wait and no more, and the caller connects anyway.</summary>
+    [Fact]
+    public async Task AHelperThatKeepsClosingClientsRunsTheWaitOut()
+    {
+        var folder = TempFolder();
+        using var server = new FakeQwarkServer { ClosesNewConnections = true };
+        server.Start();
+
+        try
+        {
+            using var host = new Rpcs3Host(folder, server.Port);
+            Assert.True(host.Ensure(null, 28012, out _));
+
+            var started = DateTime.UtcNow;
+            Assert.False(await host.WaitForReadyAsync(TimeSpan.FromMilliseconds(600)));
+            var waited = DateTime.UtcNow - started;
+
+            Assert.True(waited >= TimeSpan.FromMilliseconds(550) && waited < TimeSpan.FromSeconds(3), $"waited {waited}");
+            Assert.False(host.DiedOnStartup);
         }
         finally
         {

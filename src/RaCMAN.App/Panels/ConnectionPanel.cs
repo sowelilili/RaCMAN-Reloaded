@@ -8,7 +8,10 @@ public static class ConnectionPanel
     /// <summary>Where a helper on this PC is: RPCS3 and qwark-rpcs3.exe both run here.</summary>
     public const string LocalHost = "127.0.0.1";
 
-    /// <summary>How long a just-started helper gets to open the qwark port before the first connect.</summary>
+    /// <summary>
+    /// How long a just-started helper gets to open the qwark port and take a client before the
+    /// first connect goes out anyway (<see cref="Rpcs3Host.WaitForReadyAsync"/>).
+    /// </summary>
     public static readonly TimeSpan HelperStartupWait = TimeSpan.FromSeconds(5);
 
     private static string _host = string.Empty;
@@ -453,7 +456,9 @@ public static class ConnectionPanel
         state.AddToast(message);
         state.Run(async () =>
         {
-            bool up = await state.Rpcs3.WaitForPortAsync(HelperStartupWait).ConfigureAwait(false);
+            // Not just the port: a helper that is booting into a game RPCS3 is already running
+            // closes a new client as it arrives, and connecting into that cost a reconnect.
+            bool up = await state.Rpcs3.WaitForReadyAsync(HelperStartupWait).ConfigureAwait(false);
             if (!up && state.Rpcs3.DiedOnStartup)
             {
                 // Connecting now would only start the reconnect loop against a port nothing will

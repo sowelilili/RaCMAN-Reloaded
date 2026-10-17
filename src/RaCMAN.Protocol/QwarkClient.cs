@@ -239,7 +239,12 @@ public sealed class QwarkClient : IDisposable
         }
         catch
         {
-            cts.Cancel();
+            // A console that closes the connection during HELLO (qwark through a game's boot, and
+            // a qwark-rpcs3 booting into a game RPCS3 already runs) is seen by the receive loop
+            // first, and its teardown has already cancelled and disposed this source. Cancelling it
+            // again threw ObjectDisposedException out of here in place of the real failure, which
+            // is what the user was shown.
+            try { cts.Cancel(); } catch (ObjectDisposedException) { /* torn down already */ }
             socket.Dispose();
             udp.Dispose();
             lock (_gate)
@@ -553,6 +558,14 @@ public sealed class QwarkClient : IDisposable
             }
 
             return await tcs.Task.WaitAsync(RequestTimeout, cancellationToken).ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException) when (!ReferenceEquals(Volatile.Read(ref _stream), stream))
+        {
+            // The connection went while this was being written, and the teardown disposed the
+            // stream under it: the request failed because the link closed, so say that, as the
+            // teardown says it to every request it was still waiting on.
+            _pending.TryRemove(seq, out _);
+            throw new IOException("connection closed");
         }
         catch (Exception ex)
         {
@@ -887,10 +900,14 @@ public sealed class QwarkClient : IDisposable
         return RequestAsync(Opcode.PosStore, payload, cancellationToken);
     }
 
-    public async Task<string[]> PlanetListAsync(CancellationToken cancellationToken = default)
+    /// <summary>
+    /// PLANET_LIST: the names at their ids, and since build 53 the order a menu lists them in. An
+    /// older module's reply, names alone, comes back in id order.
+    /// </summary>
+    public async Task<PlanetList> PlanetListAsync(CancellationToken cancellationToken = default)
     {
         var payload = await RequestAsync(Opcode.PlanetList, null, cancellationToken).ConfigureAwait(false);
-        return ParseNameList(payload);
+        return PlanetList.Parse(payload);
     }
 
     public Task PlanetSelectAsync(byte planet, PlanetFlags flags, CancellationToken cancellationToken = default) =>

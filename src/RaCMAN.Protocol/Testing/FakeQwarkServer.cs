@@ -573,6 +573,16 @@ public sealed class FakeQwarkServer : IDisposable
     public string[] Planets { get; set; } = { "Veldin", "Novalis", "Aridia", "Kerwan" };
 
     /// <summary>
+    /// The menu order PLANET_LIST sends after the names (build 53): null sends the ids in turn,
+    /// which is what qwark sends for a game whose numbering is its order. Whatever this holds goes
+    /// out as it is, so a test can hand the client an order that is not every index once.
+    /// </summary>
+    public byte[]? PlanetOrder { get; set; }
+
+    /// <summary>False answers PLANET_LIST with the names alone, as a module before build 53 does.</summary>
+    public bool SendsPlanetOrder { get; set; } = true;
+
+    /// <summary>
     /// What AUTOSPLIT_DESCRIBE reports. Empty means the running game has no watcher, which the op
     /// answers UNSUPPORTED, exactly as a game qwark has no autosplitter for would.
     /// </summary>
@@ -1706,6 +1716,23 @@ public sealed class FakeQwarkServer : IDisposable
     /// <summary>Stops accepting, so a reconnect attempt fails until <see cref="Reopen"/>.</summary>
     public void StopListening() => _listener.Stop();
 
+    private volatile bool _closesNewConnections;
+    private int _closedOnArrival;
+
+    /// <summary>
+    /// Closes every new connection the moment it is accepted, as qwark does through BOOTING and
+    /// QUITTING (section 1.1), and as a qwark-rpcs3 just started does while it boots into a game
+    /// RPCS3 is already running. Connections already open are served as before.
+    /// </summary>
+    public bool ClosesNewConnections
+    {
+        get => _closesNewConnections;
+        set => _closesNewConnections = value;
+    }
+
+    /// <summary>How many connections <see cref="ClosesNewConnections"/> has closed as they arrived.</summary>
+    public int ConnectionsClosedOnArrival => Volatile.Read(ref _closedOnArrival);
+
     public void Reopen() => _listener.Start();
 
     private async Task AcceptLoopAsync()
@@ -1734,6 +1761,13 @@ public sealed class FakeQwarkServer : IDisposable
             {
                 // Listener stopped; wait for Reopen.
                 await Task.Delay(10);
+                continue;
+            }
+
+            if (_closesNewConnections)
+            {
+                Interlocked.Increment(ref _closedOnArrival);
+                client.Dispose();
                 continue;
             }
 
@@ -2218,10 +2252,13 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.PlanetList:
                 {
-                    var buffer = new byte[1 + Planets.Length * 24];
+                    var order = !SendsPlanetOrder ? Array.Empty<byte>()
+                        : PlanetOrder ?? Enumerable.Range(0, Planets.Length).Select(i => (byte)i).ToArray();
+                    var buffer = new byte[1 + Planets.Length * 24 + order.Length];
                     var w = new SpanWriter(buffer);
                     w.WriteU8((byte)Planets.Length);
                     foreach (var planet in Planets) w.WriteFixedString(planet, 24);
+                    w.WriteBytes(order);
                     return (Status.Ok, buffer);
                 }
 

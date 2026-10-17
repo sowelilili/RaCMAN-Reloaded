@@ -191,10 +191,11 @@ public static class PositionsPanel
     {
         if (state.Planets.Length == 0) return false;
 
-        // The combo shows the planets the game has; the index behind the pick is the one the
-        // console numbered it with, filler entries included, because that is what a request
-        // carries. A selection the console holds on a hidden entry shows as the first real one.
-        var choices = PlanetChoices.For(state.Planets);
+        // The combo shows the planets the game has, in the order the console lists them; the
+        // index behind the pick is the one the console numbered it with, filler entries included,
+        // because that is what a request carries. A selection the console holds on a hidden entry
+        // shows as the first real one.
+        var choices = PlanetChoices.For(state.Planets, state.PlanetOrder);
         int pick = choices.PositionFor(state.Session.SelectedPlanet);
         var flags = state.Session.PlanetFlags;
 
@@ -207,7 +208,9 @@ public static class PositionsPanel
 
         // A game is offered the boxes for the bits its own planet load acts on, whatever the Level
         // flags panel can or cannot read for it, and each box shows the console's stored flag.
-        var boxes = PlanetResetOptions.For(state.DescribedGame).Boxes();
+        // Which bits that is can depend on the module's build (UYA's special bolts, build 53).
+        byte build = state.Hello?.QwarkVersion ?? state.Session.QwarkVersion;
+        var boxes = PlanetResetOptions.For(state.DescribedGame, build).Boxes();
         for (int i = 0; i < boxes.Count; i++)
         {
             if (i > 0) ImGui.SameLine();

@@ -9,8 +9,10 @@ namespace RaCMAN.App;
 /// </summary>
 public sealed class PlanetChoices
 {
-    private static PlanetChoices _cached = new(Array.Empty<string>(), Array.Empty<int>());
-    private static IReadOnlyList<string>? _cachedFrom;
+    /// <summary>The last answer and what it was for, swapped as one reference so a reader never sees half of one.</summary>
+    private sealed record Cached(IReadOnlyList<string> From, IReadOnlyList<int>? Order, PlanetChoices Choices);
+
+    private static Cached? _cached;
 
     private PlanetChoices(string[] labels, int[] indices)
     {
@@ -43,19 +45,27 @@ public sealed class PlanetChoices
     }
 
     /// <summary>
-    /// The combo's contents for a planet list. A list that is nothing but placeholders is offered
-    /// whole: an empty combo would leave no way to pick a planet at all, which is worse than a
-    /// filler name in it.
+    /// The combo's contents for a planet list, in the order the console says a menu lists them
+    /// (PLANET_LIST since build 53: UYA and Deadlocked in the order the game visits them, the
+    /// others in id order) and in id order without one. An order that is not every index of the
+    /// list exactly once is not one, and the list goes in id order then too. A list that is
+    /// nothing but placeholders is offered whole: an empty combo would leave no way to pick a
+    /// planet at all, which is worse than a filler name in it.
     /// </summary>
-    public static PlanetChoices For(IReadOnlyList<string> planets)
+    public static PlanetChoices For(IReadOnlyList<string> planets, IReadOnlyList<int>? order = null)
     {
         // The panels ask once a frame and the list only changes when PLANET_LIST answers, so the
-        // last answer is remembered by reference. Render thread only, like everything in a panel.
-        if (ReferenceEquals(_cachedFrom, planets)) return _cached;
+        // last answer is remembered by reference. The panels call it on the render thread alone,
+        // but the tests call it from several at once, so the answer and what it was for are one
+        // reference and what is returned is never read back from the field.
+        var last = _cached;
+        if (last is not null && ReferenceEquals(last.From, planets) && ReferenceEquals(last.Order, order)) return last.Choices;
+
+        var sequence = IsWholeOrder(order, planets.Count) ? order! : Enumerable.Range(0, planets.Count).ToArray();
 
         var labels = new List<string>(planets.Count);
         var indices = new List<int>(planets.Count);
-        for (int i = 0; i < planets.Count; i++)
+        foreach (int i in sequence)
         {
             if (IsPlaceholder(planets[i])) continue;
             labels.Add(planets[i]);
@@ -64,16 +74,31 @@ public sealed class PlanetChoices
 
         if (labels.Count == 0)
         {
-            for (int i = 0; i < planets.Count; i++)
+            foreach (int i in sequence)
             {
                 labels.Add(planets[i]);
                 indices.Add(i);
             }
         }
 
-        _cached = new PlanetChoices(labels.ToArray(), indices.ToArray());
-        _cachedFrom = planets;
-        return _cached;
+        var choices = new PlanetChoices(labels.ToArray(), indices.ToArray());
+        _cached = new Cached(planets, order, choices);
+        return choices;
+    }
+
+    /// <summary>True when <paramref name="order"/> names every index below <paramref name="count"/> exactly once.</summary>
+    private static bool IsWholeOrder(IReadOnlyList<int>? order, int count)
+    {
+        if (order is null || order.Count != count) return false;
+
+        var seen = new bool[count];
+        foreach (int index in order)
+        {
+            if (index < 0 || index >= count || seen[index]) return false;
+            seen[index] = true;
+        }
+
+        return true;
     }
 
     /// <summary>Where a planet index sits in the combo, or -1 when it is one of the hidden ones.</summary>
@@ -104,9 +129,15 @@ public sealed class PlanetChoices
 /// </summary>
 public readonly record struct PlanetResetOptions(bool LevelFlags, bool SpecialBolts)
 {
+    /// <summary>The first qwark build whose UYA planet load acts on the special-bolts bit.</summary>
+    public const byte Rac3SpecialBoltsBuild = 53;
+
     /// <summary>
-    /// RaC1 resets both, its level flags and its gold bolts. RaC2 and UYA reset their level flags
-    /// and have no per-planet special bolt, so their loads ignore that bit, and Deadlocked's load
+    /// RaC1 resets both, its level flags and its gold bolts, and so does UYA from qwark build 53,
+    /// whose special bolts are its titanium bolts (PROTOCOL.md 5.5). An older module's UYA load
+    /// ignores that bit, so against one UYA is offered the level flags alone, as it always was:
+    /// the build comes from HELLO, as the stale-module warning's does. RaC2 resets its level flags
+    /// and has no per-planet special bolt, so its load ignores that bit, and Deadlocked's load
     /// ignores both. A game the client has no name for is offered neither, the same as Deadlocked.
     /// <para>
     /// This is not the Level flags panel's question, and whether LEVELFLAGS_GET is answered does
@@ -116,9 +147,9 @@ public readonly record struct PlanetResetOptions(bool LevelFlags, bool SpecialBo
     /// kept resetting the flags on every load.
     /// </para>
     /// </summary>
-    public static PlanetResetOptions For(GameId game) => new(
+    public static PlanetResetOptions For(GameId game, byte qwarkBuild) => new(
         LevelFlags: game is GameId.Rac1 or GameId.Rac2 or GameId.Rac3,
-        SpecialBolts: game is GameId.Rac1);
+        SpecialBolts: game is GameId.Rac1 || (game is GameId.Rac3 && qwarkBuild >= Rac3SpecialBoltsBuild));
 
     private static readonly PlanetResetBox LevelFlagsBox = new("Reset level flags", PlanetFlags.ResetLevelFlags);
     private static readonly PlanetResetBox SpecialBoltsBox = new("Reset special bolts", PlanetFlags.ResetSpecialBolts);

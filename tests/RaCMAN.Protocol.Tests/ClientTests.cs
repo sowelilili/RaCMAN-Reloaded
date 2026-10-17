@@ -268,7 +268,8 @@ public class ClientTests
             Assert.False(positions.Slots[7].Filled);
 
             var planets = await client.PlanetListAsync();
-            Assert.Equal(new[] { "Veldin", "Novalis", "Aridia", "Kerwan" }, planets);
+            Assert.Equal(new[] { "Veldin", "Novalis", "Aridia", "Kerwan" }, planets.Names);
+            Assert.Equal(new[] { 0, 1, 2, 3 }, planets.Order);
 
             var mods = await client.ModListAsync();
             Assert.Equal(2, mods.Length);
@@ -1087,6 +1088,93 @@ public class ClientTests
         Assert.True(await PumpAsync(state, () => state.Describe.Game == GameId.Rac2));
         Assert.Single(state.Describe.Features);
         Assert.True(await PumpAsync(state, () => state.Planets.Length == 2));
+    }
+
+    /// <summary>
+    /// PLANET_LIST since build 53: the names at their ids, then the order a menu lists them in.
+    /// The state keeps both, the names still indexed by id for everything that looks one up.
+    /// </summary>
+    [Fact]
+    public async Task ThePlanetOrderTheConsoleSendsIsKeptBesideTheNames()
+    {
+        using var server = new FakeQwarkServer();
+        server.Planets = new[] { "(none)", "Veldin", "Florana", "Phoenix Rescue", "Daxx" };
+        server.PlanetOrder = new byte[] { 1, 2, 4, 3, 0 };
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.PlanetOrder.Length == 5));
+        Assert.Equal(new[] { 1, 2, 4, 3, 0 }, state.PlanetOrder);
+        Assert.Equal("Daxx", state.Planets[4]);
+        Assert.Equal(new[] { "Veldin", "Florana", "Daxx", "Phoenix Rescue" },
+            PlanetChoices.For(state.Planets, state.PlanetOrder).Labels);
+    }
+
+    /// <summary>
+    /// A qwark that closes a new connection as it arrives, as one does through a game's boot: the
+    /// connect fails with what happened, the connection closing, and not with the
+    /// ObjectDisposedException the client's own clean-up used to throw over it, which was the
+    /// toast a switch to RPCS3 showed. The reconnect loop then takes over as before.
+    /// </summary>
+    [Fact]
+    public async Task AConnectionClosedDuringHelloFailsWithTheClosingNotTheCleanUp()
+    {
+        using var server = new FakeQwarkServer { ClosesNewConnections = true };
+        server.Start();
+
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            using var client = new QwarkClient { AutoReconnect = false };
+            var ex = await Assert.ThrowsAnyAsync<Exception>(() => client.ConnectAsync("127.0.0.1", server.Port));
+
+            Assert.False(ex is ObjectDisposedException, ex.ToString());
+            // The closing as the receive loop saw it, or the HELLO finding the link already gone.
+            Assert.True(ex is IOException or SocketException
+                        || (ex is InvalidOperationException && ex.Message.Contains("not connected", StringComparison.Ordinal)),
+                $"{ex.GetType().Name}: {ex.Message}");
+            Assert.False(client.IsConnected);
+        }
+
+        Assert.Equal(5, server.ConnectionsClosedOnArrival);
+
+        // Once the console keeps clients again, a client connects.
+        server.ClosesNewConnections = false;
+        using var later = new QwarkClient { AutoReconnect = false };
+        await later.ConnectAsync("127.0.0.1", server.Port);
+        Assert.True(later.IsConnected);
+    }
+
+    [Fact]
+    public async Task PlanetListReadsTheOrderAndStandsInForOneThatIsMissingOrBroken()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.Planets = new[] { "Aranos", "Oozla", "Maktar" };
+            server.PlanetOrder = new byte[] { 2, 0, 1 };
+            var list = await client.PlanetListAsync();
+            Assert.Equal(new[] { "Aranos", "Oozla", "Maktar" }, list.Names);
+            Assert.Equal(new[] { 2, 0, 1 }, list.Order);
+            Assert.True(list.OrderSent);
+
+            // A module before build 53: the names and nothing after them, so id order.
+            server.SendsPlanetOrder = false;
+            list = await client.PlanetListAsync();
+            Assert.Equal(new[] { "Aranos", "Oozla", "Maktar" }, list.Names);
+            Assert.Equal(new[] { 0, 1, 2 }, list.Order);
+            Assert.False(list.OrderSent);
+
+            // Bytes after the names that are not every index once are no order either.
+            server.SendsPlanetOrder = true;
+            foreach (var broken in new[] { new byte[] { 2, 2, 1 }, new byte[] { 0, 1, 3 }, new byte[] { 1, 0 } })
+            {
+                server.PlanetOrder = broken;
+                list = await client.PlanetListAsync();
+                Assert.Equal(new[] { 0, 1, 2 }, list.Order);
+                Assert.False(list.OrderSent);
+            }
+        }
     }
 
     [Fact]

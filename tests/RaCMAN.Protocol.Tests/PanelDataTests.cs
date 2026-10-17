@@ -653,6 +653,94 @@ public class PlanetChoiceTests
         "(unused)", "DreadZone", "Catacrom", "(infinite loop)", "Sarathos",
     };
 
+    /// <summary>UYA's whole list as qwark names it, every name at its id.</summary>
+    private static string[] UyaWhole() => new[]
+    {
+        "(none)", "Veldin", "Florana", "Starship Phoenix", "Marcadia", "Daxx", "Phoenix Rescue",
+        "Annihilation Nation", "Aquatos", "Tyhrranosis", "Zeldrin Starport", "Obani Gemini",
+        "Blackwater City", "Holostar", "Koros", "(unused)", "Metropolis", "Crash Site", "Aridia",
+        "Qwark's Hideout", "Launch Site", "Obani Draco", "Command Center", "Holostar Clank",
+        "Insomniac Museum", "(unused)", "Metropolis Rangers", "Aquatos Clank", "Aquatos Sewers",
+        "Tyhrranosis Rangers", "Vid Comic 6", "Vid Comic 1", "Vid Comic 4", "Vid Comic 2",
+        "Vid Comic 3", "Vid Comic 5", "Vid Comic 1 SE",
+    };
+
+    /// <summary>The order qwark build 53 sends after UYA's names: RAC3Form's combo box, placeholders last.</summary>
+    private static int[] UyaOrder() => new[]
+    {
+        1, 2, 3, 4, 5, 11, 12, 7, 8, 27, 28, 9, 10, 13, 23, 21, 16, 17, 18, 19,
+        6, 14, 22, 20, 24, 29, 26, 31, 33, 34, 32, 35, 30, 36, 15, 25, 0,
+    };
+
+    /// <summary>
+    /// The user's report: UYA's selector listed the planets by id, where the old client listed
+    /// them in the order the game visits them. The console now says that order, and the combo
+    /// follows it, while every row still carries the planet's own id.
+    /// </summary>
+    [Fact]
+    public void UyaIsListedInTheGamesOrderAndEveryRowKeepsItsId()
+    {
+        var planets = UyaWhole();
+        var choices = PlanetChoices.For(planets, UyaOrder());
+
+        Assert.Equal(
+            new[]
+            {
+                "Veldin", "Florana", "Starship Phoenix", "Marcadia", "Daxx", "Obani Gemini",
+                "Blackwater City", "Annihilation Nation", "Aquatos", "Aquatos Clank", "Aquatos Sewers",
+                "Tyhrranosis", "Zeldrin Starport", "Holostar", "Holostar Clank", "Obani Draco",
+                "Metropolis", "Crash Site", "Aridia", "Qwark's Hideout", "Phoenix Rescue", "Koros",
+                "Command Center", "Launch Site", "Insomniac Museum", "Tyhrranosis Rangers",
+                "Metropolis Rangers", "Vid Comic 1", "Vid Comic 2", "Vid Comic 3", "Vid Comic 4",
+                "Vid Comic 5", "Vid Comic 6", "Vid Comic 1 SE",
+            },
+            choices.Labels);
+
+        // The placeholders are still not offered, and each label is still its id's name.
+        Assert.Equal(planets.Length - 3, choices.Count);
+        for (int i = 0; i < choices.Count; i++) Assert.Equal(planets[choices.Indices[i]], choices.Labels[i]);
+
+        // Picking Obani Gemini, sixth in the combo, loads id 11; Metropolis is still 16.
+        Assert.Equal(11, choices.PlanetAt(5));
+        Assert.Equal(16, choices.PlanetAt(choices.PositionOf(16)));
+        Assert.Equal(-1, choices.PositionOf(15));
+
+        // A selection on a hidden id sits on the first row, which is Veldin either way.
+        Assert.Equal(1, choices.PlanetAt(choices.PositionFor(25)));
+    }
+
+    /// <summary>
+    /// An order that is not every index exactly once is no order: a module before build 53 sends
+    /// none, and the client lists by id rather than drop or repeat a planet.
+    /// </summary>
+    [Fact]
+    public void AnOrderThatIsNotEveryIndexOnceIsIgnored()
+    {
+        var planets = Deadlocked();
+        var byId = PlanetChoices.For(planets).Labels;
+
+        Assert.Equal(byId, PlanetChoices.For(planets, new[] { 4, 2, 1, 1, 0 }).Labels);
+        Assert.Equal(byId, PlanetChoices.For(planets, new[] { 4, 2, 1 }).Labels);
+        Assert.Equal(byId, PlanetChoices.For(planets, new[] { 4, 2, 1, 3, 9 }).Labels);
+        Assert.Equal(byId, PlanetChoices.For(planets, Array.Empty<int>()).Labels);
+
+        // And a whole one is followed, however short the list.
+        Assert.Equal(new[] { "Sarathos", "DreadZone", "Catacrom" },
+            PlanetChoices.For(planets, new[] { 4, 1, 2, 0, 3 }).Labels);
+    }
+
+    /// <summary>The combo is remembered by the list and the order together, so a new order for the same names is drawn.</summary>
+    [Fact]
+    public void TheSameNamesInANewOrderAreDrawnInIt()
+    {
+        var planets = Deadlocked();
+        var first = PlanetChoices.For(planets, new[] { 0, 1, 2, 3, 4 });
+        var second = PlanetChoices.For(planets, new[] { 4, 2, 1, 0, 3 });
+
+        Assert.Equal(new[] { "DreadZone", "Catacrom", "Sarathos" }, first.Labels);
+        Assert.Equal(new[] { "Sarathos", "Catacrom", "DreadZone" }, second.Labels);
+    }
+
     [Theory]
     [InlineData("(none)", true)]
     [InlineData("(unused)", true)]
@@ -1047,30 +1135,69 @@ public class PlanetResetOptionTests
     [Fact]
     public void RaC1OffersResetLevelFlagsBesideResetSpecialBolts()
     {
-        var options = PlanetResetOptions.For(GameId.Rac1);
+        foreach (byte build in new byte[] { 52, QwarkClient.ExpectedQwarkBuild })
+        {
+            var options = PlanetResetOptions.For(GameId.Rac1, build);
+
+            Assert.True(options.LevelFlags);
+            Assert.True(options.SpecialBolts);
+            Assert.Equal(
+                new[]
+                {
+                    new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags),
+                    new PlanetResetBox("Reset special bolts", PlanetFlags.ResetSpecialBolts),
+                },
+                options.Boxes());
+        }
+    }
+
+    /// <summary>
+    /// RaC2's load resets the level flags and leaves bit 1 alone: it has no per-planet special bolt
+    /// to take back, so a box for it would do nothing in that game while turning on RaC1's gold
+    /// bolt reset, the setting being one for the whole console.
+    /// </summary>
+    [Fact]
+    public void RaC2OffersTheLevelFlagsBoxOnly()
+    {
+        var options = PlanetResetOptions.For(GameId.Rac2, QwarkClient.ExpectedQwarkBuild);
 
         Assert.True(options.LevelFlags);
-        Assert.True(options.SpecialBolts);
+        Assert.False(options.SpecialBolts);
         Assert.Equal(
-            new[]
-            {
-                new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags),
-                new PlanetResetBox("Reset special bolts", PlanetFlags.ResetSpecialBolts),
-            },
+            new[] { new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags) },
             options.Boxes());
     }
 
     /// <summary>
-    /// RaC2's and UYA's loads reset the level flags and leave bit 1 alone: neither has a per-planet
-    /// special bolt to take back, so a box for it would do nothing in that game while turning on
-    /// RaC1's gold bolt reset, the setting being one for the whole console.
+    /// From build 53 UYA's load takes back the destination's titanium bolts on bit 1, so UYA gets
+    /// RaC1's row: the same two boxes, worded the same, in the same order.
     /// </summary>
     [Fact]
-    public void RaC2AndUyaOfferTheLevelFlagsBoxOnly()
+    public void UyaOffersRaC1sTwoBoxesAgainstBuild53()
     {
-        foreach (var game in new[] { GameId.Rac2, GameId.Rac3 })
+        var options = PlanetResetOptions.For(GameId.Rac3, PlanetResetOptions.Rac3SpecialBoltsBuild);
+
+        Assert.True(options.LevelFlags);
+        Assert.True(options.SpecialBolts);
+        Assert.Equal(PlanetResetOptions.For(GameId.Rac1, PlanetResetOptions.Rac3SpecialBoltsBuild).Boxes(),
+            options.Boxes());
+        Assert.Equal("Reset special bolts", options.Boxes()[1].Label);
+        Assert.Equal(53, PlanetResetOptions.Rac3SpecialBoltsBuild);
+        Assert.True(QwarkClient.ExpectedQwarkBuild >= PlanetResetOptions.Rac3SpecialBoltsBuild);
+
+        Assert.True(PlanetResetOptions.For(GameId.Rac3, 54).SpecialBolts);
+    }
+
+    /// <summary>
+    /// A module before build 53 ignores bit 1 in UYA, so against one the box is not drawn: it
+    /// would promise a reset the load does not make, and turn on RaC1's gold bolt reset besides.
+    /// </summary>
+    [Fact]
+    public void UyaAgainstAnOlderModuleOffersTheLevelFlagsBoxOnly()
+    {
+        foreach (byte build in new byte[] { 0, 12, 52 })
         {
-            var options = PlanetResetOptions.For(game);
+            var options = PlanetResetOptions.For(GameId.Rac3, build);
 
             Assert.True(options.LevelFlags);
             Assert.False(options.SpecialBolts);
@@ -1083,7 +1210,7 @@ public class PlanetResetOptionTests
     [Fact]
     public void DeadlockedHasNeither()
     {
-        var options = PlanetResetOptions.For(GameId.Rac4);
+        var options = PlanetResetOptions.For(GameId.Rac4, QwarkClient.ExpectedQwarkBuild);
 
         Assert.False(options.LevelFlags);
         Assert.False(options.SpecialBolts);
@@ -1093,7 +1220,7 @@ public class PlanetResetOptionTests
     [Fact]
     public void NoGameMeansNoBoxes()
     {
-        var options = PlanetResetOptions.For(GameId.None);
+        var options = PlanetResetOptions.For(GameId.None, QwarkClient.ExpectedQwarkBuild);
 
         Assert.False(options.LevelFlags);
         Assert.False(options.SpecialBolts);
@@ -1107,7 +1234,7 @@ public class PlanetResetOptionTests
     [Fact]
     public void TheBoxesShowTheStoredFlagsAsTheyAre()
     {
-        var rac1 = PlanetResetOptions.For(GameId.Rac1).Boxes();
+        var rac1 = PlanetResetOptions.For(GameId.Rac1, QwarkClient.ExpectedQwarkBuild).Boxes();
 
         Assert.Equal("Reset_level_flags:on Reset_special_bolts:off",
             PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.ResetLevelFlags));
@@ -1117,7 +1244,7 @@ public class PlanetResetOptionTests
             PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.None));
 
         // A bit the game does not act on has no box to show it in, and is not read as one that does.
-        var rac2 = PlanetResetOptions.For(GameId.Rac2).Boxes();
+        var rac2 = PlanetResetOptions.For(GameId.Rac2, QwarkClient.ExpectedQwarkBuild).Boxes();
         Assert.Equal("Reset_level_flags:off", PositionsPanel.ResetBoxSummary(rac2, PlanetFlags.ResetSpecialBolts));
     }
 }

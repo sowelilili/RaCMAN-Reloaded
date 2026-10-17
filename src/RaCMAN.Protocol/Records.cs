@@ -531,6 +531,52 @@ public sealed record PositionList(byte Planet, PositionSlot[] Slots)
     }
 }
 
+/// <summary>
+/// PLANET_LIST, section 5.5: the names, each at the planet id a request carries, and since build
+/// 53 the order a menu lists them in, which is the order the game visits them rather than the order
+/// it numbers them. <see cref="Order"/> is always every index exactly once: a module before build 53
+/// sends no order, and a reply whose bytes after the names are anything but every index once is
+/// read the same way, so either lists in id order.
+/// </summary>
+public sealed record PlanetList(string[] Names, int[] Order)
+{
+    public static PlanetList Empty { get; } = new(Array.Empty<string>(), Array.Empty<int>());
+
+    /// <summary>True when the reply carried an order (build 53 on), false when id order stands in for a missing or broken one.</summary>
+    public bool OrderSent { get; init; }
+
+    public static PlanetList Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int count = r.ReadU8();
+        var names = new string[count];
+        for (int i = 0; i < count; i++) names[i] = r.ReadFixedString(24);
+
+        if (r.Remaining >= count && count > 0)
+        {
+            var order = new int[count];
+            var seen = new bool[count];
+            bool whole = true;
+            for (int i = 0; i < count; i++)
+            {
+                int index = r.ReadU8();
+                if (index >= count || seen[index])
+                {
+                    whole = false;
+                    break;
+                }
+
+                seen[index] = true;
+                order[i] = index;
+            }
+
+            if (whole) return new PlanetList(names, order) { OrderSent = true };
+        }
+
+        return new PlanetList(names, Enumerable.Range(0, count).ToArray());
+    }
+}
+
 /// <summary>UNLOCK_LIST entry, 44 bytes.</summary>
 public sealed record Unlock(byte Id, byte Category, byte Fields, uint[] Values, string Name)
 {

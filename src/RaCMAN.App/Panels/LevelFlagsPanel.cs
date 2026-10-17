@@ -71,7 +71,7 @@ public static class LevelFlagsPanel
             // The filler names in the console list ("(none)", "(unused)", "(infinite loop)") are
             // not offered; _planet stays the real index the console expects, and one left on a
             // hidden id comes back as the first planet the game really has.
-            var choices = PlanetChoices.For(planets);
+            var choices = PlanetChoices.For(planets, state.PlanetOrder);
             int pick = choices.PositionFor(_planet);
             _planet = choices.PlanetAt(pick);
             if (ImGui.Combo("Planet", ref pick, choices.Labels, choices.Count))

@@ -159,7 +159,7 @@ else if (settings.Rpcs3Target)
     {
         state.Run(async () =>
         {
-            bool up = await state.Rpcs3.WaitForPortAsync(ConnectionPanel.HelperStartupWait).ConfigureAwait(false);
+            bool up = await state.Rpcs3.WaitForReadyAsync(ConnectionPanel.HelperStartupWait).ConfigureAwait(false);
             if (!up && state.Rpcs3.DiedOnStartup)
             {
                 // Same rule as the Connect button: a helper that died on the way up is reported,

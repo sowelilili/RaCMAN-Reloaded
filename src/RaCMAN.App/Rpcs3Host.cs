@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Net;
 using System.Net.NetworkInformation;
+using System.Net.Sockets;
 using RaCMAN.Protocol;
 
 namespace RaCMAN.App;
@@ -278,6 +280,89 @@ public sealed class Rpcs3Host : IDisposable
         }
 
         return PortInUse(QwarkPort);
+    }
+
+    /// <summary>How often <see cref="WaitForReadyAsync"/> asks again while the helper is still booting.</summary>
+    public static readonly TimeSpan ReadyPollInterval = TimeSpan.FromMilliseconds(50);
+
+    /// <summary>
+    /// Waits until the helper will keep a client: its port is open and a HELLO there is answered.
+    /// The port opening is not that. A helper that has just started and finds a game RPCS3 is
+    /// already running boots into it, and through the boot's quiet second and the rest of BOOTING
+    /// qwark closes every new connection as it arrives (PROTOCOL.md 1.1): against the tests' fake
+    /// PINE server, for half a second after the port opens. A client that connected into that was
+    /// dropped at once, said so, and came back a second later on its reconnect loop's first retry,
+    /// which was the second the switch to RPCS3 took. Asking with a HELLO of this method's own, on a
+    /// socket of its own, every <see cref="ReadyPollInterval"/>, the client connects the moment
+    /// the helper would keep it, and its own connection is never the one dropped.
+    /// <para>
+    /// False when the time ran out or the helper died on the way up (<see cref="DiedOnStartup"/>,
+    /// as <see cref="WaitForPortAsync"/> says it). Connecting anyway after a timeout is still the
+    /// right thing to try: the reconnect loop then does what it always did.
+    /// </para>
+    /// </summary>
+    public async Task<bool> WaitForReadyAsync(TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        if (!await WaitForPortAsync(timeout, cancellationToken).ConfigureAwait(false)) return false;
+
+        while (true)
+        {
+            var left = deadline - DateTime.UtcNow;
+            if (left <= TimeSpan.Zero) return false;
+
+            if (await AnswersHelloAsync(QwarkPort, left, cancellationToken).ConfigureAwait(false)) return true;
+
+            if (!IsRunning && !Adopted && ExitCode is { } code)
+            {
+                Problem = $"{ExeName} {DescribeExit(code)} before it took a client on port {QwarkPort}";
+                DiedOnStartup = true;
+                return false;
+            }
+
+            await Task.Delay(ReadyPollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// One HELLO to a qwark on this PC's <paramref name="port"/>, on a connection of its own that
+    /// is closed again at once: true when it is answered OK, false when nothing listens, the
+    /// connection is closed or reset, or no answer comes inside <paramref name="timeout"/>. HELLO
+    /// changes nothing on the console, and is one of the requests qwark answers even mid-boot on a
+    /// connection it already holds, so an answer means only that a new client is kept.
+    /// </summary>
+    public static async Task<bool> AnswersHelloAsync(int port, TimeSpan timeout, CancellationToken cancellationToken = default)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(timeout);
+
+        using var socket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+        try
+        {
+            await socket.ConnectAsync(new IPEndPoint(IPAddress.Loopback, port), cts.Token).ConfigureAwait(false);
+
+            var hello = Frame.Request(Opcode.Hello, 1, new[] { QwarkClient.ClientProtocolVersion }).Encode();
+            await socket.SendAsync(hello, SocketFlags.None, cts.Token).ConfigureAwait(false);
+
+            var header = new byte[Frame.HeaderSize];
+            for (int got = 0; got < header.Length;)
+            {
+                int n = await socket.ReceiveAsync(header.AsMemory(got), SocketFlags.None, cts.Token).ConfigureAwait(false);
+                if (n == 0) return false;
+                got += n;
+            }
+
+            var (_, seq, code) = Frame.DecodeHeader(header);
+            return seq == 1 && code == (ushort)RaCMAN.Protocol.Status.Ok;
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return false;
+        }
+        catch (Exception ex) when (ex is SocketException or ProtocolException or IOException)
+        {
+            return false;
+        }
     }
 
     /// <summary>

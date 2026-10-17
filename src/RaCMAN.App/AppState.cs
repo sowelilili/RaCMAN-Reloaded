@@ -377,6 +377,13 @@ public sealed class AppState : IDisposable
 
     public string[] Planets { get; private set; } = Array.Empty<string>();
 
+    /// <summary>
+    /// The order PLANET_LIST says a menu lists <see cref="Planets"/> in (build 53): ids, every one
+    /// once, in the order the game visits them. The ids in turn for a game whose numbering is its
+    /// order, and for a module from before the console sent one.
+    /// </summary>
+    public int[] PlanetOrder { get; private set; } = Array.Empty<int>();
+
     public WatchEntry[] Watches { get; private set; } = Array.Empty<WatchEntry>();
 
     public FreezeEntry[] Freezes { get; private set; } = Array.Empty<FreezeEntry>();
@@ -936,6 +943,7 @@ public sealed class AppState : IDisposable
         Autosplitter.Descriptors = AutosplitEvents;
         Autosplitter.Game = GameId.None;
         Planets = Array.Empty<string>();
+        PlanetOrder = Array.Empty<int>();
         Autosplitter.PlanetNames = Planets;
         EnumOptions.Clear();
         Unlocks = UnlockList.Empty;
@@ -1080,8 +1088,9 @@ public sealed class AppState : IDisposable
 
             Run(() => Client.PlanetListAsync(), planets =>
             {
-                Planets = planets;
-                Autosplitter.PlanetNames = planets;
+                Planets = planets.Names;
+                PlanetOrder = planets.Order;
+                Autosplitter.PlanetNames = planets.Names;
             }, quiet);
 
             RefreshAutosplitEvents();
