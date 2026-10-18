@@ -65,7 +65,7 @@ The Save files panel has premade saves in its last category, **(premade savefile
 
 ## Console menu
 
-On a console, Deadlocked has a RaCMAN menu on the TV. Open it from **Options** in the pause menu, or press L1, R1, L2, R2, L3 and R3 together in play. The Combos panel can change that combo or turn it off.
+On a console, Deadlocked has a RaCMAN menu on the TV. Press L1, R1, L2, R2, L3 and R3 together in play to open it. The Combos panel can change that combo; turning it off leaves no way into the menu.
 
 ## Updates
 
