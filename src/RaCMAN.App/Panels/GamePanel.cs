@@ -641,6 +641,10 @@ public static class GamePanel
                 Ui.Heading(headings[i].Heading!);
                 ImGui.PushID($"manip-header-{i}");
                 DrawFeatureBlock(state, describe, headings[i].Features, section, toggleColumns, leadingSpace: false);
+
+                // Revision 1.21: what an ACTION with a status readout is doing, under the block
+                // (UYA's trophy reset), and nothing for one that names none.
+                ManipsArea.DrawStatusLines(state, headings[i].Features);
                 ImGui.PopID();
             }
 

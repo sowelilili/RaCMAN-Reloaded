@@ -8,7 +8,8 @@ namespace RaCMAN.App.Panels;
 /// dropdown, the auto-reset and remember switches, Apply now, the warning about per-run manips and
 /// a line for the console's last event. The headings MANIP_LIST names under it (Deadlocked's Fixes,
 /// UYA's Trophies) are drawn by <see cref="GamePanel"/>, which owns the feature controls, from
-/// <see cref="HeaderBlocks"/>.
+/// <see cref="HeaderBlocks"/>, each with <see cref="DrawStatusLines"/> under it: the trophy reset's
+/// status, from its status readout in the last telemetry (revision 1.21).
 /// <para>
 /// Everything here is drawn from <see cref="AppState.Manips"/>, MANIP_LIST's last answer, and each
 /// control sends one request and reads the list again. The client keeps no selection and no option
@@ -54,6 +55,82 @@ public static class ManipsArea
         ManipEvents.NoticeFor(list) is { } notice ? $"Last: {notice.Text}" : null;
 
     /// <summary>
+    /// The line under UYA's Trophies heading for the trophy reset's status word (revision 1.21), or
+    /// null for nothing to say: no reset this boot, or a state this client does not know. It is read
+    /// at a glance between attempts, so it stays short; the console's log has the details.
+    /// </summary>
+    public static string? TrophyLine(TrophyResetStatus status) => status.State switch
+    {
+        TrophyResetState.Running => status.Step switch
+        {
+            TrophyResetStep.Deleting => "Trophies: resetting... (deleting)",
+            TrophyResetStep.Registering when status.Registrations >= 2 =>
+                $"Trophies: resetting... (registering, attempt {status.Registrations})",
+            TrophyResetStep.Registering => "Trophies: resetting... (registering)",
+            _ => "Trophies: resetting...",
+        },
+        TrophyResetState.Ready => $"Trophies ready ({status.Seconds} s)",
+        TrophyResetState.Failed => $"Trophy reset failed: {FailureText(status)}",
+        _ => null,
+    };
+
+    /// <summary>Why a trophy reset failed, in a few words.</summary>
+    private static string FailureText(TrophyResetStatus status) => status.Failure switch
+    {
+        TrophyResetFailure.DeleteStopped => "a trophy file could not be deleted",
+        TrophyResetFailure.Unregistered => "the game could not re-register its trophies",
+        TrophyResetFailure.NoAnswer => "the console did not answer, restart the game",
+        TrophyResetFailure.LoadEnded => "the Veldin load ended first",
+        TrophyResetFailure.GameRefused => "the game refused it",
+        TrophyResetFailure.NotTaken => "the game did not respond",
+        TrophyResetFailure.Refused when status.RefusedWith == Status.NotFound => "trophy folder not found",
+        TrophyResetFailure.Refused => $"refused ({status.RefusedWith})",
+        TrophyResetFailure.Stopped => "the game changed under it",
+        _ => $"reason {status.Detail}",
+    };
+
+    /// <summary>
+    /// The status line for <paramref name="feature"/>, when it is an ACTION that names a status
+    /// readout (UYA's Reset trophies, revision 1.21), read from <paramref name="session"/>; null for
+    /// every other feature, for a qwark that names no status readout, and for nothing to say.
+    /// </summary>
+    public static (string Text, TrophyResetState State)? StatusLine(SessionInfo session, Feature feature)
+    {
+        if (feature.StatusReadout is not { } index || session.ReadoutAt(index) is not { } word) return null;
+
+        var status = TrophyResetStatus.Parse(word);
+        return TrophyLine(status) is { } text ? (text, status.State) : null;
+    }
+
+    /// <summary>
+    /// The status lines of a heading's features, drawn under its button and its toggle: grey while
+    /// a reset runs, green once the trophies are ready, red when one failed. Nothing at all before
+    /// the first reset of a boot.
+    /// </summary>
+    public static void DrawStatusLines(AppState state, IReadOnlyList<Feature> features)
+    {
+        foreach (var feature in features)
+        {
+            if (StatusLine(state.Session, feature) is not { } line) continue;
+
+            switch (line.State)
+            {
+                case TrophyResetState.Ready:
+                    Ui.Success(line.Text);
+                    break;
+
+                case TrophyResetState.Failed:
+                    Ui.Error(line.Text);
+                    break;
+
+                default:
+                    Ui.Hint(line.Text);
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
     /// The headings drawn under the controls: each header MANIP_LIST names, in its order, with the
     /// features of <paramref name="features"/> it lists, in the header's order and whatever their
     /// kind. A feature two headers list goes under the first, and a header with nothing to draw
@@ -81,24 +158,29 @@ public static class ManipsArea
 
     /// <summary>
     /// What the headless summary prints: "hidden" while there is no list, otherwise the selection,
-    /// the two options, the groups, the headings with the features under each, the last event and
-    /// whether there is a warning.
+    /// the two options, the groups, the headings with the features under each, the last event,
+    /// whether there is a warning and the trophy reset's status line ("-" for none).
     /// </summary>
     public static string Summary(AppState state)
     {
         if (state.Manips is not { } list) return "hidden";
 
         string Name(string text) => text.Replace(' ', '_');
+        var blocks = HeaderBlocks(list, state.Describe.Features);
         string groups = string.Join(",", list.Groups.Select(g =>
             Name(g.Name) + (g.IsExtension ? "*" : string.Empty) + (g.HasPerRun ? "!" : string.Empty)));
-        string headers = string.Join(" ", HeaderBlocks(list, state.Describe.Features).Select(b =>
+        string headers = string.Join(" ", blocks.Select(b =>
             $"{Name(b.Heading!)}:{string.Join(",", b.Features.Select(f => Name(f.Label)))}"));
+        string? status = blocks.SelectMany(b => b.Features)
+            .Select(f => StatusLine(state.Session, f)?.Text)
+            .FirstOrDefault(text => text is not null);
 
         return $"selected={Name(list.GroupName(list.Selected))} auto={(list.AutoReset ? "on" : "off")} "
                + $"remember={(list.Remember ? "on" : "off")} groups=[{groups}] "
                + $"headers=[{headers}] event={list.EventSeq}:{list.EventKind} "
                + $"toasts={state.ManipToasts} drawn={(Drawn ? "yes" : "no")} "
-               + $"warning={(Warning(list) is null ? "no" : "yes")}";
+               + $"warning={(Warning(list) is null ? "no" : "yes")} "
+               + $"trophies={(status is null ? "-" : Name(status))}";
     }
 
     public static void Draw(AppState state, ManipList list)
@@ -116,14 +198,12 @@ public static class ManipsArea
         if (ImGui.Checkbox("Auto-reset", ref autoReset)) state.SetManipOptions(autoReset, list.Remember);
         // The console's trigger is the start of a run, not every load: a load into the first planet
         // in RaC1, RaC2 and UYA, a new game or a challenge-mode start in Deadlocked.
-        Ui.Tooltip("Apply the category's per-run manips again at the start of every run: when a save or a "
-                   + "new game loads the first planet, or in Deadlocked a new game or a challenge-mode start. "
-                   + "To practise from a save on another planet, use Apply now.");
+        Ui.Tooltip("Apply the category's per-run manips again at the start of every run");
 
         ImGui.SameLine();
         bool remember = list.Remember;
         if (ImGui.Checkbox("Remember category", ref remember)) state.SetManipOptions(list.AutoReset, remember);
-        Ui.Tooltip("Keep this category when the game is restarted. When this is off, the game starts at None.");
+        Ui.Tooltip("Automatically apply your last category's manips on the next game boot.");
 
         bool none = list.SelectedGroup is null;
         ImGui.BeginDisabled(none);
@@ -131,8 +211,7 @@ public static class ManipsArea
         ImGui.EndDisabled();
         Ui.Tooltip(none
             ? "Pick a category type first."
-            : "Apply the category's manips now, for example after loading a save on another planet. "
-              + "A save must be loaded.");
+            : "Apply the category's manips now. A save must be loaded.");
 
         if (Warning(list) is { } warning) Ui.Warning(warning);
         if (LastEventLine(list) is { } line) Ui.Hint(line);

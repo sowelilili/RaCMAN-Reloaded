@@ -740,6 +740,13 @@ public sealed class FakeQwarkServer : IDisposable
     public const byte TrophyAutoResetId = 39;
 
     /// <summary>
+    /// The readout the trophy reset names as its status (revision 1.21), by the name qwark's UYA
+    /// table gives it. The fake adds it after the table's own readouts; the client finds it through
+    /// the reset's row and never by this name.
+    /// </summary>
+    public const string TrophyStatusReadoutName = "Trophy reset";
+
+    /// <summary>
     /// The headings each game's MANIP_LIST carries, with the DESCRIBE labels of the features listed
     /// under each: Deadlocked's Fixes and UYA's Trophies, and none for the other two.
     /// </summary>
@@ -811,11 +818,14 @@ public sealed class FakeQwarkServer : IDisposable
     /// lacks them, for a fake session moved to that game, so a headless run has something to draw
     /// under each heading: Deadlocked's two fixes (toggles, the crash patches writing code) and
     /// UYA's trophy reset button and its toggle, at qwark's ids 21 and 39 unless a feature already
-    /// has one of those.
+    /// has one of those. The reset names a status readout, as build 53 does from revision 1.21: one
+    /// called <see cref="TrophyStatusReadoutName"/>, added after the table's readouts, which reads
+    /// 0, no reset this boot, until <see cref="SetTrophyStatus"/> says otherwise.
     /// </summary>
     public static DescribeResult WithManipHeaderFeatures(DescribeResult describe, GameId game)
     {
         var features = describe.Features.ToList();
+        var readouts = describe.Readouts.ToList();
         foreach (var (_, labels) in ManipHeadersFor(game))
         {
             foreach (var label in labels)
@@ -826,11 +836,45 @@ public sealed class FakeQwarkServer : IDisposable
                 byte id = wanted is { } at && features.All(f => f.Id != at)
                     ? at
                     : (byte)(features.Count == 0 ? 0 : features.Max(f => f.Id) + 1);
-                features.Add(new Feature(id, kind, 0, 0, flags, 0xFF, 0, 0, label));
+
+                byte readout = SessionInfo.NoReadout;
+                if (label == TrophyResetLabel)
+                {
+                    int index = readouts.IndexOf(TrophyStatusReadoutName);
+                    if (index < 0 && readouts.Count < SessionInfo.ReadoutCount)
+                    {
+                        readouts.Add(TrophyStatusReadoutName);
+                        index = readouts.Count - 1;
+                    }
+
+                    if (index >= 0) readout = (byte)index;
+                }
+
+                features.Add(new Feature(id, kind, 0, 0, flags, readout, 0, 0, label));
             }
         }
 
-        return describe with { Features = features.ToArray() };
+        return describe with { Features = features.ToArray(), Readouts = readouts.ToArray() };
+    }
+
+    /// <summary>
+    /// Puts <paramref name="status"/> in the readout the trophy reset's row names as its status, as
+    /// qwark does on every tick (revision 1.21), so the next telemetry carries it. False, with
+    /// nothing changed, when the table has no trophy reset that names one, as an older module has
+    /// none.
+    /// </summary>
+    public bool SetTrophyStatus(TrophyResetStatus status)
+    {
+        lock (_gate)
+        {
+            var reset = Array.Find(Describe.Features, f => f.Label == TrophyResetLabel && f.StatusReadout is not null);
+            if (reset?.StatusReadout is not { } index) return false;
+
+            var readouts = (uint[])_session.Readout.Clone();
+            readouts[index] = status.ToWord();
+            _session = _session with { Readout = readouts };
+            return true;
+        }
     }
 
     /// <summary>

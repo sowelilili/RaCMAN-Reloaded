@@ -21,7 +21,8 @@ public static class FakeScript
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
-                                + "manip[:kind[:group]]";
+                                + "manip[:kind[:group]], "
+                                + "trophies[:none|starting|deleting|registering|ready|failed[:n]]";
 
     /// <summary>The folder <c>consolemod</c> puts on the fake console when the step names none.</summary>
     public const string DefaultConsoleMod = "old-savefile-helper";
@@ -88,6 +89,28 @@ public static class FakeScript
     private static bool StepCarriesTime(AutosplitKind kind) =>
         kind is AutosplitKind.LoadStart or AutosplitKind.LoadEnd or AutosplitKind.Pause or AutosplitKind.Resume;
 
+    /// <summary>
+    /// The trophy status a <c>trophies[:state[:n]]</c> step names, or null for a state it does not
+    /// know. <c>n</c> is the registration for <c>registering</c>, the seconds for <c>ready</c> (13
+    /// when left out) and the reason for <c>failed</c> (2, every registration failed, when left out).
+    /// </summary>
+    public static TrophyResetStatus? TrophyStep(string[] parts)
+    {
+        string state = parts.Length > 1 ? parts[1] : "ready";
+        int? n = parts.Length > 2 && int.TryParse(parts[2], out var value) ? value : null;
+
+        return state switch
+        {
+            "none" => default(TrophyResetStatus),
+            "starting" => TrophyResetStatus.Running(TrophyResetStep.Starting),
+            "deleting" => TrophyResetStatus.Running(TrophyResetStep.Deleting),
+            "registering" => TrophyResetStatus.Running(TrophyResetStep.Registering, n ?? 1),
+            "ready" => TrophyResetStatus.Ready(n ?? 13),
+            "failed" => TrophyResetStatus.Failed((TrophyResetFailure)(n ?? (int)TrophyResetFailure.Unregistered)),
+            _ => null,
+        };
+    }
+
     public static void Apply(FakeQwarkServer fake, string step)
     {
         // "split:1:3" is one step: the kind, then the reason code and its argument. For a timing
@@ -123,6 +146,20 @@ public static class FakeScript
             byte? group = parts.Length > 2 && byte.TryParse(parts[2], out var g) ? g : null;
             ushort seq = fake.RaiseManipEvent((ManipEventKind)kindNumber, group);
             Console.WriteLine($"fake-script manip seq={seq} kind={(ManipEventKind)kindNumber} group={group?.ToString() ?? "selected"}");
+            return;
+        }
+
+        // UYA's trophy reset status (revision 1.21), as qwark reports it through the reset's status
+        // readout: "trophies:registering:2" is the second registration, "trophies:ready:13" a reset
+        // that took 13 s, "trophies:failed:2" one that failed for reason 2, and "trophies:none" no
+        // reset this boot. Run "rac3" first, so the fake has the reset and its readout.
+        if (parts[0] == "trophies")
+        {
+            var status = TrophyStep(parts);
+            bool set = status is { } s && fake.SetTrophyStatus(s);
+            Console.WriteLine(set
+                ? $"fake-script trophies word=0x{status!.Value.ToWord():X8}"
+                : $"fake-script trophies: nothing set for '{step}' (no such state, or no trophy reset in the table)");
             return;
         }
 

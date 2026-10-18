@@ -288,8 +288,7 @@ public static class SaveFilesPanel
 
         if (premade)
         {
-            Ui.Hint("Load one into the game, or right-click it to copy it into your own savefiles, " +
-                    "where you can rename it and save over it.");
+            Ui.Hint("Right click to copy a save into your own");
         }
 
         ImGui.Spacing();
@@ -303,8 +302,11 @@ public static class SaveFilesPanel
             if (_transferred > 0) Ui.Hint($"{_transferred} bytes");
         }
 
-        DrawRenameQuestion(state);
-        DrawDeleteQuestion(state);
+        if (!premade)
+        {
+            DrawRenameQuestion(state);
+            DrawDeleteQuestion(state);
+        }
     }
 
     private static void DrawCategoryRow(AppState state, string title)
@@ -640,9 +642,9 @@ public static class SaveFilesPanel
     /// <summary>What the delete dialog says will be deleted, by where the save lives.</summary>
     public static string DeleteWhere(SaveFileEntry entry) => entry.Location switch
     {
-        SaveFileLocation.Console => $"{entry.DisplayName} is deleted from the console. This PC has no copy of it.",
-        SaveFileLocation.Pc => $"{entry.DisplayName} is deleted from this PC. The console has no copy of it.",
-        _ => $"{entry.DisplayName} is deleted from the console and from this PC.",
+        SaveFileLocation.Console => $"{entry.DisplayName} will be deleted from the console. This PC has no copy of it.",
+        SaveFileLocation.Pc => $"{entry.DisplayName} will be deleted from this PC. The console has no copy of it.",
+        _ => $"{entry.DisplayName} will be deleted from the console and from this PC.",
     };
 
     /// <summary>
@@ -765,7 +767,7 @@ public static class SaveFilesPanel
 
         Ui.Paragraph(DeleteWhere(question.Entry));
         ImGui.Spacing();
-        Ui.Hint("A deleted save cannot be brought back.");
+        Ui.Hint("This action is permanent.");
         ImGui.Separator();
 
         ImGui.BeginDisabled(_busy);

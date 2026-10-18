@@ -345,6 +345,19 @@ public sealed record Feature(
             ? Readout
             : null;
 
+    /// <summary>
+    /// The index of this ACTION's status readout, a word that says what the action is doing and how
+    /// it last ended (revision 1.21, PROTOCOL.md section 5.3), or null when it names none, as every
+    /// ACTION did before that revision. UYA's Reset trophies is the one that does, and its word is a
+    /// <see cref="TrophyResetStatus"/>.
+    /// </summary>
+    public byte? StatusReadout =>
+        Kind == FeatureKind.Action
+        && Readout != SessionInfo.NoReadout
+        && Readout < SessionInfo.ReadoutCount
+            ? Readout
+            : null;
+
     public static Feature Parse(ReadOnlySpan<byte> entry)
     {
         if (entry.Length < Size)

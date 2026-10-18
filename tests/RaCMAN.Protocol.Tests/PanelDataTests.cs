@@ -2343,9 +2343,9 @@ public class SaveFileRowMenuTests
     [Fact]
     public void TheDialogsSayWhichCopiesAreRenamedOrDeleted()
     {
-        Assert.Equal("veldin is deleted from the console and from this PC.", SaveFilesPanel.DeleteWhere(Category[0]));
-        Assert.Equal("Kerwan is deleted from the console. This PC has no copy of it.", SaveFilesPanel.DeleteWhere(Category[1]));
-        Assert.Equal("novalis is deleted from this PC. The console has no copy of it.", SaveFilesPanel.DeleteWhere(Category[2]));
+        Assert.Equal("veldin will be deleted from the console and from this PC.", SaveFilesPanel.DeleteWhere(Category[0]));
+        Assert.Equal("Kerwan will be deleted from the console. This PC has no copy of it.", SaveFilesPanel.DeleteWhere(Category[1]));
+        Assert.Equal("novalis will be deleted from this PC. The console has no copy of it.", SaveFilesPanel.DeleteWhere(Category[2]));
 
         Assert.Contains("both renamed", SaveFilesPanel.RenameWhere(Category[0]));
         Assert.StartsWith("Only the console", SaveFilesPanel.RenameWhere(Category[1]));
