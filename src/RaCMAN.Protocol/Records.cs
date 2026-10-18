@@ -450,6 +450,35 @@ public sealed record DescribeResult(GameId Game, string[] Groups, string[] Reado
     public string GroupName(byte index) => index < Groups.Length ? Groups[index] : $"Group {index}";
 
     public string ReadoutName(int index) => index >= 0 && index < Readouts.Length ? Readouts[index] : $"readout[{index}]";
+
+    /// <summary>
+    /// Whether <paramref name="other"/> lays the game out exactly as this does: the same game, the
+    /// same groups and readout names in the same order, and the same rows field for field. The
+    /// one thing left out is each row's AUTO bit. qwark fills it in from <c>toggle_auto</c> as it
+    /// answers, so it is the user's "on boot" choice rather than part of the table: it changes with
+    /// every FEATURE_SET_AUTO, telemetry carries the same bits, and two answers from one module
+    /// would otherwise differ for nothing. A new connection compares the description on screen
+    /// with the module's answer this way rather than byte for byte, which would take a box ticked
+    /// before the link went for a different module.
+    /// </summary>
+    public bool SameLayoutAs(DescribeResult other)
+    {
+        if (ReferenceEquals(this, other)) return true;
+        if (Game != other.Game) return false;
+        if (!Groups.AsSpan().SequenceEqual(other.Groups)) return false;
+        if (!Readouts.AsSpan().SequenceEqual(other.Readouts)) return false;
+        if (Features.Length != other.Features.Length) return false;
+
+        for (int i = 0; i < Features.Length; i++)
+        {
+            if (WithoutAuto(Features[i]) != WithoutAuto(other.Features[i])) return false;
+        }
+
+        return true;
+    }
+
+    private static Feature WithoutAuto(Feature feature) =>
+        feature with { Flags = feature.Flags & ~FeatureFlags.Auto };
 }
 
 /// <summary>WATCH_LIST entry.</summary>

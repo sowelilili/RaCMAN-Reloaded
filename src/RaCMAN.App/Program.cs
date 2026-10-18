@@ -245,7 +245,12 @@ if (exitAfter > 0)
                       // The last error toast of the run, so a headless session change can be
                       // checked for the refusals a launch used to spray across the screen.
                       $"lasterror=\"{state.LastError ?? "(none)"}\" " +
-                      $"autosplitevents={state.AutosplitEvents.Length} " +
+                      $"autosplitevents={state.AutosplitEvents.Length} readouts={state.Describe.Readouts.Length} " +
+
+                      // The DESCRIBE each new connection owes: how many were answered, how many of
+                      // those found another description, and how often the panels started again.
+                      $"describechecks={state.DescriptionChecks}/{state.DescriptionsReplaced} " +
+                      $"panelresets={state.PanelResets} " +
 
                       // The manips area as MANIP_LIST last described it, and whether it was drawn.
                       $"manips=\"{ManipsArea.Summary(state)}\" " +

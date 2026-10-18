@@ -1999,7 +1999,7 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.Describe:
                     DescribeCount++;
-                    return (Status.Ok, EncodeDescribe(Describe));
+                    return (Status.Ok, EncodeDescribe(WithAutoFlags(Describe, _session.ToggleAuto)));
 
                 case Opcode.FeatureSet:
                 {
@@ -3050,6 +3050,21 @@ public sealed class FakeQwarkServer : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// The AUTO bit each TOGGLE row carries on the wire: the row's own, and the toggle's bit in
+    /// <c>toggle_auto</c>, which qwark ORs in as it answers (features.c). It is why two DESCRIBE
+    /// answers from one module differ once an "on boot" box has been ticked in between.
+    /// </summary>
+    public static DescribeResult WithAutoFlags(DescribeResult describe, ulong toggleAuto) =>
+        describe with
+        {
+            Features = describe.Features
+                .Select(f => f.Kind == FeatureKind.Toggle && f.Id < 64 && (toggleAuto & (1UL << f.Id)) != 0
+                    ? f with { Flags = f.Flags | FeatureFlags.Auto }
+                    : f)
+                .ToArray(),
+        };
 
     public static byte[] EncodeDescribe(DescribeResult describe)
     {

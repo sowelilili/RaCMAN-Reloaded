@@ -28,10 +28,11 @@ public sealed class Toast
 /// the unlock table's shape, whether the game has level flags — belongs to the game, not to the
 /// process running it or to this connection. It is therefore kept for as long as the same game
 /// keeps coming back: a quit to the XMB, a reboot and a dropped link all leave it alone, and the
-/// panels draw it with their controls greyed out until the session is INGAME again. Only a
-/// different game, a different qwark build or the user asking for a re-read replaces it. Anything
-/// read out of the running process goes the moment that process does; see
-/// <see cref="ClearGameViews"/>.
+/// panels draw it with their controls greyed out until the session is INGAME again. A different
+/// game, a different qwark build or the user asking for a re-read replaces it, and so does a
+/// module that describes the game differently under the same build number, which is what every
+/// new connection reads DESCRIBE once to find out (<see cref="CheckDescription"/>). Anything read
+/// out of the running process goes the moment that process does; see <see cref="ClearGameViews"/>.
 /// </para>
 /// </summary>
 public sealed class AppState : IDisposable
@@ -39,11 +40,15 @@ public sealed class AppState : IDisposable
     /// <summary>
     /// Which game the described data on this object belongs to, and which module described it. A
     /// build that is replaced under a running game describes it differently, so it is part of the
-    /// key rather than something to notice later.
+    /// key rather than something to notice later. A module replaced by another of the same build
+    /// number is not in it, and cannot be: that is what <see cref="CheckDescription"/> is for.
     /// </summary>
     private readonly record struct DescribedKey(GameId Game, byte QwarkVersion, byte ProtocolVersion)
     {
         public bool IsEmpty => Game == GameId.None;
+
+        public static DescribedKey Of(SessionInfo session) =>
+            new(session.Game, session.QwarkVersion, session.ProtocolVersion);
     }
 
     private readonly ConcurrentQueue<Action> _actions = new();
@@ -68,6 +73,30 @@ public sealed class AppState : IDisposable
     /// first tick that finds the session INGAME again reads back what was held, once.
     /// </summary>
     private bool _heldBack;
+
+    /// <summary>
+    /// Set by every connection that comes up, and cleared by the first DESCRIBE that connection
+    /// sends, a check or a key change's read. Only a new connection can bring a new module: the
+    /// console has to restart, or the module be reloaded, for one to replace another, and either
+    /// takes the link down with it. So the description is read again once per connection, at the
+    /// first tick that finds the game INGAME on it, and never on a quit or a reboot.
+    /// </summary>
+    private bool _describeOwed;
+
+    /// <summary>A check's DESCRIBE is out: one at a time, so a slow answer is never asked twice.</summary>
+    private bool _describeChecking;
+
+    /// <summary>
+    /// Counts the connections that have come up, so an answer that left on one is never taken for
+    /// the next one's: the module on the other end may not be the same.
+    /// </summary>
+    private int _connection;
+
+    /// <summary>
+    /// Moves on every time the description is adopted or dropped, so a check that left before one
+    /// of those compares nothing with a description it was not asked about.
+    /// </summary>
+    private int _describedEpoch;
 
     private int _inFlight;
 
@@ -172,7 +201,13 @@ public sealed class AppState : IDisposable
             }
 
             // Not a re-read of everything: if this is the game that was running when the link
-            // went, its description is still on screen and still true. The tick decides.
+            // went, its description is still on screen and probably still true. The tick decides,
+            // and the one DESCRIBE this connection owes is how it finds out whether the module
+            // that answered is one that describes the game the same way. The build number cannot
+            // say: a module rebuilt under the same one, as every build is until it is released,
+            // reports the same key with different rows.
+            _connection++;
+            _describeOwed = true;
             AdoptSession();
         });
 
@@ -422,6 +457,20 @@ public sealed class AppState : IDisposable
 
     /// <summary>How many manip events this run has toasted, for the headless summary.</summary>
     public int ManipToasts { get; private set; }
+
+    /// <summary>
+    /// How many times this run has thrown the panels away, drafts and all (<see cref="ResetPanels"/>),
+    /// for the headless summary: what tells a module change from a reconnect that kept everything.
+    /// </summary>
+    public int PanelResets { get; private set; }
+
+    /// <summary>
+    /// How many of the checks new connections owe (<see cref="CheckDescription"/>) have been
+    /// answered, and how many of those found a description other than the one on screen.
+    /// </summary>
+    public int DescriptionChecks { get; private set; }
+
+    public int DescriptionsReplaced { get; private set; }
 
     private readonly ManipEvents _manipEvents = new();
 
@@ -805,12 +854,12 @@ public sealed class AppState : IDisposable
         // the previous game's cheats on screen and a "Describe: Unsupported" toast under them.
         if (session.State == SessionState.Ingame && session.Game != GameId.None)
         {
-            var key = new DescribedKey(session.Game, session.QwarkVersion, session.ProtocolVersion);
+            var key = DescribedKey.Of(session);
             if (key != _described)
             {
                 // A different game, or a module replaced under this one: nothing on screen belongs
-                // to it. This is one of the three ways the description is ever thrown away, and
-                // the read that follows is what adopts the new one.
+                // to it. This is one of the ways the description is ever thrown away, and the read
+                // that follows is what adopts the new one.
                 if (!_described.IsEmpty) ResetPanels();
                 _liveStale = false;
 
@@ -818,30 +867,44 @@ public sealed class AppState : IDisposable
                 _heldBack = false;
                 RefreshAll();
             }
-            else if (_liveStale)
+            else
             {
-                // The same game again, whatever generation and whatever happened to the link: the
-                // layout on screen is still this game's, so only the values are read again.
-                _liveStale = false;
-                DescribedTitle = session.TitleId;
-                RefreshLive();
+                // A new connection owes one DESCRIBE, asked the first tick it finds the game: the
+                // module that answered may not be the one that described what is on screen.
+                bool check = _describeOwed && !_describeChecking;
 
-                // And the console-side probes a launch refused, which RefreshLive does not carry
-                // and nothing else would ask for again. Once: the flag is what stops a game that
-                // boots and quits and boots from reading them three times over.
-                if (_heldBack)
+                if (_liveStale)
                 {
-                    _heldBack = false;
-                    RefreshAutosplitEvents();
-                    RefreshSaveFileInfo();
+                    // The same game again, whatever generation and whatever happened to the link:
+                    // the layout on screen is still this game's, so only the values are read again.
+                    _liveStale = false;
+                    DescribedTitle = session.TitleId;
+                    RefreshLive();
+
+                    // And the console-side probes a launch refused, which RefreshLive does not
+                    // carry and nothing else would ask for again. Once: the flag is what stops a
+                    // game that boots and quits and boots from reading them three times over. A
+                    // check reads both of them itself.
+                    if (check)
+                    {
+                        _heldBack = false;
+                    }
+                    else if (_heldBack)
+                    {
+                        _heldBack = false;
+                        RefreshAutosplitEvents();
+                        RefreshSaveFileInfo();
+                    }
+                    else if (CodePatchesUnsupported)
+                    {
+                        // Under RPCS3 the helper is in the game only if the RPCS3 patch was applied
+                        // when this boot loaded the executable, so every boot has its own answer,
+                        // and the restart the patch asks for is exactly this branch.
+                        RefreshSaveFileInfo();
+                    }
                 }
-                else if (CodePatchesUnsupported)
-                {
-                    // Under RPCS3 the helper is in the game only if the RPCS3 patch was applied when
-                    // this boot loaded the executable, so every boot has its own answer, and the
-                    // restart the patch asks for is exactly this branch.
-                    RefreshSaveFileInfo();
-                }
+
+                if (check && !HoldsBackgroundWork()) CheckDescription(key);
             }
         }
         else if (UnknownGame && _liveStale)
@@ -912,12 +975,13 @@ public sealed class AppState : IDisposable
 
     /// <summary>
     /// Everything: the description, the console-owned tables and the panels' own drafts. Only a
-    /// different game, a different qwark build or the user's own "Re-read everything" reaches
-    /// here. A quit, a reboot and a dropped connection do not, which is the whole of "what the
-    /// console described belongs to the game".
+    /// different game, a different qwark build, a module that describes the game differently or
+    /// the user's own "Re-read everything" reaches here. A quit, a reboot and a dropped connection
+    /// do not, which is the whole of "what the console described belongs to the game".
     /// </summary>
     public void ResetPanels()
     {
+        PanelResets++;
         ForgetDescribed();
         Watches = Array.Empty<WatchEntry>();
         Freezes = Array.Empty<FreezeEntry>();
@@ -936,6 +1000,7 @@ public sealed class AppState : IDisposable
     private void ForgetDescribed()
     {
         _described = default;
+        _describedEpoch++;
         DescribedTitle = string.Empty;
         Describe = DescribeResult.Empty;
         AutosplitEvents = Array.Empty<AutosplitEventDesc>();
@@ -961,6 +1026,7 @@ public sealed class AppState : IDisposable
     private void AdoptDescribed(DescribedKey key, string title)
     {
         _described = key;
+        _describedEpoch++;
         DescribedTitle = title;
         Autosplitter.Game = key.Game;
     }
@@ -985,7 +1051,8 @@ public sealed class AppState : IDisposable
     /// <summary>
     /// What the reconnect does: move the change trackers to the session that just came up and let
     /// the next Tick decide. If it is the game that was running when the link went, its
-    /// description is still on screen and still true, and only the values are read again.
+    /// description is still on screen, the values are read again and DESCRIBE is asked once to
+    /// confirm the module still describes it that way.
     /// </summary>
     public void AdoptSession()
     {
@@ -1035,12 +1102,13 @@ public sealed class AppState : IDisposable
     }
 
     /// <summary>
-    /// The description and the values together, and the one place the description is read. The
-    /// game it belongs to is adopted here, because DESCRIBE only answers for the running game
-    /// while a game is running: outside INGAME it is refused or answered with the last one's
-    /// table, so nothing is asked and the panels keep what they have. A title qwark has no game
-    /// module for is the other half of that rule: it is INGAME and there is still nothing to
-    /// describe, so none of these goes out either.
+    /// The description and the values together, and the one place a description is read for a
+    /// game that has none on screen; a new connection's check (<see cref="CheckDescription"/>) is
+    /// the other DESCRIBE, and it only compares. The game it belongs to is adopted here, because
+    /// DESCRIBE only answers for the running game while a game is running: outside INGAME it is
+    /// refused or answered with the last one's table, so nothing is asked and the panels keep what
+    /// they have. A title qwark has no game module for is the other half of that rule: it is
+    /// INGAME and there is still nothing to describe, so none of these goes out either.
     /// </summary>
     public void RefreshAll(bool quiet = true)
     {
@@ -1050,26 +1118,19 @@ public sealed class AppState : IDisposable
         if (Ingame && !UnknownGame)
         {
             var session = Session;
-            var key = new DescribedKey(session.Game, session.QwarkVersion, session.ProtocolVersion);
+            var key = DescribedKey.Of(session);
 
             // Adopted before the answer comes back, so the next tick does not ask a second time.
+            // And this is the DESCRIBE the connection owes, so it is not checked again behind it.
             AdoptDescribed(key, session.TitleId);
+            _describeOwed = false;
 
             Run(async () =>
             {
                 try
                 {
                     var describe = await Client.DescribeAsync().ConfigureAwait(false);
-                    Post(() =>
-                    {
-                        Describe = describe;
-                        EnumOptions.Clear();
-                        foreach (var feature in describe.Features.Where(f => f.Kind == FeatureKind.Enum))
-                        {
-                            byte id = feature.Id;
-                            Run(() => Client.FeatureOptionsAsync(id), options => EnumOptions[id] = options, quiet);
-                        }
-                    });
+                    Post(() => AdoptDescription(describe, quiet));
                 }
                 catch (QwarkStatusException)
                 {
@@ -1086,19 +1147,137 @@ public sealed class AppState : IDisposable
                 }
             }, null, quiet);
 
-            Run(() => Client.PlanetListAsync(), planets =>
-            {
-                Planets = planets.Names;
-                PlanetOrder = planets.Order;
-                Autosplitter.PlanetNames = planets.Names;
-            }, quiet);
-
-            RefreshAutosplitEvents();
-            RefreshSaveFileInfo();
-            RefreshLevelFlagsSupport(quiet);
+            RefreshModuleTables(quiet);
         }
 
         RefreshLive(quiet);
+    }
+
+    /// <summary>Takes a DESCRIBE answer as the description on screen, and reads its ENUM rows' options.</summary>
+    private void AdoptDescription(DescribeResult describe, bool quiet)
+    {
+        Describe = describe;
+        EnumOptions.Clear();
+        RefreshEnumOptions(describe, quiet);
+    }
+
+    /// <summary>FEATURE_OPTIONS for each ENUM row of <paramref name="describe"/>, each one taken as it comes back.</summary>
+    private void RefreshEnumOptions(DescribeResult describe, bool quiet)
+    {
+        foreach (var feature in describe.Features.Where(f => f.Kind == FeatureKind.Enum))
+        {
+            byte id = feature.Id;
+            Run(() => Client.FeatureOptionsAsync(id), options => EnumOptions[id] = options, quiet);
+        }
+    }
+
+    /// <summary>
+    /// What the module keeps for the game beside DESCRIBE, and is read with it: the planet list,
+    /// the autosplit rows, the savefile helper and whether the game has level flags. One small
+    /// request each, and each answer is taken as it comes back.
+    /// </summary>
+    private void RefreshModuleTables(bool quiet)
+    {
+        Run(() => Client.PlanetListAsync(), planets =>
+        {
+            Planets = planets.Names;
+            PlanetOrder = planets.Order;
+            Autosplitter.PlanetNames = planets.Names;
+        }, quiet);
+
+        RefreshAutosplitEvents();
+        RefreshSaveFileInfo();
+        RefreshLevelFlagsSupport(quiet);
+    }
+
+    /// <summary>
+    /// The DESCRIBE a new connection owes the description on screen, sent at the first tick that
+    /// finds the game INGAME on it. A module replaced by another under the same build number keeps
+    /// the key the description is held under, so nothing else ever notices it: the rows, the
+    /// readout names and the flags on screen stayed the old module's until the client was
+    /// restarted, which is how a new trophy-reset status line and a thirteenth readout name went
+    /// unseen. The answer is compared rather than adopted (<see cref="CompareDescription"/>).
+    /// <para>
+    /// The module's other tables go out beside it, because they are the same blind spot and the
+    /// first tick in the game is when they are answered: PLANET_LIST, AUTOSPLIT_DESCRIBE,
+    /// SAVEFILE_INFO and the level-flag probe, one small request each. Nothing is reset for them;
+    /// they are taken as they come back, as a key change's are, and no draft hangs off any of
+    /// them. The ENUM rows' options wait for the comparison, since which rows there are is what it
+    /// decides. MANIP_LIST is not here because RefreshLive reads it on every way into a game.
+    /// </para>
+    /// </summary>
+    private void CheckDescription(DescribedKey key)
+    {
+        _describeOwed = false;
+        _describeChecking = true;
+
+        int connection = _connection;
+        int epoch = _describedEpoch;
+
+        RunQuiet(async () =>
+        {
+            try
+            {
+                var describe = await Client.DescribeAsync().ConfigureAwait(false);
+                Post(() => CompareDescription(describe, key, connection, epoch));
+            }
+            catch (QwarkStatusException)
+            {
+                // The game ending between the decision and the request, as for RefreshAll: still
+                // owed, and asked the next time this connection finds the game. A refusal while
+                // the game is still up is left alone rather than asked again every frame.
+                Post(() =>
+                {
+                    if (connection == _connection && !Ingame) _describeOwed = true;
+                });
+
+                throw;
+            }
+            finally
+            {
+                Post(() => _describeChecking = false);
+            }
+        });
+
+        RefreshModuleTables(quiet: true);
+    }
+
+    /// <summary>
+    /// What a check's answer means. The description on screen, field for field and with the
+    /// toggles' AUTO bits left out (<see cref="DescribeResult.SameLayoutAs"/>), keeps everything as
+    /// it is, the panels' drafts included: the check found what was already known. Anything else
+    /// is a module change and is treated as a changed key is, except that the answer is already in
+    /// hand and is adopted rather than asked for a second time.
+    /// </summary>
+    private void CompareDescription(DescribeResult describe, DescribedKey key, int connection, int epoch)
+    {
+        // The connection it was asked on has gone, or the description has been replaced or dropped
+        // since: the answer is nobody's any more.
+        if (connection != _connection || epoch != _describedEpoch || key != _described) return;
+
+        DescriptionChecks++;
+        if (describe.SameLayoutAs(Describe))
+        {
+            // The options are the module's too, and are asked for the rows the comparison has just
+            // said are still there. Not once the game has gone: they stay as they are until it is
+            // back, as everything else described does.
+            if (Ingame && !UnknownGame) RefreshEnumOptions(Describe, quiet: true);
+            return;
+        }
+
+        DescriptionsReplaced++;
+        if (Panels.Ui.Debug) AddToast("qwark now describes this game differently: the panels start again");
+
+        ResetPanels();
+
+        // Out of the game already, or into another one: the next tick that finds a game describes
+        // it from the start, as it would any game it had not seen.
+        if (!Ingame || UnknownGame || DescribedKey.Of(Session) != key) return;
+
+        AdoptDescribed(key, Session.TitleId);
+        AdoptDescription(describe, quiet: true);
+        RefreshModuleTables(quiet: true);
+        RefreshLive();
     }
 
     /// <summary>
