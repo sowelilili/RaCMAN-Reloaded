@@ -63,6 +63,10 @@ Open **Game**, then **Manips**, and pick the category type of your run. Hover a 
 
 The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
 
+## Console menu
+
+On a console, Deadlocked has a RaCMAN menu on the TV. Open it from **Options** in the pause menu, or press L1, R1, L2, R2, L3 and R3 together in play. The Combos panel can change that combo or turn it off.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.

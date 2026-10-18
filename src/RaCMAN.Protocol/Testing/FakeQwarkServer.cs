@@ -1201,7 +1201,14 @@ public sealed class FakeQwarkServer : IDisposable
 
     public List<FreezeEntry> Freezes { get; } = new();
 
-    public Dictionary<ComboAction, uint> Combos { get; } = new();
+    /// <summary>
+    /// The console's combos. Revision 1.22: the console menu's has its mask before anybody sets
+    /// one, as on a console, so COMBO_LIST has an entry for it from the start.
+    /// </summary>
+    public Dictionary<ComboAction, uint> Combos { get; } = new()
+    {
+        [ComboAction.OpenConsoleMenu] = ComboDefaults.OpenConsoleMenu,
+    };
 
     /// <summary>
     /// The last COMBO_SUSPEND the client sent: true while it is holding the combos off, which is

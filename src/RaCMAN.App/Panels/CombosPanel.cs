@@ -17,6 +17,7 @@ public static class CombosPanel
         ComboAction.Die,
         ComboAction.LoadPlanet,
         ComboAction.LoadSetAsideFile,
+        ComboAction.OpenConsoleMenu,
     };
 
     /// <summary>A capture in flight must not survive a game or connection change.</summary>
@@ -66,6 +67,31 @@ public static class CombosPanel
     public static bool SetAsideComboBlocked(ComboAction action, SessionInfo session, SaveFileInfo info) =>
         action == ComboAction.LoadSetAsideFile && !SaveFilesPanel.HelperIn(session, info);
 
+    /// <summary>
+    /// Whether the console menu's combo has nothing to open: the menu is drawn by code qwark
+    /// writes into the game, which RPCS3 does not take, so qwark-rpcs3 has no menu at all.
+    /// </summary>
+    public static bool MenuComboBlocked(ComboAction action, SessionInfo session) =>
+        action == ComboAction.OpenConsoleMenu && session.IsEmulator;
+
+    /// <summary>The first qwark build with the console menu and its combo, revision 1.22.</summary>
+    public const byte ConsoleMenuBuild = 54;
+
+    /// <summary>
+    /// Whether the panel draws a row for the action: the console menu's only against a module
+    /// that has it, since an older one answers its COMBO_SET with BAD_ARG.
+    /// </summary>
+    public static bool ShowsRow(ComboAction action, byte qwarkBuild) =>
+        action != ComboAction.OpenConsoleMenu || qwarkBuild >= ConsoleMenuBuild;
+
+    /// <summary>What the row says about itself when the pointer rests on it.</summary>
+    public static string? Tooltip(ComboAction action) => action switch
+    {
+        ComboAction.OpenConsoleMenu =>
+            "Opens the RaCMAN menu on the TV, in Deadlocked for now. It works even when the combos are switched off.",
+        _ => null,
+    };
+
     public static string Label(ComboAction action) => action switch
     {
         ComboAction.SavePosition => "Save position",
@@ -73,6 +99,7 @@ public static class CombosPanel
         ComboAction.Die => "Die",
         ComboAction.LoadPlanet => "Load planet",
         ComboAction.LoadSetAsideFile => "Load set-aside file",
+        ComboAction.OpenConsoleMenu => "Open console menu",
         _ => action.ToString(),
     };
 
@@ -149,6 +176,8 @@ public static class CombosPanel
 
         foreach (var action in Actions)
         {
+            if (!ShowsRow(action, state.Session.QwarkVersion)) continue;
+
             ImGui.TableNextRow();
             ImGui.PushID((int)action);
 
@@ -163,9 +192,15 @@ public static class CombosPanel
                 Ui.TextDisabled(Label(action));
                 if (ImGui.IsItemHovered()) Ui.SetTooltip(Ui.NeedsSaveFileHelper);
             }
+            else if (MenuComboBlocked(action, state.Session))
+            {
+                Ui.TextDisabled(Label(action));
+                if (ImGui.IsItemHovered()) Ui.SetTooltip("The console menu is not available under RPCS3.");
+            }
             else
             {
                 ImGui.TextUnformatted(Label(action));
+                if (Tooltip(action) is { } tip && ImGui.IsItemHovered()) Ui.SetTooltip(tip);
             }
 
             ImGui.TableNextColumn();
@@ -201,6 +236,21 @@ public static class CombosPanel
                     await state.Client.ComboSetAsync(target, 0);
                     state.Post(() => state.RefreshCombos());
                 });
+            }
+
+            // The console menu's combo is the one with a mask of its own; Clear turns it off, and
+            // this puts the console's default back.
+            if (action == ComboAction.OpenConsoleMenu && mask != ComboDefaults.OpenConsoleMenu)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Default"))
+                {
+                    state.Run(async () =>
+                    {
+                        await state.Client.ComboSetAsync(ComboAction.OpenConsoleMenu, ComboDefaults.OpenConsoleMenu);
+                        state.Post(() => state.RefreshCombos());
+                    });
+                }
             }
 
             ImGui.PopID();

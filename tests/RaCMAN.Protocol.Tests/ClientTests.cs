@@ -278,7 +278,10 @@ public class ClientTests
 
             await client.ComboSetAsync(ComboAction.SavePosition, 0x0B);
             var combos = await client.ComboListAsync();
-            Assert.Equal(new ComboEntry(ComboAction.SavePosition, 0x0B), Assert.Single(combos));
+            Assert.Equal(2, combos.Length);
+            Assert.Contains(new ComboEntry(ComboAction.SavePosition, 0x0B), combos);
+            // Revision 1.22: the console menu's combo is there before anybody sets it.
+            Assert.Contains(new ComboEntry(ComboAction.OpenConsoleMenu, 0x060F), combos);
         }
     }
 
@@ -1431,12 +1434,12 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(52, true)]     // the build before the one this client ships with
-    [InlineData(53, false)]    // exactly the expected build: the RaC1/RaC2 savefile helper pauses the game before loading and moved out of game memory
-    [InlineData(54, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(53, true)]     // the build before the one this client ships with
+    [InlineData(54, false)]    // exactly the expected build: the console menu, revision 1.22, and its sixth combo
+    [InlineData(55, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(53, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(54, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
@@ -1502,7 +1505,18 @@ public class ClientTests
 
         // And the buttons that were down when Cancel was pressed store nothing on the way up.
         await PressAsync(state, server, 0);
-        Assert.Empty(server.Combos);
+        AssertOnlyTheMenuDefault(server);
+    }
+
+    /// <summary>
+    /// Nothing stored but what a fresh console has: since revision 1.22 the console menu's combo
+    /// has its mask before anybody sets one.
+    /// </summary>
+    private static void AssertOnlyTheMenuDefault(FakeQwarkServer server)
+    {
+        var only = Assert.Single(server.Combos);
+        Assert.Equal(ComboAction.OpenConsoleMenu, only.Key);
+        Assert.Equal(ComboDefaults.OpenConsoleMenu, only.Value);
     }
 
     [Fact]
@@ -1521,7 +1535,7 @@ public class ClientTests
         server.Session = server.Session with { Game = GameId.Rac2, TitleId = "NPEA00386" };
 
         Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
-        Assert.Empty(server.Combos);
+        AssertOnlyTheMenuDefault(server);
     }
 
     /// <summary>

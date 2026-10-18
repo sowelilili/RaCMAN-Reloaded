@@ -451,6 +451,21 @@ public enum ComboAction : byte
     Die = 2,
     LoadPlanet = 3,
     LoadSetAsideFile = 4,
+
+    /// <summary>
+    /// Revision 1.22 (qwark build 54): opens the console menu on the TV, or closes it. The one
+    /// combo the console gives a mask out of the box, <see cref="ComboDefaults.OpenConsoleMenu"/>,
+    /// and the one its combo switch does not hold off, since a console with no PC may have no
+    /// other way into the menu. COMBO_LIST reports it as a sixth entry.
+    /// </summary>
+    OpenConsoleMenu = 5,
+}
+
+/// <summary>The masks a combo has on a console that was never told otherwise.</summary>
+public static class ComboDefaults
+{
+    /// <summary>L1 + R1 + L2 + R2 + L3 + R3, qwark's COMBO_MENU_DEFAULT.</summary>
+    public const uint OpenConsoleMenu = 0x060F;
 }
 
 /// <summary>

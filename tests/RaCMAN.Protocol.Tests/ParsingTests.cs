@@ -590,6 +590,41 @@ public class ParsingTests
         Assert.False(previous.IsEmpty);
     }
 
+    /// <summary>
+    /// Revision 1.22: COMBO_LIST grew from five entries to six. The sixth is the console menu's,
+    /// and an entry for an action this client does not know parses too, so a console newer than
+    /// the client never breaks the Combos panel: it draws its own rows and looks each one up.
+    /// </summary>
+    [Fact]
+    public void ComboListOfSixAndMoreParses()
+    {
+        var payload = new byte[1 + 7 * 8];
+        payload[0] = 7;
+        for (int i = 0; i < 7; i++)
+        {
+            payload[1 + i * 8] = (byte)i;
+            payload[1 + i * 8 + 7] = (byte)(0x10 + i);
+        }
+
+        payload[1 + 5 * 8 + 6] = 0x06;
+        payload[1 + 5 * 8 + 7] = 0x0F;
+
+        var combos = ComboEntry.ParseList(payload);
+        Assert.Equal(7, combos.Length);
+        Assert.Equal(new ComboEntry(ComboAction.OpenConsoleMenu, ComboDefaults.OpenConsoleMenu), combos[5]);
+        Assert.Equal((ComboAction)6, combos[6].Action);
+
+        var byAction = combos.ToDictionary(c => c.Action, c => c.Mask);
+        Assert.Equal(0x060Fu, byAction[ComboAction.OpenConsoleMenu]);
+        Assert.Equal("Open console menu", RaCMAN.App.Panels.CombosPanel.Label(ComboAction.OpenConsoleMenu));
+        Assert.Equal("6", RaCMAN.App.Panels.CombosPanel.Label((ComboAction)6));
+
+        // The row is drawn only against a module that has the menu.
+        Assert.False(RaCMAN.App.Panels.CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, 53));
+        Assert.True(RaCMAN.App.Panels.CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, QwarkClient.ExpectedQwarkBuild));
+        Assert.True(RaCMAN.App.Panels.CombosPanel.ShowsRow(ComboAction.Die, 53));
+    }
+
     [Fact]
     public void ComboAndDirListsParse()
     {
