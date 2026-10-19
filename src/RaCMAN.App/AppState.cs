@@ -184,6 +184,13 @@ public sealed class AppState : IDisposable
             // one's (see ManipEvents).
             _manipEvents.Forget();
 
+            // The VSH figures are the console's at the time it answered, and this may be another
+            // console or a module that has restarted: nothing of the last connection's is shown,
+            // and the first tick that finds flags.VSH_MEMORY on this one asks at once.
+            ForgetVshMemory();
+            _vshMemoryLive = true;
+            _sinceVshMemory = VshMemoryPollSeconds;
+
             // The restart notice is done with when the console comes back running the build that
             // was put on it, and it belongs to that console: connecting to another one, or to the
             // helper on this PC, has nothing staged on it to restart for.
@@ -221,6 +228,7 @@ public sealed class AppState : IDisposable
             _lastState = SessionState.Xmb;
             _lastPlanet = 0xFF;
             _liveStale = true;
+            ForgetVshMemory();
 
             // What the console described stays: the console still holds it, this client will be
             // back, and a layout that empties itself every time the link hiccups is the thing this
@@ -330,7 +338,7 @@ public sealed class AppState : IDisposable
     public bool UnknownGame => Ingame && Session.Game == GameId.None;
 
     /// <summary>
-    /// True while the console is refusing everything but the five control ops. PROTOCOL.md section
+    /// True while the console is refusing everything but the control ops. PROTOCOL.md section
     /// 1.1: through BOOTING and through QUITTING qwark allocates no request buffers, so every
     /// list, describe, info and event read is drained and answered BUSY until the session is
     /// INGAME. Nothing automatic is sent while this is set — the burst of refusals a launch used to
@@ -799,9 +807,19 @@ public sealed class AppState : IDisposable
             if (_toasts[i].Remaining <= 0) _toasts.RemoveAt(i);
         }
 
-        if (!Connected) return;
+        if (!Connected)
+        {
+            // The Disconnect button and a change of target take the link down without raising
+            // Disconnected, and the VSH figures go with the link however it went.
+            ForgetVshMemory();
+            return;
+        }
 
         var session = Session;
+
+        // Nothing to do with the game either: the console's own memory, read on a timer whatever
+        // the session is doing (see VshMemoryPollSeconds).
+        PollVshMemory(session, deltaSeconds);
 
         // Nothing to do with the game: a standalone console whose module is older than this client
         // has the new one written to its boot path, once, as soon as the session is somewhere the
@@ -1467,6 +1485,140 @@ public sealed class AppState : IDisposable
                 if (refused) AddToast(ManipEvents.NotApplied(group), ToastKind.Error);
                 else AddToast(ManipEvents.Applied(group), ToastKind.Success);
             });
+        });
+    }
+
+    // ---------------------------------------------------------------- the VSH's free memory
+
+    /// <summary>
+    /// How often VSH_MEMORY (revision 1.22) is read while the session carries flags.VSH_MEMORY.
+    /// qwark takes its own reading about every ten seconds, so asking more often would only fetch
+    /// the same figure again. The op is a control op, answered in every session state, so the read
+    /// is not held through a launch the way the bulk reads are: a launch is when the figure moves.
+    /// </summary>
+    public const float VshMemoryPollSeconds = 10f;
+
+    /// <summary>
+    /// The last VSH_MEMORY answer on this connection: null before the first one and once the
+    /// connection has gone. A later read that is refused leaves it here, so the panel can tell a
+    /// console that has never answered from one that answered and then refused
+    /// (<see cref="VshMemoryStatus"/>).
+    /// </summary>
+    public VshMemoryInfo? VshMemory { get; private set; }
+
+    /// <summary>
+    /// The status the last VSH_MEMORY read was refused with, or null when it went through or none
+    /// has been sent on this connection. The read is nobody's click, so a refusal says no more in a
+    /// toast than <see cref="RunQuiet"/> lets it; the Connection panel shows it in place of the
+    /// figures instead, which is how a request without a button shows its status.
+    /// </summary>
+    public Status? VshMemoryStatus { get; private set; }
+
+    /// <summary>
+    /// Seconds since <see cref="VshMemory"/> arrived, on the frames' own clock, so the ages it carries
+    /// can be shown as they are now rather than as they were when the console answered.
+    /// </summary>
+    public float VshMemoryAge { get; private set; }
+
+    /// <summary>
+    /// Set once the connection that is up has been taken in (SessionEstablished), and cleared when
+    /// it goes. The transport is up, and HELLO has filled the session in, a moment before that, and
+    /// a read sent in between would be answered for a connection this object has not seen yet.
+    /// </summary>
+    private bool _vshMemoryLive;
+
+    /// <summary>A VSH_MEMORY is out: one at a time, so a slow answer is never asked twice.</summary>
+    private bool _vshMemoryInFlight;
+
+    /// <summary>
+    /// Set when a reply could not be read. It is reported once and not asked for again on this
+    /// connection: the module that sent it will send the same thing ten seconds later.
+    /// </summary>
+    private bool _vshMemoryUnreadable;
+
+    /// <summary>Seconds since the last VSH_MEMORY went out, held at the interval once one is due.</summary>
+    private float _sinceVshMemory;
+
+    /// <summary>Drops the figures, the status and the age with the connection they came from.</summary>
+    private void ForgetVshMemory()
+    {
+        VshMemory = null;
+        VshMemoryStatus = null;
+        VshMemoryAge = 0;
+        _vshMemoryLive = false;
+        _vshMemoryUnreadable = false;
+    }
+
+    /// <summary>
+    /// The timed read. Only while the session carries flags.VSH_MEMORY: the PS3 module sets it from
+    /// module start, qwark-rpcs3 never does, and a module from before the op never does either and
+    /// would answer UNKNOWN_OP, so without the bit nothing is sent at all. Asked on the first tick
+    /// that finds the bit on a connection, and every <see cref="VshMemoryPollSeconds"/> after that.
+    /// </summary>
+    private void PollVshMemory(SessionInfo session, float deltaSeconds)
+    {
+        if (VshMemory is not null) VshMemoryAge += deltaSeconds;
+        _sinceVshMemory = Math.Min(_sinceVshMemory + deltaSeconds, VshMemoryPollSeconds);
+
+        if (!_vshMemoryLive || !session.VshMemory || _vshMemoryInFlight || _vshMemoryUnreadable) return;
+        if (_sinceVshMemory < VshMemoryPollSeconds) return;
+
+        _sinceVshMemory = 0;
+        RefreshVshMemory();
+    }
+
+    /// <summary>
+    /// One VSH_MEMORY read, quietly, taken only by the connection it was asked on. A refusal is
+    /// kept for the panel. It toasts only when it is news — a status other than the one the last
+    /// read got — and only when <see cref="StatusToast"/> lets a background read say it at all: the
+    /// same refusal every ten seconds is the panel's line, not a toast every ten seconds.
+    /// </summary>
+    private void RefreshVshMemory()
+    {
+        _vshMemoryInFlight = true;
+        int connection = _connection;
+        var previous = VshMemoryStatus;
+
+        RunQuiet(async () =>
+        {
+            try
+            {
+                var info = await Client.VshMemoryAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    if (connection != _connection || !_vshMemoryLive) return;
+
+                    VshMemory = info;
+                    VshMemoryStatus = null;
+                    VshMemoryAge = 0;
+                });
+            }
+            catch (QwarkStatusException ex)
+            {
+                var status = ex.Status;
+                Post(() =>
+                {
+                    if (connection == _connection && _vshMemoryLive) VshMemoryStatus = status;
+                });
+
+                if (status != previous) throw;
+            }
+            catch (ProtocolException ex)
+            {
+                // Hidden and reported once, as the manips area does with a reply it cannot read.
+                Post(() =>
+                {
+                    if (connection != _connection || !_vshMemoryLive) return;
+
+                    VshMemory = null;
+                    _vshMemoryUnreadable = true;
+                    AddToast($"VSH memory: {ex.Message}", ToastKind.Error);
+                });
+            }
+            finally
+            {
+                Post(() => _vshMemoryInFlight = false);
+            }
         });
     }
 

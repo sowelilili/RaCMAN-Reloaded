@@ -12,8 +12,9 @@ namespace RaCMAN.Protocol.Testing;
 /// really keeps, PLANET_LIST, MOBY_TABLE, UNLOCK_LIST/SET, the LEVELFLAGS ops,
 /// MOD_LIST, the file ops including FILE_RENAME, COMBO_SET/LIST/SUSPEND/ENABLE, the two AUTOSPLIT ops
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
-/// ops of revision 1.10 over the same in-memory filesystem the file ops use, and the four MANIP ops
-/// of revision 1.21 over a small per-game group table. Everything else answers UNKNOWN_OP.
+/// ops of revision 1.10 over the same in-memory filesystem the file ops use, the four MANIP ops
+/// of revision 1.21 over a small per-game group table, and VSH_MEMORY of revision 1.22 over a
+/// figure a test sets. Everything else answers UNKNOWN_OP.
 /// <para>
 /// <see cref="UnknownGame"/> is the other session build 36 can report: a title the module has no
 /// game for, where the memory ops work and every game op answers UNSUPPORTED.
@@ -1301,6 +1302,31 @@ public sealed class FakeQwarkServer : IDisposable
         get => PatchReply.StampFor(SaveFilePatchWords, SaveFilePatchBytes);
     }
 
+    // ------------------------------------------- 5.1, the VSH's free memory (revision 1.22)
+
+    private VshMemoryInfo? _vshMemory;
+
+    /// <summary>
+    /// What VSH_MEMORY answers with, and flags.VSH_MEMORY with it. Null, the default, is a console
+    /// that cannot read the figure (qwark-rpcs3, or qwark-host before its <c>vshmem</c> command):
+    /// bit5 is clear in every session block this server sends and the op answers UNSUPPORTED. Set,
+    /// bit5 is set in HELLO, GET_STATE and every telemetry packet, and the op answers OK with these
+    /// bytes, in any session state. A module from before the op is <see cref="RefusedOps"/> with
+    /// UNKNOWN_OP.
+    /// </summary>
+    public VshMemoryInfo? VshMemory
+    {
+        get { lock (_gate) return _vshMemory; }
+        set
+        {
+            lock (_gate)
+            {
+                _vshMemory = value;
+                SetSessionFlag(SessionFlags.VshMemory, value is not null);
+            }
+        }
+    }
+
     // ------------------------------------------- 5.3, code switches (revision 1.17)
 
     /// <summary>
@@ -1649,8 +1675,8 @@ public sealed class FakeQwarkServer : IDisposable
 
     /// <summary>
     /// A game launching, section 1.1: the session reports BOOTING and, because qwark allocates no
-    /// request buffers while one is, every request but HELLO, HEARTBEAT, SUBSCRIBE, UNSUBSCRIBE and
-    /// GET_STATE is drained and answered BUSY. Clearing it puts the session back INGAME.
+    /// request buffers while one is, every request but the control ops (<see cref="IsControlOp"/>)
+    /// is drained and answered BUSY. Clearing it puts the session back INGAME.
     /// </summary>
     public bool Booting
     {
@@ -1783,11 +1809,13 @@ public sealed class FakeQwarkServer : IDisposable
     }
 
     /// <summary>
-    /// The five ops that keep working through BOOTING and QUITTING: they fit in fixed buffers, so
-    /// qwark answers them with no allocation while everything else is refused.
+    /// The ops that keep working through BOOTING and QUITTING: they fit in fixed buffers, so qwark
+    /// answers them with no allocation while everything else is refused. The first five since
+    /// section 1.1 was written, and VSH_MEMORY since revision 1.22.
     /// </summary>
     public static bool IsControlOp(Opcode opcode) => opcode is
-        Opcode.Hello or Opcode.Heartbeat or Opcode.Subscribe or Opcode.Unsubscribe or Opcode.GetState;
+        Opcode.Hello or Opcode.Heartbeat or Opcode.Subscribe or Opcode.Unsubscribe or Opcode.GetState
+        or Opcode.VshMemory;
 
     /// <summary>The ops a platform without writable instruction memory refuses outright.</summary>
     private bool RefusedWithoutCodePatches(Opcode opcode, byte[] payload)
@@ -1981,6 +2009,10 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.Notify:
                     return (Status.Ok, null);
+
+                // Revision 1.22: a control op, so a launch does not stop it (IsControlOp).
+                case Opcode.VshMemory:
+                    return _vshMemory is { } vsh ? (Status.Ok, vsh.ToBytes()) : (Status.Unsupported, null);
 
                 case Opcode.Subscribe:
                 {

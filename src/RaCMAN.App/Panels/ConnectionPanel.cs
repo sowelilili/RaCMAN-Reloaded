@@ -1,3 +1,4 @@
+using System.Globalization;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
@@ -110,6 +111,7 @@ public static class ConnectionPanel
         if (state.Connected)
         {
             var session = state.Session;
+            DrawVshMemory(state, session);
             Ui.DebugHint($"Telemetry port {state.Client.TelemetryPort} | {(state.Telemetry is null ? "no packet yet" : $"{state.Telemetry.Watches.Length} watch values")}");
             if (state.Client.TelemetryViaTcp)
             {
@@ -775,6 +777,101 @@ public static class ConnectionPanel
         Ui.Hint("Adds a firewall rule for this app (asks for admin). Or run \"Allow through Firewall.cmd\".");
         Ui.DebugHint($"Rule would name {executable}");
     }
+
+    /// <summary>
+    /// How much memory the VSH has free (qwark build 54), under the status line, where a user
+    /// reporting a console whose menus or plugins have started failing is looking anyway. Not a
+    /// debug detail, so it shows without "Show debug information"; with it, a second line says when
+    /// and where the lowest reading was and how old the figures are. Nothing at all where the
+    /// console cannot read the figure (RPCS3, an older module): the session's flags say which.
+    /// </summary>
+    private static void DrawVshMemory(AppState state, SessionInfo session)
+    {
+        if (VshMemoryLine(session.VshMemory, state.VshMemory, state.VshMemoryStatus) is not { } line) return;
+
+        if (line.Warning) Ui.Warning(line.Text);
+        else Ui.Hint(line.Text);
+
+        // Only beside figures: a refused read has no reading to say more about.
+        if (state.VshMemoryStatus is null && state.VshMemory is { } info)
+        {
+            Ui.DebugHint(VshMemoryDebugLine(info, (uint)state.VshMemoryAge));
+        }
+    }
+
+    /// <summary>
+    /// The VSH memory line and whether it is drawn as a warning, or null for no line. None while the
+    /// session lacks flags.VSH_MEMORY (<paramref name="flagged"/>), and none before the first
+    /// answer. A refused read shows its status in place of the figures, except a status a
+    /// background read is entitled to (<see cref="StatusToast.IsQuietStatus"/>) before any figure
+    /// has arrived, which says nothing here as it would say nothing in a toast. The figures are a
+    /// warning once the latest or the lowest is under qwark's own low mark,
+    /// <see cref="VshMemoryInfo.LowBytes"/>.
+    /// </summary>
+    public static (string Text, bool Warning)? VshMemoryLine(bool flagged, VshMemoryInfo? info, Status? refused)
+    {
+        if (!flagged) return null;
+
+        if (refused is { } status)
+        {
+            if (info is null && StatusToast.IsQuietStatus(status)) return null;
+            return ($"VSH memory: {status}", true);
+        }
+
+        if (info is null) return null;
+
+        string text = $"VSH memory: {Kb(info.FreeKb)} KB free of {Kb(info.TotalKb)} KB";
+        if (info.HasLowest) text += $" (lowest {Kb(info.LowestKb)} KB)";
+        return (text, info.IsLow);
+    }
+
+    /// <summary>
+    /// The debug line under the figures: when and where the lowest reading was, the figure at
+    /// module start, and how old the latest reading is. The console's ages are as of its reply, so
+    /// <paramref name="sinceReply"/>, the seconds since that reply arrived, is added to both.
+    /// </summary>
+    public static string VshMemoryDebugLine(VshMemoryInfo info, uint sinceReply = 0)
+    {
+        var parts = new List<string>(3);
+
+        if (info.HasLowest)
+        {
+            string game = info.LowestGame == GameId.None ? string.Empty : $" in {GameName(info.LowestGame)}";
+            parts.Add($"lowest {Ago((ulong)info.LowestAgeSeconds + sinceReply)} ago at {ReadingName(info.LowestAt)}{game}");
+        }
+
+        parts.Add(info.HasStart ? $"{Kb(info.StartKb)} KB free at module start" : "no reading at module start");
+        parts.Add($"reading {Ago((ulong)info.AgeSeconds + sinceReply)} old");
+
+        string line = string.Join(" | ", parts);
+        return char.ToUpperInvariant(line[0]) + line[1..];
+    }
+
+    /// <summary>What a reading was taken at, to follow "at". A kind a later module adds is shown by its number.</summary>
+    private static string ReadingName(VshMemoryReading reading) => reading switch
+    {
+        VshMemoryReading.Start => "module start",
+        VshMemoryReading.TickThread => "tick thread start",
+        VshMemoryReading.Game => "game start",
+        VshMemoryReading.Menu => "console menu install",
+        VshMemoryReading.Periodic => "a ten-second reading",
+        _ => $"reading {(byte)reading}",
+    };
+
+    /// <summary>The game's own name, or its number for a game id this client has no name for.</summary>
+    private static string GameName(GameId game) =>
+        Enum.IsDefined(game) ? game.DisplayName() : $"game {(byte)game}";
+
+    /// <summary>Seconds as "4 s", "12 min" or "2 h 5 min".</summary>
+    private static string Ago(ulong seconds) => seconds switch
+    {
+        < 60 => $"{seconds} s",
+        < 3600 => $"{seconds / 60} min",
+        _ => $"{seconds / 3600} h {seconds % 3600 / 60} min",
+    };
+
+    /// <summary>A KB figure with thousands separators, the same on every machine.</summary>
+    private static string Kb(uint kb) => kb.ToString("N0", CultureInfo.InvariantCulture);
 
     /// <summary>
     /// The console is running an older qwark.sprx than the one this client shipped with, so its

@@ -11,6 +11,15 @@ public enum Opcode : ushort
     PreviousReapply = 0x0005,
     PreviousDismiss = 0x0006,
 
+    /// <summary>
+    /// Revision 1.22 (build 54): how much memory the VSH has free, as qwark last read it, and the
+    /// lowest it has read since the module started. No payload. A control op, so it is answered in
+    /// every session state, BOOTING and QUITTING included. UNSUPPORTED where the platform cannot
+    /// read the figure, and UNKNOWN_OP from a module before it, which is why the client asks only
+    /// while <see cref="SessionFlags.VshMemory"/> is set.
+    /// </summary>
+    VshMemory = 0x0007,
+
     // 5.2 Telemetry
     Subscribe = 0x0010,
     Unsubscribe = 0x0011,
@@ -534,6 +543,40 @@ public enum SessionFlags : byte
     /// patches the instructions itself.
     /// </summary>
     CodeSwitches = 1 << 4,
+
+    /// <summary>
+    /// The module can read the VSH's free memory (revision 1.22): its first reading went through,
+    /// so VSH_MEMORY answers with figures. The PS3 module sets it from module start; qwark-rpcs3
+    /// never does, and neither does a module from before the op, which would answer UNKNOWN_OP.
+    /// It is the only thing the client asks VSH_MEMORY on.
+    /// </summary>
+    VshMemory = 1 << 5,
+}
+
+/// <summary>
+/// VSH_MEMORY's <c>lowest_at</c>, section 5.1.1 of PROTOCOL.md (revision 1.22): which of qwark's
+/// readings of the VSH's free memory the lowest one was. A value not listed here is a reading a
+/// later module takes, and is shown by its number.
+/// </summary>
+public enum VshMemoryReading : byte
+{
+    /// <summary>No lowest reading yet.</summary>
+    None = 0,
+
+    /// <summary>At module start, before the tick thread was created.</summary>
+    Start = 1,
+
+    /// <summary>Just after the tick thread was created.</summary>
+    TickThread = 2,
+
+    /// <summary>A game reached INGAME.</summary>
+    Game = 3,
+
+    /// <summary>The console menu's renderer went into the game.</summary>
+    Menu = 4,
+
+    /// <summary>The reading qwark takes every ten seconds.</summary>
+    Periodic = 5,
 }
 
 /// <summary>

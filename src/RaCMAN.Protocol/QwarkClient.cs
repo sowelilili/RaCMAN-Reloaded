@@ -657,6 +657,16 @@ public sealed class QwarkClient : IDisposable
     public Task PreviousDismissAsync(CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.PreviousDismiss, null, cancellationToken);
 
+    /// <summary>
+    /// VSH_MEMORY (revision 1.22): the VSH's free memory at qwark's latest reading and the lowest
+    /// since the module started. Answered in every session state. A platform that cannot read it
+    /// answers UNSUPPORTED and a module from before the op UNKNOWN_OP, both thrown as any other
+    /// status is; a caller that asks only while <see cref="SessionInfo.VshMemory"/> is set meets
+    /// neither. A reply shorter than 28 bytes throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<VshMemoryInfo> VshMemoryAsync(CancellationToken cancellationToken = default) =>
+        VshMemoryInfo.Parse(await RequestAsync(Opcode.VshMemory, null, cancellationToken).ConfigureAwait(false));
+
     // ---------------------------------------------------------------- 5.2 telemetry
 
     public Task SubscribeAsync(ushort udpPort, CancellationToken cancellationToken = default) =>

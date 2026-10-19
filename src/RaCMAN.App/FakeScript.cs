@@ -178,7 +178,7 @@ public static class FakeScript
         switch (step)
         {
             // Both halves of what a real quit is: the session says QUITTING, and, per PROTOCOL.md
-            // section 1.1, every request but the five control ops is answered BUSY until a game is
+            // section 1.1, every request but the control ops is answered BUSY until a game is
             // up again. "booting" is the other side of the same coin, the launch itself.
             case "quit":
                 fake.Quitting = true;

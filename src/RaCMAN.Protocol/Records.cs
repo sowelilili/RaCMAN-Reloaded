@@ -64,6 +64,13 @@ public sealed record SessionInfo(
     public bool CodeFeaturesUnavailable => CodePatchesUnsupported && !CodeSwitches;
 
     /// <summary>
+    /// The module can say how much memory the VSH has free (revision 1.22): VSH_MEMORY answers
+    /// with figures. Set by the PS3 module, never by qwark-rpcs3 or a module from before the op,
+    /// so it is what the client asks on rather than sending a request that can only be refused.
+    /// </summary>
+    public bool VshMemory => (Flags & SessionFlags.VshMemory) != 0;
+
+    /// <summary>
     /// The console is holding every combo off until COMBO_ENABLE turns them back on (revision
     /// 1.12). The switch is the console's, kept in its config, so this is what the checkbox on the
     /// Combos panel draws itself from rather than anything the client remembers.
@@ -867,6 +874,100 @@ public sealed record PreviousSession(
         }
 
         return new PreviousSession(toggles, mods, freezes, patches);
+    }
+}
+
+/// <summary>
+/// The VSH_MEMORY reply, section 5.1.1 of PROTOCOL.md (revision 1.22, build 54): how much memory the
+/// VSH had free at qwark's latest reading, and the lowest it has read since the module started.
+/// <code>
+/// u32 free, u32 total, u32 lowest, u32 start, u32 age_s, u32 lowest_age_s,
+/// u8 lowest_at, u8 lowest_game, u8 pad[2]
+/// </code>
+/// Every figure is in bytes and every age in seconds before the reply. qwark reads the figure about
+/// every ten seconds, and at the moments <see cref="VshMemoryReading"/> names, so <see cref="AgeSeconds"/>
+/// is normally ten or less. <see cref="LowestGame"/> is the session's <c>game</c> byte at the lowest
+/// reading, <see cref="GameId.None"/> at the XMB and for a title qwark has no module for, and
+/// <see cref="Start"/> is 0 when the reading at module start failed. Nothing here is the client's
+/// to act on: it is shown, because a console that runs out of VSH memory is a console whose menus
+/// and plugins start failing, and that is the first thing to ask about when one does.
+/// </summary>
+public sealed record VshMemoryInfo(
+    uint Free,
+    uint Total,
+    uint Lowest,
+    uint Start,
+    uint AgeSeconds,
+    uint LowestAgeSeconds,
+    VshMemoryReading LowestAt,
+    GameId LowestGame)
+{
+    /// <summary>Twenty-eight bytes. A longer reply is a later revision's, and its first 28 are these.</summary>
+    public const int WireSize = 28;
+
+    /// <summary>
+    /// qwark's own low mark: below a megabyte free it logs a "low" line, and the client colours the
+    /// figures as a warning below the same mark.
+    /// </summary>
+    public const uint LowBytes = 1024 * 1024;
+
+    /// <summary>The figures in KB, rounded down, which is how they are shown.</summary>
+    public uint FreeKb => Free / 1024;
+
+    public uint TotalKb => Total / 1024;
+
+    public uint LowestKb => Lowest / 1024;
+
+    public uint StartKb => Start / 1024;
+
+    /// <summary>The module has a lowest reading to report; <c>lowest_at</c> 0 says it has none.</summary>
+    public bool HasLowest => LowestAt != VshMemoryReading.None;
+
+    /// <summary>The reading at module start went through; 0 says it failed or was never taken.</summary>
+    public bool HasStart => Start != 0;
+
+    /// <summary>The latest reading, or the lowest one, is under <see cref="LowBytes"/>.</summary>
+    public bool IsLow => Free < LowBytes || (HasLowest && Lowest < LowBytes);
+
+    /// <summary>
+    /// A reply shorter than 28 bytes stops inside a field and throws, as every fixed-size reply
+    /// here does. Bytes past the 28th are left for a later revision.
+    /// </summary>
+    public static VshMemoryInfo Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < WireSize)
+        {
+            throw new ProtocolException($"VSH_MEMORY needs {WireSize} bytes, got {payload.Length}");
+        }
+
+        var r = new SpanReader(payload[..WireSize]);
+        uint free = r.ReadU32();
+        uint total = r.ReadU32();
+        uint lowest = r.ReadU32();
+        uint start = r.ReadU32();
+        uint age = r.ReadU32();
+        uint lowestAge = r.ReadU32();
+        var lowestAt = (VshMemoryReading)r.ReadU8();
+        var lowestGame = (GameId)r.ReadU8();
+
+        return new VshMemoryInfo(free, total, lowest, start, age, lowestAge, lowestAt, lowestGame);
+    }
+
+    /// <summary>The other direction, for the fake console the tests drive.</summary>
+    public byte[] ToBytes()
+    {
+        var bytes = new byte[WireSize];
+        var w = new SpanWriter(bytes);
+        w.WriteU32(Free);
+        w.WriteU32(Total);
+        w.WriteU32(Lowest);
+        w.WriteU32(Start);
+        w.WriteU32(AgeSeconds);
+        w.WriteU32(LowestAgeSeconds);
+        w.WriteU8((byte)LowestAt);
+        w.WriteU8((byte)LowestGame);
+        w.WriteZeros(2);
+        return bytes;
     }
 }
 
