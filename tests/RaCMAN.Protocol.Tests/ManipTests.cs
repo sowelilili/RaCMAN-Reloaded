@@ -410,28 +410,33 @@ public class ManipClientTests
     }
 
     [Fact]
-    public async Task PickingASetupGroupOnAFileItDoesNotSuitIsRefusedAtOnceAndStillAnsweredOk()
+    public async Task PickingAGroupWritesNothingAndItsSetupWaitsForARunStart()
     {
         var (server, client) = await ConnectAsync();
         using (server)
         using (client)
         {
             MakeUya(server);
-            server.ChallengeCounter = 0;
+            server.ChallengeCounter = 1;
+            ushort seq = (await client.ManipListAsync()).EventSeq;
 
-            // NG+ no QE is a setup alone. With a file in play the setup goes in straight away,
-            // after the check, and a fresh file is refused there; the answer is OK all the same.
+            // Stepping through the groups with a file in play, as the console menu's Left and Right
+            // do, writes and raises nothing: neither on a file the group suits nor on one it doesn't.
+            await client.ManipSelectAsync(1);
+            await client.ManipSelectAsync(2);
+            server.ChallengeCounter = 0;
             await client.ManipSelectAsync(1);
             var list = await client.ManipListAsync();
             Assert.Equal(1, list.Selected);
-            Assert.Equal(ManipEventKind.RefusedNotChallengeFile, list.EventKind);
-            Assert.Equal(1, list.EventGroup);
+            Assert.Equal(seq, list.EventSeq);
 
-            // On a challenge-mode file the NG+ group's setup goes in, and its first time this boot
-            // is announced.
+            // NG+ no QE is a setup alone: it goes in at the next run start that passes the check,
+            // and its first time this boot is announced.
             server.ChallengeCounter = 1;
-            await client.ManipSelectAsync(2);
-            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
+            server.ManipRunStart();
+            var started = await client.ManipListAsync();
+            Assert.Equal(ManipEventKind.Activated, started.EventKind);
+            Assert.Equal(1, started.EventGroup);
         }
     }
 
@@ -466,21 +471,24 @@ public class ManipClientTests
             MakeUya(server);
             server.ChallengeCounter = 1;
 
+            // The setup's first time this boot is announced; here Apply now puts it in.
             await client.ManipSelectAsync(1);
-            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
+            await client.ManipApplyAsync();
+            var first = await client.ManipListAsync();
+            Assert.Equal(ManipEventKind.Activated, first.EventKind);
 
             // Apply now on a group that is a setup alone writes it again: kind 2, a new number.
-            ushort seq = (await client.ManipListAsync()).EventSeq;
             await client.ManipApplyAsync();
             var applied = await client.ManipListAsync();
             Assert.Equal(ManipEventKind.PerRunApplied, applied.EventKind);
-            Assert.NotEqual(seq, applied.EventSeq);
+            Assert.NotEqual(first.EventSeq, applied.EventSeq);
 
-            // Another group, then this one again: the setup is due again and goes in at once, and
-            // this group was announced this boot already.
+            // Another group, then this one again: nothing goes in on the way, the setup is due
+            // again at the next run start, and this group was announced this boot already.
             await client.ManipSelectAsync(2);
-            Assert.Equal(ManipEventKind.Activated, (await client.ManipListAsync()).EventKind);
             await client.ManipSelectAsync(1);
+            Assert.Equal(applied.EventSeq, (await client.ManipListAsync()).EventSeq);
+            server.ManipRunStart();
             var again = await client.ManipListAsync();
             Assert.Equal(ManipEventKind.PerRunApplied, again.EventKind);
             Assert.Equal(1, again.EventGroup);
@@ -939,7 +947,7 @@ public class ManipStateTests
     }
 
     [Fact]
-    public async Task PickingASetupGroupOnTheWrongFileIsToldAtOnce()
+    public async Task PickingASetupGroupOnTheWrongFileSaysNothingUntilTheRunStarts()
     {
         using var server = new FakeQwarkServer();
         server.Describe = FakeQwarkServer.WithManipHeaderFeatures(server.Describe with { Game = GameId.Rac3 }, GameId.Rac3);
@@ -950,11 +958,16 @@ public class ManipStateTests
 
         Assert.True(await PumpAsync(state, () => state.Manips is not null));
 
-        // UYA's NG+ no QE is a setup, which goes in at once with a file in play: on a fresh file the
-        // console refuses, and the select's own OK is not the end of it.
+        // UYA's NG+ no QE is a setup. Picking it with a fresh file in play checks and writes
+        // nothing, so nothing is toasted; the refusal comes with the next run start.
+        const string text = "NG+ no QE wasn't applied: this file isn't a challenge-mode file";
         state.SelectManipGroup(1);
-        Assert.True(await PumpAsync(state,
-            () => ToastsSaying(state, "NG+ no QE wasn't applied: this file isn't a challenge-mode file") == 1));
+        Assert.True(await PumpAsync(state, () => state.Manips?.Selected == 1));
+        await PumpForAsync(state, 200);
+        Assert.Equal(0, ToastsSaying(state, text));
+
+        server.ManipRunStart();
+        Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1, timeoutMs: 6000));
     }
 
     /// <summary>

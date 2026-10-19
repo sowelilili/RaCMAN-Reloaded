@@ -1109,15 +1109,11 @@ public sealed class FakeQwarkServer : IDisposable
                 // The same group again is nothing: no setup rewritten, no refusal raised.
                 if (id == config.Selected) return (Status.Ok, null);
 
+                // Nothing is written or checked now, whatever is in play, as qwark's build 54 does:
+                // the group's setup is due at the next run start that passes its check, or at Apply
+                // now. Stepping through the groups (the console menu's Left and Right) raises nothing.
                 config.Selected = id;
                 config.SetupDone = false;
-
-                // A group picked while a file is in play has its setup made at once, after the
-                // check: the group's first application this boot says it was activated, a later one
-                // that it was applied, and a file the group does not suit says so. The answer is OK
-                // whatever happened, as qwark's is; the event is what tells.
-                if (group is not null && ManipFileLoaded) ManipAttempt(config, group, setup: true, perRun: false);
-
                 return (Status.Ok, null);
             }
 
