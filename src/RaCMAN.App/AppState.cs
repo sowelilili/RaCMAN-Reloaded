@@ -1499,6 +1499,39 @@ public sealed class AppState : IDisposable
     public const float VshMemoryPollSeconds = 10f;
 
     /// <summary>
+    /// Under this many bytes free the VSH is short of memory: the status line says "low memory"
+    /// (<see cref="VshMemoryLow"/>) and the Connection panel's line turns the warning colour. The
+    /// one mark for both. A console with webMAN and qwark loaded has about 2.6 MB free at the XMB
+    /// and 1 to 1.5 MB in a game, dipping to a little over 1 MB, so qwark's own 1 MB log mark is
+    /// ordinary play. 512 KB is half the lowest of those normal readings and twice the 256 KB under
+    /// which webMAN stops serving pages.
+    /// </summary>
+    public const uint VshMemoryLowBytes = 512 * 1024;
+
+    /// <summary>
+    /// How far above <see cref="VshMemoryLowBytes"/> a reading has to come back before "low memory"
+    /// goes: one 64 KB page, so a figure that wobbles about the mark does not turn the warning on and
+    /// off every ten seconds.
+    /// </summary>
+    public const uint VshMemoryLowMarginBytes = 64 * 1024;
+
+    /// <summary>
+    /// The status line's "low memory": the latest reading went under <see cref="VshMemoryLowBytes"/>
+    /// and has not since come back above it by <see cref="VshMemoryLowMarginBytes"/>. Only while a
+    /// reading is live — connected, the session carrying flags.VSH_MEMORY, and the latest read gone
+    /// through — so never under RPCS3, with a module from before the op, or with no connection.
+    /// </summary>
+    public bool VshMemoryLow =>
+        _vshMemoryLow && Connected && Session.VshMemory && VshMemoryStatus is null && VshMemory is not null;
+
+    /// <summary>
+    /// Whether "low memory" shows after a reading of <paramref name="free"/> bytes, given whether it
+    /// showed before it: on under the mark, and off again only above the mark plus the margin.
+    /// </summary>
+    public static bool VshMemoryLowAfter(bool wasLow, uint free) =>
+        free < VshMemoryLowBytes || (wasLow && free <= VshMemoryLowBytes + VshMemoryLowMarginBytes);
+
+    /// <summary>
     /// The last VSH_MEMORY answer on this connection: null before the first one and once the
     /// connection has gone. A later read that is refused leaves it here, so the panel can tell a
     /// console that has never answered from one that answered and then refused
@@ -1539,7 +1572,13 @@ public sealed class AppState : IDisposable
     /// <summary>Seconds since the last VSH_MEMORY went out, held at the interval once one is due.</summary>
     private float _sinceVshMemory;
 
-    /// <summary>Drops the figures, the status and the age with the connection they came from.</summary>
+    /// <summary>
+    /// "Low memory" as the readings that went through have left it (<see cref="VshMemoryLowAfter"/>).
+    /// A refused read hides the warning without touching this, and the next reading carries on from it.
+    /// </summary>
+    private bool _vshMemoryLow;
+
+    /// <summary>Drops the figures, the status, the age and the warning with the connection they came from.</summary>
     private void ForgetVshMemory()
     {
         VshMemory = null;
@@ -1547,6 +1586,7 @@ public sealed class AppState : IDisposable
         VshMemoryAge = 0;
         _vshMemoryLive = false;
         _vshMemoryUnreadable = false;
+        _vshMemoryLow = false;
     }
 
     /// <summary>
@@ -1591,6 +1631,7 @@ public sealed class AppState : IDisposable
                     VshMemory = info;
                     VshMemoryStatus = null;
                     VshMemoryAge = 0;
+                    _vshMemoryLow = VshMemoryLowAfter(_vshMemoryLow, info.Free);
                 });
             }
             catch (QwarkStatusException ex)

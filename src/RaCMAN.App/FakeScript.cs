@@ -22,7 +22,8 @@ public static class FakeScript
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
                                 + "manip[:kind[:group]], "
-                                + "trophies[:none|starting|deleting|registering|ready|failed[:n]]";
+                                + "trophies[:none|starting|deleting|registering|ready|failed[:n]], "
+                                + "vshmem:<free KB>[:<total KB>]|vshmem:off";
 
     /// <summary>The folder <c>consolemod</c> puts on the fake console when the step names none.</summary>
     public const string DefaultConsoleMod = "old-savefile-helper";
@@ -111,6 +112,33 @@ public static class FakeScript
         };
     }
 
+    /// <summary>
+    /// What a <c>vshmem:&lt;free KB&gt;[:&lt;total KB&gt;]</c> step leaves the fake answering
+    /// VSH_MEMORY with: a fresh reading of that much free, of that total or the last one's (20,480 KB
+    /// before any), with the lowest following the readings given. <c>vshmem:off</c>, or a step
+    /// without a figure, is null: the console can no longer read it, and bit5 goes.
+    /// </summary>
+    public static VshMemoryInfo? VshMemoryStep(VshMemoryInfo? previous, string[] parts, GameId game)
+    {
+        if (parts.Length < 2 || !uint.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out uint freeKb))
+        {
+            return null;
+        }
+
+        uint totalKb = parts.Length > 2 && uint.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out var t)
+            ? t
+            : previous?.TotalKb ?? 20480;
+
+        uint free = freeKb * 1024;
+        if (previous is { HasLowest: true } before && before.Lowest <= free)
+        {
+            return before with { Free = free, Total = totalKb * 1024, AgeSeconds = 0 };
+        }
+
+        return new VshMemoryInfo(free, totalKb * 1024, free, previous?.Start ?? free, 0, 0,
+            VshMemoryReading.Periodic, game);
+    }
+
     public static void Apply(FakeQwarkServer fake, string step)
     {
         // "split:1:3" is one step: the kind, then the reason code and its argument. For a timing
@@ -171,6 +199,17 @@ public static class FakeScript
             string folder = parts.Length > 1 && parts[1].Length > 0 ? parts[1] : DefaultConsoleMod;
             fake.AddConsoleMod(folder, "Old savefile helper", auto: true);
             Console.WriteLine($"fake-script consolemod {folder}");
+            return;
+        }
+
+        // The VSH's free memory (revision 1.22), as qwark-host's vshmem command gives it, so a run
+        // can go under the low mark and back out of it and the status line be watched following.
+        if (parts[0] == "vshmem")
+        {
+            fake.VshMemory = VshMemoryStep(fake.VshMemory, parts, fake.Session.Game);
+            Console.WriteLine(fake.VshMemory is { } vsh
+                ? $"fake-script vshmem {vsh.FreeKb} KB free of {vsh.TotalKb} KB, lowest {vsh.LowestKb} KB"
+                : "fake-script vshmem off");
             return;
         }
 

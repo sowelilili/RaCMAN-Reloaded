@@ -805,8 +805,10 @@ public static class ConnectionPanel
     /// answer. A refused read shows its status in place of the figures, except a status a
     /// background read is entitled to (<see cref="StatusToast.IsQuietStatus"/>) before any figure
     /// has arrived, which says nothing here as it would say nothing in a toast. The figures are a
-    /// warning once the latest or the lowest is under qwark's own low mark,
-    /// <see cref="VshMemoryInfo.LowBytes"/>.
+    /// warning once the latest or the lowest is under <see cref="AppState.VshMemoryLowBytes"/>, the
+    /// mark the status line's "low memory" goes by. The lowest is never above the latest, so the
+    /// line is a warning whenever the status line says "low memory", and stays one after the figure
+    /// recovers for as long as the lowest it shows is under the mark.
     /// </summary>
     public static (string Text, bool Warning)? VshMemoryLine(bool flagged, VshMemoryInfo? info, Status? refused)
     {
@@ -822,8 +824,19 @@ public static class ConnectionPanel
 
         string text = $"VSH memory: {Kb(info.FreeKb)} KB free of {Kb(info.TotalKb)} KB";
         if (info.HasLowest) text += $" (lowest {Kb(info.LowestKb)} KB)";
-        return (text, info.IsLow);
+
+        bool low = info.Free < AppState.VshMemoryLowBytes
+                   || (info.HasLowest && info.Lowest < AppState.VshMemoryLowBytes);
+        return (text, low);
     }
+
+    /// <summary>
+    /// The hover text on the status line's "low memory" (<see cref="AppState.VshMemoryLow"/>): the
+    /// figure it is about, and what to do if the game starts to suffer for it.
+    /// </summary>
+    public static string VshMemoryLowTooltip(VshMemoryInfo info) =>
+        $"The console's system software (the VSH) is low on memory: {Kb(info.FreeKb)} KB free of "
+        + $"{Kb(info.TotalKb)} KB. Close other plugins or reboot the console if the game becomes unstable.";
 
     /// <summary>
     /// The debug line under the figures: when and where the lowest reading was, the figure at

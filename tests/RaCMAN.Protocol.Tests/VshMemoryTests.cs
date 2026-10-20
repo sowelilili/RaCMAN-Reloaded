@@ -10,7 +10,8 @@ namespace RaCMAN.Protocol.Tests;
 /// <summary>
 /// VSH_MEMORY and flags.VSH_MEMORY (protocol revision 1.22, qwark build 54) on the client's side:
 /// the 28-byte reply, the request against the fake console, the timed read <see cref="AppState"/>
-/// makes only while the bit is set, and the line the Connection panel draws from it.
+/// makes only while the bit is set, the line the Connection panel draws from it, and the status
+/// line's "low memory".
 /// </summary>
 public class VshMemoryTests
 {
@@ -103,7 +104,6 @@ public class VshMemoryTests
         Assert.Equal(1800u, info.StartKb);
         Assert.True(info.HasLowest);
         Assert.True(info.HasStart);
-        Assert.False(info.IsLow);
 
         // And the fake console sends exactly these bytes for the same figures.
         Assert.Equal(wire, Figures.ToBytes());
@@ -129,18 +129,10 @@ public class VshMemoryTests
     }
 
     [Fact]
-    public void KbIsRoundedDownAndLowIsUnderQwarksMark()
+    public void KbIsRoundedDown()
     {
         Assert.Equal(1u, (Figures with { Free = 2047 }).FreeKb);
         Assert.Equal(0u, (Figures with { Free = 1023 }).FreeKb);
-
-        // qwark's mark is a megabyte free, and "under" is strictly under.
-        Assert.False((Figures with { Free = VshMemoryInfo.LowBytes, Lowest = VshMemoryInfo.LowBytes }).IsLow);
-        Assert.True((Figures with { Free = VshMemoryInfo.LowBytes - 1 }).IsLow);
-        Assert.True((Figures with { Lowest = VshMemoryInfo.LowBytes - 1 }).IsLow);
-
-        // A lowest the module says it does not have is not a low lowest.
-        Assert.False((Figures with { Lowest = 0, LowestAt = VshMemoryReading.None }).IsLow);
         Assert.False((Figures with { Start = 0 }).HasStart);
     }
 
@@ -237,6 +229,7 @@ public class VshMemoryTests
         Assert.Null(state.VshMemory);
         Assert.Null(state.VshMemoryStatus);
         Assert.Null(ConnectionPanel.VshMemoryLine(state.Session.VshMemory, state.VshMemory, state.VshMemoryStatus));
+        Assert.False(state.VshMemoryLow);
         Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
     }
 
@@ -359,6 +352,7 @@ public class VshMemoryTests
         await PumpForAsync(state, 200);
 
         Assert.Null(state.VshMemory);
+        Assert.False(state.VshMemoryLow);
         Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
         Assert.Null(ConnectionPanel.VshMemoryLine(state.Session.VshMemory, state.VshMemory, state.VshMemoryStatus));
     }
@@ -382,6 +376,169 @@ public class VshMemoryTests
         Assert.True(await PumpAsync(state, () => state.VshMemory == booting));
         Assert.Null(state.VshMemoryStatus);
         Assert.True(state.ConsoleBusy);
+    }
+
+    // ================================================================ the status line's "low memory"
+
+    /// <summary>A ten-second reading of <paramref name="freeKb"/> free, with the lowest since module start.</summary>
+    private static VshMemoryInfo Reading(uint freeKb, uint lowestKb) =>
+        Figures with { Free = freeKb * 1024, Lowest = lowestKb * 1024, LowestAt = VshMemoryReading.Periodic };
+
+    /// <summary>The console's figure moves, the interval passes, and the client has read the new one.</summary>
+    private static async Task ReadAsync(AppState state, FakeQwarkServer server, VshMemoryInfo figures)
+    {
+        int asked = Asked(server);
+        server.VshMemory = figures;
+        state.Tick(AppState.VshMemoryPollSeconds);
+        Assert.True(await PumpAsync(state, () => Asked(server) > asked && state.VshMemory == figures));
+    }
+
+    [Fact]
+    public void TheMarkIs512KbAndTheWarningGoesOnlyAPageAboveIt()
+    {
+        const uint mark = AppState.VshMemoryLowBytes;
+        const uint clear = mark + AppState.VshMemoryLowMarginBytes;
+        Assert.Equal(512u * 1024, mark);
+        Assert.Equal(64u * 1024, AppState.VshMemoryLowMarginBytes);
+
+        // On strictly under the mark.
+        Assert.True(AppState.VshMemoryLowAfter(false, mark - 1));
+        Assert.True(AppState.VshMemoryLowAfter(false, 0));
+        Assert.False(AppState.VshMemoryLowAfter(false, mark));
+        Assert.False(AppState.VshMemoryLowAfter(false, clear));
+
+        // Once on, it stays on up to the mark plus a page, and goes only above that.
+        Assert.True(AppState.VshMemoryLowAfter(true, mark));
+        Assert.True(AppState.VshMemoryLowAfter(true, clear));
+        Assert.False(AppState.VshMemoryLowAfter(true, clear + 1));
+    }
+
+    [Fact]
+    public async Task LowMemoryShowsWhileTheLatestReadingIsUnderTheMark()
+    {
+        // Deadlocked a few seconds after its arrival, as a console reported it: ordinary play.
+        using var server = new FakeQwarkServer { VshMemory = Reading(1044, 1044) };
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.VshMemory is not null));
+        Assert.False(state.VshMemoryLow);
+
+        // Exactly the mark is not under it.
+        await ReadAsync(state, server, Reading(512, 512));
+        Assert.False(state.VshMemoryLow);
+
+        await ReadAsync(state, server, Reading(400, 400));
+        Assert.True(state.VshMemoryLow);
+        Assert.True(ConnectionPanel.VshMemoryLine(state.Session.VshMemory, state.VshMemory, state.VshMemoryStatus)!.Value.Warning);
+
+        // Back at the XMB's figure: gone from the status line. The panel's line keeps the warning
+        // colour, because the lowest it shows is still under the mark.
+        await ReadAsync(state, server, Reading(2696, 400));
+        Assert.False(state.VshMemoryLow);
+        Assert.Equal(("VSH memory: 2,696 KB free of 5,678 KB (lowest 400 KB)", true),
+            ConnectionPanel.VshMemoryLine(state.Session.VshMemory, state.VshMemory, state.VshMemoryStatus));
+    }
+
+    [Fact]
+    public async Task LowMemoryGoesOnlyOnceTheReadingIsAPageAboveTheMark()
+    {
+        using var server = new FakeQwarkServer { VshMemory = Reading(400, 400) };
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.VshMemory is not null));
+        Assert.True(state.VshMemoryLow);
+
+        // Over the mark, but not by a page: a figure wobbling about the mark does not flicker it.
+        await ReadAsync(state, server, Reading(540, 400));
+        Assert.True(state.VshMemoryLow);
+        await ReadAsync(state, server, Reading(576, 400));
+        Assert.True(state.VshMemoryLow);
+
+        await ReadAsync(state, server, Reading(577, 400));
+        Assert.False(state.VshMemoryLow);
+
+        // The same band on the way down does not bring it back; under the mark does.
+        await ReadAsync(state, server, Reading(530, 400));
+        Assert.False(state.VshMemoryLow);
+        await ReadAsync(state, server, Reading(511, 400));
+        Assert.True(state.VshMemoryLow);
+    }
+
+    [Fact]
+    public async Task LowMemoryShowsOnlyWhileTheReadingIsLive()
+    {
+        using var server = new FakeQwarkServer { VshMemory = Reading(400, 400) };
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.VshMemoryLow));
+
+        // A refused read: the panel keeps the figures and shows the status, but the latest read did
+        // not go through, so there is nothing for the status line to warn on.
+        server.RefusedOps[Opcode.VshMemory] = Status.IoError;
+        state.Tick(AppState.VshMemoryPollSeconds);
+        Assert.True(await PumpAsync(state, () => state.VshMemoryStatus == Status.IoError));
+        Assert.NotNull(state.VshMemory);
+        Assert.False(state.VshMemoryLow);
+
+        // The next one that goes through brings it back.
+        server.RefusedOps.Remove(Opcode.VshMemory);
+        await ReadAsync(state, server, Reading(420, 400));
+        Assert.True(state.VshMemoryLow);
+
+        // The console can no longer read the figure: bit5 goes, and VSH_MEMORY is UNSUPPORTED.
+        server.VshMemory = null;
+        Assert.True(await PumpAsync(state, () => !state.Session.VshMemory));
+        Assert.False(state.VshMemoryLow);
+
+        await ReadAsync(state, server, Reading(410, 400));
+        Assert.True(state.VshMemoryLow);
+
+        // Disconnected, it goes with the figures.
+        await state.Client.DisconnectAsync();
+        state.Tick(1f / 60f);
+        Assert.False(state.VshMemoryLow);
+
+        // And a new connection starts from nothing: a reading inside the band above the mark,
+        // which would have kept the last connection's warning up, does not put one up.
+        server.VshMemory = Reading(540, 400);
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        Assert.True(await PumpAsync(state, () => state.VshMemory is not null));
+        Assert.False(state.VshMemoryLow);
+    }
+
+    [Fact]
+    public void TheLowMemoryHoverGivesTheFigureAndWhatToDo()
+    {
+        Assert.Equal("The console's system software (the VSH) is low on memory: 400 KB free of 20,480 KB. "
+                     + "Close other plugins or reboot the console if the game becomes unstable.",
+            ConnectionPanel.VshMemoryLowTooltip(Figures with { Free = 400 * 1024, Total = 20480 * 1024 }));
+    }
+
+    [Fact]
+    public void TheFakeScriptsVshmemStepMovesTheFigure()
+    {
+        using var server = new FakeQwarkServer();
+
+        FakeScript.Apply(server, "vshmem:1044");
+        Assert.Equal(1044u, server.VshMemory!.FreeKb);
+        Assert.Equal(20480u, server.VshMemory.TotalKb);
+        Assert.Equal(1044u, server.VshMemory.LowestKb);
+        Assert.True(server.Session.VshMemory);
+
+        // Down, then back up: the lowest stays at the bottom, the total as it was last given.
+        FakeScript.Apply(server, "vshmem:400:31744");
+        FakeScript.Apply(server, "vshmem:2696");
+        Assert.Equal(2696u, server.VshMemory.FreeKb);
+        Assert.Equal(31744u, server.VshMemory.TotalKb);
+        Assert.Equal(400u, server.VshMemory.LowestKb);
+        Assert.Equal(1044u, server.VshMemory.StartKb);
+
+        FakeScript.Apply(server, "vshmem:off");
+        Assert.Null(server.VshMemory);
+        Assert.False(server.Session.VshMemory);
     }
 
     // ================================================================ what the panel says
@@ -411,20 +568,29 @@ public class VshMemoryTests
     }
 
     [Fact]
-    public void TheLineIsAWarningUnderAMegabyte()
+    public void TheLineIsAWarningUnderTheLowMark()
     {
-        var low = Figures with { Free = 1023 * 1024 };
-        Assert.Equal(("VSH memory: 1,023 KB free of 5,678 KB (lowest 1,100 KB)", true),
+        Assert.Equal(512u * 1024, AppState.VshMemoryLowBytes);
+
+        var low = Figures with { Free = 511 * 1024, Lowest = 511 * 1024 };
+        Assert.Equal(("VSH memory: 511 KB free of 5,678 KB (lowest 511 KB)", true),
             ConnectionPanel.VshMemoryLine(true, low, null));
 
         // A lowest under the mark is a warning even with plenty free now.
-        var dipped = Figures with { Lowest = 1000 * 1024 };
-        Assert.Equal(("VSH memory: 1,234 KB free of 5,678 KB (lowest 1,000 KB)", true),
+        var dipped = Figures with { Lowest = 500 * 1024 };
+        Assert.Equal(("VSH memory: 1,234 KB free of 5,678 KB (lowest 500 KB)", true),
             ConnectionPanel.VshMemoryLine(true, dipped, null));
 
-        // Exactly a megabyte is not under it.
-        var edge = Figures with { Free = 1024 * 1024, Lowest = 1024 * 1024 };
+        // Exactly the mark is not under it, and the in-game figures of an ordinary session (about a
+        // megabyte, qwark's own log mark) are not a warning at all.
+        var edge = Figures with { Free = AppState.VshMemoryLowBytes, Lowest = AppState.VshMemoryLowBytes };
         Assert.False(ConnectionPanel.VshMemoryLine(true, edge, null)!.Value.Warning);
+        var ordinary = Figures with { Free = 1044 * 1024, Lowest = 1044 * 1024 };
+        Assert.False(ConnectionPanel.VshMemoryLine(true, ordinary, null)!.Value.Warning);
+
+        // A lowest the module says it does not have is not a low lowest.
+        var none = Figures with { Lowest = 0, LowestAt = VshMemoryReading.None };
+        Assert.False(ConnectionPanel.VshMemoryLine(true, none, null)!.Value.Warning);
     }
 
     [Fact]

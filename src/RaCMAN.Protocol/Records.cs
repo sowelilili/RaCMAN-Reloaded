@@ -905,12 +905,6 @@ public sealed record VshMemoryInfo(
     /// <summary>Twenty-eight bytes. A longer reply is a later revision's, and its first 28 are these.</summary>
     public const int WireSize = 28;
 
-    /// <summary>
-    /// qwark's own low mark: below a megabyte free it logs a "low" line, and the client colours the
-    /// figures as a warning below the same mark.
-    /// </summary>
-    public const uint LowBytes = 1024 * 1024;
-
     /// <summary>The figures in KB, rounded down, which is how they are shown.</summary>
     public uint FreeKb => Free / 1024;
 
@@ -925,9 +919,6 @@ public sealed record VshMemoryInfo(
 
     /// <summary>The reading at module start went through; 0 says it failed or was never taken.</summary>
     public bool HasStart => Start != 0;
-
-    /// <summary>The latest reading, or the lowest one, is under <see cref="LowBytes"/>.</summary>
-    public bool IsLow => Free < LowBytes || (HasLowest && Lowest < LowBytes);
 
     /// <summary>
     /// A reply shorter than 28 bytes stops inside a field and throws, as every fixed-size reply

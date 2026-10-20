@@ -243,6 +243,7 @@ if (exitAfter > 0)
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"obspad={state.ObsPad.State}/{state.ObsPad.Port} " +
                       $"tcpfallback={state.Client.TelemetryViaTcp} " +
+                      $"vshmem={(state.VshMemory is { } vsh ? $"{vsh.FreeKb}KB" : "none")} lowmemory={state.VshMemoryLow} " +
 
                       // The last error toast of the run, so a headless session change can be
                       // checked for the refusals a launch used to spray across the screen.

@@ -502,6 +502,17 @@ public sealed class AppWindow : GameWindow
                        + "To update your firewall, go to the Connection panel.");
         }
 
+        // The console running short of the memory every plugin shares, last of the warnings: the
+        // Connection panel has the figures, and the hover gives the one that matters here.
+        if (_state.VshMemoryLow && _state.VshMemory is { } vsh)
+        {
+            ImGui.SameLine();
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            Ui.Text(Ui.Yellow, "low memory");
+            Ui.Tooltip(ConnectionPanel.VshMemoryLowTooltip(vsh));
+        }
+
         if (_state.Connected && session.PreviousPending)
         {
             ImGui.SameLine();
