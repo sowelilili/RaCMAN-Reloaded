@@ -88,7 +88,7 @@ public static class CombosPanel
     public static string? Tooltip(ComboAction action) => action switch
     {
         ComboAction.OpenConsoleMenu =>
-            "Opens the RaCMAN menu on the TV, in Deadlocked for now. It works even when the combos are switched off.",
+            "Opens the Trainer menu on the TV. It works even when the combos are switched off.",
         _ => null,
     };
 
