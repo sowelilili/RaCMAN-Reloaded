@@ -4,9 +4,10 @@
 ##
 ## The payload comes from two places: this repository (the client, the skins, the layout and
 ## autosplit data, the mod library in mods/ and the premade savefiles in premade-savefiles/)
-## and sowelilili/qwark (the PS3 module, the console menu's ui.pak and the RPCS3 helper, out of
-## its committed dist/ folder). The staging itself is publish.ps1's, run with switches rather
-## than copied here, so the release layout has one description.
+## and sowelilili/qwark (the PS3 module, the console menu's ui.pak, the console installer
+## package and the RPCS3 helper, out of its committed dist/ folder). The staging itself is
+## publish.ps1's, run with switches rather than copied here, so the release layout has one
+## description; the installer package is not part of it, and goes up as an asset of its own.
 ##
 ## Velopack's own releases index lives in the release assets, so the two jobs run one after the
 ## other and the Linux one merges into the release the Windows one made.
@@ -65,7 +66,7 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak qwark/dist/qwark-rpcs3.exe; do
+          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak qwark/dist/qwark-installer.pkg qwark/dist/qwark-rpcs3.exe; do
             if [ ! -f "$file" ]; then
               echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no ${file#qwark/}. Build it and commit it to that repository's dist/ folder before tagging a release."
               missing=1
@@ -136,6 +137,19 @@ jobs:
           --merge
           --releaseName "RaCMAN Reloaded ${{ steps.version.outputs.version }}"
           --tag "${{ github.ref_name }}"
+
+      # The installer for a console with no PC: a package that Package Manager installs, carrying
+      # the same qwark.sprx and ui.pak as the client. It is an asset of its own, never part of the
+      # client's folder, and qwark makes it into dist/ from the very module and pak beside it. The
+      # release exists by now: the step above made it.
+      - name: Attach the console installer package
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release upload "${GITHUB_REF_NAME}" qwark/dist/qwark-installer.pkg
+          --clobber
+          --repo "${{ github.repository }}"
 
   linux:
     name: Linux (AppImage)

@@ -8,11 +8,13 @@ A modding tool and trainer for the original Ratchet & Clank quadrilogy, on PS3 a
 
 ## Installation
 
-Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, the console menu's file `ui.pak` and the RPCS3 helper.
+Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, the console menu's file `ui.pak`, the RPCS3 helper and a console installer.
 
 - **Windows, installer**: run `RaCMANReloaded-win-Setup.exe`. It installs for your user account only. It does not need administrator rights.
 - **Windows, portable**: unzip `RaCMANReloaded-win-Portable.zip` and run `RaCMAN.App.exe`.
 - **Linux**: download `RaCMANReloaded-linux.AppImage`, make it executable and run it.
+
+**Install without a PC**: download `qwark-installer.pkg` and install it on the console with Package Manager. Run **qwark installer** once. It installs the module and restarts the console.
 
 ## Connect to a PS3
 
@@ -121,18 +123,18 @@ dotnet test
 dotnet run --project src/RaCMAN.App
 ```
 
-`publish.ps1` makes `../build/RaCMAN-Reloaded/` and a zip of it. It takes `qwark.sprx`, `ui.pak` and `qwark-rpcs3.exe` from `../qwark/dist/`, which qwark commits, so a release needs no PS3 SDK. `-All` adds linux-x64 and osx-x64.
+`publish.ps1` makes `../build/RaCMAN-Reloaded/` and a zip of it. It takes `qwark.sprx`, `ui.pak` and `qwark-rpcs3.exe` from `../qwark/dist/`, which qwark commits, so a release needs no PS3 SDK. It puts `qwark-installer.pkg` from there beside the zip. `-All` adds linux-x64 and osx-x64.
 
 To work without a console, build the qwark simulator with `../qwark/build-host.sh`. Run `qwark-host.exe`, type `boot NPEA00385`, and connect the client to `127.0.0.1`. `dotnet run --project src/RaCMAN.App -- --help` lists the flags for headless runs.
 
 ## Releasing
 
-1. Build `qwark.sprx`, `ui.pak` and `qwark-rpcs3.exe` in the qwark repository and commit them to its `dist/` folder. The release fails without them.
+1. Build `qwark.sprx`, `ui.pak`, `qwark-installer.pkg` and `qwark-rpcs3.exe` in the qwark repository and commit them to its `dist/` folder. The release fails without them.
 2. Tag a commit here `vX.Y.Z` and push the tag.
 
 `.github/workflows/release.yml` then builds the client, packs it with [Velopack](https://docs.velopack.io) and uploads it. The Windows job makes the release. The Linux job adds its AppImage to it. The version comes from the tag.
 
-A release carries `Setup.exe`, the portable zip, the AppImage, the `.nupkg` packages and the `releases.win.json` and `releases.linux.json` files. Do not delete those two files from a release. The client reads them to find updates.
+A release carries `Setup.exe`, the portable zip, the AppImage, `qwark-installer.pkg`, the `.nupkg` packages and the `releases.win.json` and `releases.linux.json` files. Do not delete those two files from a release. The client reads them to find updates.
 
 There is no macOS job yet. macOS needs signing and notarisation first.
 

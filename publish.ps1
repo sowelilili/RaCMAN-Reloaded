@@ -11,6 +11,10 @@
     and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
     ..\build\RaCMAN-Reloaded.zip.
 
+    ..\qwark\dist\qwark-installer.pkg, the installer for a console with no PC, goes beside the
+    zips as ..\build\qwark-installer.pkg, and never into an application folder: the client has no
+    use for it, and a release carries it as an asset of its own.
+
     The console side comes from qwark's committed dist\ folder, which `make dist` fills after a
     build, so a release can be cut without a PS3 SDK on the machine.
 
@@ -58,6 +62,7 @@ param(
     [string]$SprxPath,
     [string]$UiPakPath,
     [string]$Rpcs3Path,
+    [string]$PkgPath,
     [string]$Rid,
     [string]$StageName,
     [string]$Version,
@@ -78,6 +83,7 @@ if (-not $ModsSource) { $ModsSource = Combine $repo 'mods' }
 if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.sprx' }
 if (-not $UiPakPath)  { $UiPakPath  = Combine $repo '..' 'qwark' 'dist' 'ui.pak' }
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
+if (-not $PkgPath)    { $PkgPath    = Combine $repo '..' 'qwark' 'dist' 'qwark-installer.pkg' }
 
 # The mod library the client ships with: one folder per title plus the shared Lua helpers. It
 # lives in this repo now, so a release carries whatever is committed and nothing else. UYA
@@ -298,6 +304,16 @@ else {
         $runtimes += @{ Rid = 'linux-x64'; Name = 'RaCMAN-Reloaded-linux-x64' }
         $runtimes += @{ Rid = 'osx-x64';   Name = 'RaCMAN-Reloaded-osx-x64' }
     }
+}
+
+# The console installer package, for a console with no PC, beside the zips rather than inside any
+# of them: the same file for every runtime, and nothing the client itself reads.
+if (Test-Path $PkgPath) {
+    Copy-Item -Force $PkgPath (Join-Path $OutputRoot 'qwark-installer.pkg')
+    Write-Host "qwark-installer.pkg: $(Resolve-Full $PkgPath)"
+}
+else {
+    Write-Warning "qwark-installer.pkg not found at $PkgPath; the release folder will not carry the console installer"
 }
 
 foreach ($runtime in $runtimes) {
