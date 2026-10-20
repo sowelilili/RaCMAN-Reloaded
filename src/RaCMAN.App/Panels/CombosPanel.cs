@@ -139,6 +139,17 @@ public static class CombosPanel
     };
 
     /// <summary>
+    /// What a combo's cell says: its buttons, or "disabled" for mask 0. The hex of the bit-field
+    /// goes after the buttons only with debug information on: it is of use while reading the wire
+    /// and nothing else, and at the end of a six-button combo, the console menu's default, it ran
+    /// past the edge of the column at the window's default width.
+    /// </summary>
+    public static string MaskText(uint mask, bool debug) =>
+        mask == 0 ? "disabled"
+        : debug ? $"{PadButtons.Describe(mask)}  (0x{mask:X})"
+        : PadButtons.Describe(mask);
+
+    /// <summary>
     /// Feeds the telemetry pad mask to the capture in flight. <see cref="ComboCapture"/> keeps the
     /// fullest mask of the press and answers with it when the pad returns to 0, which is exactly
     /// when qwark re-arms a combo.
@@ -297,7 +308,7 @@ public static class CombosPanel
             }
             else
             {
-                Ui.Text(mask == 0 ? Ui.Grey : Ui.Green, mask == 0 ? "disabled" : $"{PadButtons.Describe(mask)}  (0x{mask:X})");
+                Ui.Text(mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
             }
 
             ImGui.TableNextColumn();

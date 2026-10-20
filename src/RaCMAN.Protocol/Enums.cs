@@ -473,10 +473,9 @@ public enum ComboAction : byte
 
     /// <summary>
     /// Revision 1.22 (qwark build 54): opens the console menu on the TV, or closes it. The one
-    /// combo the console gives a mask out of the box, <see cref="ComboDefaults.OpenConsoleMenu"/>,
-    /// and the one its combo switch does not hold off, so a console with no PC keeps its quick way
-    /// into the menu (the game's pause menu, through its Help row, is the other). COMBO_LIST
-    /// reports it as a sixth entry.
+    /// combo the console gives a mask out of the box, <see cref="ComboDefaults.OpenConsoleMenu"/>.
+    /// Build 54 did not let the combo switch hold it off; since build 55 (revision 1.23) the switch
+    /// holds it like every other combo. COMBO_LIST reports it as a sixth entry.
     /// </summary>
     OpenConsoleMenu = 5,
 

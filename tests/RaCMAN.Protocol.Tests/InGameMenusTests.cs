@@ -119,7 +119,7 @@ public class InGameMenusTests
         Assert.False(CombosPanel.InGameMenusBlocked(console));
         Assert.True(CombosPanel.InGameMenusBlocked(rpcs3));
         Assert.Equal("Trainer replaces Help in the pause menu", CombosPanel.InGameMenusStatus(console));
-        Assert.Equal("the pause menu keeps Help", CombosPanel.InGameMenusStatus(off));
+        Assert.Equal("the game's default pause menu", CombosPanel.InGameMenusStatus(off));
         Assert.Equal("not under RPCS3", CombosPanel.InGameMenusStatus(rpcs3));
 
         var parsed = SessionInfo.Parse(off.ToBytes());
@@ -152,11 +152,31 @@ public class InGameMenusTests
         }
     }
 
+    /// <summary>
+    /// The hex of a combo's bit-field goes after its buttons only with debug information on: the
+    /// console menu's six-button default, with the hex after it, was wider than its column.
+    /// </summary>
+    [Fact]
+    public void TheHexOfAComboShowsOnlyWithDebugInformation()
+    {
+        uint menu = ComboDefaults.OpenConsoleMenu;
+        string buttons = PadButtons.Describe(menu);
+
+        Assert.Equal(buttons, CombosPanel.MaskText(menu, debug: false));
+        Assert.Equal($"{buttons}  (0x{menu:X})", CombosPanel.MaskText(menu, debug: true));
+        Assert.DoesNotContain("0x", CombosPanel.MaskText(menu, debug: false));
+
+        // A combo that is off says so, with or without the debug detail.
+        Assert.Equal("disabled", CombosPanel.MaskText(0, debug: false));
+        Assert.Equal("disabled", CombosPanel.MaskText(0, debug: true));
+    }
+
     [Fact]
     public void TheRowIsGatedOnTheBuildAndGreyedWhereTheBoxIs()
     {
         Assert.Equal("Toggle fast loads", CombosPanel.Label(ComboAction.ToggleFastLoads));
-        Assert.NotNull(CombosPanel.Tooltip(ComboAction.ToggleFastLoads));
+        Assert.Null(CombosPanel.Tooltip(ComboAction.ToggleFastLoads));
+        Assert.NotNull(CombosPanel.Tooltip(ComboAction.OpenConsoleMenu));
         Assert.False(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, 54));
         Assert.True(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, 55));
         Assert.True(CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, 54));
