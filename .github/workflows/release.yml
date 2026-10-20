@@ -4,9 +4,9 @@
 ##
 ## The payload comes from two places: this repository (the client, the skins, the layout and
 ## autosplit data, the mod library in mods/ and the premade savefiles in premade-savefiles/)
-## and sowelilili/qwark (the PS3 module and the RPCS3 helper, out of its committed dist/
-## folder). The staging itself is publish.ps1's, run with switches rather than copied here, so
-## the release layout has one description.
+## and sowelilili/qwark (the PS3 module, the console menu's ui.pak and the RPCS3 helper, out of
+## its committed dist/ folder). The staging itself is publish.ps1's, run with switches rather
+## than copied here, so the release layout has one description.
 ##
 ## Velopack's own releases index lives in the release assets, so the two jobs run one after the
 ## other and the Linux one merges into the release the Windows one made.
@@ -65,7 +65,7 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for file in qwark/dist/qwark.sprx qwark/dist/qwark-rpcs3.exe; do
+          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak qwark/dist/qwark-rpcs3.exe; do
             if [ ! -f "$file" ]; then
               echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no ${file#qwark/}. Build it and commit it to that repository's dist/ folder before tagging a release."
               missing=1
@@ -95,6 +95,7 @@ jobs:
             -OutputRoot '${{ github.workspace }}/stage' `
             -StageName RaCMAN-Reloaded `
             -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx' `
+            -UiPakPath '${{ github.workspace }}/qwark/dist/ui.pak' `
             -Rpcs3Path '${{ github.workspace }}/qwark/dist/qwark-rpcs3.exe'
 
       - name: Install vpk
@@ -170,13 +171,18 @@ jobs:
           path: qwark
 
       # No qwark-rpcs3.exe here: the RPCS3 helper is a Windows executable, and publish.ps1 leaves
-      # it out of a non-Windows payload anyway.
+      # it out of a non-Windows payload anyway. The console side is the same for every PC, so the
+      # module and its ui.pak are needed here too.
       - name: Check qwark built what this release needs
         run: |
-          if [ ! -f qwark/dist/qwark.sprx ]; then
-            echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no dist/qwark.sprx. Build it and commit it to that repository's dist/ folder before tagging a release."
-            exit 1
-          fi
+          missing=0
+          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak; do
+            if [ ! -f "$file" ]; then
+              echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no ${file#qwark/}. Build it and commit it to that repository's dist/ folder before tagging a release."
+              missing=1
+            fi
+          done
+          exit $missing
 
       - name: Install .NET
         uses: actions/setup-dotnet@v4
@@ -194,7 +200,8 @@ jobs:
             -NoZip `
             -OutputRoot '${{ github.workspace }}/stage' `
             -StageName RaCMAN-Reloaded `
-            -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx'
+            -SprxPath '${{ github.workspace }}/qwark/dist/qwark.sprx' `
+            -UiPakPath '${{ github.workspace }}/qwark/dist/ui.pak'
 
       # The AppImage's entry point has to be executable, and a zip-free copy through PowerShell
       # does not carry the bit.

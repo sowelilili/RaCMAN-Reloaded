@@ -575,6 +575,14 @@ public enum SessionFlags : byte
     /// whose menu always took the row, so it reads right against those too.
     /// </summary>
     MenuHelpOff = 1 << 6,
+
+    /// <summary>
+    /// The console's <c>/dev_hdd0/qwark/ui.pak</c> is missing, damaged or not the one built with
+    /// the running module (revision 1.23, build 55), so the console menu cannot go into a game.
+    /// The module checks it at start and again just after a file op on that path. Never set by
+    /// qwark-rpcs3, and never by a module before build 55, where the bit was always 0.
+    /// </summary>
+    UiPakBad = 1 << 7,
 }
 
 /// <summary>

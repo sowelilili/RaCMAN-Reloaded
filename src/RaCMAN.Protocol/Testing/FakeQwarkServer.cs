@@ -14,7 +14,8 @@ namespace RaCMAN.Protocol.Testing;
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
 /// ops of revision 1.10 over the same in-memory filesystem the file ops use, the four MANIP ops
 /// of revision 1.21 over a small per-game group table, and VSH_MEMORY of revision 1.22 over a
-/// figure a test sets. Everything else answers UNKNOWN_OP.
+/// figure a test sets. Everything else answers UNKNOWN_OP. From build 55 it also sets flags bit7,
+/// UI_PAK_BAD, from the ui.pak in that filesystem, as qwark does (<see cref="UiPakBad"/>).
 /// <para>
 /// <see cref="UnknownGame"/> is the other session build 36 can report: a title the module has no
 /// game for, where the memory ops work and every game op answers UNSUPPORTED.
@@ -636,7 +637,8 @@ public sealed class FakeQwarkServer : IDisposable
     private SessionInfo ReportedSession()
     {
         var (planet, flags) = ReportedPlanetSelection();
-        return _session with { SelectedPlanet = planet, PlanetFlags = flags };
+        var sessionFlags = ReportsUiPakBad ? _session.Flags | SessionFlags.UiPakBad : _session.Flags;
+        return _session with { SelectedPlanet = planet, PlanetFlags = flags, Flags = sessionFlags };
     }
 
     /// <summary>
@@ -1313,6 +1315,107 @@ public sealed class FakeQwarkServer : IDisposable
         get => PatchReply.StampFor(SaveFilePatchWords, SaveFilePatchBytes);
     }
 
+    // ------------------------------------------- 3, the console menu's ui.pak (revision 1.23)
+
+    /// <summary>The first module build that checks <see cref="UiPak.ConsolePath"/> and sets flags bit7.</summary>
+    public const byte UiPakBuild = 55;
+
+    /// <summary>
+    /// What the fake module made of its pak the last time it looked. The real one looks at module
+    /// start, just after a file op on the pak's path and at each game's menu install; this one at
+    /// <see cref="Start"/> and <see cref="RestartModule"/>, after the same file ops, and when the
+    /// session moves to another build or a new generation. A test that writes <see cref="Files"/>
+    /// directly sees the flag move at the next of those, as it would against a console.
+    /// </summary>
+    private bool _uiPakBad;
+
+    /// <summary>
+    /// A pak this fake counts as good for <paramref name="build"/>: the 32-byte header (magic
+    /// QPAK, format 1, header size 32, the build) and filler up to <paramref name="length"/>. The
+    /// real module compares the pak with the one it was built with; the fake reads the header
+    /// alone, so a pak naming its build is a good one and anything else is not.
+    /// </summary>
+    public static byte[] UiPakFor(byte build, int length = 4096)
+    {
+        var pak = new byte[Math.Max(length, UiPak.HeaderSize)];
+        for (int i = UiPak.HeaderSize; i < pak.Length; i++) pak[i] = (byte)(i * 13 + build);
+
+        var w = new SpanWriter(pak);
+        w.WriteBytes(UiPak.Magic);
+        w.WriteU16(1);
+        w.WriteU16(UiPak.HeaderSize);
+        w.WriteU32(build);
+        pak.AsSpan(12, UiPak.HeaderSize - 12).Clear();
+        return pak;
+    }
+
+    /// <summary>
+    /// Puts a good pak for this fake's build, or for <paramref name="build"/>, where the module
+    /// reads it. Before <see cref="Start"/> that is a console that starts with its pak in place;
+    /// leaving it out is one that starts without.
+    /// </summary>
+    public void PutUiPak(byte? build = null)
+    {
+        lock (_gate) Files[UiPak.ConsolePath] = UiPakFor(build ?? _session.QwarkVersion);
+    }
+
+    /// <summary>
+    /// The module refuses every pak, as one built from other sources under the same number would
+    /// be refused. Taken at the module's next look, like a change to <see cref="Files"/>.
+    /// </summary>
+    public bool RejectsUiPak { get; set; }
+
+    /// <summary>
+    /// flags bit7 as every session block this fake sends carries it: the last look found no good
+    /// pak, the build is one that looks (<see cref="UiPakBuild"/> or later), and the fake is not
+    /// in its RPCS3 shape (<see cref="Emulator"/> or <see cref="NoCodePatches"/>), where qwark-rpcs3
+    /// never sets it. A test can still set the bit by hand in <see cref="Session"/>'s flags.
+    /// </summary>
+    public bool UiPakBad
+    {
+        get { lock (_gate) return ReportsUiPakBad; }
+    }
+
+    private bool ReportsUiPakBad =>
+        _uiPakBad
+        && _session.QwarkVersion >= UiPakBuild
+        && (_session.Flags & (SessionFlags.Emulator | SessionFlags.NoCodePatches)) == 0;
+
+    /// <summary>
+    /// The module started again, as after the console's restart: on <paramref name="build"/> when
+    /// one is given, with a good staged pak (<see cref="UiPak.StagedPath"/>) moved into place and
+    /// the pak looked at. Connections are left alone; <see cref="DropClients"/> is the restart's
+    /// other half, for a test that wants it.
+    /// </summary>
+    public void RestartModule(byte? build = null)
+    {
+        lock (_gate)
+        {
+            if (build is { } next) _session = _session with { QwarkVersion = next };
+            StartModuleUiPak();
+        }
+    }
+
+    private bool GoodUiPak(byte[] pak) =>
+        !RejectsUiPak && UiPak.TryReadBuild(pak, out int build) && build == _session.QwarkVersion;
+
+    /// <summary>Under <see cref="_gate"/>: what qwark does at module start, the staged pak first.</summary>
+    private void StartModuleUiPak()
+    {
+        if (Files.TryGetValue(UiPak.StagedPath, out var staged) && GoodUiPak(staged))
+        {
+            Files.Remove(UiPak.ConsolePath);
+            Files[UiPak.ConsolePath] = staged;
+            Files.Remove(UiPak.StagedPath);
+        }
+
+        CheckUiPak();
+    }
+
+    /// <summary>Under <see cref="_gate"/>: the module's look at its pak.</summary>
+    private void CheckUiPak() =>
+        _uiPakBad = !Files.TryGetValue(UiPak.ConsolePath, out var pak) || !GoodUiPak(pak);
+
     // ------------------------------------------- 5.1, the VSH's free memory (revision 1.22)
 
     private VshMemoryInfo? _vshMemory;
@@ -1638,7 +1741,11 @@ public sealed class FakeQwarkServer : IDisposable
         {
             lock (_gate)
             {
+                // Another build is another module, and a new generation a game whose menu install
+                // looks at the pak: either way the module has looked at it again.
+                bool look = value.QwarkVersion != _session.QwarkVersion || value.Generation != _session.Generation;
                 _session = value;
+                if (look) CheckUiPak();
 
                 // A session moved by hand to anything but BOOTING or QUITTING has finished
                 // launching, so the refusals below stop with it: the two ways of driving this
@@ -1841,7 +1948,12 @@ public sealed class FakeQwarkServer : IDisposable
         return Array.Find(Describe.Features, f => f.Id == payload[0])?.WritesCode ?? false;
     }
 
-    public void Start() => _ = Task.Run(AcceptLoopAsync);
+    public void Start()
+    {
+        // Module start, before anything answers: the staged ui.pak is adopted and the pak checked.
+        lock (_gate) StartModuleUiPak();
+        _ = Task.Run(AcceptLoopAsync);
+    }
 
     /// <summary>Kills every accepted connection, the way a console crash or a reboot would.</summary>
     public void DropClients()
@@ -2605,6 +2717,8 @@ public sealed class FakeQwarkServer : IDisposable
                         Files.Remove(key);
                     }
 
+                    // A folder above the pak took it with it.
+                    if (UiPak.ConsolePath.StartsWith(path + "/", StringComparison.Ordinal)) CheckUiPak();
                     return (Status.Ok, null);
                 }
 
@@ -2668,14 +2782,20 @@ public sealed class FakeQwarkServer : IDisposable
                 {
                     if (payload.Length < 4) return (Status.BadArg, null);
                     uint handle = new SpanReader(payload).ReadU32();
-                    if (!_openFiles.Remove(handle)) return (Status.NotFound, null);
+                    if (!_openFiles.Remove(handle, out var closed)) return (Status.NotFound, null);
+
+                    // A write to the pak is finished only when its handle closes, and that is when
+                    // the module looks at it again.
+                    if (closed.Mode == FileMode.WriteTruncate && closed.Path == UiPak.ConsolePath) CheckUiPak();
                     return (Status.Ok, null);
                 }
 
                 case Opcode.FileDelete:
                 {
                     string path = Encoding.UTF8.GetString(payload);
-                    return Files.Remove(path) ? (Status.Ok, null) : (Status.NotFound, null);
+                    bool removed = Files.Remove(path);
+                    if (path == UiPak.ConsolePath) CheckUiPak();
+                    return removed ? (Status.Ok, null) : (Status.NotFound, null);
                 }
 
                 // NOT_FOUND for a folder that is not there, as qwark answers when it cannot open it.
@@ -2987,6 +3107,7 @@ public sealed class FakeQwarkServer : IDisposable
 
                     Files.Remove(from);
                     Files[to] = moving;
+                    if (from == UiPak.ConsolePath || to == UiPak.ConsolePath) CheckUiPak();
                     return (Status.Ok, null);
                 }
 

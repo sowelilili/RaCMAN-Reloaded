@@ -488,6 +488,17 @@ public sealed class AppWindow : GameWindow
             Ui.Text(Ui.Yellow, "qwark.sprx is out of date");
         }
 
+        // The module is current and its menu file is not: the same kind of line, and the
+        // Connection panel has the button that sends it.
+        if (_state.UiPakNeeded)
+        {
+            ImGui.SameLine();
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            Ui.Text(Ui.Yellow, "ui.pak is missing or out of date");
+            Ui.Tooltip($"{AppState.UiPakWarning} The Connection panel can send it.");
+        }
+
         // The same, for the fallback that is easy to run on for months without noticing: everything
         // works, so nothing says so except the Connection panel nobody has open.
         if (_state.Connected && _state.Client.TelemetryViaTcp)

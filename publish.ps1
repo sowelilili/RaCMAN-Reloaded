@@ -6,16 +6,17 @@
     Publishes src/RaCMAN.App framework-dependent for win-x64 (and, with -All, for linux-x64 and
     osx-x64 as well), then stages ..\build\RaCMAN-Reloaded\ with the published app, the
     controller skins, the moby layout data, the mod library from this repo's mods\ folder, the
-    premade savefiles from its premade-savefiles\ folder, ..\qwark\dist\qwark.sprx and
-    ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
+    premade savefiles from its premade-savefiles\ folder, ..\qwark\dist\qwark.sprx,
+    ..\qwark\dist\ui.pak (the console menu's file, which the module reads from the console's HDD)
+    and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
     ..\build\RaCMAN-Reloaded.zip.
 
     The console side comes from qwark's committed dist\ folder, which `make dist` fills after a
     build, so a release can be cut without a PS3 SDK on the machine.
 
     Each runtime gets its own complete folder and zip: the app finds controllerskins\, data\,
-    mods\, premade-savefiles\ and qwark.sprx beside its own executable, so the payload cannot be
-    shared between runtimes. win-x64 is the one that lands in RaCMAN-Reloaded\; -All adds
+    mods\, premade-savefiles\, qwark.sprx and ui.pak beside its own executable, so the payload
+    cannot be shared between runtimes. win-x64 is the one that lands in RaCMAN-Reloaded\; -All adds
     RaCMAN-Reloaded-linux-x64\ and RaCMAN-Reloaded-osx-x64\.
 
     The release workflow calls this script too, with -Rid, -Version, -SelfContained and -NoZip,
@@ -55,6 +56,7 @@ param(
     [string]$OutputRoot,
     [string]$ModsSource,
     [string]$SprxPath,
+    [string]$UiPakPath,
     [string]$Rpcs3Path,
     [string]$Rid,
     [string]$StageName,
@@ -74,6 +76,7 @@ function Combine {
 if (-not $OutputRoot) { $OutputRoot = Combine $repo '..' 'build' }
 if (-not $ModsSource) { $ModsSource = Combine $repo 'mods' }
 if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.sprx' }
+if (-not $UiPakPath)  { $UiPakPath  = Combine $repo '..' 'qwark' 'dist' 'ui.pak' }
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 
 # The mod library the client ships with: one folder per title plus the shared Lua helpers. It
@@ -165,6 +168,17 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
     }
     else {
         Write-Warning "qwark.sprx not found at $SprxPath; the release will not carry the module"
+    }
+
+    # The console menu's renderers, which the module reads from the console's HDD. The client sends
+    # it with qwark.sprx from beside itself, and the console side is the same whatever the PC runs,
+    # so every runtime carries it.
+    if (Test-Path $UiPakPath) {
+        Copy-Item -Force $UiPakPath (Join-Path $stageDir 'ui.pak')
+        Write-Host "  ui.pak: $(Resolve-Full $UiPakPath)"
+    }
+    else {
+        Write-Warning "ui.pak not found at $UiPakPath; the release will not carry the console menu's file"
     }
 
     # The RPCS3 helper: qwark's core built for the PC, which the client starts beside itself when

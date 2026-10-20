@@ -5,6 +5,12 @@ namespace RaCMAN.Protocol;
 /// <summary>Which part of the update a failure belongs to, for the one message the user sees.</summary>
 public enum SprxUpdateStep
 {
+    /// <summary>
+    /// Writing the new build's ui.pak beside the console's own as <see cref="UiPak.StagedPath"/>
+    /// and reading it back. The first step, so a failure here leaves the module alone too.
+    /// </summary>
+    UiPak,
+
     /// <summary>Reading boot_plugins.txt to find out where the console loads the module from.</summary>
     BootPath,
 
@@ -33,8 +39,12 @@ public sealed class SprxUpdateException : Exception
     public SprxUpdateStep Step { get; }
 }
 
-/// <summary>What the update did, for the message and for a test to read.</summary>
-public readonly record struct SprxUpdateResult(string BootPath, string BackupPath, bool ReplacedACopy, int Bytes);
+/// <summary>
+/// What the update did, for the message and for a test to read. <see cref="UiPakStaged"/> is false
+/// when the client had no ui.pak to send, and the console then keeps whatever pak it has.
+/// </summary>
+public readonly record struct SprxUpdateResult(
+    string BootPath, string BackupPath, bool ReplacedACopy, int Bytes, bool UiPakStaged = false);
 
 /// <summary>
 /// Replaces the console's boot copy of qwark.sprx with the one this client shipped, through the
@@ -47,6 +57,12 @@ public readonly record struct SprxUpdateResult(string BootPath, string BackupPat
 /// console booting the module it booted before. A failure does leave the <c>.new</c> file behind:
 /// the next attempt truncates it, and rubbish beside the boot copy is worth less than the extra
 /// requests a cleanup would make against a console that has just refused one.
+/// </para>
+/// <para>
+/// The console menu's ui.pak goes first, and only ever as <see cref="UiPak.StagedPath"/>: the
+/// module that is running reads its own pak until the restart, and the next build's would be a bad
+/// one to it. The new module moves the staged pak into place when it starts, before it checks it.
+/// A failure there stops the update before the module is touched.
 /// </para>
 /// <para>
 /// Nothing here decides <em>whether</em> to update. The caller compares the build HELLO reported
@@ -80,15 +96,41 @@ public static class SprxUpdate
     }
 
     /// <summary>
-    /// Puts <paramref name="sprx"/> where the console boots its module from. The console has to be
-    /// restarted afterwards: a VSH plugin is read once, at boot, and this client cannot restart it.
+    /// Puts <paramref name="sprx"/> where the console boots its module from, and
+    /// <paramref name="uiPak"/>, when there is one, where the new module will look for it at its
+    /// start. The console has to be restarted afterwards: a VSH plugin is read once, at boot, and
+    /// this client cannot restart it.
     /// </summary>
     public static async Task<SprxUpdateResult> RunAsync(
         QwarkClient client,
         ReadOnlyMemory<byte> sprx,
+        byte[]? uiPak = null,
         IProgress<string>? progress = null,
         CancellationToken cancellationToken = default)
     {
+        if (uiPak is not null)
+        {
+            progress?.Report($"Uploading {UiPak.FileName} to {UiPak.StagedPath}");
+            try
+            {
+                await client.WriteFileAsync(UiPak.StagedPath, uiPak, progress: null, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                throw new SprxUpdateException(SprxUpdateStep.UiPak,
+                    $"uploading {UiPak.FileName} to {UiPak.StagedPath}", error);
+            }
+
+            try
+            {
+                await VerifyAsync(client, UiPak.StagedPath, uiPak, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                throw new SprxUpdateException(SprxUpdateStep.UiPak, $"checking {UiPak.StagedPath}", error);
+            }
+        }
+
         string bootPath;
         try
         {
@@ -115,17 +157,7 @@ public static class SprxUpdate
 
         try
         {
-            var written = await client.ReadFileAsync(temporary, progress: null, cancellationToken).ConfigureAwait(false);
-            if (written.Length != sprx.Length)
-            {
-                throw new IOException(
-                    $"the console holds {written.Length} bytes of it, not {sprx.Length}");
-            }
-
-            if (Crc32.Compute(written) != Crc32.Compute(sprx.Span))
-            {
-                throw new IOException("the copy on the console does not match the one that was sent");
-            }
+            await VerifyAsync(client, temporary, sprx, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -165,7 +197,26 @@ public static class SprxUpdate
         }
 
         progress?.Report($"{bootPath} is the new {WebManLoader.SprxName}");
-        return new SprxUpdateResult(bootPath, backup, replaced, sprx.Length);
+        return new SprxUpdateResult(bootPath, backup, replaced, sprx.Length, UiPakStaged: uiPak is not null);
+    }
+
+    /// <summary>
+    /// Reads <paramref name="path"/> back and checks it against what was sent: the length, then the
+    /// CRC32. The module's upload and every upload of ui.pak are checked this one way.
+    /// </summary>
+    internal static async Task VerifyAsync(
+        QwarkClient client, string path, ReadOnlyMemory<byte> sent, CancellationToken cancellationToken)
+    {
+        var written = await client.ReadFileAsync(path, progress: null, cancellationToken).ConfigureAwait(false);
+        if (written.Length != sent.Length)
+        {
+            throw new IOException($"the console holds {written.Length} bytes of it, not {sent.Length}");
+        }
+
+        if (Crc32.Compute(written) != Crc32.Compute(sent.Span))
+        {
+            throw new IOException("the copy on the console does not match the one that was sent");
+        }
     }
 
     /// <summary>
@@ -200,7 +251,7 @@ public static class SprxUpdate
     }
 
     /// <summary>The same, and says whether the move happened, which decides what a failed swap undoes.</summary>
-    private static async Task<bool> MovedAsync(Task work)
+    internal static async Task<bool> MovedAsync(Task work)
     {
         try
         {

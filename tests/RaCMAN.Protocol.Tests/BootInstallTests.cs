@@ -1,5 +1,8 @@
 using System.Text;
 
+using RaCMAN.App.Panels;
+using RaCMAN.Protocol.Testing;
+
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
@@ -196,6 +199,83 @@ public class BootInstallTests
 
         Assert.True(await Loader(server).RemoveFromBootAsync("127.0.0.1"));
         Assert.Equal(string.Empty, Text(server, BootList));
+    }
+
+    // ------------------------------------------------------------------ ui.pak
+
+    /// <summary>
+    /// The console menu's ui.pak goes with the module, to the folder qwark reads it from. The
+    /// folder is made first: a console qwark has never started on has none.
+    /// </summary>
+    [Fact]
+    public async Task TheInstallPutsUiPakInQwarksFolderBesideTheModule()
+    {
+        var pak = FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild);
+
+        using var server = new FakeFtpServer();
+        server.Start();
+
+        var said = new List<string>();
+        var result = await Loader(server).InstallToBootAsync(
+            "127.0.0.1", FakeRelease(pak), new InlineProgress<string>(said.Add));
+
+        Assert.True(result.UiPakSent);
+        Assert.Equal(pak, server.Stored[UiPak.ConsolePath]);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, server.Stored[WebManLoader.BootPath]);
+        Assert.Equal($"{Qwark}\n", Text(server, BootList));
+        Assert.Contains($"Uploading ui.pak to {UiPak.ConsolePath}", said);
+
+        await WaitForQuitAsync(server);
+        var commands = server.Commands.Where(c => !c.StartsWith("PASV", StringComparison.Ordinal)).ToList();
+        int module = commands.IndexOf($"STOR {WebManLoader.BootPath}");
+        int folder = commands.IndexOf($"MKD {UiPak.ConsoleDirectory}");
+        int stored = commands.IndexOf($"STOR {UiPak.ConsolePath}");
+        Assert.True(module >= 0 && module < folder && folder < stored, string.Join(" | ", commands));
+
+        Assert.Contains("Sent ui.pak to /dev_hdd0/qwark.", ConnectionPanel.BootInstallMessage(result));
+    }
+
+    /// <summary>No ui.pak beside the module: the module is installed all the same, and the client says the pak is missing.</summary>
+    [Fact]
+    public async Task WithoutUiPakTheModuleIsInstalledAndTheClientSaysSo()
+    {
+        using var server = new FakeFtpServer();
+        server.Start();
+
+        var said = new List<string>();
+        var result = await Loader(server).InstallToBootAsync(
+            "127.0.0.1", FakeRelease(null), new InlineProgress<string>(said.Add));
+
+        Assert.False(result.UiPakSent);
+        Assert.Equal(BootInstallOutcome.Added, result.Outcome);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, server.Stored[WebManLoader.BootPath]);
+        Assert.False(server.Stored.ContainsKey(UiPak.ConsolePath));
+        Assert.Contains(UiPak.MissingNote, said);
+
+        await WaitForQuitAsync(server);
+        Assert.DoesNotContain($"MKD {UiPak.ConsoleDirectory}", server.Commands);
+
+        Assert.Contains("No ui.pak was sent.", ConnectionPanel.BootInstallMessage(result));
+    }
+
+    /// <summary>The FTP session's last word is QUIT, so once the server has it the command list is complete.</summary>
+    internal static async Task WaitForQuitAsync(FakeFtpServer server)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (!server.Commands.Contains("QUIT") && sw.ElapsedMilliseconds < 5000) await Task.Delay(10);
+        Assert.Contains("QUIT", server.Commands);
+    }
+
+    /// <summary>A qwark.sprx in a folder of its own, with a ui.pak beside it when one is given.</summary>
+    internal static string FakeRelease(byte[]? pak)
+    {
+        string folder = Path.Combine(TestDataFolder.Root, $"release-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        if (pak is not null) File.WriteAllBytes(Path.Combine(folder, UiPak.FileName), pak);
+
+        string path = Path.Combine(folder, WebManLoader.SprxName);
+        File.WriteAllBytes(path, new byte[] { 1, 2, 3, 4 });
+        return path;
     }
 
     private static WebManLoader Loader(FakeFtpServer server) => new() { FtpPort = server.Port };

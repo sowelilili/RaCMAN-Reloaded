@@ -19,9 +19,10 @@ public enum BootInstallOutcome
 
 /// <summary>
 /// What an install did and how many lines the list holds afterwards, which is the other thing the
-/// user has to be told: see <see cref="BeyondHenLimit"/>.
+/// user has to be told: see <see cref="BeyondHenLimit"/>. <see cref="UiPakSent"/> says whether the
+/// console menu's ui.pak went with the module; it is false when the client had none beside it.
 /// </summary>
-public readonly record struct BootInstallResult(BootInstallOutcome Outcome, int Lines)
+public readonly record struct BootInstallResult(BootInstallOutcome Outcome, int Lines, bool UiPakSent = false)
 {
     /// <summary>
     /// Whether the console reads past the end of the list. qwark is the first line either way, so
@@ -33,7 +34,8 @@ public readonly record struct BootInstallResult(BootInstallOutcome Outcome, int 
 
 /// <summary>
 /// Gets qwark.sprx onto the console the way racman-official does it: FTP the file into
-/// /dev_hdd0/tmp/ and load it through webMAN's vshplugin.ps3mapi endpoint.
+/// /dev_hdd0/tmp/ and load it through webMAN's vshplugin.ps3mapi endpoint. The console menu's
+/// ui.pak travels in the same FTP session, to /dev_hdd0/qwark/ (see <see cref="UiPak"/>).
 ///
 /// The console side of this cannot be tested here: it needs a console running webMAN MOD with its
 /// FTP server up. The FTP client below is checked against RFC 959 rather than against hardware, and
@@ -112,8 +114,14 @@ public sealed class WebManLoader
         }
     }
 
-    /// <summary>Uploads the SPRX over FTP and asks webMAN to load it into the given VSH slot.</summary>
-    public async Task LoadAsync(
+    /// <summary>
+    /// Uploads the SPRX over FTP, and the console menu's ui.pak with it when there is one beside
+    /// it, then asks webMAN to load the module into the given VSH slot. The pak goes across before
+    /// the load, because the module checks it as it starts. A client with no pak, or a pak the
+    /// console refused, still loads the module and says so: the trainer does not wait on the
+    /// menu's file. Returns whether the pak was sent.
+    /// </summary>
+    public async Task<bool> LoadAsync(
         string ip,
         string localSprxPath,
         int slot = DefaultSlot,
@@ -125,11 +133,14 @@ public sealed class WebManLoader
 
         progress?.Report($"Uploading {SprxName} to {RemotePath}");
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
+        var pak = await ReadUiPakAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
+        bool sent;
         using (var ftp = new FtpSession(ip, FtpPort))
         {
             await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
             await ftp.StoreAsync(RemotePath, bytes, cancellationToken).ConfigureAwait(false);
+            sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
         }
 
         progress?.Report($"Loading {SprxName} into slot {slot}");
@@ -138,11 +149,51 @@ public sealed class WebManLoader
         using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         progress?.Report($"{SprxName} loaded into slot {slot}");
+        return sent;
+    }
+
+    /// <summary>The ui.pak beside <paramref name="localSprxPath"/>, or null when there is none.</summary>
+    private static async Task<byte[]?> ReadUiPakAsync(string localSprxPath, CancellationToken cancellationToken)
+    {
+        string path = UiPak.BesideSprx(localSprxPath);
+        return File.Exists(path) ? await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false) : null;
+    }
+
+    /// <summary>
+    /// Puts the pak where the module reads it, or says there is none. qwark creates its folder when
+    /// it starts, and a console it has never started on has none, so MKD goes first. A refusal is
+    /// said, with the console's reply, and the module goes on without it: the module works without
+    /// its menu file, and the Connection panel offers the pak again once the module is up.
+    /// Answers whether the pak went across.
+    /// </summary>
+    private static async Task<bool> StoreUiPakAsync(
+        FtpSession ftp, byte[]? pak, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        if (pak is null)
+        {
+            progress?.Report(UiPak.MissingNote);
+            return false;
+        }
+
+        progress?.Report($"Uploading {UiPak.FileName} to {UiPak.ConsolePath}");
+        try
+        {
+            await ftp.MakeDirectoryAsync(UiPak.ConsoleDirectory, cancellationToken).ConfigureAwait(false);
+            await ftp.StoreAsync(UiPak.ConsolePath, pak, cancellationToken).ConfigureAwait(false);
+            return true;
+        }
+        catch (IOException error)
+        {
+            progress?.Report($"{UiPak.SendFailedNote} ({error.Message})");
+            return false;
+        }
     }
 
     /// <summary>
     /// Puts the SPRX in /dev_hdd0/plugins and makes that path the first line of
     /// /dev_hdd0/boot_plugins.txt so the console loads it at boot, before anything else on the list.
+    /// The console menu's ui.pak goes to /dev_hdd0/qwark with it when the client has one; without
+    /// one the module is installed all the same, and the result says the pak was not sent.
     /// Only ever called from an explicit user action: a VSH plugin that crashes at boot is recovered
     /// only by disabling plugins.
     /// </summary>
@@ -154,6 +205,7 @@ public sealed class WebManLoader
     {
         if (!File.Exists(localSprxPath)) throw new FileNotFoundException($"{SprxName} not found", localSprxPath);
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
+        var pak = await ReadUiPakAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
         using var ftp = new FtpSession(ip, FtpPort);
         await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -161,10 +213,12 @@ public sealed class WebManLoader
         progress?.Report($"Uploading {SprxName} to {BootPath}");
         await ftp.MakeDirectoryAsync(PluginsDirectory, cancellationToken).ConfigureAwait(false);
         await ftp.StoreAsync(BootPath, bytes, cancellationToken).ConfigureAwait(false);
+        bool sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
 
         var existing = await ftp.RetrieveAsync(BootPluginsPath, cancellationToken).ConfigureAwait(false);
         var text = existing is null ? string.Empty : Encoding.UTF8.GetString(existing);
-        var (rewritten, result) = PlanBootList(text);
+        var (rewritten, planned) = PlanBootList(text);
+        var result = planned with { UiPakSent = sent };
 
         if (result.Outcome is BootInstallOutcome.AlreadyFirst)
         {

@@ -2,6 +2,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 
+using RaCMAN.Protocol.Testing;
+
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
@@ -95,6 +97,110 @@ public class FtpTests
         using var ftp = new FtpSession("127.0.0.1", server.Port);
         await ftp.ConnectAsync();
         await ftp.MakeDirectoryAsync("/dev_hdd0/plugins");
+    }
+
+    /// <summary>
+    /// The webMAN load sends ui.pak in the same session as the module, into qwark's folder, and
+    /// only then asks webMAN to load the module, so the module finds its pak as it starts. webMAN's
+    /// HTTP side is a stub here: what it records is what the FTP server held when the load was asked.
+    /// </summary>
+    [Fact]
+    public async Task TheWebManLoadSendsUiPakBeforeAskingForTheLoad()
+    {
+        var pak = FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild);
+
+        using var server = new FakeFtpServer();
+        server.Start();
+
+        var webMan = new WebManStub(() => server.Stored.TryGetValue(UiPak.ConsolePath, out var held) ? held : null);
+        var loader = new WebManLoader(new HttpClient(webMan)) { FtpPort = server.Port };
+
+        var said = new List<string>();
+        bool sent = await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(pak), 5,
+            new InlineProgress<string>(said.Add));
+
+        Assert.True(sent);
+        var (url, pakAtLoad) = Assert.Single(webMan.Requests);
+        Assert.Equal("http://127.0.0.1/vshplugin.ps3mapi?prx=%2Fdev_hdd0%2Ftmp%2Fqwark.sprx&load_slot=5", url);
+        Assert.Equal(pak, pakAtLoad);
+        Assert.Contains($"Uploading ui.pak to {UiPak.ConsolePath}", said);
+
+        await BootInstallTests.WaitForQuitAsync(server);
+        var commands = server.Commands.Where(c => !c.StartsWith("PASV", StringComparison.Ordinal)).ToList();
+        Assert.Equal(
+            new[]
+            {
+                $"STOR {WebManLoader.RemotePath}",
+                $"MKD {UiPak.ConsoleDirectory}",
+                $"STOR {UiPak.ConsolePath}",
+                "QUIT",
+            },
+            commands.Skip(3));
+    }
+
+    [Fact]
+    public async Task WithoutUiPakTheWebManLoadStillLoadsTheModuleAndSaysSo()
+    {
+        using var server = new FakeFtpServer();
+        server.Start();
+
+        var webMan = new WebManStub(() => null);
+        var loader = new WebManLoader(new HttpClient(webMan)) { FtpPort = server.Port };
+
+        var said = new List<string>();
+        bool sent = await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(null), 5,
+            new InlineProgress<string>(said.Add));
+
+        Assert.False(sent);
+        Assert.Single(webMan.Requests);
+        Assert.Contains(UiPak.MissingNote, said);
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, server.Stored[WebManLoader.RemotePath]);
+
+        await BootInstallTests.WaitForQuitAsync(server);
+        Assert.DoesNotContain($"MKD {UiPak.ConsoleDirectory}", server.Commands);
+        Assert.False(server.Stored.ContainsKey(UiPak.ConsolePath));
+    }
+
+    /// <summary>
+    /// A console that refuses qwark's folder or the pak still gets its module: the trainer does not
+    /// wait on the menu's file, and the refusal is said with the console's reply.
+    /// </summary>
+    [Fact]
+    public async Task ARefusedUiPakStillLoadsTheModuleAndSaysWhy()
+    {
+        var pak = FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild);
+
+        using var server = new FakeFtpServer { MkdReply = "553 Permission denied" };
+        server.Start();
+
+        var webMan = new WebManStub(() => null);
+        var loader = new WebManLoader(new HttpClient(webMan)) { FtpPort = server.Port };
+
+        var said = new List<string>();
+        bool sent = await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(pak), 5,
+            new InlineProgress<string>(said.Add));
+
+        Assert.False(sent);
+        Assert.Single(webMan.Requests);
+        Assert.Contains(said, line => line.StartsWith(UiPak.SendFailedNote, StringComparison.Ordinal) && line.Contains("553"));
+        Assert.Equal(new byte[] { 1, 2, 3, 4 }, server.Stored[WebManLoader.RemotePath]);
+        Assert.False(server.Stored.ContainsKey(UiPak.ConsolePath));
+    }
+
+    /// <summary>webMAN's load endpoint, answered here: it records each request and what the FTP server held at that moment.</summary>
+    private sealed class WebManStub : HttpMessageHandler
+    {
+        private readonly Func<byte[]?> _pakOnConsole;
+
+        public WebManStub(Func<byte[]?> pakOnConsole) => _pakOnConsole = pakOnConsole;
+
+        public List<(string Url, byte[]? PakAtLoad)> Requests { get; } = new();
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add((request.RequestUri!.AbsoluteUri, _pakOnConsole()));
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+        }
     }
 
     [Fact]

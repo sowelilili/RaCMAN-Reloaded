@@ -128,6 +128,7 @@ public static class ConnectionPanel
         }
 
         DrawStaleBuild(state);
+        DrawUiPak(state);
         DrawVersions(state);
 
         if (rpcs3)
@@ -172,8 +173,15 @@ public static class ConnectionPanel
         string sprx = Ps3Connect.ResolveSprx(_sprxPath);
 
         // The resolved path is absolute and long, so both spellings of this line wrap.
-        if (File.Exists(sprx)) Ui.Hint(sprx);
-        else Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
+        if (File.Exists(sprx))
+        {
+            Ui.Hint(sprx);
+            DrawUiPakBeside(sprx);
+        }
+        else
+        {
+            Ui.Warning($"{sprx} (not found; build ../qwark or point this at the SPRX)");
+        }
 
         ImGui.SetNextItemWidth(120);
         load |= Ui.SubmitInt("VSH slot", ref _slot, 0, 7);
@@ -261,8 +269,15 @@ public static class ConnectionPanel
         // it is the whole of what a standalone user sees of the SPRX.
         if (withPathBox)
         {
-            if (File.Exists(sprx)) Ui.Hint(sprx);
-            else Ui.Warning($"{sprx} (not found; the release puts qwark.sprx beside this client)");
+            if (File.Exists(sprx))
+            {
+                Ui.Hint(sprx);
+                DrawUiPakBeside(sprx);
+            }
+            else
+            {
+                Ui.Warning($"{sprx} (not found; the release puts qwark.sprx beside this client)");
+            }
         }
 
         ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
@@ -280,12 +295,7 @@ public static class ConnectionPanel
             state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
                 result =>
                 {
-                    state.AddToast(result.Outcome switch
-                    {
-                        BootInstallOutcome.Added => "Added at the top of boot_plugins.txt",
-                        BootInstallOutcome.Moved => "Moved to the top of boot_plugins.txt",
-                        _ => "boot_plugins.txt already starts with it",
-                    } + ". Restart the console; the module only loads at boot.");
+                    state.AddToast(BootInstallMessage(result));
 
                     // qwark is first, so it loads whatever follows it; the lines past the limit are
                     // the user's own plugins, and only the user can say which of them to drop.
@@ -310,6 +320,31 @@ public static class ConnectionPanel
         ImGui.EndDisabled();
 
         DrawUpdateModuleButton(state, sprx);
+    }
+
+    /// <summary>
+    /// What the boot install did, in the one toast it gets: where qwark is on the list, whether
+    /// ui.pak went with it, and the restart a boot plugin needs. A missing pak has already been
+    /// named, with what it costs, as the install went.
+    /// </summary>
+    public static string BootInstallMessage(BootInstallResult result) =>
+        result.Outcome switch
+        {
+            BootInstallOutcome.Added => "Added at the top of boot_plugins.txt.",
+            BootInstallOutcome.Moved => "Moved to the top of boot_plugins.txt.",
+            _ => "boot_plugins.txt already starts with it.",
+        }
+        + (result.UiPakSent ? $" Sent {UiPak.FileName} to {UiPak.ConsoleDirectory}." : $" No {UiPak.FileName} was sent.")
+        + " Restart the console; the module only loads at boot.";
+
+    /// <summary>
+    /// Under the SPRX's path, where it is drawn: a release has ui.pak beside qwark.sprx, so only
+    /// its absence is worth a line, and then before anything is sent rather than after.
+    /// </summary>
+    private static void DrawUiPakBeside(string sprx)
+    {
+        string pak = UiPak.BesideSprx(sprx);
+        if (!File.Exists(pak)) Ui.Warning($"{UiPak.MissingNote} ({pak})");
     }
 
     /// <summary>
@@ -922,6 +957,25 @@ public static class ConnectionPanel
         ImGui.Spacing();
         Ui.Warning($"The console is running qwark build {state.Hello!.QwarkVersion}; this client shipped with build "
                    + $"{QwarkClient.ExpectedQwarkBuild}. " + fix);
+    }
+
+    /// <summary>
+    /// The console's ui.pak is missing or another build's while its module is current
+    /// (<see cref="AppState.UiPakNeeded"/>): the Trainer menu cannot go into a game, and the pak
+    /// alone puts that right, whichever mode the console was set up in. An older module is the
+    /// stale-build line's business, and its fix carries the pak; RPCS3 has no console menu.
+    /// </summary>
+    private static void DrawUiPak(AppState state)
+    {
+        if (!state.UiPakNeeded) return;
+
+        ImGui.Spacing();
+        Ui.Warning(AppState.UiPakWarning);
+
+        // A launch answers the file ops BUSY, so the button waits for the game to be up.
+        ImGui.BeginDisabled(state.UiPakSending || state.ConsoleBusy);
+        if (ImGui.Button("Send ui.pak")) state.SendUiPak();
+        ImGui.EndDisabled();
     }
 
     /// <summary>

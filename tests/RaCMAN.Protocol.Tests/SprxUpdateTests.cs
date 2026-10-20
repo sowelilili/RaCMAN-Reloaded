@@ -37,6 +37,21 @@ public class SprxUpdateTests
         return path;
     }
 
+    /// <summary>
+    /// The module with a ui.pak beside it, as a release has them: in a folder of its own, since a
+    /// ui.pak in the test data folder would sit beside every other test's module too.
+    /// </summary>
+    private static string WriteModuleWithPak(byte[] bytes, byte[] pak)
+    {
+        var folder = Path.Combine(TestDataFolder.Root, $"release-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        File.WriteAllBytes(Path.Combine(folder, UiPak.FileName), pak);
+
+        var path = Path.Combine(folder, WebManLoader.SprxName);
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
     private static byte[] Utf8(string text) => Encoding.UTF8.GetBytes(text);
 
     private static async Task<AppState> ConnectAsync(FakeQwarkServer server, string sprxPath, bool standalone = true)
@@ -393,6 +408,131 @@ public class SprxUpdateTests
 
         Assert.Equal(shipped, second.Files[WebManLoader.BootPath]);
         Assert.Equal(onSecond, second.Files[BackupPath(WebManLoader.BootPath)]);
+    }
+
+    // ---------------------------------------------------------------- ui.pak
+
+    /// <summary>
+    /// The shipped ui.pak goes beside the console's own as ui.pak.new, read back and checked, and
+    /// the running module's pak is left alone: it reads its own until the restart. The new module
+    /// moves the staged one into place when it starts.
+    /// </summary>
+    [Fact]
+    public async Task ThePakIsStagedAsNewAndTheNewModuleTakesItAtItsStart()
+    {
+        var shipped = Module(7);
+        var pak = FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild);
+        var oldPak = Module(60, 2048);
+
+        using var server = new FakeQwarkServer();
+        server.Files[WebManLoader.BootPath] = Module(90, 4096);
+        server.Files[UiPak.ConsolePath] = oldPak;
+        server.Start();
+
+        using var state = await ConnectAsync(server, WriteModuleWithPak(shipped, pak));
+
+        Assert.True(await PumpAsync(state, () => state.QwarkUpdateStaged > 0));
+
+        Assert.Equal(pak, server.Files[UiPak.StagedPath]);
+        Assert.Equal(oldPak, server.Files[UiPak.ConsolePath]);
+        Assert.Equal(shipped, server.Files[WebManLoader.BootPath]);
+        Assert.DoesNotContain(state.Toasts, toast => toast.Text == UiPak.MissingNote);
+        Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
+
+        // The console restarts on the new module, which adopts the staged pak and is happy with it.
+        server.RestartModule(QwarkClient.ExpectedQwarkBuild);
+
+        Assert.Equal(pak, server.Files[UiPak.ConsolePath]);
+        Assert.False(server.Files.ContainsKey(UiPak.StagedPath));
+        Assert.False(server.UiPakBad);
+    }
+
+    /// <summary>
+    /// The pak is the first step, so a console that refuses it is never asked about the module:
+    /// the boot list is not read and the boot copy is not touched.
+    /// </summary>
+    [Fact]
+    public async Task AFailedPakUploadStopsTheUpdateBeforeTheModule()
+    {
+        var onConsole = Module(90, 4096);
+
+        using var server = new FakeQwarkServer();
+        server.Files[WebManLoader.BootPath] = onConsole;
+        server.Files[WebManLoader.BootPluginsPath] = Utf8($"{WebManLoader.BootPath}\n");
+        server.FileWriteStatus = Status.IoError;
+        server.Start();
+
+        using var client = new QwarkClient { AutoReconnect = false };
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        server.ClearRequestLog();
+
+        var failure = await Assert.ThrowsAsync<SprxUpdateException>(() => SprxUpdate.RunAsync(
+            client, Module(7), FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild)));
+
+        Assert.Equal(SprxUpdateStep.UiPak, failure.Step);
+        Assert.Contains($"uploading ui.pak to {UiPak.StagedPath}", failure.Message, StringComparison.Ordinal);
+        Assert.Contains(nameof(Status.IoError), failure.Message, StringComparison.Ordinal);
+
+        Assert.Equal(0, server.RequestLog().Count(op => op == Opcode.FileRead));
+        Assert.Equal(onConsole, server.Files[WebManLoader.BootPath]);
+        Assert.False(server.Files.ContainsKey(TempPath(WebManLoader.BootPath)));
+        Assert.False(server.Files.ContainsKey(BackupPath(WebManLoader.BootPath)));
+    }
+
+    [Fact]
+    public async Task AFailedPakUploadIsTheOneMessageTheUserSees()
+    {
+        var onConsole = Module(90, 4096);
+
+        using var server = new FakeQwarkServer();
+        server.Files[WebManLoader.BootPath] = onConsole;
+        server.FileWriteStatus = Status.IoError;
+        server.Start();
+
+        using var state = await ConnectAsync(server,
+            WriteModuleWithPak(Module(7), FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild)));
+
+        Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Kind == ToastKind.Error)));
+
+        var error = Assert.Single(state.Toasts, t => t.Kind == ToastKind.Error);
+        Assert.StartsWith(
+            $"Updating qwark.sprx on the console failed while uploading ui.pak to {UiPak.StagedPath}: ",
+            error.Text, StringComparison.Ordinal);
+        Assert.Equal(onConsole, server.Files[WebManLoader.BootPath]);
+        Assert.Equal(0, state.QwarkUpdateStaged);
+    }
+
+    /// <summary>No pak beside the client is no reason to keep the old module: it is replaced, and the result says the pak was not sent.</summary>
+    [Fact]
+    public async Task WithoutAPakTheModuleIsStillReplacedAndTheClientSaysSo()
+    {
+        var shipped = Module(9);
+
+        using var server = new FakeQwarkServer();
+        server.Files[WebManLoader.BootPath] = Module(90, 4096);
+        server.Start();
+
+        using (var client = new QwarkClient { AutoReconnect = false })
+        {
+            await client.ConnectAsync("127.0.0.1", server.Port);
+            var result = await SprxUpdate.RunAsync(client, shipped);
+
+            Assert.False(result.UiPakStaged);
+            Assert.Equal(shipped, server.Files[WebManLoader.BootPath]);
+            Assert.False(server.Files.ContainsKey(UiPak.StagedPath));
+        }
+
+        server.Files[WebManLoader.BootPath] = Module(90, 4096);
+
+        var folder = Path.Combine(TestDataFolder.Root, $"release-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(folder);
+        var sprx = Path.Combine(folder, WebManLoader.SprxName);
+        File.WriteAllBytes(sprx, shipped);
+
+        using var state = await ConnectAsync(server, sprx);
+        Assert.True(await PumpAsync(state, () => state.QwarkUpdateStaged > 0));
+        Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Text == UiPak.MissingNote)));
+        Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
     }
 
     // ---------------------------------------------------------------- the sequence by hand

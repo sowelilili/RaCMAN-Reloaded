@@ -18,6 +18,7 @@ int startPanel = 0;
 string? connectTo = null;
 string? fakeScript = null;
 string? dataDir = null;
+string? fakeUiPak = null;
 bool fakeServer = false;
 bool fakeRpcs3 = false;
 bool padWindow = false;
@@ -47,6 +48,10 @@ for (int i = 0; i < args.Length; i++)
             fakeServer = true;
             fakeRpcs3 = true;
             break;
+        case "--fake-uipak" when i + 1 < args.Length:
+            fakeServer = true;
+            fakeUiPak = args[++i].ToLowerInvariant();
+            break;
         case "--pad-window":
             padWindow = true;
             break;
@@ -68,6 +73,8 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --connect <host>       connect to qwark on start");
             Console.WriteLine("  --fake-server          run the in-process fake qwark and connect to it");
             Console.WriteLine("  --fake-rpcs3           as --fake-server, with the emulator and no-code-patches flags set");
+            Console.WriteLine("  --fake-uipak <state>   as --fake-server, on this client's qwark build, with the console's");
+            Console.WriteLine("                         ui.pak missing, stale (another build's) or good");
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
 
             // The numbers come from the nav's own list, so the help cannot say one order while the
@@ -137,6 +144,28 @@ if (fakeServer)
     // the library's copies already on it, as someone who has enabled mods before would. Whether
     // each is in the game is the fake script's to say (modsin, modscheck, modsout).
     if (fakeRpcs3) fake.PreloadMods(state.Mods.Scan(fake.Session.TitleId));
+
+    // The console menu's pak, on a module of the build this client ships with: only from that build
+    // on does the module look at it at all. Before Start, which is the module's start and its look.
+    if (fakeUiPak is not null)
+    {
+        byte build = RaCMAN.Protocol.QwarkClient.ExpectedQwarkBuild;
+        fake.Session = fake.Session with { QwarkVersion = build };
+        switch (fakeUiPak)
+        {
+            case "good":
+                fake.PutUiPak();
+                break;
+            case "stale":
+                fake.PutUiPak((byte)(build - 1));
+                break;
+            case "missing":
+                break;
+            default:
+                Console.Error.WriteLine($"--fake-uipak: unknown state '{fakeUiPak}'; use missing, stale or good");
+                break;
+        }
+    }
 
     fake.Start();
     connectTo ??= "127.0.0.1";
@@ -214,7 +243,7 @@ if (exitAfter > 0)
                       $"target={target}{helper} panel=\"{panelOnExit}\" " +
                       $"connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
                       $"emulator={sess?.IsEmulator ?? false} nocodepatches={sess?.CodePatchesUnsupported ?? false} " +
-                      $"codeswitches={sess?.CodeSwitches ?? false} " +
+                      $"codeswitches={sess?.CodeSwitches ?? false} uipakbad={sess?.UiPakBad ?? false} " +
                       $"features={state.Describe.Features.Length} planets={state.Planets.Length} " +
                       $"slots={state.Positions.Slots.Length} mods={state.ConsoleMods.Length} " +
                       $"watches={state.Watches.Length} combos={state.Combos.Length} " +

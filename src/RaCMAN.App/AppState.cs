@@ -186,6 +186,11 @@ public sealed class AppState : IDisposable
             // A new connection, so the standalone update gets its one attempt again.
             _sprxUpdateTried = false;
 
+            // And its own toast about a bad ui.pak; a look at the flag after a send on the last
+            // connection is about a module this may not be.
+            _uiPakToasted = false;
+            _uiPakCheckIn = 0;
+
             // And the manip events start again from whatever the console holds now: the module on
             // the other end may be a new one, whose event numbers mean nothing next to the old
             // one's (see ManipEvents).
@@ -236,6 +241,7 @@ public sealed class AppState : IDisposable
             _lastPlanet = 0xFF;
             _liveStale = true;
             ForgetVshMemory();
+            _uiPakCheckIn = 0;
             _drops++;
 
             // What the console described stays: the console still holds it, this client will be
@@ -600,7 +606,13 @@ public sealed class AppState : IDisposable
         if (!File.Exists(sprx)) return;
 
         Post(() => AddToast($"No VSH slot holds {WebManLoader.SprxName}: loading it"));
-        await WebMan.LoadAsync(host, sprx, Settings.Ps3.WebManSlot, cancellationToken: token).ConfigureAwait(false);
+        bool uiPakSent = await WebMan.LoadAsync(host, sprx, Settings.Ps3.WebManSlot, cancellationToken: token)
+            .ConfigureAwait(false);
+        if (!uiPakSent)
+        {
+            string note = File.Exists(UiPak.BesideSprx(sprx)) ? UiPak.SendFailedNote : UiPak.MissingNote;
+            Post(() => AddToast(note));
+        }
         await Task.Delay(Ps3Connect.LoadWait, token).ConfigureAwait(false);
         Post(() => AddToast($"{WebManLoader.SprxName} loaded through webMAN; reconnecting", ToastKind.Success));
     }
@@ -639,34 +651,42 @@ public sealed class AppState : IDisposable
     }
 
     /// <summary>
-    /// Sends <paramref name="sprxPath"/> to the console's boot path through qwark's file ops. The
-    /// automatic path above and the Connection panel's debug button both come here, and a failure
-    /// at any step is one error toast that names the step and leaves the boot copy as it was.
+    /// Sends <paramref name="sprxPath"/> to the console's boot path through qwark's file ops, and
+    /// the ui.pak beside it to where the new module adopts it at its start. The automatic path
+    /// above and the Connection panel's debug button both come here, and a failure at any step is
+    /// one error toast that names the step and leaves the boot copy as it was. No ui.pak beside the
+    /// SPRX still updates the module, and says the pak was not sent.
     /// </summary>
     public void UpdateConsoleModule(string sprxPath)
     {
         // The shipped SPRX is the build this client expects, which is what the console will report
         // once it has restarted; that is the number the notice carries.
         byte staged = QwarkClient.ExpectedQwarkBuild;
+        string pakPath = UiPak.BesideSprx(sprxPath);
 
         Run(async () =>
         {
             byte[] bytes;
+            byte[]? pak = null;
+            string reading = sprxPath;
             try
             {
                 bytes = await File.ReadAllBytesAsync(sprxPath).ConfigureAwait(false);
+
+                reading = pakPath;
+                if (File.Exists(pakPath)) pak = await File.ReadAllBytesAsync(pakPath).ConfigureAwait(false);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
                 Post(() => AddToast(
-                    $"Updating {WebManLoader.SprxName} on the console failed while reading {sprxPath}: {error.Message}",
+                    $"Updating {WebManLoader.SprxName} on the console failed while reading {reading}: {error.Message}",
                     ToastKind.Error));
                 return;
             }
 
             try
             {
-                var result = await SprxUpdate.RunAsync(Client, bytes,
+                var result = await SprxUpdate.RunAsync(Client, bytes, pak,
                     new Progress<string>(message => Post(() =>
                     {
                         if (Panels.Ui.Debug) AddToast(message);
@@ -677,6 +697,7 @@ public sealed class AppState : IDisposable
                     QwarkUpdateStaged = staged;
                     _sprxUpdateTarget = ConnectedTo;
                     AddToast(QwarkUpdateNotice, ToastKind.Success);
+                    if (!result.UiPakStaged) AddToast(UiPak.MissingNote);
                     if (Panels.Ui.Debug && result.ReplacedACopy)
                     {
                         AddToast($"The module it replaced is at {result.BackupPath}");
@@ -692,6 +713,108 @@ public sealed class AppState : IDisposable
                     ToastKind.Error));
             }
         });
+    }
+
+    // ---------------------------------------------------------------- the console menu's ui.pak
+
+    /// <summary>The Connection panel's line for <see cref="UiPakNeeded"/>, and the start of its toast.</summary>
+    public const string UiPakWarning =
+        "The console's ui.pak is missing or from another build, so the Trainer menu cannot load in games.";
+
+    /// <summary>
+    /// How long after a send that went through the flag is looked at again. The module checks the
+    /// pak within a tick of the rename, so the next packet should already be clear of it.
+    /// </summary>
+    public const float UiPakCheckSeconds = 3f;
+
+    /// <summary>
+    /// The console runs the module this client shipped with and says its ui.pak is missing or not
+    /// that module's (<see cref="SessionInfo.UiPakBad"/>), so sending the pak alone fixes the menu.
+    /// Never under RPCS3, which has no console menu and never sets the flag. Never for an older
+    /// module either: its update carries the pak, and the stale-build warning already covers it.
+    /// A newer module than this client's is beyond any pak this client has.
+    /// </summary>
+    public bool UiPakNeeded =>
+        Connected
+        && !Settings.Rpcs3Target
+        && !IsEmulator
+        && !CodePatchesUnsupported
+        && Hello is { } hello
+        && hello.QwarkVersion == QwarkClient.ExpectedQwarkBuild
+        && Session.UiPakBad;
+
+    /// <summary>A send of ui.pak is under way; the button waits for it.</summary>
+    public bool UiPakSending { get; private set; }
+
+    /// <summary>Whether this connection has had its one toast about the pak.</summary>
+    private bool _uiPakToasted;
+
+    /// <summary>Seconds left before a send that went through is checked against the flag; 0 when none waits.</summary>
+    private float _uiPakCheckIn;
+
+    /// <summary>
+    /// The Connection panel's Send ui.pak: the copy beside this client's qwark.sprx, through the
+    /// module's own file ops (<see cref="UiPakSend"/>). Each step shows as it starts; a copy that
+    /// could not fix anything is refused before a request goes out, and every failure is one toast
+    /// that names the step and what the console answered. A few seconds after a send that went
+    /// through, the flag is looked at once more, since only the module can say it took the pak.
+    /// </summary>
+    public void SendUiPak()
+    {
+        if (UiPakSending) return;
+
+        string path = UiPak.BesideSprx(Ps3Connect.ResolveSprx(Settings.Ps3.SprxPath));
+        int connection = _connection;
+        UiPakSending = true;
+
+        Run(async () =>
+        {
+            try
+            {
+                await UiPakSend.RunAsync(Client, path,
+                    new Progress<string>(message => Post(() => AddToast(message)))).ConfigureAwait(false);
+
+                Post(() =>
+                {
+                    AddToast($"Sent {UiPak.FileName} to the console", ToastKind.Success);
+                    if (connection == _connection) _uiPakCheckIn = UiPakCheckSeconds;
+                });
+            }
+            catch (UiPakSendException error)
+            {
+                Post(() => AddToast(error.Message, ToastKind.Error));
+            }
+            finally
+            {
+                Post(() => UiPakSending = false);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Once a frame while connected: the one toast a connection gets about a bad pak, and the look
+    /// at the flag that follows a send.
+    /// </summary>
+    private void WatchUiPak(float deltaSeconds)
+    {
+        bool needed = UiPakNeeded;
+        if (needed && !_uiPakToasted)
+        {
+            _uiPakToasted = true;
+            AddToast($"{UiPakWarning} See the Connection panel.");
+        }
+
+        if (_uiPakCheckIn <= 0) return;
+
+        _uiPakCheckIn -= deltaSeconds;
+        if (_uiPakCheckIn > 0) return;
+
+        _uiPakCheckIn = 0;
+        if (needed)
+        {
+            AddToast("The console still says its ui.pak is missing or from another build. The ui.pak beside "
+                     + "this client may be from another build; the console's qwark log says why.", ToastKind.Error);
+        }
     }
 
     // ---------------------------------------------------------------- plumbing
@@ -833,6 +956,9 @@ public sealed class AppState : IDisposable
         // has the new one written to its boot path, once, as soon as the session is somewhere the
         // file ops will be answered.
         MaybeUpdateConsoleModule(session);
+
+        // Nor is the console menu's file, on a module that is current (see UiPakNeeded).
+        WatchUiPak(deltaSeconds);
 
         // The process the values came out of, which a quit, a boot and a reboot all replace. The
         // title going empty is the trip to the XMB, and it is a session change like any other:

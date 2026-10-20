@@ -83,6 +83,12 @@ public sealed record SessionInfo(
     /// </summary>
     public bool MenuHelpOff => (Flags & SessionFlags.MenuHelpOff) != 0;
 
+    /// <summary>
+    /// The console's ui.pak is missing or not the running module's (revision 1.23, build 55), so
+    /// the Trainer menu cannot load in games. Only a console module of build 55 or later sets it.
+    /// </summary>
+    public bool UiPakBad => (Flags & SessionFlags.UiPakBad) != 0;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>
