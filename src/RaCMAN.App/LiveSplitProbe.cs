@@ -83,9 +83,15 @@ public sealed class LiveSplitProbe
     public bool Looking => Volatile.Read(ref _looking) != 0;
 
     /// <summary>
-    /// True when this tick would look: both switches on, nothing connected, and no build already
-    /// turned away. It is the whole of the decision, so the guard and the panel cannot drift apart
-    /// and a test can ask the question without waiting for an interval.
+    /// True when this tick would look: both switches on, nothing connected or being connected, and
+    /// no build already turned away. It is the whole of the decision, so the guard and the panel
+    /// cannot drift apart and a test can ask the question without waiting for an interval.
+    /// <para>
+    /// "Being connected" is the client's attempt that a look handed over, or a press of Connect:
+    /// <see cref="LiveSplitClient.Enabled"/> covers both. With only "connected" here, a handshake
+    /// that took longer than an interval was looked at again, found again and handed over again,
+    /// a second socket on LiveSplit for a connection already on its way.
+    /// </para>
     /// </summary>
     public bool Wanted
     {
@@ -93,7 +99,7 @@ public sealed class LiveSplitProbe
         {
             var autosplit = _settings.Autosplit;
             return autosplit.Enabled && autosplit.ConnectsAutomatically
-                   && !_liveSplit.IsConnected && !_liveSplit.TooOld;
+                   && !_liveSplit.Enabled && !_liveSplit.TooOld;
         }
     }
 

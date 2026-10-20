@@ -19,8 +19,21 @@ namespace RaCMAN.Protocol.Tests;
 /// unlock categories.
 /// </para>
 /// </summary>
+[Collection(GameLayoutCollection.Name)]
 public class GameLayoutTests
 {
+    /// <summary>
+    /// Where a test writes a layout file of its own: in this run's data folder, so two runs at once
+    /// (another worktree's, say) never write, load and delete the same file in the shared temp
+    /// directory under each other.
+    /// </summary>
+    private static string LayoutFile(string name)
+    {
+        string folder = Path.Combine(TestDataFolder.Root, "layout-tests");
+        Directory.CreateDirectory(folder);
+        return Path.Combine(folder, name);
+    }
+
     /// <summary>The one disc that carries three games; no entry is keyed by it, so the game key must do the work.</summary>
     private const string DiscTitle = "BCES01503";
 
@@ -269,7 +282,7 @@ public class GameLayoutTests
     [Fact]
     public void HeadingsCollectTheirFeaturesAndKeepFirstSeenOrder()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-headings.json");
+        string path = LayoutFile("racman-layout-headings.json");
         File.WriteAllText(path, """
         {
           "sideSections": ["Debug"],
@@ -475,7 +488,7 @@ public class GameLayoutTests
     [Fact]
     public void TheOldSideSectionsKeyIsReadAsTheSubPageList()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-legacy-side.json");
+        string path = LayoutFile("racman-layout-legacy-side.json");
         File.WriteAllText(path, """
         {
           "sideSections": ["Manips", "Collectables", "Unlocks", "Debug"],
@@ -504,7 +517,7 @@ public class GameLayoutTests
     [Fact]
     public void SubPagesWinsOverTheOldKey()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-both-keys.json");
+        string path = LayoutFile("racman-layout-both-keys.json");
         File.WriteAllText(path, """
         {
           "sideSections": ["Manips", "Collectables", "Cosmetics", "Debug"],
@@ -535,7 +548,7 @@ public class GameLayoutTests
     [Fact]
     public void ThePanelKeyedSubPagesTableIsStillRead()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-hosts.json");
+        string path = LayoutFile("racman-layout-hosts.json");
         File.WriteAllText(path, """
         {
           "subPages": {
@@ -573,7 +586,7 @@ public class GameLayoutTests
     [Fact]
     public void UnlocksTabsWinsOverThePanelKeyedTable()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-hosts-and-tabs.json");
+        string path = LayoutFile("racman-layout-hosts-and-tabs.json");
         File.WriteAllText(path, """
         {
           "subPages": { "Game": ["Manips"], "Unlocks": ["Collectables"] },
@@ -602,7 +615,7 @@ public class GameLayoutTests
     [Fact]
     public void ASectionInBothListsStaysASubPage()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-twice.json");
+        string path = LayoutFile("racman-layout-twice.json");
         File.WriteAllText(path, """
         {
           "subPages": ["Debug", "Debug"],
@@ -658,7 +671,7 @@ public class GameLayoutTests
     [Fact]
     public void AFeatureCanBeMovedToTheQuickBlockButTheSectionIsNeverDrawnAsOne()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-quick.json");
+        string path = LayoutFile("racman-layout-quick.json");
         File.WriteAllText(path, """
         {
           "subPages": ["Quick", "Debug"],
@@ -688,7 +701,7 @@ public class GameLayoutTests
     [Fact]
     public void AFileThatListsAReservedSectionAsASubPageIsIgnored()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-reserved-side.json");
+        string path = LayoutFile("racman-layout-reserved-side.json");
         File.WriteAllText(path, """
         {
           "subPages": ["Options", "Unlocks", "Values", "Debug"],
@@ -718,7 +731,7 @@ public class GameLayoutTests
     {
         try
         {
-            GameLayout.LoadFrom(Path.Combine(Path.GetTempPath(), "racman-no-such-layout.json"));
+            GameLayout.LoadFrom(LayoutFile("racman-no-such-layout.json"));
             Assert.Empty(GameLayout.Problems);
             Assert.Contains("Manips", GameLayout.SubPages);
             Assert.Contains("Debug", GameLayout.SubPages);
@@ -744,7 +757,7 @@ public class GameLayoutTests
     [Fact]
     public void ATitleIdEntryWinsOverTheGameKey()
     {
-        string path = Path.Combine(Path.GetTempPath(), "racman-layout-title-override.json");
+        string path = LayoutFile("racman-layout-title-override.json");
         File.WriteAllText(path, """
         {
           "sideSections": ["Debug"],
@@ -783,4 +796,15 @@ public class GameLayoutTests
         Assert.Equal(new[] { "Cheats", "Player", "Savefile" }, order.Take(3));
         Assert.Equal("Extra", order[^1]);            // an unlisted tab is appended, not dropped
     }
+}
+
+/// <summary>
+/// <see cref="GameLayout"/> is one table for the whole process, and <see cref="GameLayoutTests"/> loads
+/// files of its own into it. Those tests run by themselves, after every other class, so no test that
+/// sorts features into sections can read a layout one of them has swapped in for a moment.
+/// </summary>
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class GameLayoutCollection
+{
+    public const string Name = "GameLayout";
 }

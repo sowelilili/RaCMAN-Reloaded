@@ -297,9 +297,11 @@ public class VshMemoryTests
         Assert.True(await PumpAsync(state, () => state.VshMemory is not null));
         Assert.Equal(1, Asked(server));
 
-        // A link that drops: the Disconnected event.
+        // A link that drops: the Disconnected event. The transport flag drops before the event is
+        // raised and taken in, and between a frame and the condition, so the wait is for the event
+        // (it is what clears Hello), not for the flag.
         server.DropClients();
-        Assert.True(await PumpAsync(state, () => !state.Connected));
+        Assert.True(await PumpAsync(state, () => !state.Connected && state.Hello is null));
         Assert.Null(state.VshMemory);
         Assert.Null(state.VshMemoryStatus);
     }

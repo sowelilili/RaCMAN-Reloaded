@@ -209,10 +209,7 @@ internal sealed class FakeLiveSplitServer : IDisposable
                     var line = await reader.ReadLineAsync(_cts.Token);
                     if (line is null) return;
 
-                    string command = line.Trim();
-                    lock (_gate) _commands.Add(command);
-
-                    var reply = Handle(command);
+                    var reply = Handle(line.Trim());
                     if (reply is not null) await writer.WriteLineAsync(reply);
                 }
             }
@@ -223,10 +220,17 @@ internal sealed class FakeLiveSplitServer : IDisposable
         }
     }
 
+    /// <summary>
+    /// Records the command and does what it does, in one step: a test that has seen a command
+    /// arrive (<see cref="Actions"/>, <see cref="Commands"/>) is looking at a timer it has already
+    /// moved. Recorded first and handled after, a test could see the pause, move
+    /// <see cref="RealTime"/> on, and have the pause freeze the clock it had just moved.
+    /// </summary>
     private string? Handle(string command)
     {
         lock (_gate)
         {
+            _commands.Add(command);
             if (Ignored.Contains(command)) return null;
 
             // "addloadingtimes 1.440000" and friends: the verb decides, the argument rides along.
@@ -422,6 +426,13 @@ public class AutosplitterTests
         Assert.False(AutosplitterPanel.HasPause(Array.Empty<AutosplitEventDesc>()));
     }
 
+    /// <summary>
+    /// The query timeout for a client whose server answers every query: the fake answers at once,
+    /// so only a machine too busy to run it can make an answer late, and that is not the build's
+    /// silence the product's one-second timeout is there to tell (see LiveSplitClient.QueryTimeout).
+    /// </summary>
+    private static readonly TimeSpan Patient = TimeSpan.FromSeconds(10);
+
     private static async Task<bool> WaitFor(Func<bool> condition, int timeoutMs = 5000)
     {
         var sw = Stopwatch.StartNew();
@@ -469,7 +480,9 @@ public class AutosplitterTests
             Settings = new Settings();
             Settings.Autosplit.Enabled = true;
 
-            LiveSplit = new LiveSplitClient();
+            // Patient: the fake answers everything (see LiveSplitClient.QueryTimeout). A test that
+            // has it ignore a query puts the product's own timeout back first.
+            LiveSplit = new LiveSplitClient { QueryTimeout = Patient };
 
             // The app hands results to the render thread; a test applies them where they happen.
             Engine = new Autosplitter(Settings, LiveSplit, action => action())
@@ -901,6 +914,7 @@ public class AutosplitterTests
 
         h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
         Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await h.Sent(LiveSplitClient.InitialiseGameTime));
 
         // The engine re-asks after every command, so it now knows the timer is running.
         Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
@@ -1079,6 +1093,11 @@ public class AutosplitterTests
 
         h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
         Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+
+        // The start's second command too, the zero that gives the run its game time: it follows
+        // the timer's start on its own, and one that lands after the clear below is a zero the
+        // quit under test never sent, counted against it.
+        Assert.True(await h.Sent(LiveSplitClient.InitialiseGameTime));
         Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
 
         h.Server.RealTime = TimeSpan.FromSeconds(realTimeSeconds);
@@ -1217,6 +1236,7 @@ public class AutosplitterTests
     public async Task AQuitWhoseClockCannotBeReadIsLoggedAsAnErrorAndStillUnpaused()
     {
         using var h = await RunningDeadlockedAsync(600, 600);
+        h.LiveSplit.QueryTimeout = LiveSplitClient.DefaultQueryTimeout;
         h.Server.Ignored.Add(LiveSplitClient.GetCurrentGameTime);
 
         h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, NormalisedPause.Code, 0));
@@ -1646,6 +1666,7 @@ public class AutosplitterTests
         // but waiting a second and then tearing the socket down is what made the link drop seconds
         // after it came up, and the net that caught that stays.
         using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
+        h.LiveSplit.QueryTimeout = LiveSplitClient.DefaultQueryTimeout;
         h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
         await h.ReadyAsync();
 
@@ -1675,6 +1696,7 @@ public class AutosplitterTests
     public async Task ASurvivingConnectionKeepsWorkingForLongerThanAQueryTimeout()
     {
         using var h = new Harness(GameId.Rac2, new[] { "Aranos", "Oozla" }, PlanetEntered, BossDefeated);
+        h.LiveSplit.QueryTimeout = LiveSplitClient.DefaultQueryTimeout;
         h.Server.Ignored.Add(LiveSplitClient.GetUpcomingSplitName);
         await h.ReadyAsync();
 
@@ -1749,7 +1771,7 @@ public class AutosplitterTests
         settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = port;
 
-        using var client = new LiveSplitClient();
+        using var client = new LiveSplitClient { QueryTimeout = Patient };
         var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(200));
 
         // Nothing is there yet, and looking at nothing changes nothing at all.
@@ -1828,7 +1850,7 @@ public class AutosplitterTests
         settings.Autosplit.ConnectsAutomatically = true;
         settings.Autosplit.Port = port;
 
-        using var client = new LiveSplitClient();
+        using var client = new LiveSplitClient { QueryTimeout = Patient };
         var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(200));
 
         var server = new FakeLiveSplitServer(port, "Aranos", "Oozla");
@@ -1836,8 +1858,10 @@ public class AutosplitterTests
         server.Dispose();
 
         // Nothing notices a socket nobody is talking on: in the app it is the engine's 1 Hz poll
-        // that finds a dead connection, so the test writes to it the same way.
-        for (int i = 0; i < 20 && client.IsConnected; i++)
+        // that finds a dead connection, so the test writes to it the same way, for as long as the
+        // fake takes to close its end on a busy machine: one write after that is what fails.
+        var writing = Stopwatch.StartNew();
+        while (writing.ElapsedMilliseconds < 10000 && client.IsConnected)
         {
             client.Send(LiveSplitClient.Ping);
             await Task.Delay(50);
@@ -1872,13 +1896,14 @@ public class AutosplitterTests
         settings.Autosplit.Port = port;
         Assert.False(settings.Autosplit.ConnectsAutomatically);
 
-        using var client = new LiveSplitClient();
+        using var client = new LiveSplitClient { QueryTimeout = Patient };
         var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(100));
 
         // Connected by hand, which is all the switch off leaves.
         var server = new FakeLiveSplitServer(port, "Aranos", "Oozla");
         client.Start(LiveSplitClient.DefaultHost, port);
         Assert.True(await WaitFor(() => client.IsConnected), "the fake LiveSplit never accepted the press");
+        Assert.True(await WaitFor(() => server.Accepted >= 1), "the server never counted the connection");
         Assert.Equal(1, server.Accepted);
         server.Dispose();
 
@@ -1925,7 +1950,7 @@ public class AutosplitterTests
         // on says nothing about whether this client should go looking for LiveSplit by itself.
         Assert.False(settings.Autosplit.ConnectsAutomatically);
 
-        using var client = new LiveSplitClient();
+        using var client = new LiveSplitClient { QueryTimeout = Patient };
         var probe = new LiveSplitProbe(settings, client, action => action(), TimeSpan.FromMilliseconds(100));
         Assert.False(probe.Wanted);
 
@@ -1949,7 +1974,10 @@ public class AutosplitterTests
         settings.Autosplit.ConnectsAutomatically = true;
         Assert.True(probe.Wanted);
         Assert.True(await WaitProbing(probe, () => client.IsConnected), "the probe never found the server");
-        Assert.True(server.Accepted >= 1);
+
+        // The client calls itself connected once its socket is, which can be before the fake's
+        // accept loop has got round to counting it.
+        Assert.True(await WaitFor(() => server.Accepted >= 1), "the server never saw the connection");
 
         client.Stop();
     }

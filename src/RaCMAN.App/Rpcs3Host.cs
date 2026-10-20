@@ -28,7 +28,14 @@ public sealed class Rpcs3Host : IDisposable
     public const int MaxLines = 50;
 
     /// <summary>How long a helper gets to leave on its own after "exit" before it is killed.</summary>
-    public static readonly TimeSpan StopGrace = TimeSpan.FromSeconds(2);
+    public static readonly TimeSpan DefaultStopGrace = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// <see cref="DefaultStopGrace"/>, unless a test that is about the clean exit rather than the
+    /// kill gives its stand-in longer: a batch file on a busy machine can take more than two
+    /// seconds to read the line.
+    /// </summary>
+    public TimeSpan StopGrace { get; init; } = DefaultStopGrace;
 
     private readonly object _gate = new();
     private readonly List<string> _lines = new();

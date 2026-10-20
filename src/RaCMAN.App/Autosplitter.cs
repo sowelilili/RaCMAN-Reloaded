@@ -121,6 +121,12 @@ public sealed class Autosplitter
     private volatile LiveSplitView _view = LiveSplitView.Empty;
     private GameId _game = GameId.None;
     private int _refreshing;
+
+    /// <summary>
+    /// Moves on every time a command that moves the timer goes out (see <see cref="Act"/>). A
+    /// read-back that was asked before one of those is from before it, and is not taken.
+    /// </summary>
+    private int _commands;
     private int _received;
     private int _acted;
     private int _adjustments;
@@ -741,6 +747,7 @@ public sealed class Autosplitter
         AutosplitEvent ev, string what, string command, string? because = null,
         string? then = null, string? thenBecause = null)
     {
+        Interlocked.Increment(ref _commands);
         _liveSplit.Send(command);
         string line = because is null ? command : $"{command} ({because})";
 
@@ -847,6 +854,14 @@ public sealed class Autosplitter
     /// <summary>
     /// Reads the timer phase, the split index and the two split names back. One refresh runs at a
     /// time: a burst of events would otherwise queue four queries each behind the same connection.
+    /// <para>
+    /// A command sent while the four are being asked makes their answers old: they are from before
+    /// it, and taken in they would put back what the command's own assumption took away — a RESET
+    /// that lands in the middle of the read-back after a START, and the START that follows it then
+    /// finds the timer "Running" and leaves it stopped. So the read is asked again, a few times at
+    /// most, until no command has gone out under it; the refresh that command asked for was the
+    /// one turned away above, because this one was running.
+    /// </para>
     /// </summary>
     public async Task RefreshAsync()
     {
@@ -854,18 +869,28 @@ public sealed class Autosplitter
 
         try
         {
-            if (!_liveSplit.IsConnected) return;
+            for (int pass = 0; pass < 3; pass++)
+            {
+                if (!_liveSplit.IsConnected) return;
 
-            var phase = LiveSplitClient.ParsePhase(await Ask(LiveSplitClient.GetCurrentTimerPhase));
-            string? current = Clean(await Ask(LiveSplitClient.GetCurrentSplitName));
-            int index = ParseIndex(await Ask(LiveSplitClient.GetSplitIndex));
+                int commands = Volatile.Read(ref _commands);
+                var phase = LiveSplitClient.ParsePhase(await Ask(LiveSplitClient.GetCurrentTimerPhase));
+                string? current = Clean(await Ask(LiveSplitClient.GetCurrentSplitName));
+                int index = ParseIndex(await Ask(LiveSplitClient.GetSplitIndex));
 
-            // The one name the route compares. An empty answer is the run's last segment, and the
-            // route reads that as "do not split", which is what it means.
-            string? upcoming = Clean(await Ask(LiveSplitClient.GetUpcomingSplitName));
+                // The one name the route compares. An empty answer is the run's last segment, and the
+                // route reads that as "do not split", which is what it means.
+                string? upcoming = Clean(await Ask(LiveSplitClient.GetUpcomingSplitName));
 
-            var view = new LiveSplitView(phase, current, upcoming, index);
-            _post(() => _view = view);
+                if (commands != Volatile.Read(ref _commands)) continue;
+
+                var view = new LiveSplitView(phase, current, upcoming, index);
+                _post(() =>
+                {
+                    if (commands == Volatile.Read(ref _commands)) _view = view;
+                });
+                return;
+            }
         }
         finally
         {
@@ -897,6 +922,7 @@ public sealed class Autosplitter
     {
         if (!_liveSplit.IsConnected) return;
 
+        Interlocked.Increment(ref _commands);
         _liveSplit.Send(command);
         Record(default, "(manual)", command, false);
         _ = RefreshAsync();

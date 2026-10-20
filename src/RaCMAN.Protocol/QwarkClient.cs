@@ -224,7 +224,7 @@ public sealed class QwarkClient : IDisposable
             _telemetryViaTcp = false;
 
             _ = Task.Run(() => ReceiveLoopAsync(stream, cts.Token));
-            _ = Task.Run(() => TelemetryLoopAsync(udp, cts.Token));
+            _ = Task.Run(() => TelemetryLoopAsync(udp, stream, cts.Token));
             _ = Task.Run(() => HeartbeatLoopAsync(cts.Token));
             _ = Task.Run(() => StatePollLoopAsync(cts.Token));
 
@@ -265,6 +265,16 @@ public sealed class QwarkClient : IDisposable
 
     private Task TeardownAsync(Exception? error, bool raiseEvent)
     {
+        TearDown(error, raiseEvent, only: null);
+        return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Takes the connection down. With <paramref name="only"/> it is that connection or nothing:
+    /// false, and nothing touched, when the current one is another (or there is none).
+    /// </summary>
+    private bool TearDown(Exception? error, bool raiseEvent, NetworkStream? only)
+    {
         Socket? socket;
         NetworkStream? stream;
         UdpClient? udp;
@@ -273,6 +283,8 @@ public sealed class QwarkClient : IDisposable
 
         lock (_gate)
         {
+            if (only is not null && !ReferenceEquals(_stream, only)) return false;
+
             socket = _socket;
             stream = _stream;
             udp = _udp;
@@ -284,6 +296,13 @@ public sealed class QwarkClient : IDisposable
             _udp = null;
             _connectionCts = null;
             _transportUp = false;
+
+            // Nothing about the console survives the connection: the client re-reads everything
+            // on the next HELLO, so a stale session block must not keep colouring the UI meanwhile.
+            // Cleared under the lock that Adopt takes, so a packet this connection's telemetry
+            // loop is still holding cannot be put back after it.
+            _latestTelemetry = null;
+            _latestSession = null;
         }
 
         try { cts?.Cancel(); } catch { /* already gone */ }
@@ -298,22 +317,45 @@ public sealed class QwarkClient : IDisposable
             if (_pending.TryRemove(key, out var tcs)) tcs.TrySetException(failure);
         }
 
-        // Nothing about the console survives the connection: the client re-reads everything on
-        // the next HELLO, so a stale session block must not keep colouring the UI meanwhile.
-        _latestTelemetry = null;
-        _latestSession = null;
-
         if (wasUp && raiseEvent) Disconnected?.Invoke(error);
-        return Task.CompletedTask;
+        return wasUp;
     }
 
-    private void HandleConnectionLost(Exception? error)
+    /// <summary>
+    /// The connection <paramref name="stream"/> carried has failed, and it alone is taken down. A
+    /// failure is reported from a pool thread some time after it happened: every request a teardown
+    /// fails comes back through here, and so does the receive loop of a connection that Disconnect,
+    /// a change of target or a reconnect has already replaced. Taken as "the link", any of those
+    /// took the new connection down a moment after it came up — under load, often enough to see.
+    /// </summary>
+    internal void HandleConnectionLost(Exception? error, NetworkStream stream)
     {
-        if (!_transportUp) return;
-
-        _ = TeardownAsync(error, raiseEvent: true);
+        if (!TearDown(error, raiseEvent: true, only: stream)) return;
 
         if (_wantConnection && AutoReconnect) StartReconnectLoop();
+    }
+
+    /// <summary>The current connection, as <see cref="HandleConnectionLost"/> and <see cref="Adopt"/> know it. Tests only.</summary>
+    internal NetworkStream? CurrentStream
+    {
+        get { lock (_gate) return _stream; }
+    }
+
+    /// <summary>
+    /// Takes a telemetry snapshot as the latest, if the connection it came over is still the
+    /// current one. A packet the UDP loop or a GET_STATE reply was holding when its connection went
+    /// would otherwise put the old console's session back on a client that has none.
+    /// </summary>
+    internal bool Adopt(TelemetryPacket packet, NetworkStream connection)
+    {
+        lock (_gate)
+        {
+            if (!ReferenceEquals(_stream, connection)) return false;
+
+            _latestTelemetry = packet;
+            _latestSession = packet.Session;
+            return true;
+        }
     }
 
     private void StartReconnectLoop()
@@ -433,7 +475,7 @@ public sealed class QwarkClient : IDisposable
         }
         catch (Exception ex)
         {
-            HandleConnectionLost(ex);
+            HandleConnectionLost(ex, stream);
         }
     }
 
@@ -442,7 +484,7 @@ public sealed class QwarkClient : IDisposable
     private static readonly bool DropUdp =
         Environment.GetEnvironmentVariable("RACMAN_DROP_UDP") == "1";
 
-    private async Task TelemetryLoopAsync(UdpClient udp, CancellationToken token)
+    private async Task TelemetryLoopAsync(UdpClient udp, NetworkStream connection, CancellationToken token)
     {
         try
         {
@@ -473,8 +515,8 @@ public sealed class QwarkClient : IDisposable
                     continue;
                 }
 
-                _latestTelemetry = packet;
-                _latestSession = packet.Session;
+                if (!Adopt(packet, connection)) continue;
+
                 Interlocked.Exchange(ref _lastUdpTicks, Environment.TickCount64);
                 _telemetryViaTcp = false;
                 TelemetryReceived?.Invoke(packet);
@@ -570,7 +612,7 @@ public sealed class QwarkClient : IDisposable
         catch (Exception ex)
         {
             _pending.TryRemove(seq, out _);
-            if (ex is IOException or SocketException) HandleConnectionLost(ex);
+            if (ex is IOException or SocketException) HandleConnectionLost(ex, stream);
             throw;
         }
     }
@@ -677,12 +719,17 @@ public sealed class QwarkClient : IDisposable
 
     public async Task<TelemetryPacket> GetStateAsync(CancellationToken cancellationToken = default)
     {
+        // The connection the request goes out on. A reply that comes back after it has gone is
+        // still returned to the caller, who asked for it, but it is not the latest of anything.
+        var connection = CurrentStream;
         var payload = await RequestAsync(Opcode.GetState, null, cancellationToken).ConfigureAwait(false);
         var packet = TelemetryPacket.Parse(payload);
-        _latestTelemetry = packet;
-        _latestSession = packet.Session;
-        _telemetryViaTcp = true;
-        TelemetryReceived?.Invoke(packet);
+        if (connection is not null && Adopt(packet, connection))
+        {
+            _telemetryViaTcp = true;
+            TelemetryReceived?.Invoke(packet);
+        }
+
         return packet;
     }
 

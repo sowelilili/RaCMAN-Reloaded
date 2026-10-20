@@ -772,6 +772,24 @@ public class ManipStateTests
 
     private static int ToastsSaying(AppState state, string text) => state.Toasts.Count(t => t.Text == text);
 
+    /// <summary>
+    /// Makes the timed MANIP_LIST due on the frames' own clock: the interval goes by in one frame
+    /// rather than being waited out. The frames the pump runs are tied to the wall clock, and a
+    /// busy machine runs fewer of them a second, so a wait of a few seconds could end before the
+    /// frames had added up to one interval and the read had ever been made.
+    /// </summary>
+    private static void ManipReadDue(AppState state) => state.Tick(AppState.ManipPollSeconds);
+
+    /// <summary>One timed read, made due (<see cref="ManipReadDue"/>) and run until its answer is in.</summary>
+    private static async Task TimedManipReadAsync(AppState state, FakeQwarkServer server)
+    {
+        int asked = server.RequestLog().Count(op => op == Opcode.ManipList);
+        ManipReadDue(state);
+        Assert.True(await PumpAsync(state, () => server.RequestLog().Count(op => op == Opcode.ManipList) > asked
+                                                 && state.InFlight == 0));
+        state.Tick(1f / 60f);
+    }
+
     private static bool HasManipsSection(AppState state) =>
         GamePanel.SectionsFor(UnknownTitle, GameId.None, state.Describe, state.Manips)
             .ContainsKey(GameLayout.ManipsSection);
@@ -967,7 +985,8 @@ public class ManipStateTests
         Assert.Equal(0, ToastsSaying(state, text));
 
         server.ManipRunStart();
-        Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1, timeoutMs: 6000));
+        ManipReadDue(state);
+        Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1));
     }
 
     /// <summary>
@@ -992,11 +1011,13 @@ public class ManipStateTests
         server.ManipRunStart();
 
         const string text = "NG+ (poki skip) wasn't applied: this file isn't a challenge-mode file";
-        Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1, timeoutMs: 6000));
+        ManipReadDue(state);
+        Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1));
         Assert.Equal(planet, server.Session.CurrentPlanet);
 
         // And once only, however many timed reads follow.
-        await PumpForAsync(state, (int)(AppState.ManipPollSeconds * 1000 * 2) + 200);
+        await TimedManipReadAsync(state, server);
+        await TimedManipReadAsync(state, server);
         Assert.Equal(1, ToastsSaying(state, text));
     }
 
@@ -1014,8 +1035,12 @@ public class ManipStateTests
         server.ClearRequestLog();
 
         // An older module is a game with no manips as far as the page is concerned: no area, no
-        // toast, and no timed reads of an op it does not know.
-        await PumpForAsync(state, (int)(AppState.ManipPollSeconds * 1000 * 2) + 300);
+        // toast, and no timed reads of an op it does not know: two intervals' worth of frames.
+        for (int i = 0; i < 2; i++)
+        {
+            ManipReadDue(state);
+            await PumpForAsync(state, 300);
+        }
 
         Assert.Null(state.Manips);
         Assert.False(HasManipsSection(state));
@@ -1106,7 +1131,9 @@ public class ManipStateTests
         Assert.True(await PumpAsync(state, () => state.Manips is not null));
 
         server.Quitting = true;
-        Assert.True(await PumpAsync(state, () => state.ConsoleBusy));
+
+        // A timed read sent just before the quit, and answered after it, is not this test's.
+        Assert.True(await PumpAsync(state, () => state.ConsoleBusy && state.InFlight == 0));
         server.ClearRequestLog();
 
         state.RefreshManips();

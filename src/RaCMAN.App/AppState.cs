@@ -93,6 +93,13 @@ public sealed class AppState : IDisposable
     private int _connection;
 
     /// <summary>
+    /// Counts the Disconnected events taken in. A read out of the running game that left before
+    /// one is not put back on the panels after it: its reply can have been on its way when the link
+    /// went, and land a frame after <see cref="ClearGameViews"/> had emptied them.
+    /// </summary>
+    private int _drops;
+
+    /// <summary>
     /// Moves on every time the description is adopted or dropped, so a check that left before one
     /// of those compares nothing with a description it was not asked about.
     /// </summary>
@@ -229,6 +236,7 @@ public sealed class AppState : IDisposable
             _lastPlanet = 0xFF;
             _liveStale = true;
             ForgetVshMemory();
+            _drops++;
 
             // What the console described stays: the console still holds it, this client will be
             // back, and a layout that empties itself every time the link hiccups is the thing this
@@ -1764,6 +1772,7 @@ public sealed class AppState : IDisposable
         if (!Connected) return;
 
         Interlocked.Increment(ref _positionsInFlight);
+        int drops = _drops;
         Run(async () =>
         {
             try
@@ -1775,7 +1784,10 @@ public sealed class AppState : IDisposable
                 // In a finally, so a refused read does not stop the next one from ever starting.
                 Interlocked.Decrement(ref _positionsInFlight);
             }
-        }, positions => Positions = positions, quiet);
+        }, positions =>
+        {
+            if (drops == _drops) Positions = positions;
+        }, quiet);
     }
 
     /// <summary>
@@ -1787,6 +1799,7 @@ public sealed class AppState : IDisposable
         if (!Connected || UnknownGame) return;
         if (quiet && HoldsBackgroundWork()) return;
 
+        int drops = _drops;
         Run(async () =>
         {
             try
@@ -1794,6 +1807,9 @@ public sealed class AppState : IDisposable
                 var list = await Client.UnlockListAsync().ConfigureAwait(false);
                 Post(() =>
                 {
+                    // The rows are the running game's, as the slots are (see _drops).
+                    if (drops != _drops) return;
+
                     Unlocks = list;
                     UnlocksUnsupported = false;
                 });

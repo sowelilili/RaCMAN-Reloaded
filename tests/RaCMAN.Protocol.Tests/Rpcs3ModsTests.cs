@@ -1481,7 +1481,14 @@ public class Rpcs3ModsTests : IDisposable
 
     // ================================================================ end to end
 
-    private async Task<bool> PumpAsync(AppState state, Func<bool> condition, int timeoutMs = 5000)
+    /// <summary>
+    /// Runs frames until the condition holds. Fifteen seconds rather than five: what is waited for
+    /// here is real work, an upload and a patch's pages and a write to RPCS3's folder, a dozen
+    /// round trips and a few files, and on a machine busy with other builds that outlasted five.
+    /// Every wait in this class is for something that does happen; none of them waits to see
+    /// that nothing does.
+    /// </summary>
+    private async Task<bool> PumpAsync(AppState state, Func<bool> condition, int timeoutMs = 15000)
     {
         var sw = Stopwatch.StartNew();
         while (sw.ElapsedMilliseconds < timeoutMs)
@@ -1852,12 +1859,15 @@ public class Rpcs3ModsTests : IDisposable
             // A new session, so the first write is no longer this session's.
             server.SetModPresence("lock_rng", loaded: true, checking: false);
             server.Session = server.Session with { Generation = server.Session.Generation + 1 };
-            Assert.True(await PumpAsync(state, () => mods.StatusFor(newer).State == ModRpcs3State.UpdateAvailable));
+            Assert.True(await PumpAsync(state, () => mods.StatusFor(newer).State == ModRpcs3State.UpdateAvailable),
+                $"{mods.StatusFor(newer)} | disk: {mods.DiskProblem} | generation {state.Session.Generation} of {server.Session.Generation}");
 
             mods.RequestUpdate(newer);
             Assert.StartsWith("Rewrite Lock RNG's RPCS3 patch from the copy in the library (version 1.1)?", mods.Pending!.Message);
             mods.Confirm();
-            Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Text == "Updated Lock RNG. Restart the game in RPCS3 to load it.")));
+            Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Text == "Updated Lock RNG. Restart the game in RPCS3 to load it.")),
+                $"{string.Join(" | ", state.Toasts.Select(t => t.Text))} | busy {mods.IsBusy(newer)} | "
+                + $"pool {ThreadPool.ThreadCount} threads, {ThreadPool.PendingWorkItemCount} queued");
 
             var entry = Rpcs3Patches.ReadPatchFile(folder.PatchFile(Title)).ModEntryFor(Hash, "lock_rng")!;
             Assert.Equal(new[] { new PatchWord(0x005C8318, 0x806D9001) }, entry.Words);

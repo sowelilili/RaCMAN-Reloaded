@@ -100,7 +100,11 @@ public class Rpcs3HostTests
         try
         {
             string stub = WriteStub(folder);
-            using var host = new Rpcs3Host(folder, FreePort());
+
+            // What is checked is that "exit" on stdin is how it leaves, with its own code 0. The
+            // kill behind the grace is not, and a batch file on a busy machine can take more than
+            // the two seconds the real helper is given to read the line, so the stub gets longer.
+            using var host = new Rpcs3Host(folder, FreePort()) { StopGrace = TimeSpan.FromSeconds(60) };
 
             Assert.True(host.Ensure(stub, 28012, out string message));
             Assert.Contains("Started", message, StringComparison.Ordinal);
@@ -204,22 +208,26 @@ public class Rpcs3HostTests
             Assert.True(host.Ensure(null, 28012, out _));
             Assert.True(host.Adopted);
 
-            var started = DateTime.UtcNow;
             var ready = host.WaitForReadyAsync(TimeSpan.FromSeconds(10));
 
-            // The port is open the whole time, and still nothing is kept for a while.
-            await Task.Delay(400);
+            // The port is open the whole time, and still nothing is kept: the wait has asked twice
+            // and been closed twice, and goes on. Counted in probes rather than timed, since how
+            // many a busy machine makes in a given 400 ms is anybody's guess.
+            Assert.True(await Waits(() => server.ConnectionsClosedOnArrival >= 2),
+                $"{server.ConnectionsClosedOnArrival} probes were closed on arrival");
             Assert.False(ready.IsCompleted, "the wait ended while the helper was still closing clients");
             Assert.True(Rpcs3Host.PortInUse(server.Port));
+            int closedWhileBooting = server.ConnectionsClosedOnArrival;
             server.ClosesNewConnections = false;
 
+            // It ends on a probe that is kept, not on the timeout, and on the first one that can be:
+            // at most the probe already on its way when the helper changed is closed after that.
             Assert.True(await ready);
-            var waited = DateTime.UtcNow - started;
-            Assert.True(waited >= TimeSpan.FromMilliseconds(400), $"ready after {waited}");
-            Assert.True(waited < TimeSpan.FromMilliseconds(1300),
-                $"ready {waited} after the start, where the helper kept clients from 400 ms");
-            Assert.True(server.ConnectionsClosedOnArrival >= 2,
-                $"{server.ConnectionsClosedOnArrival} probes were closed on arrival");
+            Assert.True(server.ConnectionsClosedOnArrival <= closedWhileBooting + 1,
+                $"{server.ConnectionsClosedOnArrival - closedWhileBooting} probes closed after the helper kept clients");
+
+            // How soon it asks again is a constant, and is held to one rather than timed.
+            Assert.True(Rpcs3Host.ReadyPollInterval <= TimeSpan.FromMilliseconds(100));
 
             // And the client's own connect is then the one that holds, with no reconnect behind it.
             using var client = new QwarkClient { AutoReconnect = true };

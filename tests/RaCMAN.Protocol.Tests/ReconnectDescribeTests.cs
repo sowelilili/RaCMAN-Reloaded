@@ -40,6 +40,16 @@ public class ReconnectDescribeTests
         return condition();
     }
 
+    /// <summary>
+    /// Frames until the link is down and the client has taken in the Disconnected event that says
+    /// so, which is what clears <see cref="AppState.Hello"/>. The transport flag drops first and the
+    /// event is raised a moment later on the thread that saw the link go: a test that reconnects
+    /// on the flag alone can have that event land after the new connection's SessionEstablished
+    /// and undo what the new connection set up.
+    /// </summary>
+    private static Task<bool> DroppedAsync(AppState state) =>
+        PumpAsync(state, () => !state.Connected && state.Hello is null);
+
     /// <summary>Runs frames for a while, so a request that should not go out has had every chance to.</summary>
     private static Task PumpForAsync(AppState state, int milliseconds) => PumpAsync(state, () => false, milliseconds);
 
@@ -90,7 +100,7 @@ public class ReconnectDescribeTests
         // The console restarts. The new module is the same build, so the key the description is
         // held under is the same, and a fresh module counts its generations from the start again.
         server.DropClients();
-        Assert.True(await PumpAsync(state, () => !state.Connected));
+        Assert.True(await DroppedAsync(state));
 
         server.Describe = newModule;
         server.Session = server.Session with
@@ -167,12 +177,21 @@ public class ReconnectDescribeTests
         int resets = state.PanelResets;
 
         server.DropClients();
-        Assert.True(await PumpAsync(state, () => !state.Connected));
+        Assert.True(await DroppedAsync(state));
         server.ClearRequestLog();
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 
         Assert.True(await PumpAsync(state, () => state.DescriptionChecks == 1));
         Assert.True(await PumpAsync(state, () => state.Positions.Slots.Length > 0));
+
+        // The tables a check reads beside DESCRIBE have all been asked for, however long a busy
+        // machine took to get to them; then a while longer, for any that should not come.
+        int enums = before.Features.Count(f => f.Kind == FeatureKind.Enum);
+        Assert.True(await PumpAsync(state, () => Count(server, Opcode.PlanetList) >= 1
+                                                 && Count(server, Opcode.AutosplitDescribe) >= 1
+                                                 && Count(server, Opcode.SaveFileInfo) >= 1
+                                                 && Count(server, Opcode.FeatureOptions) >= enums
+                                                 && state.InFlight == 0));
         await PumpForAsync(state, 400);
 
         Assert.Equal(described + 1, server.DescribeCount);
@@ -218,7 +237,7 @@ public class ReconnectDescribeTests
         Assert.True(answer.SameLayoutAs(before));
 
         server.DropClients();
-        Assert.True(await PumpAsync(state, () => !state.Connected));
+        Assert.True(await DroppedAsync(state));
         await state.Client.ConnectAsync("127.0.0.1", server.Port);
 
         Assert.True(await PumpAsync(state, () => state.DescriptionChecks == 1));

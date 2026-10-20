@@ -910,12 +910,17 @@ public class ClientTests
         };
 
         await client.ConnectAsync("127.0.0.1", server.Port);
+        int established = 1;
+        client.SessionEstablished += _ => Interlocked.Increment(ref established);
 
         // The console drops the link but is still there. The hook runs, throws, and the attempt
-        // behind it lands anyway: a hook that failed says nothing about whether qwark is up.
+        // behind it lands anyway: a hook that failed says nothing about whether qwark is up. The
+        // attempt has landed when its session is established: the transport is up a HELLO before
+        // that, and waiting on it alone counted the server's HELLOs a moment too soon.
         server.DropClients();
         Assert.True(await WaitFor(() => !client.IsConnected));
-        Assert.True(await WaitFor(() => client.IsConnected, 15000));
+        Assert.True(await WaitFor(() => Volatile.Read(ref established) >= 2, 15000));
+        Assert.True(client.IsConnected);
         Assert.True(Volatile.Read(ref hooks) >= 1);
         Assert.Equal(2, server.HelloCount);
 
@@ -930,6 +935,79 @@ public class ClientTests
         Assert.True(client.ReconnectAttempt >= 3);
 
         await client.DisconnectAsync();
+    }
+
+    /// <summary>
+    /// A loss reported for a connection that has already been replaced. Every request a teardown
+    /// fails, and the receive loop of a connection that Disconnect or a change of target closed,
+    /// reports its loss from a pool thread a moment later. Under load that was after the next
+    /// connection had come up, and it took that one down — in a test, as "not connected to qwark"
+    /// out of the next HELLO, or as a session that never answered again. The report is called
+    /// directly here because when a pool thread gets round to it cannot be arranged from outside.
+    /// </summary>
+    [Fact]
+    public async Task ALossReportedForAConnectionAlreadyReplacedLeavesTheNewOneUp()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var client = new QwarkClient { AutoReconnect = false };
+        int lost = 0;
+        client.Disconnected += _ => Interlocked.Increment(ref lost);
+
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        var first = client.CurrentStream!;
+
+        // The Disconnect button, or a change of target: no event, and the next connection at once.
+        await client.DisconnectAsync();
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        var second = client.CurrentStream!;
+        Assert.NotSame(first, second);
+
+        client.HandleConnectionLost(new IOException("connection closed"), first);
+        Assert.True(client.IsConnected);
+        Assert.Same(second, client.CurrentStream);
+        Assert.Equal(0, Volatile.Read(ref lost));
+        Assert.Equal(server.Session.TitleId, (await client.GetStateAsync()).Session.TitleId);
+
+        // The same report for the connection that is up is a real loss, and raised once.
+        client.HandleConnectionLost(new IOException("connection closed"), second);
+        Assert.False(client.IsConnected);
+        Assert.Equal(1, Volatile.Read(ref lost));
+        client.HandleConnectionLost(new IOException("connection closed"), second);
+        Assert.Equal(1, Volatile.Read(ref lost));
+    }
+
+    /// <summary>
+    /// A telemetry snapshot that was on its way when its connection went — a packet the UDP loop
+    /// was holding, a GET_STATE reply not yet taken in — is not the latest of anything. Taken in
+    /// after the teardown, it put the old console's title back on a client with no connection,
+    /// which a test of the dropped link caught as a title that would not clear.
+    /// </summary>
+    [Fact]
+    public async Task ASnapshotFromAConnectionThatHasGoneIsNotTakenIn()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var client = new QwarkClient { AutoReconnect = false };
+
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        var first = client.CurrentStream!;
+        var packet = await client.GetStateAsync();
+        Assert.Equal(server.Session.TitleId, client.LatestSession!.TitleId);
+
+        await client.DisconnectAsync();
+        Assert.False(client.Adopt(packet, first));
+        Assert.Null(client.LatestTelemetry);
+        Assert.Null(client.LatestSession);
+
+        // Nor once the next connection is up: the next one has its own.
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        Assert.False(client.Adopt(packet, first));
+        Assert.NotSame(packet, client.LatestTelemetry);
+
+        // The connection that is up takes its snapshots in as before.
+        Assert.True(client.Adopt(packet, client.CurrentStream!));
+        Assert.Same(packet, client.LatestTelemetry);
     }
 
     [Fact]

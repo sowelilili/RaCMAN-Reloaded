@@ -149,7 +149,16 @@ public sealed class LiveSplitClient : IDisposable
     /// A query unanswered for this long is taken as one this server does not implement. It is not
     /// a connection failure, and the connection is left exactly as it was.
     /// </summary>
-    public static readonly TimeSpan QueryTimeout = TimeSpan.FromSeconds(1);
+    public static readonly TimeSpan DefaultQueryTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// <see cref="DefaultQueryTimeout"/>, unless a test gives a server that answers everything
+    /// longer. A query that runs out is taken as one the build does not answer and is not asked
+    /// again on the connection, and the version query running out turns the build away, so on a
+    /// machine busy enough to keep a loopback answer waiting a second, a test would be testing the
+    /// machine.
+    /// </summary>
+    public TimeSpan QueryTimeout { get; set; } = DefaultQueryTimeout;
 
     /// <summary>What the panel says about a build that would not name its version.</summary>
     public const string TooOldStatus = "LiveSplit too old";
@@ -482,6 +491,10 @@ public sealed class LiveSplitClient : IDisposable
     {
         TcpClient? client = null;
         bool established = false;
+
+        // What the popup counts, moved only once the attempt is over (see the finally).
+        bool connectFailed = false;
+        bool turnedAway = false;
         try
         {
             // A quiet attempt is not announced: the status stays where it was until there is
@@ -510,7 +523,8 @@ public sealed class LiveSplitClient : IDisposable
             string? version = await AskAsync(stream, GetLiveSplitVersion, token).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(version))
             {
-                NoteTooOld(quiet);
+                NoteTooOld();
+                turnedAway = !quiet;
                 return;
             }
 
@@ -536,7 +550,7 @@ public sealed class LiveSplitClient : IDisposable
             if (!quiet)
             {
                 LastError = ex is SocketException socket ? socket.SocketErrorCode.ToString() : ex.Message;
-                if (!established) Interlocked.Increment(ref _connectFailures);
+                connectFailed = !established;
             }
         }
         finally
@@ -550,6 +564,12 @@ public sealed class LiveSplitClient : IDisposable
             // connection: the status line goes back to a plain "Not connected" rather than naming
             // a socket error nobody pressed anything to cause, and the next Start is a fresh one.
             lock (_gate) Enabled = false;
+
+            // Last, the counts the popup watches: by the time either moves, everything it is
+            // about is already so. Moved before the socket was closed, a frame could see the
+            // count and a client that still said Connected and Enabled.
+            if (connectFailed) Interlocked.Increment(ref _connectFailures);
+            if (turnedAway) Interlocked.Increment(ref _tooOldFailures);
         }
     }
 
@@ -672,15 +692,19 @@ public sealed class LiveSplitClient : IDisposable
     /// <para>
     /// The wall itself is latched whoever walked into it, because it is what the status line goes
     /// on explaining and what stops the probe looking again. Only the <b>count</b> is the user's
-    /// press: a quiet attempt moves nothing the popup watches.
+    /// press: a quiet attempt moves nothing the popup watches, and the worker moves it for a press
+    /// once the connection is closed.
     /// </para>
     /// </summary>
-    private void NoteTooOld(bool quiet)
+    private void NoteTooOld()
     {
+        // Over as far as anyone looking is concerned, and said before the wall is: nothing reads a
+        // build latched as too old off a client that still says it is connected to it. The probe
+        // is held off meanwhile by Enabled, which goes only after the latch.
+        _status = LiveSplitStatus.Disconnected;
         _tooOld = true;
         LastError = TooOldStatus;
         LastNote = $"LiveSplit did not answer \"{GetLiveSplitVersion}\"; this build is too old.";
-        if (!quiet) Interlocked.Increment(ref _tooOldFailures);
         lock (_gate) Enabled = false;
     }
 

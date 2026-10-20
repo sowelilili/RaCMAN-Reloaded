@@ -6,4 +6,10 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- QwarkClient's connection seams (HandleConnectionLost, Adopt, CurrentStream): a failure or a
+         packet that arrives for a connection already replaced cannot be timed from outside. -->
+    <InternalsVisibleTo Include="RaCMAN.Protocol.Tests" />
+  </ItemGroup>
+
 </Project>

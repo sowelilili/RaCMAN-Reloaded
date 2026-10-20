@@ -261,8 +261,13 @@ public class UnknownGameTests
         Assert.False(state.UnknownGame);
 
         // Everything the known game asked for has answered by now, so what lands in the log after
-        // this was asked for on the title that replaces it and not on its way out.
+        // this was asked for on the title that replaces it and not on its way out. The ENUM rows'
+        // option lists are the last of it, asked once DESCRIBE is in; waited for, rather than
+        // assumed to be in after a few hundred milliseconds, which a busy machine can outlast.
+        int enums = state.Describe.Features.Count(f => f.Kind == FeatureKind.Enum);
+        Assert.True(await PumpAsync(state, () => state.EnumOptions.Count == enums && state.InFlight == 0));
         await PumpForAsync(state, 300);
+        Assert.True(await PumpAsync(state, () => state.InFlight == 0));
         server.ClearRequestLog();
         server.UnknownGame = true;
 

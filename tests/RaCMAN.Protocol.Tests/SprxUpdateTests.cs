@@ -367,6 +367,18 @@ public class SprxUpdateTests
         using var state = await ConnectAsync(first, sprx);
         Assert.True(await PumpAsync(state, () => state.QwarkUpdateStaged > 0));
 
+        // Every notice that goes up, counted as it appears rather than while it is still on screen:
+        // a toast runs out after six seconds, and a busy machine can take longer than that to
+        // write the module to the second console.
+        var notices = new HashSet<Toast>();
+        bool Noticed(int count)
+        {
+            notices.UnionWith(state.Toasts.Where(toast => toast.Text == state.QwarkUpdateNotice));
+            return notices.Count == count;
+        }
+
+        Assert.True(Noticed(1));
+
         // Another console, which is stale too and has nothing staged on it. The notice from the
         // first one must not stand in for it, or this one would never be updated at all.
         var onSecond = Module(120, 4096);
@@ -377,8 +389,7 @@ public class SprxUpdateTests
         await state.Client.ConnectAsync("127.0.0.1", second.Port);
 
         // Two notices: one per console that had the module written to it.
-        Assert.True(await PumpAsync(state,
-            () => state.Toasts.Count(toast => toast.Text == state.QwarkUpdateNotice) == 2));
+        Assert.True(await PumpAsync(state, () => Noticed(2), timeoutMs: 20000));
 
         Assert.Equal(shipped, second.Files[WebManLoader.BootPath]);
         Assert.Equal(onSecond, second.Files[BackupPath(WebManLoader.BootPath)]);

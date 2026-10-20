@@ -205,7 +205,10 @@ public class BootQuietTests
 
         // The user's Deadlocked session: a quit, the XMB, and the same game on its way back.
         server.Quitting = true;
-        Assert.True(await PumpAsync(state, () => state.ConsoleBusy));
+
+        // And whatever was asked before the quit has been answered: a read sent just before it,
+        // and still on its way on a busy machine, is not one the launch let through.
+        Assert.True(await PumpAsync(state, () => state.ConsoleBusy && state.InFlight == 0));
 
         server.ClearRequestLog();
         int refused = server.BusyCount;
