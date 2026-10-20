@@ -122,9 +122,7 @@ public static class CombosPanel
     public static string? Tooltip(ComboAction action) => action switch
     {
         ComboAction.OpenConsoleMenu =>
-            "Opens the Trainer menu on the TV. It works even when the combos are switched off.",
-        ComboAction.ToggleFastLoads =>
-            "Turns fast loads on or off, as the Fast loads box does. The console says which.",
+            "Opens the Trainer menu in-game.",
         _ => null,
     };
 
@@ -219,9 +217,8 @@ public static class CombosPanel
         {
             Ui.SetTooltip(blocked
                 ? "The console menu is not available under RPCS3."
-                : "Trainer replaces Help in the game's pause menu. Off, the pause menu keeps its Help, "
-                  + "and the menu combo still opens the Trainer menu. It applies at once, or when the "
-                  + "pause menu next closes.");
+                : "When enabled, shows the in-game Trainer menu in place of the Help menu. "
+                  + "When disabled, the Trainer menu is only accessible with its button combo");
         }
 
         ImGui.SameLine();
@@ -231,7 +228,7 @@ public static class CombosPanel
     /// <summary>What the In-game menus box says beside itself, from the session flags alone.</summary>
     public static string InGameMenusStatus(SessionInfo session) =>
         InGameMenusBlocked(session) ? "not under RPCS3"
-        : session.MenuHelpOff ? "the pause menu keeps Help"
+        : session.MenuHelpOff ? "the game's default pause menu"
         : "Trainer replaces Help in the pause menu";
 
     public static void Draw(AppState state)
