@@ -196,7 +196,7 @@ foreach ($r in $repos) {
 
 Write-Step 'checking the console payload'
 
-foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark-rpcs3.exe')) {
+foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark-installer.pkg', 'qwark-rpcs3.exe')) {
     $path = Combine $qwark 'dist' $file
     if (-not (Test-Path $path)) {
         throw "qwark has no dist\$file. Build it in qwark (make, then make dist) and commit it."
