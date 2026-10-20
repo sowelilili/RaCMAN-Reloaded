@@ -67,7 +67,9 @@ The Save files panel has premade saves in its last category, **(premade savefile
 
 ## Console menu
 
-On a console, all four games have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was, or press L1, R1, L2, R2, L3 and R3 together in play. The Combos panel can change that combo.
+On a console, all four games have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was, or press L1, R1, L2, R2, L3 and R3 together in play. The Combos panel can change that combo. Untick **In-game menus** there to keep the game's own Help in the pause menu; the combo still opens the Trainer menu.
+
+The Combos panel also has a **Toggle fast loads** combo. It has no buttons until you capture some, and the console says whether fast loads are now on or off.
 
 ## Updates
 

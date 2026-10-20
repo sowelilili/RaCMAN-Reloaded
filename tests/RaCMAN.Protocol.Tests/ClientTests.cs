@@ -1434,12 +1434,13 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(10, true)]
-    [InlineData(53, true)]     // the build before the one this client ships with
-    [InlineData(54, false)]    // exactly the expected build: the console menu, revision 1.22, and its sixth combo
-    [InlineData(55, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(53, true)]
+    [InlineData(54, true)]     // the build before the one this client ships with: client 1.4.0's
+    [InlineData(55, false)]    // exactly the expected build: revision 1.23, In-game menus and the fast-loads combo
+    [InlineData(56, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(54, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(55, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
@@ -1506,6 +1507,35 @@ public class ClientTests
         // And the buttons that were down when Cancel was pressed store nothing on the way up.
         await PressAsync(state, server, 0);
         AssertOnlyTheMenuDefault(server);
+    }
+
+    /// <summary>
+    /// Revision 1.23: the fast-loads combo is captured and stored like any other row. Here rather
+    /// than with the rest of revision 1.23's tests because the capture is the panel's static state,
+    /// which only the tests of one class may share.
+    /// </summary>
+    [Fact]
+    public async Task CapturingTheFastLoadsComboStoresIt()
+    {
+        using var server = new FakeQwarkServer();
+        server.AnimateInput = false;
+        server.Start();
+        server.Session = server.Session with { QwarkVersion = CombosPanel.FastLoadsComboBuild };
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Hello is not null));
+        Assert.True(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, state.Session.QwarkVersion));
+
+        CombosPanel.BeginCapture(state, ComboAction.ToggleFastLoads);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+
+        await PressAsync(state, server, CaptureMask);
+        await PressAsync(state, server, 0);
+
+        Assert.True(await PumpAsync(state, () => server.Combos.ContainsKey(ComboAction.ToggleFastLoads)));
+        Assert.Equal(CaptureMask, server.Combos[ComboAction.ToggleFastLoads]);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
+        Assert.True(await PumpAsync(state, () => state.Combos.Any(c => c.Action == ComboAction.ToggleFastLoads)));
     }
 
     /// <summary>

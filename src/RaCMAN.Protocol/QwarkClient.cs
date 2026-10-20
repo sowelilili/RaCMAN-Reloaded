@@ -21,7 +21,7 @@ public sealed class QwarkClient : IDisposable
     /// an older SPRX answers DESCRIBE with the old tables and the client quietly shows less than it
     /// should. Comparing it against HELLO is the only way to catch that.
     /// </summary>
-    public const byte ExpectedQwarkBuild = 54;
+    public const byte ExpectedQwarkBuild = 55;
 
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
@@ -1440,6 +1440,18 @@ public sealed class QwarkClient : IDisposable
         }), cancellationToken);
 
     // ---------------------------------------------------------------- 5.10 config
+
+    /// <summary>
+    /// MENU_HELP, revision 1.23: whether the console menu's Trainer row replaces the game's Help
+    /// row in its pause menu. Kept in the console's config like the combo switch, and read back
+    /// from <see cref="SessionInfo.MenuHelpOff"/>. The console swaps the row at once in ordinary
+    /// play, or once the pause menu has closed.
+    /// </summary>
+    public Task MenuHelpAsync(bool on, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.MenuHelp, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)(on ? 1 : 0));
+        }), cancellationToken);
 
     public Task ConfigReloadAsync(CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.ConfigReload, null, cancellationToken);

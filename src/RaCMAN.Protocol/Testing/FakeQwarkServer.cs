@@ -1225,6 +1225,17 @@ public sealed class FakeQwarkServer : IDisposable
         set => SetSessionFlag(SessionFlags.CombosOff, !value);
     }
 
+    /// <summary>
+    /// The console menu's Help row, MENU_HELP of revision 1.23: on by default, as a fresh config
+    /// is; off sets flags bit6, which is all the client ever reads of it. A fake set to
+    /// <see cref="NoCodePatches"/> answers MENU_HELP UNSUPPORTED, as qwark-rpcs3 does.
+    /// </summary>
+    public bool MenuHelp
+    {
+        get => (Session.Flags & SessionFlags.MenuHelpOff) == 0;
+        set => SetSessionFlag(SessionFlags.MenuHelpOff, !value);
+    }
+
     /// <summary>The console's filesystem, as far as the file ops are concerned.</summary>
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
 
@@ -2519,6 +2530,9 @@ public sealed class FakeQwarkServer : IDisposable
                     if (payload.Length < 8) return (Status.BadArg, null);
                     var r = new SpanReader(payload);
                     var action = (ComboAction)r.ReadU8();
+                    // Seven actions since revision 1.23, the fast-loads combo the seventh; an
+                    // action past them is BAD_ARG, as qwark answers it.
+                    if (action > ComboAction.ToggleFastLoads) return (Status.BadArg, null);
                     r.Skip(3);
                     Combos[action] = r.ReadU32();
                     return (Status.Ok, null);
@@ -2556,6 +2570,17 @@ public sealed class FakeQwarkServer : IDisposable
                     _session = payload[0] != 0
                         ? _session with { Flags = _session.Flags & ~SessionFlags.CombosOff }
                         : _session with { Flags = _session.Flags | SessionFlags.CombosOff };
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.MenuHelp:
+                {
+                    // `u8 on`, 0 or 1, as COMBO_ENABLE; no console menu where code is not patched.
+                    if (payload.Length < 1 || payload[0] > 1) return (Status.BadArg, null);
+                    if (NoCodePatches) return (Status.Unsupported, null);
+                    _session = payload[0] != 0
+                        ? _session with { Flags = _session.Flags & ~SessionFlags.MenuHelpOff }
+                        : _session with { Flags = _session.Flags | SessionFlags.MenuHelpOff };
                     return (Status.Ok, null);
                 }
 

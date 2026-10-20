@@ -17,6 +17,7 @@ public static class CombosPanel
         ComboAction.Die,
         ComboAction.LoadPlanet,
         ComboAction.LoadSetAsideFile,
+        ComboAction.ToggleFastLoads,
         ComboAction.OpenConsoleMenu,
     };
 
@@ -74,21 +75,56 @@ public static class CombosPanel
     public static bool MenuComboBlocked(ComboAction action, SessionInfo session) =>
         action == ComboAction.OpenConsoleMenu && session.IsEmulator;
 
+    /// <summary>
+    /// Whether the fast-loads combo has nothing to flip: the Fast loads cheat patches game code,
+    /// so under RPCS3 it needs qwark's patches, as the Fast loads box on the Game panel does, and
+    /// the console refuses the combo the same way until they are in.
+    /// </summary>
+    public static bool FastLoadsComboBlocked(ComboAction action, SessionInfo session) =>
+        action == ComboAction.ToggleFastLoads && session.CodeFeaturesUnavailable;
+
     /// <summary>The first qwark build with the console menu and its combo, revision 1.22.</summary>
     public const byte ConsoleMenuBuild = 54;
 
     /// <summary>
-    /// Whether the panel draws a row for the action: the console menu's only against a module
-    /// that has it, since an older one answers its COMBO_SET with BAD_ARG.
+    /// The first qwark build with the fast-loads combo and the In-game menus switch (MENU_HELP),
+    /// revision 1.23.
     /// </summary>
-    public static bool ShowsRow(ComboAction action, byte qwarkBuild) =>
-        action != ComboAction.OpenConsoleMenu || qwarkBuild >= ConsoleMenuBuild;
+    public const byte FastLoadsComboBuild = 55;
+
+    /// <inheritdoc cref="FastLoadsComboBuild"/>
+    public const byte InGameMenusBuild = 55;
+
+    /// <summary>
+    /// Whether the panel draws a row for the action: the console menu's and the fast-loads one only
+    /// against a module that has them, since an older one answers their COMBO_SET with BAD_ARG.
+    /// </summary>
+    public static bool ShowsRow(ComboAction action, byte qwarkBuild) => action switch
+    {
+        ComboAction.OpenConsoleMenu => qwarkBuild >= ConsoleMenuBuild,
+        ComboAction.ToggleFastLoads => qwarkBuild >= FastLoadsComboBuild,
+        _ => true,
+    };
+
+    /// <summary>
+    /// Whether the In-game menus box is drawn: only against a module that has MENU_HELP, which an
+    /// older one answers UNKNOWN_OP.
+    /// </summary>
+    public static bool ShowsInGameMenus(byte qwarkBuild) => qwarkBuild >= InGameMenusBuild;
+
+    /// <summary>
+    /// Whether the In-game menus box is greyed: under RPCS3 there is no console menu, and qwark
+    /// answers MENU_HELP UNSUPPORTED.
+    /// </summary>
+    public static bool InGameMenusBlocked(SessionInfo session) => session.IsEmulator || session.CodePatchesUnsupported;
 
     /// <summary>What the row says about itself when the pointer rests on it.</summary>
     public static string? Tooltip(ComboAction action) => action switch
     {
         ComboAction.OpenConsoleMenu =>
             "Opens the Trainer menu on the TV. It works even when the combos are switched off.",
+        ComboAction.ToggleFastLoads =>
+            "Turns fast loads on or off, as the Fast loads box does. The console says which.",
         _ => null,
     };
 
@@ -100,6 +136,7 @@ public static class CombosPanel
         ComboAction.LoadPlanet => "Load planet",
         ComboAction.LoadSetAsideFile => "Load set-aside file",
         ComboAction.OpenConsoleMenu => "Open console menu",
+        ComboAction.ToggleFastLoads => "Toggle fast loads",
         _ => action.ToString(),
     };
 
@@ -153,6 +190,50 @@ public static class CombosPanel
         ImGui.Spacing();
     }
 
+    /// <summary>
+    /// The console's In-game menus switch, MENU_HELP of revision 1.23: whether the Trainer menu
+    /// takes the place of Help in the game's pause menu. It sits right under the table's last row,
+    /// the console menu's combo, which is the other way into that menu, and it is the only setting
+    /// of the menu the client has. Drawn from the session flag, like the combo switch, so it always
+    /// says what the console says: a click sends the request, the next packet moves the box, and
+    /// the console swaps the row at once in play or as soon as the pause menu closes. Hidden
+    /// against a module without the op, greyed under RPCS3, which has no console menu.
+    /// </summary>
+    private static void DrawInGameMenus(AppState state)
+    {
+        if (!ShowsInGameMenus(state.Session.QwarkVersion)) return;
+
+        bool blocked = InGameMenusBlocked(state.Session);
+        bool on = !state.Session.MenuHelpOff;
+
+        ImGui.Spacing();
+        ImGui.BeginDisabled(blocked);
+        if (ImGui.Checkbox("In-game menus", ref on))
+        {
+            bool want = on;
+            state.Run(() => state.Client.MenuHelpAsync(want));
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            Ui.SetTooltip(blocked
+                ? "The console menu is not available under RPCS3."
+                : "Trainer replaces Help in the game's pause menu. Off, the pause menu keeps its Help, "
+                  + "and the menu combo still opens the Trainer menu. It applies at once, or when the "
+                  + "pause menu next closes.");
+        }
+
+        ImGui.SameLine();
+        Ui.Text(Ui.Grey, InGameMenusStatus(state.Session));
+    }
+
+    /// <summary>What the In-game menus box says beside itself, from the session flags alone.</summary>
+    public static string InGameMenusStatus(SessionInfo session) =>
+        InGameMenusBlocked(session) ? "not under RPCS3"
+        : session.MenuHelpOff ? "the pause menu keeps Help"
+        : "Trainer replaces Help in the pause menu";
+
     public static void Draw(AppState state)
     {
         Ui.Heading("Controller combos");
@@ -196,6 +277,11 @@ public static class CombosPanel
             {
                 Ui.TextDisabled(Label(action));
                 if (ImGui.IsItemHovered()) Ui.SetTooltip("The console menu is not available under RPCS3.");
+            }
+            else if (FastLoadsComboBlocked(action, state.Session))
+            {
+                Ui.TextDisabled(Label(action));
+                if (ImGui.IsItemHovered()) Ui.SetTooltip(Ui.NeedsQwarkPatches);
             }
             else
             {
@@ -257,6 +343,8 @@ public static class CombosPanel
         }
 
         ImGui.EndTable();
+
+        DrawInGameMenus(state);
 
         ImGui.Spacing();
         if (ImGui.SmallButton("Refresh")) state.RefreshCombos();

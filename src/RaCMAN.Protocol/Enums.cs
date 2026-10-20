@@ -119,6 +119,16 @@ public enum Opcode : ushort
     ConfigReload = 0x0090,
     ConfigSave = 0x0091,
 
+    /// <summary>
+    /// Revision 1.23 (qwark build 55): <c>u8 on</c>, whether the console menu's Trainer row takes
+    /// the place of the game's Help row in its pause menu (config.txt's <c>menu.help</c>, 1 out
+    /// of the box). A config write, answered in every session state; the console swaps the row's
+    /// words at the next moment the pause menu cannot be reading them.
+    /// <see cref="SessionFlags.MenuHelpOff"/> is where the setting comes back. UNSUPPORTED under
+    /// RPCS3, which has no console menu, and UNKNOWN_OP from a module before it.
+    /// </summary>
+    MenuHelp = 0x0092,
+
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
@@ -469,6 +479,13 @@ public enum ComboAction : byte
     /// reports it as a sixth entry.
     /// </summary>
     OpenConsoleMenu = 5,
+
+    /// <summary>
+    /// Revision 1.23 (qwark build 55): turns the running game's fast loads on or off, exactly as
+    /// the Fast loads box does, and the console says which. No mask out of the box. Under RPCS3 it
+    /// is refused like the box until qwark's patches are in.
+    /// </summary>
+    ToggleFastLoads = 6,
 }
 
 /// <summary>The masks a combo has on a console that was never told otherwise.</summary>
@@ -551,6 +568,13 @@ public enum SessionFlags : byte
     /// It is the only thing the client asks VSH_MEMORY on.
     /// </summary>
     VshMemory = 1 << 5,
+
+    /// <summary>
+    /// The console's <c>menu.help</c> is 0 (revision 1.23): its menu leaves the game's Help row
+    /// alone, so Trainer is reached through the menu combo only. Clear on every earlier module,
+    /// whose menu always took the row, so it reads right against those too.
+    /// </summary>
+    MenuHelpOff = 1 << 6,
 }
 
 /// <summary>

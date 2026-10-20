@@ -77,6 +77,12 @@ public sealed record SessionInfo(
     /// </summary>
     public bool CombosOff => (Flags & SessionFlags.CombosOff) != 0;
 
+    /// <summary>
+    /// The console menu leaves the game's Help row alone (revision 1.23): MENU_HELP's setting, kept
+    /// in the console's config, which the Combos panel's In-game menus box draws itself from.
+    /// </summary>
+    public bool MenuHelpOff => (Flags & SessionFlags.MenuHelpOff) != 0;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>
