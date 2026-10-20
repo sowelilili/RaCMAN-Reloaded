@@ -371,6 +371,7 @@ public sealed class AppWindow : GameWindow
         PreviousSessionModal.Draw(_state);
         FirewallModal.Draw(_state);
         LiveSplitModal.Draw(_state);
+        WhatsNewModal.Draw(_state);
         DrawToasts();
     }
 
@@ -406,13 +407,15 @@ public sealed class AppWindow : GameWindow
     /// The one line above everything else, and only while there is something to do about it: a new
     /// version to fetch, one coming down, or one waiting for a restart. Later silences it until the
     /// client is started again, and the Settings panel keeps the buttons for anyone who changes
-    /// their mind.
+    /// their mind. When the releases have notes, What's new opens them in a window of their own; the
+    /// first start of the new version has a line of its own here, with the same button.
     /// </summary>
     private void DrawUpdateBanner()
     {
         var updates = _state.Updates;
         if (!updates.HasBanner) return;
 
+        bool updated = false;
         switch (updates.Stage)
         {
             case UpdateStage.Available:
@@ -432,13 +435,24 @@ public sealed class AppWindow : GameWindow
                 ImGui.SameLine();
                 if (ImGui.SmallButton("Restart to update")) updates.RestartAndApply();
                 break;
+
+            default:
+                Ui.Text(Ui.Green, $"Updated to RaCMAN Reloaded {updates.UpdatedTo}");
+                updated = true;
+                break;
+        }
+
+        if (updates.HasNotes)
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("What's new")) updates.OpenNotes();
         }
 
         // Not offered mid-download: there is nothing to put off while the bytes are coming.
         if (updates.Stage != UpdateStage.Downloading)
         {
             ImGui.SameLine();
-            if (ImGui.SmallButton("Later")) updates.Dismiss();
+            if (ImGui.SmallButton(updated ? "Close" : "Later")) updates.Dismiss();
         }
 
         ImGui.Separator();

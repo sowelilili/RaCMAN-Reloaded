@@ -73,6 +73,8 @@ On a console, all four games have a Trainer menu on the TV. Open it from **Train
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.
 
+**What's new** on the bar shows the release notes. The first start after an update offers them once more.
+
 The Settings panel holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
 
 A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one. In standalone mode the client sends it by itself.

@@ -138,6 +138,7 @@ public sealed class UpdateService
     private readonly Action<string, ToastKind> _toast;
 
     private UpdateManager? _manager;
+    private ReleaseListCapture? _releaseList;
     private UpdateInfo? _pending;
     private bool _managerFailed;
 
@@ -170,6 +171,24 @@ public sealed class UpdateService
     /// <summary>Set by the banner's Later button, so one run is not nagged twice.</summary>
     public bool Dismissed { get; private set; }
 
+    /// <summary>
+    /// What changed, newest release first: the notes of every version between this one and the one
+    /// on offer, or, on the first start of a new version, the notes it was downloaded with. Empty
+    /// when the releases say nothing, and then the banner is the plain one.
+    /// </summary>
+    public IReadOnlyList<ReleaseNote> Notes { get; private set; } = Array.Empty<ReleaseNote>();
+
+    public bool HasNotes => Notes.Count > 0;
+
+    /// <summary>Whether the What's new window is open.</summary>
+    public bool NotesOpen { get; private set; }
+
+    /// <summary>
+    /// The version this start was updated to, while its notes are on show; null otherwise. Set
+    /// once, by <see cref="ShowInstalledNotes"/>, on the first start of that version.
+    /// </summary>
+    public string? UpdatedTo { get; private set; }
+
     public bool Busy => Stage is UpdateStage.Checking or UpdateStage.Downloading;
 
     /// <summary>
@@ -194,9 +213,13 @@ public sealed class UpdateService
 
     public bool IsInert => InertReason is not null;
 
-    /// <summary>The banner is drawn for the three states the user can act on.</summary>
+    /// <summary>
+    /// The banner is drawn for the three states the user can act on, and on the first start of a
+    /// new version that came with notes.
+    /// </summary>
     public bool HasBanner =>
-        !Dismissed && Stage is UpdateStage.Available or UpdateStage.Downloading or UpdateStage.Ready;
+        !Dismissed && (Stage is UpdateStage.Available or UpdateStage.Downloading or UpdateStage.Ready
+                       || UpdatedTo is not null);
 
     public DateTime? LastCheckUtc => _settings.Updates.LastCheckUtc;
 
@@ -227,6 +250,30 @@ public sealed class UpdateService
         Check(announce: false);
     }
 
+    /// <summary>
+    /// The first start of a new version: the notes it was downloaded with, shown once on the banner
+    /// and then forgotten. Notes for a version that has not been applied yet stay for the start
+    /// that applies it. Nothing here reaches the network, and it is still off for a run that is not
+    /// <see cref="Allowed"/>, so a headless run on the real data folder cannot use the notes up.
+    /// </summary>
+    public void ShowInstalledNotes()
+    {
+        if (!Allowed || _settings.Updates.PendingNotes is not { } stored) return;
+
+        var (show, keep) = ReleaseNotes.AfterUpdate(stored, AppVersion.Current);
+        if (!keep)
+        {
+            _settings.Updates.PendingNotes = null;
+            _settings.Save();
+        }
+
+        if (show.Count == 0) return;
+
+        UpdatedTo = AppVersion.Clean(stored.Version);
+        Notes = show;
+        NotesOpen = false;
+    }
+
     /// <summary>The Settings panel's button. Says what it found either way, since it was asked.</summary>
     public void CheckNow() => Check(announce: true);
 
@@ -239,12 +286,16 @@ public sealed class UpdateService
         Stage = UpdateStage.Checking;
         Problem = null;
 
+        var releaseList = _releaseList;
+
         _ = Task.Run(async () =>
         {
             try
             {
+                releaseList?.Clear();
                 var update = await manager.CheckForUpdatesAsync().ConfigureAwait(false);
-                _post(() => Found(update, announce));
+                var notes = NotesFor(update, releaseList?.Last);
+                _post(() => Found(update, notes, announce));
             }
             catch (Exception ex)
             {
@@ -259,7 +310,32 @@ public sealed class UpdateService
         });
     }
 
-    private void Found(UpdateInfo? update, bool announce)
+    /// <summary>
+    /// The notes for what a check found, out of the releases list Velopack fetched for that check.
+    /// Off the render thread, and never throws: an update whose notes cannot be read is offered
+    /// without them.
+    /// </summary>
+    private static IReadOnlyList<ReleaseNote> NotesFor(UpdateInfo? update, string? releaseList)
+    {
+        try
+        {
+            string? target = update?.TargetFullRelease?.Version?.ToString();
+            return target is null
+                ? Array.Empty<ReleaseNote>()
+                : ReleaseNotes.FromGithubReleases(releaseList, AppVersion.Current, target);
+        }
+        catch (Exception)
+        {
+            return Array.Empty<ReleaseNote>();
+        }
+    }
+
+    /// <summary>
+    /// What a check's answer does, on the render thread. Public so the tests can hand the service an
+    /// answer, notes and all, without a network; a service that is not <see cref="Allowed"/> still
+    /// cannot download or apply what it is handed.
+    /// </summary>
+    public void Found(UpdateInfo? update, IReadOnlyList<ReleaseNote> notes, bool announce)
     {
         _pending = update;
         string? version = update?.TargetFullRelease?.Version?.ToString();
@@ -269,14 +345,31 @@ public sealed class UpdateService
             _pending = null;
             AvailableVersion = null;
             Stage = UpdateStage.UpToDate;
+
+            // The notes of the version just installed stay on its banner; an offer's go with it.
+            if (UpdatedTo is null)
+            {
+                Notes = Array.Empty<ReleaseNote>();
+                NotesOpen = false;
+            }
+
             if (announce) _toast($"RaCMAN Reloaded {AppVersion.Current} is the latest version", ToastKind.Success);
             return;
         }
 
+        UpdatedTo = null;
         AvailableVersion = version;
+        Notes = notes ?? Array.Empty<ReleaseNote>();
+        NotesOpen = NotesOpen && HasNotes;
         Stage = UpdateStage.Available;
         Dismissed = false;
     }
+
+    /// <summary>The banner's What's new button: opens the notes window, when there is something in it.</summary>
+    public void OpenNotes() => NotesOpen = HasNotes;
+
+    /// <summary>The notes window's Close button, and the cross on its title bar.</summary>
+    public void CloseNotes() => NotesOpen = false;
 
     /// <summary>Downloads what the last check found. The banner's Download button.</summary>
     public void Download()
@@ -300,6 +393,7 @@ public sealed class UpdateService
                     Percent = 100;
                     Stage = UpdateStage.Ready;
                     Dismissed = false;
+                    KeepNotesForAfterTheUpdate();
                 });
             }
             catch (Exception ex)
@@ -329,8 +423,33 @@ public sealed class UpdateService
         }
     }
 
-    /// <summary>The banner's Later button: not this run, and not a word about it again until restart.</summary>
-    public void Dismiss() => Dismissed = true;
+    /// <summary>
+    /// Puts the notes of the update just downloaded in the settings, for the first start of the new
+    /// version to show once (<see cref="ShowInstalledNotes"/>). Now rather than on Restart to update,
+    /// because Velopack also applies a downloaded update by itself on the next start. An update with
+    /// no notes clears whatever an earlier download left. Public for the tests, as <see cref="Found"/> is.
+    /// </summary>
+    public void KeepNotesForAfterTheUpdate()
+    {
+        var record = HasNotes && AvailableVersion is { } version
+            ? new UpdateNotesRecord { Version = version, Releases = Notes.ToList() }
+            : null;
+
+        if (record is null && _settings.Updates.PendingNotes is null) return;
+
+        _settings.Updates.PendingNotes = record;
+        _settings.Save();
+    }
+
+    /// <summary>
+    /// The banner's Later button: not this run, and not a word about it again until restart. On the
+    /// first start of a new version it is Close, and the notes are done with.
+    /// </summary>
+    public void Dismiss()
+    {
+        Dismissed = true;
+        NotesOpen = false;
+    }
 
     /// <summary>What the Settings panel prints under the buttons.</summary>
     public string StatusLine() => Stage switch
@@ -362,7 +481,8 @@ public sealed class UpdateService
     /// <summary>
     /// The Velopack manager, built once. GithubSource with no token and no prereleases: the
     /// repository is public, and a prerelease is something a maintainer tries by hand rather than
-    /// something a player is offered. Null when Velopack would not build one at all, which the
+    /// something a player is offered. Its downloader is Velopack's own, wrapped so the releases list
+    /// it fetches is kept for the notes. Null when Velopack would not build one at all, which the
     /// Settings panel reports rather than throwing on the render thread.
     /// </summary>
     private UpdateManager? Manager
@@ -373,7 +493,9 @@ public sealed class UpdateService
 
             try
             {
-                _manager = new UpdateManager(new GithubSource(RepositoryUrl, null, false));
+                var releaseList = new ReleaseListCapture(new HttpClientFileDownloader());
+                _manager = new UpdateManager(new GithubSource(RepositoryUrl, null, false, releaseList));
+                _releaseList = releaseList;
             }
             catch (Exception ex)
             {

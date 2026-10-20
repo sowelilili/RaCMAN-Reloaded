@@ -68,6 +68,43 @@ public static class FileExplorer
         }
     }
 
+    /// <summary>
+    /// The address itself when <paramref name="link"/> is an absolute http or https address, which
+    /// are the only links the release notes open; null for anything else, a file path included.
+    /// </summary>
+    public static string? WebAddress(string? link)
+    {
+        if (!Uri.TryCreate((link ?? string.Empty).Trim(), UriKind.Absolute, out var uri)) return null;
+        return uri.Scheme == Uri.UriSchemeHttps || uri.Scheme == Uri.UriSchemeHttp ? uri.AbsoluteUri : null;
+    }
+
+    /// <summary>
+    /// Opens a web page in the default browser, through the same program that shows a folder: each
+    /// of them hands an address to the browser. Only on a click, so nothing here runs in a test.
+    /// </summary>
+    public static (bool ok, string message) OpenLink(string link)
+    {
+        if (WebAddress(link) is not { } address) return (false, $"Not a web address: {link}");
+        if (CommandFor(address, Current) is not { } command) return (false, "There is no browser to open on this platform.");
+
+        var (program, target) = command;
+        try
+        {
+            var info = new ProcessStartInfo(program) { UseShellExecute = false };
+            info.ArgumentList.Add(target);
+            using var process = Process.Start(info);
+
+            return process is null
+                ? (false, $"Could not open {address}: {program} did not start")
+                : (true, $"Opened {address}");
+        }
+        catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException
+                                      or PlatformNotSupportedException)
+        {
+            return (false, $"Could not open {address}: {ex.Message}");
+        }
+    }
+
     /// <summary>This platform in the terms <see cref="CommandFor"/> takes.</summary>
     private static OSPlatform Current =>
         OperatingSystem.IsWindows() ? OSPlatform.Windows

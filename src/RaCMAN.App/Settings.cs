@@ -692,9 +692,11 @@ public sealed class Rpcs3Settings
 }
 
 /// <summary>
-/// The auto-updater's two facts. On by default: a trainer that talks to a console over a protocol
-/// with a build number is worth keeping current, and the check is one request a day. Off is
-/// honoured everywhere, including the startup check and the Settings panel's own button.
+/// What the auto-updater keeps: whether it checks, when it last did, and the notes of a downloaded
+/// update until that version has started. Checking is on by default: a trainer that talks to a
+/// console over a protocol with a build number is worth keeping current, and the check is one
+/// request a day. Off is honoured everywhere, including the startup check and the Settings panel's
+/// own button.
 /// </summary>
 public sealed class UpdateSettings
 {
@@ -708,6 +710,14 @@ public sealed class UpdateSettings
     /// </summary>
     [JsonPropertyName("lastCheckUtc")]
     public DateTime? LastCheckUtc { get; set; }
+
+    /// <summary>
+    /// The release notes of the update downloaded last, until the first start of that version has
+    /// shown them. Null the rest of the time.
+    /// </summary>
+    [JsonPropertyName("pendingNotes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public UpdateNotesRecord? PendingNotes { get; set; }
 }
 
 /// <summary>
