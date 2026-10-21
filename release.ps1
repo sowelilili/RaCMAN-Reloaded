@@ -340,6 +340,10 @@ else {
     Push-Location $qwark
     try {
         if ($sh) {
+            # The smoke test drives qwark-host.exe and qwark-rpcs3.exe from qwark's root, and nothing
+            # else rebuilds them there: a copy left from an older build reports that build's number
+            # and fails the suite, so they are built fresh from the sources being released.
+            Invoke-Suite "qwark's host build" { & $sh.Source 'build-host.sh' }
             Invoke-Suite "qwark's unit suite" { & $sh.Source 'test/run.sh' }
         }
         else {
