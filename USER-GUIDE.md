@@ -1,0 +1,112 @@
+# RaCMAN Reloaded: user guide
+
+The [README](README.md) is the quickstart. This guide has the details.
+
+## Downloads
+
+Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, the console menu's file `ui.pak`, the RPCS3 helper and a console installer.
+
+- **Windows, installer**: run `RaCMANReloaded-win-Setup.exe`. It installs for your user account only. It does not need administrator rights.
+- **Windows, portable**: unzip `RaCMANReloaded-win-Portable.zip` and run `RaCMAN.App.exe`.
+- **Linux**: download `RaCMANReloaded-linux.AppImage`, make it executable and run it.
+
+**Install without a PC**: download `qwark-installer.pkg` and install it on the console with Package Manager. Run **qwark installer** once. It installs the module and restarts the console.
+
+## Connect to a PS3
+
+1. Start the console and make sure webMAN runs on it.
+2. Type the console's IP address into the client.
+3. Press **Connect**.
+4. Start one of the four games.
+
+The client finds the module on the console, sends it if no plugin slot holds it, and connects. Each step shows a message. If a step fails, the message tells you which step failed.
+
+The panels fill with the controls for the game that runs. If the connection stops, the client connects again by itself. The console keeps the state, so nothing is lost.
+
+If you start a game the module does not know, the client keeps the Memory panel and hides the rest: watches, freezes, patches and the memory viewer work on any title.
+
+The Connection panel shows how much memory the console's system software (the VSH) has free, and the lowest it has been since the module started. If the console crashes or says it is out of memory, include that line when you report it. Below 512 KB free, the status line also shows **low memory**.
+
+## Connection modes
+
+The mode is on the Settings panel, in the **Connection** section.
+
+**webMAN** is the default mode. The client asks webMAN which plugin slot holds the module. If no slot holds it, the client sends `qwark.sprx` to the console and loads it. Automatic reconnections do the same, so the client can recover a module that stopped.
+
+**Standalone** never uses webMAN. The client only connects to the module's port. Use this mode if the console loads the module at startup.
+
+Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. The install puts qwark first on the list, so HEN loads it before webMAN. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
+
+The client sends `qwark.sprx` and `ui.pak` by itself. To copy them by hand, put `qwark.sprx` in `/dev_hdd0/plugins/` and make `/dev_hdd0/plugins/qwark.sprx` the first line of `/dev_hdd0/boot_plugins.txt`. Put `ui.pak` in `/dev_hdd0/qwark/`.
+
+In standalone mode the client also keeps that copy current. If the console runs an older module than the client ships, the client sends the new one to the console and asks you to restart it. See [docs/standalone-update.md](docs/standalone-update.md).
+
+## Connect to RPCS3
+
+1. In RPCS3, switch the IPC server on. It is in Manage, Network Services, IPC.
+2. Start the game.
+3. In the client, select **RPCS3** on the Connection panel.
+
+The PS3 and RPCS3 keep separate settings. A switch to RPCS3 does not change the console's address. Each one has its own **Reconnect automatically** box.
+
+The client starts `qwark-rpcs3.exe` beside it and connects to it on this PC. The panels behave as they do on a console, with one difference: RPCS3 recompiles the game code, so it cannot accept code patches while the game runs. Code patches go in as RPCS3 patches instead, and RPCS3 applies them when the game starts. Everything that writes data works without them.
+
+Mods work under RPCS3 as RPCS3 patches: tick **Enabled** for a mod on the Mods panel, then restart the game in RPCS3.
+
+To save and load save files under RPCS3, install qwark's patches for each game. Press **Install qwark patches...** in the RPCS3 part of the Connection panel, then restart the game in RPCS3. The client asks before it writes to RPCS3's folder.
+
+The cheats that patch game code, such as fast loads and infinite ammo, work after **Install qwark patches...** and a game restart.
+
+RPCS3 accepts one IPC client at a time. If another program holds the port, the client says so and waits for the port. RPCS3 support is for Windows at the moment.
+
+## Manip categories
+
+Open **Game**, then **Manips**, and pick the category type of your run. Hover a type to see its leaderboard categories. The console applies the manips at the start of a run, also when no PC is connected. In the first three games, a run starts when a save or a new game loads the first planet. In Deadlocked, a run starts with a new game or a challenge-mode start. **Auto-reset** applies them again at every run start, and **Remember category** keeps your choice when the game restarts. To practise from a save on another planet, press **Apply now**. NG+ manips need a challenge-mode save, and the other manips need a new save. If the save does not match, the console writes nothing and the client tells you.
+
+The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
+
+## Console menu
+
+On a console, all four games have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was, or press L1, R1, L2, R2, L3 and R3 together in play. The Combos panel can change that combo. Untick **In-game menus** there to keep the game's own Help in the pause menu; the combo still opens the Trainer menu.
+
+The Combos panel also has a **Toggle fast loads** combo. It has no buttons until you capture some, and the console says whether fast loads are now on or off.
+
+## Updates
+
+The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.
+
+**What's new** on the bar shows the release notes. The first start after an update offers them once more.
+
+The Settings panel holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
+
+A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one. In standalone mode the client sends it by itself.
+
+## Your files
+
+Your settings, colour presets, watchlists, save files and mods are in the data folder. An update never touches it.
+
+| | |
+|---|---|
+| Windows | `%APPDATA%\RaCMAN Reloaded` |
+| Linux | `$XDG_CONFIG_HOME/racman-reloaded`, or `~/.config/racman-reloaded` |
+| macOS | `~/Library/Application Support/RaCMAN Reloaded` |
+
+The Settings panel has an **Open folder** button for it. To use a different folder, start the client with `--data-dir <path>`, or set the `RACMAN_DATA_DIR` variable. A copy on a memory stick needs one of the two.
+
+You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours replaces a shipped mod with the same folder name. To remove a mod from the PC and the console, right-click it on the Mods panel and pick **Uninstall...**.
+
+If you come from the old RaCMAN, **Import from RaCMAN** on the Settings panel copies its save files and its mods into that folder as well as its settings, and it replaces nothing you already have. A few of the old default mods are left behind, and the import says which and why. See [docs/import.md](docs/import.md).
+
+## Windows firewall
+
+The console sends live data to the client over UDP. Windows blocks that data for an unsigned application, so the client offers to add a firewall rule for itself. If you refuse, the client uses TCP instead, which is slower, and the status line shows **TCP fallback**. The Connection panel keeps a button to add the rule later.
+
+The client checks for its rule at every start. It asks again only if the rule is missing. See [docs/firewall.md](docs/firewall.md) if the rule does not seem to take.
+
+## The input display in OBS
+
+The client can serve the input display as a page for OBS. Add a Browser Source with the URL on the Input display panel, and give it the size the panel shows. The page is served on 127.0.0.1 only, so it needs no firewall rule. See [docs/obs.md](docs/obs.md).
+
+## Customising the Game page
+
+The client, not the console, decides where each control is drawn. `data/gamelayout.json` holds that layout. You can move a feature to another section, and make a section into a sub-page or a tab. See [docs/gamelayout.md](docs/gamelayout.md).

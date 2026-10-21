@@ -16,6 +16,7 @@ For end-to-end runs use the simulator from the sibling repo: build `../qwark` wi
 
 ## Rules
 
+- **Never edit `README.md` without the user's explicit permission.** It is the user's quickstart, written by them to be readable for humans. User-facing detail goes in `USER-GUIDE.md` (or `docs/<topic>.md`); building, releasing and the repository layout go in `BUILD.md`.
 - No game logic and no address tables in this repo. Panels render from the last telemetry packet and the DESCRIBE reply, nothing else.
 - Every control sends one request and shows the status code; never swallow a non-OK status.
 - There is no client-side session state to restore on reconnect: HELLO, SUBSCRIBE, DESCRIBE, the list ops, done.
