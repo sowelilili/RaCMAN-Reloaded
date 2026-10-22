@@ -172,7 +172,7 @@ public class UiPakTests
     [Theory]
     [InlineData(Current, false, false, true)]
     [InlineData(Current, true, false, false)]
-    [InlineData((byte)(Current - 1), false, false, false)]
+    [InlineData((byte)(FakeQwarkServer.UiPakBuild - 1), false, false, false)]
     [InlineData(Current, false, true, false)]
     public async Task TheFakeSetsBit7AsQwarkDoes(byte build, bool withPak, bool rpcs3, bool expected)
     {
