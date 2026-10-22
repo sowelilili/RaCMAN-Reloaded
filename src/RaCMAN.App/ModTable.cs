@@ -11,6 +11,9 @@ public enum ModTone
     Quiet,
     Good,
     Bad,
+
+    /// <summary>Something to act on that is not wrong: an update waiting on the console's USB drive.</summary>
+    Update,
 }
 
 /// <summary>
@@ -22,17 +25,33 @@ public enum ModTone
 /// </summary>
 public sealed record ModRow(LocalMod? Local, ModEntry? Console, string? ConsoleFolder, bool FoldersListed)
 {
+    /// <summary>
+    /// The copy on the console's USB drive (revision 1.24), MOD_USB_LIST's row of the same folder
+    /// name, or null when no drive has the mod or the console does not read its drives.
+    /// </summary>
+    public UsbModEntry? Usb { get; init; }
+
+    /// <summary>True for a mod only the console's USB drive has: not installed on the console, not in a library here.</summary>
+    public bool UsbOnly => Local is null && Console is null && ConsoleFolder is null && Usb is not null;
+
     /// <summary>True for a mod the console has and no library on this PC does.</summary>
-    public bool ConsoleOnly => Local is null;
+    public bool ConsoleOnly => Local is null && !UsbOnly;
 
     /// <summary>What the panel selects the row by: a library mod by its folder, a console-only one by the console's.</summary>
-    public string Key => Local is { } local ? local.DirName : "console:" + FolderName;
+    public string Key => Local is { } local ? local.DirName : UsbOnly ? "usb:" + FolderName : "console:" + FolderName;
 
     /// <summary>
     /// The folder the mod is in, or is uploaded to: the library's folder name, or for a console-only
-    /// mod the console's, whole, or when DIR_LIST has not got it the name MOD_LIST carries.
+    /// mod the console's, whole, or when DIR_LIST has not got it the name MOD_LIST carries; for a
+    /// mod only the USB drive has, its folder there.
     /// </summary>
-    public string FolderName => Local?.DirName ?? ConsoleFolder ?? Console?.DirName ?? string.Empty;
+    public string FolderName => Local?.DirName ?? ConsoleFolder ?? Console?.DirName ?? Usb?.DirName ?? string.Empty;
+
+    /// <summary>
+    /// The name MOD_SET_AUTO takes for the row: the console's, or for a mod only the USB drive has,
+    /// its folder there, which the console copies in as it sets the flag. Null when neither.
+    /// </summary>
+    public string? AutoName => Console?.DirName ?? (UsbOnly ? Usb!.DirName : null);
 
     /// <summary>The name MOD_LIST knows the mod by, which MOD_UNLOAD and MOD_SET_AUTO take, or null when qwark does not list it.</summary>
     public string? ListedName => Console?.DirName;
@@ -51,13 +70,16 @@ public sealed record ModRow(LocalMod? Local, ModEntry? Console, string? ConsoleF
         {
             if (Local is { } local) return local.Name;
             if (Console is { ParseError: false } row && row.Name.Length > 0 && row.Name != row.DirName) return row.Name;
+            if (UsbOnly && Usb!.Name.Length > 0) return Usb.Name;
             return FolderName;
         }
     }
 
-    public string Version => Local?.Version ?? (Console is { ParseError: false } row ? row.Version : string.Empty);
+    public string Version => Local?.Version ?? (Console is { ParseError: false } row ? row.Version
+        : UsbOnly ? Usb!.Version : string.Empty);
 
-    public string Author => Local?.Author ?? (Console is { ParseError: false } row ? row.Author : string.Empty);
+    public string Author => Local?.Author ?? (Console is { ParseError: false } row ? row.Author
+        : UsbOnly ? Usb!.Author : string.Empty);
 
     public bool Loaded => Console?.Loaded ?? false;
 }
@@ -87,7 +109,36 @@ public static class ModTable
     /// first 31 bytes. <paramref name="folders"/> is null until DIR_LIST has been read, and then
     /// the console's mods are MOD_LIST's rows alone.
     /// </summary>
-    public static IReadOnlyList<ModRow> Build(IReadOnlyList<LocalMod> locals, IReadOnlyList<ModEntry> rows, IReadOnlyList<string>? folders)
+    public static IReadOnlyList<ModRow> Build(IReadOnlyList<LocalMod> locals, IReadOnlyList<ModEntry> rows, IReadOnlyList<string>? folders) =>
+        Build(locals, rows, folders, null);
+
+    /// <summary>
+    /// The same, with the mods on the console's USB drives (revision 1.24): each goes onto the row
+    /// of its folder name, library or console, and one no row has becomes a row of its own after the
+    /// console-only ones, ordered the same way.
+    /// </summary>
+    public static IReadOnlyList<ModRow> Build(IReadOnlyList<LocalMod> locals, IReadOnlyList<ModEntry> rows,
+        IReadOnlyList<string>? folders, IReadOnlyList<UsbModEntry>? usb)
+    {
+        var table = BuildConsole(locals, rows, folders);
+        if (usb is null || usb.Count == 0) return table;
+
+        var result = table.ToList();
+        var usbOnly = new List<ModRow>();
+        foreach (var entry in usb)
+        {
+            int at = result.FindIndex(row => string.Equals(row.FolderName, entry.DirName, StringComparison.Ordinal) && row.Usb is null);
+            if (at >= 0) result[at] = result[at] with { Usb = entry };
+            else usbOnly.Add(new ModRow(null, null, null, folders is not null) { Usb = entry });
+        }
+
+        result.AddRange(usbOnly
+            .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(row => row.FolderName, StringComparer.Ordinal));
+        return result;
+    }
+
+    private static IReadOnlyList<ModRow> BuildConsole(IReadOnlyList<LocalMod> locals, IReadOnlyList<ModEntry> rows, IReadOnlyList<string>? folders)
     {
         bool listed = folders is not null;
         var pairs = listed
@@ -159,15 +210,66 @@ public static class ModTable
     /// </summary>
     public static (string Text, ModTone Tone) ConsoleStatus(ModRow row, bool withAuto = false)
     {
+        if (row.UsbOnly) return UsbOnlyStatus(row);
         if (row.Local is not { } local) return ConsoleOnlyStatus(row, withAuto);
         if (local.FolderNameTooLong) return ("folder name too long", ModTone.Bad);
-        if (row.Console is not { } remote) return ("not uploaded", ModTone.Quiet);
+        if (row.Console is not { } remote) return WithUsb(row, new List<string> { "not uploaded" }, ModTone.Quiet);
 
         var parts = FlagWords(remote, withAuto);
-        if (remote.Hash != local.Hash) parts.Add("stale");
+
+        // Revision 1.24: a console copy newer than the library's came off a USB drive (or another
+        // PC), and Load keeps it rather than uploading the older one over it.
+        if (remote.Hash != local.Hash) parts.Add(!remote.ParseError && ModVersion.IsNewer(remote.Version, local.Version) ? "newer on console" : "stale");
 
         var tone = remote.Loaded ? ModTone.Good : remote.ParseError ? ModTone.Bad : ModTone.Quiet;
-        return (parts.Count == 0 ? "ready" : string.Join(", ", parts), tone);
+        if (parts.Count == 0) parts.Add("ready");
+        return WithUsb(row, parts, tone);
+    }
+
+    /// <summary>
+    /// What a row's USB copy adds to its status (revision 1.24): an update, one that waits for the
+    /// mod's next load because the console's copy is loaded, a copy only the drive has, one whose
+    /// contents differ with no newer version, or one the console cannot copy. A copy that is the
+    /// console's, or older, adds nothing. An update colours a row that is not wrong otherwise.
+    /// </summary>
+    private static (string Text, ModTone Tone) WithUsb(ModRow row, List<string> parts, ModTone tone)
+    {
+        string? words = row.Usb switch
+        {
+            { State: UsbModState.Newer, Waiting: true } usb => $"update {usb.Version} on USB at next load",
+            { State: UsbModState.Newer } usb => $"update {usb.Version} on USB",
+            { State: UsbModState.Available } => "on USB",
+            { State: UsbModState.Conflict } => "differs on USB",
+            { State: UsbModState.Broken } => "USB copy unusable",
+            _ => null,
+        };
+
+        if (words is null) return (string.Join(", ", parts), tone);
+        parts.Add(words);
+        if (row.Usb!.State == UsbModState.Newer && tone == ModTone.Quiet) tone = ModTone.Update;
+        return (string.Join(", ", parts), tone);
+    }
+
+    /// <summary>What a mod only the console's USB drive has says: where it is, and whether the console can copy it.</summary>
+    public static (string Text, ModTone Tone) UsbOnlyStatus(ModRow row)
+    {
+        var usb = row.Usb!;
+        return usb.State == UsbModState.Broken
+            ? ($"On {usb.DriveName}, unusable", ModTone.Bad)
+            : ($"On {usb.DriveName}", ModTone.Quiet);
+    }
+
+    /// <summary>
+    /// Whether Load leaves the library's copy of a mod on this PC and loads the console's instead
+    /// (revision 1.24): when the console's USB drive or the console itself has a newer version of it
+    /// by qwark's rule, which the console then takes or keeps. Uploading the library's older copy
+    /// would only be replaced again, or overwrite the newer one.
+    /// </summary>
+    public static bool LoadKeepsNewerConsoleCopy(ModRow row)
+    {
+        if (row.Local is not { } local) return false;
+        if (row.Usb is { State: not UsbModState.Broken } usb && ModVersion.IsNewer(usb.Version, local.Version)) return true;
+        return row.Console is { ParseError: false } remote && ModVersion.IsNewer(remote.Version, local.Version);
     }
 
     /// <summary>
@@ -189,7 +291,7 @@ public static class ModTable
         var tone = row.FolderNameTooLong || row.Console is { ParseError: true } ? ModTone.Bad
             : row.Loaded ? ModTone.Good
             : ModTone.Quiet;
-        return (string.Join(", ", parts), tone);
+        return WithUsb(row, parts, tone);
     }
 
     private static List<string> FlagWords(ModEntry remote, bool withAuto)
@@ -220,11 +322,13 @@ public static class ModTable
             : row.FolderNameTooLong ? "It cannot be loaded: " + (row.ConsoleOnly
                 ? ModFolderName.TooLongFact(row.FolderName)
                 : ModFolderName.TooLongReason(row.FolderName))
+            : row.UsbOnly && row.Usb!.State == UsbModState.Broken ? $"The console cannot copy it from {row.Usb.DriveName}: {row.Usb.ProblemText}."
             : row.ConsoleOnly && row.Console is null ? "qwark does not list this folder. Press Rescan console folder first."
             : row.ConsoleOnly && row.Console!.ParseError ? "qwark could not parse this mod's patch.txt, or a .bin it names is missing."
             : string.Empty;
 
-        string uninstallReason = !connected ? (rpcs3 ? "Connect to qwark-rpcs3 first." : "Connect to the console first.")
+        string uninstallReason = row.UsbOnly ? $"It is only on the console's USB drive ({row.Usb!.DriveName}); qwark never deletes anything there."
+            : !connected ? (rpcs3 ? "Connect to qwark-rpcs3 first." : "Connect to the console first.")
             : busy ? "Wait for the game to finish starting or stopping, and for any change under way to finish."
             : !row.FoldersListed ? "Reading the console's mod folder..."
             : string.Empty;
@@ -234,7 +338,8 @@ public static class ModTable
             LoadEnabled: !rpcs3 && !loaded && loadReason.Length == 0,
             LoadReason: loadReason,
             Unload: !rpcs3 && loaded,
-            AutoEnabled: !rpcs3 && connected && row.Console is not null,
+            AutoEnabled: !rpcs3 && connected
+                         && (row.Console is not null || (row.UsbOnly && row.Usb!.State != UsbModState.Broken)),
             UninstallEnabled: uninstallReason.Length == 0,
             UninstallReason: uninstallReason,
             Rename: row.Local is { Shipped: false, FolderNameTooLong: true });

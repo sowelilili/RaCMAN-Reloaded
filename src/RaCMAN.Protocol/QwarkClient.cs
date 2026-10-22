@@ -1025,6 +1025,14 @@ public sealed class QwarkClient : IDisposable
     public async Task<ModEntry[]> ModListAsync(CancellationToken cancellationToken = default) =>
         ModEntry.ParseList(await RequestAsync(Opcode.ModList, null, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>
+    /// MOD_USB_LIST (revision 1.24): the mods on the console's USB drives. Ask it only while
+    /// <see cref="SessionInfo.UsbMods"/> is set; an older module answers UNKNOWN_OP, and
+    /// qwark-rpcs3 UNSUPPORTED.
+    /// </summary>
+    public async Task<UsbModEntry[]> ModUsbListAsync(CancellationToken cancellationToken = default) =>
+        UsbModEntry.ParseList(await RequestAsync(Opcode.ModUsbList, null, cancellationToken).ConfigureAwait(false));
+
     public Task ModLoadAsync(string dirname, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.ModLoad, DirName(dirname), cancellationToken);
 

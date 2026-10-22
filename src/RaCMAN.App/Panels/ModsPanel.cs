@@ -46,6 +46,13 @@ public static class ModsPanel
     public static string ConsoleOnlySummary { get; private set; } = string.Empty;
 
     /// <summary>
+    /// The rows with a copy on the console's USB drive as they were last drawn (revision 1.24),
+    /// folder and console cell, for the summary line of a headless run: empty unless the run ended
+    /// on this panel.
+    /// </summary>
+    public static string UsbSummary { get; private set; } = string.Empty;
+
+    /// <summary>
     /// Whether the panel is drawn for RPCS3, where a mod is an RPCS3 patch the user switches on,
     /// rather than for a console, where it is loaded into the running game. What the connected
     /// qwark says decides it; between connections it is the target the Connection panel is set to.
@@ -132,6 +139,8 @@ public static class ModsPanel
         bool busy = state.ConsoleBusy || _uninstalling;
         ConsoleOnlySummary = string.Join(" ", rows.Where(row => row.ConsoleOnly)
             .Select(row => $"{row.FolderName}=\"{ModTable.ConsoleOnlyStatus(row, withAuto: true).Text}\""));
+        UsbSummary = string.Join(" ", rows.Where(row => row.Usb is not null)
+            .Select(row => $"{row.FolderName}=\"{ModTable.ConsoleStatus(row).Text}\""));
 
         if (rows.Count == 0)
         {
@@ -166,13 +175,15 @@ public static class ModsPanel
                 ImGui.TableNextColumn();
                 var (text, tone) = ModTable.ConsoleStatus(row);
                 Ui.Text(ColourOf(tone), text);
-                if (row.ConsoleOnly) Ui.Tooltip(row.FolderNameTooLong ? $"{ConsoleOnlyTooltip} qwark cannot load it: {ModFolderName.TooLongFact(row.FolderName)}" : ConsoleOnlyTooltip);
+                if (row.UsbOnly) Ui.Tooltip(UsbTooltip(row, title));
+                else if (row.ConsoleOnly) Ui.Tooltip(row.FolderNameTooLong ? $"{ConsoleOnlyTooltip} qwark cannot load it: {ModFolderName.TooLongFact(row.FolderName)}" : ConsoleOnlyTooltip);
                 else if (row.FolderNameTooLong) Ui.Tooltip($"This mod cannot be uploaded or loaded: {ModFolderName.TooLongReason(row.FolderName)}");
+                else if (row.Usb is not null) Ui.Tooltip(UsbTooltip(row, title));
 
                 ImGui.TableNextColumn();
                 bool auto = row.Console?.Auto ?? false;
                 ImGui.BeginDisabled(!actions.AutoEnabled);
-                if (ImGui.Checkbox("##auto", ref auto) && row.ListedName is { } dir)
+                if (ImGui.Checkbox("##auto", ref auto) && row.AutoName is { } dir)
                 {
                     bool wanted = auto;
                     state.Run(async () =>
@@ -183,6 +194,7 @@ public static class ModsPanel
                 }
 
                 ImGui.EndDisabled();
+                if (row.UsbOnly && actions.AutoEnabled) Ui.Tooltip("Ticking it copies the mod from the USB drive onto the console, which then loads it by itself whenever the game boots.");
 
                 ImGui.TableNextColumn();
                 DrawActions(state, title, row, actions);
@@ -207,8 +219,33 @@ public static class ModsPanel
     {
         ModTone.Good => Ui.Green,
         ModTone.Bad => Ui.Red,
+        ModTone.Update => Ui.Yellow,
         _ => Ui.Grey,
     };
+
+    /// <summary>
+    /// What hovering the Console cell of a row with a USB copy says (revision 1.24): where the copy
+    /// is, and what the console does with it at the next load.
+    /// </summary>
+    public static string UsbTooltip(ModRow row, string title)
+    {
+        var usb = row.Usb!;
+        string where = $"{usb.PathFor(title)}, version {(usb.Version.Length > 0 ? usb.Version : "none")}";
+        return usb.State switch
+        {
+            UsbModState.Available when row.UsbOnly =>
+                $"Only on the console's USB drive, at {where}. Load copies it onto the console and loads it.",
+            UsbModState.Available => $"The console's USB drive has this mod, at {where}.",
+            UsbModState.Newer when usb.Waiting =>
+                $"The USB drive has a newer version, at {where}. The mod is loaded, so the console takes the update the next time it loads.",
+            UsbModState.Newer => $"The USB drive has a newer version, at {where}. The console takes it the next time the mod loads.",
+            UsbModState.Older => $"The USB drive has an older version, at {where}. The console keeps its own.",
+            UsbModState.Conflict =>
+                $"The USB drive has other contents for this mod, at {where}, and no newer version. The console keeps its own; uninstall it from the console to load the USB copy instead.",
+            UsbModState.Broken => $"The copy on the USB drive, at {where}, cannot be used: {usb.ProblemText}.",
+            _ => $"The console's USB drive has this same copy, at {where}.",
+        };
+    }
 
     /// <summary>
     /// The first two cells of a row, the same in both layouts: the name, which selects the row,
@@ -229,10 +266,11 @@ public static class ModsPanel
         // sits on top of the checkbox and the buttons and eats their clicks. The row's own ID is
         // pushed around all of it, so wrapping the name differently as the window is resized does
         // not lose the selection or the menu.
-        if (row.ConsoleOnly) ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
+        bool grey = row.ConsoleOnly || row.UsbOnly;
+        if (grey) ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
         bool clicked = ImGui.Selectable($"{label}##name", _selected == row.Key,
             ImGuiSelectableFlags.SpanAllColumns | ImGuiSelectableFlags.AllowOverlap);
-        if (row.ConsoleOnly) ImGui.PopStyleColor();
+        if (grey) ImGui.PopStyleColor();
         if (clicked) _selected = row.Key;
 
         // The name is also where the author is read now, and where a name too long for the
@@ -251,7 +289,7 @@ public static class ModsPanel
 
         ImGui.TableNextColumn();
         string version = string.IsNullOrEmpty(row.Version) ? "-" : row.Version;
-        if (row.ConsoleOnly) Ui.Text(Ui.Grey, version);
+        if (row.ConsoleOnly || row.UsbOnly) Ui.Text(Ui.Grey, version);
         else ImGui.TextUnformatted(version);
     }
 
@@ -804,6 +842,7 @@ public static class ModsPanel
         if (row.Local is { } mod) return TooltipFor(mod);
 
         string text = string.IsNullOrWhiteSpace(row.Author) ? row.Name : $"{row.Name}\nby {row.Author}";
+        if (row.UsbOnly) return text + $"\nOnly on the console's USB drive ({row.Usb!.DriveName}), in {row.FolderName}";
         return text + $"\nOnly on the console, in {row.FolderName}";
     }
 
@@ -839,23 +878,33 @@ public static class ModsPanel
             {
                 var library = state.Mods;
                 uint consoleHash = row.Console?.Hash ?? 0;
+
+                // Revision 1.24: when the console's USB drive or the console itself has a newer
+                // version than this PC's library, the library's copy stays here and the console
+                // loads the newer one, taking it off the drive first if it has to.
+                bool keep = ModTable.LoadKeepsNewerConsoleCopy(row);
                 state.Run(async () =>
                 {
-                    await library.EnsureUploadedAsync(state.Client, title, mod, consoleHash,
-                        new Progress<string>(message => state.Post(() => state.AddToast(message))));
+                    if (!keep)
+                    {
+                        await library.EnsureUploadedAsync(state.Client, title, mod, consoleHash,
+                            new Progress<string>(message => state.Post(() => state.AddToast(message))));
+                    }
+
                     await state.Client.ModLoadAsync(mod.DirName);
                     state.Post(() => state.RefreshMods());
-                }, $"{mod.Name} loaded");
+                }, keep ? $"{mod.Name} loaded: the console's newer copy" : $"{mod.Name} loaded");
             }
-            else if (load && row.ListedName is { } dir)
+            else if (load && (row.ListedName ?? (row.UsbOnly ? row.Usb!.DirName : null)) is { } dir)
             {
                 // A mod only the console has is loaded from the console's own copy: there is
-                // nothing on this PC to upload first.
+                // nothing on this PC to upload first. One only its USB drive has is copied onto
+                // the console by the same MOD_LOAD (revision 1.24).
                 state.Run(async () =>
                 {
                     await state.Client.ModLoadAsync(dir);
                     state.Post(() => state.RefreshMods());
-                }, $"{row.Name} loaded");
+                }, row.UsbOnly ? $"{row.Name} copied from USB and loaded" : $"{row.Name} loaded");
             }
         }
 
@@ -900,14 +949,26 @@ public static class ModsPanel
         ImGui.Separator();
         Ui.Heading(row.Name);
 
+        if (row.UsbOnly)
+        {
+            DrawUsbOnlyDetails(title, row);
+            return;
+        }
+
         if (row.Local is not { } mod)
         {
             DrawConsoleOnlyDetails(state, title, row, rpcs3);
+            DrawUsbLine(title, row);
             return;
         }
 
         ImGui.TextUnformatted($"Folder: {mod.DirName}  ({(mod.Shipped ? "ships with RaCMAN Reloaded" : "yours")})");
         ImGui.TextUnformatted($"Version: {(string.IsNullOrEmpty(mod.Version) ? "-" : mod.Version)}    Author: {(string.IsNullOrEmpty(mod.Author) ? "-" : mod.Author)}");
+        DrawUsbLine(title, row);
+        if (ModTable.LoadKeepsNewerConsoleCopy(row))
+        {
+            Ui.Hint("The console has a newer version of this mod, or its USB drive does, so Load uses that one and does not upload this PC's copy.");
+        }
 
         if (mod.FolderNameTooLong)
         {
@@ -947,6 +1008,38 @@ public static class ModsPanel
         if (!Ui.Debug) return;
 
         DrawReadDescription(state, row);
+    }
+
+    /// <summary>The line a row with a USB copy adds to its details (revision 1.24): what is on the drive, and what the console does with it.</summary>
+    private static void DrawUsbLine(string title, ModRow row)
+    {
+        if (row.Usb is not { } usb) return;
+
+        ImGui.Spacing();
+        var colour = usb.State switch
+        {
+            UsbModState.Newer => Ui.Yellow,
+            UsbModState.Broken => Ui.Red,
+            _ => Ui.Grey,
+        };
+        Ui.Text(colour, $"USB drive: version {(usb.Version.Length > 0 ? usb.Version : "-")}");
+        Ui.TextWrapped(UsbTooltip(row, title));
+    }
+
+    /// <summary>A mod only the console's USB drive has: where it is, and that Load or Auto copies it in.</summary>
+    private static void DrawUsbOnlyDetails(string title, ModRow row)
+    {
+        var usb = row.Usb!;
+        ImGui.TextUnformatted($"Folder: {usb.PathFor(title)}  (on the console's USB drive, {usb.DriveName})");
+        ImGui.TextUnformatted($"Version: {(string.IsNullOrEmpty(usb.Version) ? "-" : usb.Version)}    Author: {(string.IsNullOrEmpty(usb.Author) ? "-" : usb.Author)}");
+
+        if (usb.State == UsbModState.Broken)
+        {
+            Ui.Error($"The console cannot copy this mod: {usb.ProblemText}.");
+            return;
+        }
+
+        Ui.Hint("It is not installed on the console. Load copies it onto the console and loads it; ticking Auto copies it and loads it at every boot. Nothing is ever written to the USB drive.");
     }
 
     /// <summary>What there is to say about a mod only the console has: where it is, what qwark makes of it, and what to do about it.</summary>

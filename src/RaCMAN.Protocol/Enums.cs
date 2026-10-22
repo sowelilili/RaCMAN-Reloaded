@@ -91,6 +91,13 @@ public enum Opcode : ushort
     /// </summary>
     ModPatch = 0x0066,
 
+    /// <summary>
+    /// Revision 1.24: the mods on the console's USB drives, available rather than installed, each
+    /// with how it stands against the console's own copy. Asked only while
+    /// <see cref="SessionFlags2.UsbMods"/> is set.
+    /// </summary>
+    ModUsbList = 0x0067,
+
     // 5.8 Files
     FileOpen = 0x0070,
     FileWrite = 0x0071,
@@ -610,6 +617,19 @@ public enum SessionFlags : byte
     /// qwark-rpcs3, and never by a module before build 55, where the bit was always 0.
     /// </summary>
     UiPakBad = 1 << 7,
+}
+
+/// <summary>SessionInfo byte 29, <c>flags2</c> (revision 1.24): a pad byte, always 0, before it.</summary>
+[Flags]
+public enum SessionFlags2 : byte
+{
+    None = 0,
+
+    /// <summary>
+    /// The module reads mods off the console's USB drives and answers MOD_USB_LIST (revision 1.24,
+    /// build 56). Never set by qwark-rpcs3, where a mod is an RPCS3 patch, nor by an older module.
+    /// </summary>
+    UsbMods = 1 << 0,
 }
 
 /// <summary>

@@ -455,6 +455,12 @@ public sealed class AppState : IDisposable
     public ModEntry[] ConsoleMods { get; private set; } = Array.Empty<ModEntry>();
 
     /// <summary>
+    /// MOD_USB_LIST (revision 1.24): the mods on the console's USB drives for the title, available
+    /// to load. Read with MOD_LIST while the console says it reads its drives, empty otherwise.
+    /// </summary>
+    public UsbModEntry[] ConsoleUsbMods { get; private set; } = Array.Empty<UsbModEntry>();
+
+    /// <summary>
     /// The folders DIR_LIST found in the console's mod folder for a title, with their whole names,
     /// or null until it has been read. MOD_LIST carries only the first 31 bytes of a folder name, so
     /// this is what the Mods panel pairs its rows with (<see cref="ModRows"/>).
@@ -1282,6 +1288,7 @@ public sealed class AppState : IDisposable
         Freezes = Array.Empty<FreezeEntry>();
         Patches = Array.Empty<PatchEntry>();
         ConsoleMods = Array.Empty<ModEntry>();
+        ConsoleUsbMods = Array.Empty<UsbModEntry>();
         ConsoleFolders = null;
         Combos = Array.Empty<ComboEntry>();
         LocalMods = Array.Empty<LocalMod>();
@@ -2130,8 +2137,27 @@ public sealed class AppState : IDisposable
         if (quiet && HoldsBackgroundWork()) return;
 
         Run(() => Client.ModListAsync(), mods => ConsoleMods = mods, quiet);
+        RefreshUsbMods(quiet);
         RefreshConsoleFolders(quiet);
         RescanLocalMods();
+    }
+
+    /// <summary>
+    /// MOD_USB_LIST (revision 1.24), only while the console says it reads its USB drives: a module
+    /// before it would answer UNKNOWN_OP and qwark-rpcs3 UNSUPPORTED. The console reads its drives
+    /// again when the last read is over a second old, so a drive put in shows on the next refresh.
+    /// </summary>
+    public void RefreshUsbMods(bool quiet = false)
+    {
+        if (!Connected || UnknownGame) return;
+        if (!Session.UsbMods)
+        {
+            ConsoleUsbMods = Array.Empty<UsbModEntry>();
+            return;
+        }
+
+        if (quiet && HoldsBackgroundWork()) return;
+        Run(() => Client.ModUsbListAsync(), rows => ConsoleUsbMods = rows, quiet);
     }
 
     /// <summary>
@@ -2184,7 +2210,7 @@ public sealed class AppState : IDisposable
     public IReadOnlyList<ModRow> ModRows()
     {
         var folders = ConsoleFolders is { } listed && listed.Title == CurrentTitle ? listed.Folders : null;
-        return ModTable.Build(LocalMods, ConsoleMods, folders);
+        return ModTable.Build(LocalMods, ConsoleMods, folders, Session.UsbMods ? ConsoleUsbMods : null);
     }
 
     /// <summary>

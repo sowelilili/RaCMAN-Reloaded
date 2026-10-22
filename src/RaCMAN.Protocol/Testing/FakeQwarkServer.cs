@@ -456,6 +456,12 @@ public sealed partial class FakeQwarkServer : IDisposable
         if (payload.Length < 32) return (Status.BadArg, null);
         string dir = SpanReader.DecodeFixed(payload.AsSpan(0, 32));
 
+        if (opcode == Opcode.ModLoad && UsbModsOn)
+        {
+            var taken = TakeForLoad(dir);
+            if (taken != Status.Ok) return (taken, null);
+        }
+
         int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.Ordinal));
         if (at < 0) return (Status.NotFound, null);
         var mod = Mods[at];
@@ -481,11 +487,205 @@ public sealed partial class FakeQwarkServer : IDisposable
         string dir = SpanReader.DecodeFixed(payload.AsSpan(0, 32));
 
         int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.Ordinal));
+
+        // Revision 1.24: auto-load on for a mod only a USB drive has copies it in first.
+        if (at < 0 && payload[32] != 0 && UsbModsOn && ScanUsb().FirstOrDefault(c => c.Row.DirName == dir) is { } copy)
+        {
+            if (copy.Row.Problem != UsbModProblem.None) return (Status.IoError, null);
+            TakeUsb(copy);
+            at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.Ordinal));
+        }
+
         if (at < 0) return (Status.NotFound, null);
 
         var mod = Mods[at];
         Mods[at] = mod with { Flags = payload[32] != 0 ? mod.Flags | ModFlags.Auto : mod.Flags & ~ModFlags.Auto };
         return (Status.Ok, null);
+    }
+
+    // ------------------------------------------------------------ USB drives, revision 1.24
+
+    /// <summary>
+    /// Whether this console reads mods off its USB drives (revision 1.24, build 56): SessionInfo
+    /// flags2 bit0 and MOD_USB_LIST. False plays a module from before it, which answers UNKNOWN_OP.
+    /// Under <see cref="NoCodePatches"/> the bit is clear and the op UNSUPPORTED, as qwark-rpcs3 does.
+    /// </summary>
+    public bool ReportsUsbMods { get; set; } = true;
+
+    private bool UsbModsOn => ReportsUsbMods && !NoCodePatches;
+
+    /// <summary>How many mods a load or an auto-load switch has copied in from a USB drive.</summary>
+    public int UsbTakes { get; private set; }
+
+    private static readonly int[] UsbPorts = { 0, 1, 2, 3, 6, 7 };
+
+    private string UsbFolder(int port, bool rootMods, string folder) =>
+        $"/dev_usb00{port}{(rootMods ? "/mods" : "/qwark/mods")}/{_modTitle}/{folder}";
+
+    /// <summary>
+    /// Puts a mod on one of the fake console's USB drives, in <c>/dev_usb00N/qwark/mods</c> or, with
+    /// <paramref name="rootMods"/>, <c>/dev_usb00N/mods</c>: a patch.txt with the name, version
+    /// (none when null) and author lines and one patch word.
+    /// </summary>
+    public void AddUsbMod(int port, string folder, string name, string? version = "1.0", string author = "someone",
+        bool rootMods = false, uint word = 0x60000000)
+    {
+        lock (_gate)
+        {
+            string versionLine = version is null ? string.Empty : $"#- version: {version}\n";
+            Files[$"{UsbFolder(port, rootMods, folder)}/patch.txt"] =
+                Encoding.UTF8.GetBytes($"#- name: {name}\n{versionLine}#- author: {author}\n0x00100000: 0x{word:X8}\n");
+        }
+    }
+
+    /// <summary>Takes one drive out: every file under <c>/dev_usb00N</c> goes.</summary>
+    public void RemoveUsbDrive(int port)
+    {
+        lock (_gate)
+        {
+            string prefix = $"/dev_usb00{port}/";
+            foreach (var key in Files.Keys.Where(k => k.StartsWith(prefix, StringComparison.Ordinal)).ToArray()) Files.Remove(key);
+        }
+    }
+
+    private sealed record UsbCopy(UsbModEntry Row, string Folder, IReadOnlyList<string> Bins);
+
+    /// <summary>
+    /// The drives as qwark reads them: each port in turn, qwark/mods before mods, a folder with a
+    /// patch.txt being a mod; of several copies of one mod a usable one, then the newest, then the
+    /// first found. Caller holds the gate.
+    /// </summary>
+    private List<UsbCopy> ScanUsb()
+    {
+        var list = new List<UsbCopy>();
+        foreach (int port in UsbPorts)
+        {
+            foreach (bool rootMods in new[] { false, true })
+            {
+                string prefix = UsbFolder(port, rootMods, string.Empty);
+                foreach (var path in Files.Keys.Where(p => p.StartsWith(prefix, StringComparison.Ordinal)
+                                                          && p.EndsWith("/patch.txt", StringComparison.Ordinal))
+                                               .OrderBy(p => p, StringComparer.Ordinal).ToArray())
+                {
+                    string folder = path[prefix.Length..^"/patch.txt".Length];
+                    if (folder.Length == 0 || folder.Contains('/') || !ModFolderName.Fits(folder)) continue;
+
+                    var copy = ReadUsbCopy(port, rootMods, folder);
+                    int at = list.FindIndex(c => c.Row.DirName == folder);
+                    if (at < 0)
+                    {
+                        list.Add(copy);
+                        continue;
+                    }
+
+                    var have = list[at].Row;
+                    bool better = have.Problem != UsbModProblem.None
+                        ? copy.Row.Problem == UsbModProblem.None
+                        : copy.Row.Problem == UsbModProblem.None && ModVersion.IsNewer(copy.Row.Version, have.Version);
+                    if (better) list[at] = copy;
+                }
+            }
+        }
+
+        return list;
+    }
+
+    private UsbCopy ReadUsbCopy(int port, bool rootMods, string folder)
+    {
+        string path = UsbFolder(port, rootMods, folder);
+        var patch = Files[$"{path}/patch.txt"];
+        var meta = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var bins = new List<string>();
+        foreach (var raw in Encoding.UTF8.GetString(patch).Split('\n'))
+        {
+            string line = raw.TrimEnd('\r');
+            int colon = line.IndexOf(':');
+            if (line.StartsWith("#-", StringComparison.Ordinal) && colon > 2)
+            {
+                meta[line[2..colon].Trim()] = line[(colon + 1)..].Trim();
+                continue;
+            }
+
+            string trimmed = line.Trim();
+            colon = trimmed.IndexOf(':');
+            if (trimmed.StartsWith('#') || colon < 0) continue;
+            string key = trimmed[..colon].Trim();
+            string value = trimmed[(colon + 1)..].Trim();
+            if (!key.StartsWith("0x", StringComparison.OrdinalIgnoreCase) || value.Length == 0
+                || value.StartsWith("0x", StringComparison.OrdinalIgnoreCase)) continue;
+            if (!bins.Contains(value, StringComparer.OrdinalIgnoreCase)) bins.Add(value);
+        }
+
+        uint state = Crc32.Update(Crc32.Start(), patch);
+        var problem = UsbModProblem.None;
+        foreach (var bin in bins)
+        {
+            if (Files.TryGetValue($"{path}/{bin}", out var body)) state = Crc32.Update(state, body);
+            else problem = UsbModProblem.MissingBin;
+        }
+
+        var row = new UsbModEntry((byte)port, UsbModState.Available, rootMods ? UsbModFlags.RootMods : UsbModFlags.None,
+            problem, Crc32.Finish(state), folder,
+            meta.TryGetValue("name", out var name) ? name : folder,
+            meta.TryGetValue("version", out var version) ? version : string.Empty,
+            meta.TryGetValue("author", out var author) ? author : string.Empty);
+        return new UsbCopy(row, path, bins);
+    }
+
+    /// <summary>A USB copy's row as MOD_USB_LIST sends it: its state against the console's table. Caller holds the gate.</summary>
+    private UsbModEntry ReportedUsb(UsbCopy copy)
+    {
+        var row = copy.Row;
+        if (row.Problem != UsbModProblem.None) return row with { State = UsbModState.Broken };
+
+        int at = Mods.FindIndex(m => string.Equals(m.DirName, row.DirName, StringComparison.Ordinal));
+        if (at < 0) return row with { State = UsbModState.Available };
+
+        var mod = Mods[at];
+        int? order = ModVersion.Compare(row.Version, mod.Version);
+        if (order > 0)
+        {
+            return row with { State = UsbModState.Newer, Flags = mod.Loaded ? row.Flags | UsbModFlags.Waiting : row.Flags };
+        }
+
+        if (order < 0) return row with { State = UsbModState.Older };
+        return row with { State = row.Hash == mod.Hash ? UsbModState.Same : UsbModState.Conflict };
+    }
+
+    /// <summary>
+    /// What qwark does before a MOD_LOAD (PROTOCOL.md 5.7.2), without the dependencies: a mod only a
+    /// drive has is copied in, a BROKEN one is IO_ERROR, and a NEWER copy of a mod that is not loaded
+    /// is taken. Caller holds the gate.
+    /// </summary>
+    private Status TakeForLoad(string dir)
+    {
+        var copy = ScanUsb().FirstOrDefault(c => c.Row.DirName == dir);
+        if (copy is null) return Status.Ok;
+
+        int at = Mods.FindIndex(m => string.Equals(m.DirName, dir, StringComparison.Ordinal));
+        if (at < 0)
+        {
+            if (copy.Row.Problem != UsbModProblem.None) return Status.IoError;
+            TakeUsb(copy);
+            return Status.Ok;
+        }
+
+        var reported = ReportedUsb(copy);
+        if (reported.State == UsbModState.Newer && !reported.Waiting) TakeUsb(copy);
+        return Status.Ok;
+    }
+
+    /// <summary>The copy: patch.txt and its .bins into the console's library, qwark.sum beside them, and a rescan.</summary>
+    private void TakeUsb(UsbCopy copy)
+    {
+        string dst = ModFolder(copy.Row.DirName);
+        foreach (var key in Files.Keys.Where(k => k.StartsWith(dst + "/", StringComparison.Ordinal)).ToArray()) Files.Remove(key);
+
+        Files[$"{dst}/patch.txt"] = Files[$"{copy.Folder}/patch.txt"];
+        foreach (var bin in copy.Bins) Files[$"{dst}/{bin}"] = Files[$"{copy.Folder}/{bin}"];
+        Files[$"{dst}/qwark.sum"] = Encoding.ASCII.GetBytes(Crc32.ToSumText(copy.Row.Hash));
+        UsbTakes++;
+        RescanUploadedMods();
     }
 
     /// <summary>Whether anything is at <paramref name="path"/>: a folder made with DIR_CREATE, or one a file or folder is under.</summary>
@@ -646,6 +846,7 @@ public sealed partial class FakeQwarkServer : IDisposable
             Flags = sessionFlags,
             ProfileFlags = ReportedProfileFlags(),
             ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
+            Flags2 = UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None,
         };
     }
 
@@ -1889,7 +2090,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
         or Opcode.ModList or Opcode.ModLoad or Opcode.ModUnload or Opcode.ModSetAuto
-        or Opcode.ModRescan or Opcode.ModInfo or Opcode.ModPatch
+        or Opcode.ModRescan or Opcode.ModInfo or Opcode.ModPatch or Opcode.ModUsbList
         or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend or Opcode.ComboEnable
         or Opcode.AutosplitEvents or Opcode.AutosplitDescribe
         or Opcode.SaveFileInfo or Opcode.SaveFileRead or Opcode.SaveFileWrite
@@ -2586,6 +2787,23 @@ public sealed partial class FakeQwarkServer : IDisposable
 
                 case Opcode.ModSetAuto:
                     return SetModAuto(payload);
+
+                // Revision 1.24: the mods on the fake console's USB drives, read out of Files.
+                case Opcode.ModUsbList:
+                {
+                    if (!ReportsUsbMods) return (Status.UnknownOp, null);
+                    if (NoCodePatches) return (Status.Unsupported, null);
+
+                    var copies = ScanUsb();
+                    var buffer = new byte[1 + copies.Count * UsbModEntry.Size];
+                    buffer[0] = (byte)copies.Count;
+                    for (int i = 0; i < copies.Count; i++)
+                    {
+                        ReportedUsb(copies[i]).ToBytes().CopyTo(buffer, 1 + i * UsbModEntry.Size);
+                    }
+
+                    return (Status.Ok, buffer);
+                }
 
                 // Revision 1.16: one mod as words and bytes for an RPCS3 patch, laid out as
                 // SAVEFILE_PATCH is. The index is MOD_LIST's. Answered at the XMB as in a game,

@@ -83,6 +83,16 @@ Combos are shared by everyone, and so is the **Combos enabled** switch. To give 
 
 RPCS3 has a single user, so this setting does not show there.
 
+## Mods on a USB drive
+
+A PS3 can load mods from a USB drive. Put each mod folder in `qwark/mods/<TITLEID>/` or in `mods/<TITLEID>/` on the drive, for example `mods/NPEA00423/il-ghost/`. Any USB port works.
+
+The Mods panel lists these mods as **On USB000** (or the port they are on). Nothing is installed until you press **Load** or tick **Auto**: then the console copies the mod from the drive and keeps it.
+
+When the drive has a newer version of a mod than the console, the panel says **update on USB**, and the console takes it the next time the mod loads. A mod that is loaded right now keeps its files until it loads again. The console compares the `#- version` line in each `patch.txt`, so give each new release a higher number. An older copy, or one with the same version, never replaces the console's copy. If the same mod is on more than one drive or folder, the console uses the newest.
+
+**Load** also uses the console's copy when it is newer than the one in your mods folder, and does not upload yours over it. Under RPCS3 there are no USB mods: use the mods folder on your PC.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.

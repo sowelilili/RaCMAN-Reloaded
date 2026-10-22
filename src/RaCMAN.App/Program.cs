@@ -268,6 +268,7 @@ if (exitAfter > 0)
 
                       // The Mods panel's rows for mods only the console has, the same way.
                       $"consoleonly=[{ModsPanel.ConsoleOnlySummary}] " +
+                      $"usbmods=[{ModsPanel.UsbSummary}] " +
                       $"savefiles={SaveFilesPanel.Summary} premadesaves=\"{SaveFilesPanel.PremadeSummary}\" " +
                       $"readout0={readout0} padmask=0x{padMask:X} input={settings.InputMode} " +
                       $"obspad={state.ObsPad.State}/{state.ObsPad.Port} " +

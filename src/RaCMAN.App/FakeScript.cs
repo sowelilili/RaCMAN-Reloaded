@@ -21,12 +21,16 @@ public static class FakeScript
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
+                                + "usbmod[:dir[:version[:port]]], usbout[:port], "
                                 + "manip[:kind[:group]], profiles[:on|off], user[:n], "
                                 + "trophies[:none|starting|deleting|registering|ready|failed[:n]], "
                                 + "vshmem:<free KB>[:<total KB>]|vshmem:off";
 
     /// <summary>The folder <c>consolemod</c> puts on the fake console when the step names none.</summary>
     public const string DefaultConsoleMod = "old-savefile-helper";
+
+    /// <summary>The folder <c>usbmod</c> puts on the fake console's USB drive when the step names none.</summary>
+    public const string DefaultUsbMod = "usb-mod";
 
     /// <summary>
     /// The steps that say what qwark-rpcs3 finds in game memory (revision 1.16): a mod found there,
@@ -219,6 +223,27 @@ public static class FakeScript
             string folder = parts.Length > 1 && parts[1].Length > 0 ? parts[1] : DefaultConsoleMod;
             fake.AddConsoleMod(folder, "Old savefile helper", auto: true);
             Console.WriteLine($"fake-script consolemod {folder}");
+            return;
+        }
+
+        // A mod on one of the console's USB drives (revision 1.24): "usbmod:lock_rng:1.2:1" puts
+        // version 1.2 of lock_rng on /dev_usb001, an update when the console has 1.0; "usbout:1"
+        // takes that drive out again.
+        if (parts[0] == "usbmod")
+        {
+            string folder = parts.Length > 1 && parts[1].Length > 0 ? parts[1] : DefaultUsbMod;
+            string version = parts.Length > 2 && parts[2].Length > 0 ? parts[2] : "1.0";
+            int port = parts.Length > 3 && int.TryParse(parts[3], out int p) ? p : 0;
+            fake.AddUsbMod(port, folder, "USB " + folder, version);
+            Console.WriteLine($"fake-script usbmod {folder} {version} on usb00{port}");
+            return;
+        }
+
+        if (parts[0] == "usbout")
+        {
+            int port = parts.Length > 1 && int.TryParse(parts[1], out int p) ? p : 0;
+            fake.RemoveUsbDrive(port);
+            Console.WriteLine($"fake-script usbout usb00{port}");
             return;
         }
 

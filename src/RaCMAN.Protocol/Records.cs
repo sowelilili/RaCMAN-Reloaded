@@ -117,6 +117,15 @@ public sealed record SessionInfo(
     /// <summary>Byte 29 bit3: the per-user settings in use are a signed-in user's profile.</summary>
     public bool ProfileActive => (ProfileFlags & ProfileFlags.Active) != 0;
 
+    /// <summary>Byte 29, <c>flags2</c> (revision 1.24); 0 from every earlier module.</summary>
+    public SessionFlags2 Flags2 { get; init; }
+
+    /// <summary>
+    /// The module reads mods off the console's USB drives (revision 1.24): MOD_USB_LIST answers,
+    /// and a mod only a drive has loads with MOD_LOAD, which copies it in first.
+    /// </summary>
+    public bool UsbMods => (Flags2 & SessionFlags2.UsbMods) != 0;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>
@@ -160,7 +169,9 @@ public sealed record SessionInfo(
         byte selectedPlanet = r.ReadU8();
         var planetFlags = (PlanetFlags)r.ReadU8();
         byte currentPlanet = r.ReadU8();
-        var profileFlags = (ProfileFlags)r.ReadU8() & ProfileBits;
+        byte flags2Byte = r.ReadU8();
+        var profileFlags = (ProfileFlags)flags2Byte & ProfileBits;
+        var flags2 = (SessionFlags2)flags2Byte & SessionFlags2.UsbMods;
         byte profileSeq = r.ReadU8();
         r.Skip(1);
         float x = r.ReadF32();
@@ -184,6 +195,7 @@ public sealed record SessionInfo(
         {
             ProfileFlags = profileFlags,
             ProfileSeq = profileSeq,
+            Flags2 = flags2,
         };
     }
 
@@ -209,7 +221,7 @@ public sealed record SessionInfo(
         w.WriteU8(SelectedPlanet);
         w.WriteU8((byte)PlanetFlags);
         w.WriteU8(CurrentPlanet);
-        w.WriteU8((byte)(ProfileFlags & ProfileBits));
+        w.WriteU8((byte)((byte)(ProfileFlags & ProfileBits) | (byte)(Flags2 & SessionFlags2.UsbMods)));
         w.WriteU8(ProfileSeq);
         w.WriteZeros(1);
         w.WriteF32(PosX);
