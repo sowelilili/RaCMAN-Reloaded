@@ -14,14 +14,15 @@ namespace RaCMAN.Protocol.Testing;
 /// with their UDP push, the three SAVEFILE ops over an in-memory aside buffer and the five library
 /// ops of revision 1.10 over the same in-memory filesystem the file ops use, the four MANIP ops
 /// of revision 1.21 over a small per-game group table, and VSH_MEMORY of revision 1.22 over a
-/// figure a test sets. Everything else answers UNKNOWN_OP. From build 55 it also sets flags bit7,
+/// figure a test sets, and PROFILE_INFO, PROFILE_ENABLE and COMBO_OVERRIDE of revision 1.24 over per-user stores a test can
+/// sign users into (FakeQwarkServer.Profiles.cs). Everything else answers UNKNOWN_OP. From build 55 it also sets flags bit7,
 /// UI_PAK_BAD, from the ui.pak in that filesystem, as qwark does (<see cref="UiPakBad"/>).
 /// <para>
 /// <see cref="UnknownGame"/> is the other session build 36 can report: a title the module has no
 /// game for, where the memory ops work and every game op answers UNSUPPORTED.
 /// </para>
 /// </summary>
-public sealed class FakeQwarkServer : IDisposable
+public sealed partial class FakeQwarkServer : IDisposable
 {
     private readonly TcpListener _listener;
     private readonly CancellationTokenSource _cts = new();
@@ -638,7 +639,14 @@ public sealed class FakeQwarkServer : IDisposable
     {
         var (planet, flags) = ReportedPlanetSelection();
         var sessionFlags = ReportsUiPakBad ? _session.Flags | SessionFlags.UiPakBad : _session.Flags;
-        return _session with { SelectedPlanet = planet, PlanetFlags = flags, Flags = sessionFlags };
+        return _session with
+        {
+            SelectedPlanet = planet,
+            PlanetFlags = flags,
+            Flags = sessionFlags,
+            ProfileFlags = ReportedProfileFlags(),
+            ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
+        };
     }
 
     /// <summary>
@@ -1202,7 +1210,9 @@ public sealed class FakeQwarkServer : IDisposable
 
     /// <summary>
     /// The console's combos. Revision 1.22: the console menu's has its mask before anybody sets
-    /// one, as on a console, so COMBO_LIST has an entry for it from the start.
+    /// one, as on a console, so COMBO_LIST has an entry for it from the start. Revision 1.24: these
+    /// are the shared masks, which COMBO_SET always writes; an active profile's overrides
+    /// (COMBO_OVERRIDE) are laid over them in COMBO_LIST.
     /// </summary>
     public Dictionary<ComboAction, uint> Combos { get; } = new()
     {
@@ -1758,6 +1768,9 @@ public sealed class FakeQwarkServer : IDisposable
 
                 // qwark keeps the last game's mod table through the XMB, as the real one does.
                 if (!string.IsNullOrEmpty(_session.TitleId)) _modTitle = _session.TitleId;
+
+                // And it looks at who is signed in only at the XMB (revision 1.24).
+                if (_session.State == SessionState.Xmb) TakeXmbUser();
             }
         }
     }
@@ -2085,7 +2098,7 @@ public sealed class FakeQwarkServer : IDisposable
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
         or Opcode.FeatureSet or Opcode.FeatureTrigger;
 
-    private (Status, byte[]?) Handle(Opcode opcode, byte[] payload, IPEndPoint remote)
+    private (Status, byte[]?) HandleOp(Opcode opcode, byte[] payload, IPEndPoint remote)
     {
         lock (_gate)
         {
@@ -2652,13 +2665,17 @@ public sealed class FakeQwarkServer : IDisposable
 
                 case Opcode.ComboList:
                 {
-                    var buffer = new byte[1 + Combos.Count * 8];
+                    // Revision 1.24: the active profile's overrides laid over the shared masks, and
+                    // the byte after each action, pad before, says which rows they are.
+                    var rows = CombosInForce();
+                    var buffer = new byte[1 + rows.Count * 8];
                     var w = new SpanWriter(buffer);
-                    w.WriteU8((byte)Combos.Count);
-                    foreach (var (action, mask) in Combos)
+                    w.WriteU8((byte)rows.Count);
+                    foreach (var (action, flags, mask) in rows)
                     {
                         w.WriteU8((byte)action);
-                        w.WriteZeros(3);
+                        w.WriteU8((byte)flags);
+                        w.WriteZeros(2);
                         w.WriteU32(mask);
                     }
 
@@ -2695,6 +2712,11 @@ public sealed class FakeQwarkServer : IDisposable
                         : _session with { Flags = _session.Flags | SessionFlags.MenuHelpOff };
                     return (Status.Ok, null);
                 }
+
+                case Opcode.ProfileInfo:
+                case Opcode.ProfileEnable:
+                case Opcode.ComboOverride:
+                    return HandleProfiles(opcode, payload);
 
                 case Opcode.DirCreate:
                 {

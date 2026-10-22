@@ -71,6 +71,18 @@ On a console, all four games have a Trainer menu on the TV. Open it from **Train
 
 The Combos panel also has a **Toggle fast loads** combo. It has no buttons until you capture some, and the console says whether fast loads are now on or off.
 
+If you change or clear the console menu combo, hover its row to see the default buttons, and capture them again to put it back.
+
+## Per-user settings
+
+A PS3 can keep separate settings for each user on the console. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, and the **In-game menus** setting. The mod and savefile libraries stay shared.
+
+Turn it on with **Per-user settings** under **Console** on the Settings panel, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line under the switch says whose settings you are editing.
+
+Combos are shared by everyone, and so is the **Combos enabled** switch. To give the signed-in user their own combo for one action, press **Override** on that row and press the buttons. That row then shows in orange. **Clear** on an orange row removes only the override, so the shared combo comes back; press **Clear** again to clear the shared combo. Overrides are kept while per-user settings are off.
+
+RPCS3 has a single user, so this setting does not show there.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.

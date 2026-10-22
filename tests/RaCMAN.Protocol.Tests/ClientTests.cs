@@ -278,7 +278,9 @@ public class ClientTests
 
             await client.ComboSetAsync(ComboAction.SavePosition, 0x0B);
             var combos = await client.ComboListAsync();
-            Assert.Equal(2, combos.Length);
+            // One row per action, in action order, as the module lists them: unset ones carry 0.
+            Assert.Equal(Enumerable.Range(0, 7).Select(i => (ComboAction)i), combos.Select(c => c.Action));
+            Assert.Contains(new ComboEntry(ComboAction.Die, 0), combos);
             Assert.Contains(new ComboEntry(ComboAction.SavePosition, 0x0B), combos);
             // Revision 1.22: the console menu's combo is there before anybody sets it.
             Assert.Contains(new ComboEntry(ComboAction.OpenConsoleMenu, 0x060F), combos);

@@ -63,6 +63,9 @@ public static class Ui
     public static Vector4 Yellow => Light ? new(0.70f, 0.45f, 0.00f, 1f) : new(0.95f, 0.82f, 0.35f, 1f);
     public static Vector4 Grey => Light ? new(0.42f, 0.42f, 0.45f, 1f) : new(0.60f, 0.60f, 0.60f, 1f);
 
+    /// <summary>A console user's own setting over a shared one: the Combos panel's overridden rows.</summary>
+    public static Vector4 Orange => Light ? new(0.85f, 0.36f, 0.00f, 1f) : new(1.00f, 0.60f, 0.20f, 1f);
+
     /// <summary>Plain body text, for the places that draw text on their own background.</summary>
     public static Vector4 Neutral => Light ? new(0.12f, 0.12f, 0.16f, 1f) : new(0.85f, 0.85f, 0.90f, 1f);
 

@@ -21,7 +21,7 @@ public static class FakeScript
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
-                                + "manip[:kind[:group]], "
+                                + "manip[:kind[:group]], profiles[:on|off], user[:n], "
                                 + "trophies[:none|starting|deleting|registering|ready|failed[:n]], "
                                 + "vshmem:<free KB>[:<total KB>]|vshmem:off";
 
@@ -188,6 +188,26 @@ public static class FakeScript
             Console.WriteLine(set
                 ? $"fake-script trophies word=0x{status!.Value.ToWord():X8}"
                 : $"fake-script trophies: nothing set for '{step}' (no such state, or no trophy reset in the table)");
+            return;
+        }
+
+        // Per-user settings (revision 1.24): "profiles" makes the fake a module that has them,
+        // "profiles:on" also turns the console's switch on behind the client's back, and
+        // "user:2" signs user 2 in at the XMB, which qwark takes once the session is at the XMB.
+        // "user:0" is nobody.
+        if (parts[0] == "profiles")
+        {
+            fake.ProfilesSupported = true;
+            if (parts.Length > 1) fake.ProfilesEnabled = parts[1] == "on";
+            Console.WriteLine($"fake-script profiles supported, switch {(fake.ProfilesEnabled ? "on" : "off")}");
+            return;
+        }
+
+        if (parts[0] == "user")
+        {
+            uint user = parts.Length > 1 && uint.TryParse(parts[1], out var u) ? u : 1u;
+            fake.SignInAtXmb(user);
+            Console.WriteLine($"fake-script user {user}, signed in: {fake.SignedInUser}");
             return;
         }
 

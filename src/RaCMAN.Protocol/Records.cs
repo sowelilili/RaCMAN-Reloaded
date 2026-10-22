@@ -89,6 +89,34 @@ public sealed record SessionInfo(
     /// </summary>
     public bool UiPakBad => (Flags & SessionFlags.UiPakBad) != 0;
 
+    /// <summary>
+    /// The per-user settings bits of byte 29, <c>flags2</c> (revision 1.24, build 56): bits 1 to 3,
+    /// and nothing else. Byte 29 was pad, and so 0, on every earlier module. Its bit0 is USB_MODS,
+    /// which is not a profile bit: it is masked out here (<see cref="ProfileBits"/>), so a console
+    /// with USB mods and no per-user settings reads as having none. Not a positional member, so
+    /// every <c>new SessionInfo(...)</c> and <c>with</c> written before it still compiles.
+    /// </summary>
+    public ProfileFlags ProfileFlags { get; init; }
+
+    /// <summary>The bits of byte 29 that are about per-user settings: 0x0E.</summary>
+    public const ProfileFlags ProfileBits = ProfileFlags.Supported | ProfileFlags.On | ProfileFlags.Active;
+
+    /// <summary>
+    /// Byte 30, <c>profile_seq</c> (revision 1.24): goes up by one, wrapping, whenever the active
+    /// profile or the settings behind it change other than by a single key write. A client that
+    /// sees it move reads PROFILE_INFO and its usual lists again.
+    /// </summary>
+    public byte ProfileSeq { get; init; }
+
+    /// <summary>Byte 29 bit1: the module has per-user settings for this console's users. The capability bit.</summary>
+    public bool ProfilesSupported => (ProfileFlags & ProfileFlags.Supported) != 0;
+
+    /// <summary>Byte 29 bit2: the console-wide per-user settings switch is on.</summary>
+    public bool ProfilesOn => (ProfileFlags & ProfileFlags.On) != 0;
+
+    /// <summary>Byte 29 bit3: the per-user settings in use are a signed-in user's profile.</summary>
+    public bool ProfileActive => (ProfileFlags & ProfileFlags.Active) != 0;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>
@@ -132,7 +160,9 @@ public sealed record SessionInfo(
         byte selectedPlanet = r.ReadU8();
         var planetFlags = (PlanetFlags)r.ReadU8();
         byte currentPlanet = r.ReadU8();
-        r.Skip(3);
+        var profileFlags = (ProfileFlags)r.ReadU8() & ProfileBits;
+        byte profileSeq = r.ReadU8();
+        r.Skip(1);
         float x = r.ReadF32();
         float y = r.ReadF32();
         float z = r.ReadF32();
@@ -150,7 +180,11 @@ public sealed record SessionInfo(
 
         return new SessionInfo(protocolVersion, qwarkVersion, state, game, generation, tick, titleId, flags,
             selectedSlot, selectedPlanet, planetFlags, currentPlanet, x, y, z, padMask, analog, readout,
-            toggleState, toggleAuto, freezeActive, modLoaded, modAuto, modPrevious);
+            toggleState, toggleAuto, freezeActive, modLoaded, modAuto, modPrevious)
+        {
+            ProfileFlags = profileFlags,
+            ProfileSeq = profileSeq,
+        };
     }
 
     public byte[] ToBytes()
@@ -175,7 +209,9 @@ public sealed record SessionInfo(
         w.WriteU8(SelectedPlanet);
         w.WriteU8((byte)PlanetFlags);
         w.WriteU8(CurrentPlanet);
-        w.WriteZeros(3);
+        w.WriteU8((byte)(ProfileFlags & ProfileBits));
+        w.WriteU8(ProfileSeq);
+        w.WriteZeros(1);
         w.WriteF32(PosX);
         w.WriteF32(PosY);
         w.WriteF32(PosZ);
@@ -822,9 +858,16 @@ public sealed record DirEntry(bool IsDirectory, uint Size, string Name)
     }
 }
 
-/// <summary>COMBO_LIST entry.</summary>
-public readonly record struct ComboEntry(ComboAction Action, uint Mask)
+/// <summary>
+/// COMBO_LIST entry: <c>u8 action, u8 flags, u8 pad[2], u32 mask</c>. The flags byte was pad
+/// before revision 1.24, and so 0 from every earlier module. The mask is always the one in force:
+/// the active profile's override where the row is <see cref="Overridden"/>, the shared one otherwise.
+/// </summary>
+public readonly record struct ComboEntry(ComboAction Action, uint Mask, ComboEntryFlags Flags = ComboEntryFlags.None)
 {
+    /// <summary>The mask is the active profile's override of this combo (revision 1.24).</summary>
+    public bool Overridden => (Flags & ComboEntryFlags.Overridden) != 0;
+
     public static ComboEntry[] ParseList(ReadOnlySpan<byte> payload)
     {
         var r = new SpanReader(payload);
@@ -833,9 +876,10 @@ public readonly record struct ComboEntry(ComboAction Action, uint Mask)
         for (int i = 0; i < n; i++)
         {
             var action = (ComboAction)r.ReadU8();
-            r.Skip(3);
+            var flags = (ComboEntryFlags)r.ReadU8();
+            r.Skip(2);
             uint mask = r.ReadU32();
-            result[i] = new ComboEntry(action, mask);
+            result[i] = new ComboEntry(action, mask, flags);
         }
 
         return result;
@@ -970,6 +1014,78 @@ public sealed record VshMemoryInfo(
         w.WriteU8((byte)LowestAt);
         w.WriteU8((byte)LowestGame);
         w.WriteZeros(2);
+        return bytes;
+    }
+}
+
+/// <summary>
+/// PROFILE_INFO's reply (revision 1.24, build 56): who is signed in on the console and whose
+/// per-user settings are in use. 64 bytes, big-endian: flags, kind, seq, pad, the XMB user number,
+/// the profile folder (24 bytes) and a name (32 bytes, UTF-8), both NUL-padded. The flags use the
+/// same bit values as SessionInfo byte 29 (0x02, 0x04, 0x08) plus <see cref="ProfileFlags.HasProfile"/>.
+/// The name is reserved for named profiles, a later revision: the module leaves it empty for a
+/// console user, whose name it does not read, so the panels call that user "user N".
+/// </summary>
+public sealed record ProfileInfo(
+    ProfileFlags Flags,
+    ProfileKind Kind,
+    byte Seq,
+    uint UserId,
+    string Folder,
+    string Name)
+{
+    /// <summary>Sixty-four bytes. A longer reply is a later revision's, and its first 64 are these.</summary>
+    public const int WireSize = 64;
+
+    public const int FolderWidth = 24;
+
+    public const int NameWidth = 32;
+
+    /// <summary>What a module without per-user settings answers, and what the client holds before asking.</summary>
+    public static ProfileInfo None { get; } = new(ProfileFlags.None, ProfileKind.Shared, 0, 0, string.Empty, string.Empty);
+
+    public bool Supported => (Flags & ProfileFlags.Supported) != 0;
+
+    public bool On => (Flags & ProfileFlags.On) != 0;
+
+    public bool Active => (Flags & ProfileFlags.Active) != 0;
+
+    /// <summary>bit5: the signed-in user's profile has been set up before, whether or not the switch is on.</summary>
+    public bool HasProfile => (Flags & ProfileFlags.HasProfile) != 0;
+
+    /// <summary>Somebody is signed in on the console.</summary>
+    public bool SignedIn => UserId != 0;
+
+    /// <summary>A reply shorter than 64 bytes throws; bytes past the 64th are left for a later revision.</summary>
+    public static ProfileInfo Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < WireSize)
+        {
+            throw new ProtocolException($"PROFILE_INFO needs {WireSize} bytes, got {payload.Length}");
+        }
+
+        var r = new SpanReader(payload[..WireSize]);
+        var flags = (ProfileFlags)r.ReadU8();
+        var kind = (ProfileKind)r.ReadU8();
+        byte seq = r.ReadU8();
+        r.Skip(1);
+        uint userId = r.ReadU32();
+        string folder = r.ReadFixedString(FolderWidth);
+        string name = r.ReadFixedString(NameWidth);
+        return new ProfileInfo(flags, kind, seq, userId, folder, name);
+    }
+
+    public byte[] ToBytes()
+    {
+        var bytes = new byte[WireSize];
+        var w = new SpanWriter(bytes);
+        w.WriteU8((byte)Flags);
+        w.WriteU8((byte)Kind);
+        w.WriteU8(Seq);
+        w.WriteZeros(1);
+        w.WriteU32(UserId);
+        w.WriteFixedString(Folder, FolderWidth);
+        w.WriteFixedString(Name, NameWidth);
         return bytes;
     }
 }

@@ -129,6 +129,34 @@ public enum Opcode : ushort
     /// </summary>
     MenuHelp = 0x0092,
 
+    /// <summary>
+    /// Revision 1.24 (qwark build 56): no payload; 64 bytes back, <see cref="Protocol.ProfileInfo"/>.
+    /// Who is signed in on the console and whose settings are in use. Answered in every session
+    /// state; with <see cref="ProfileFlags.Supported"/> clear (RPCS3) it answers OK with zeros.
+    /// The client sends PROFILE_INFO, PROFILE_ENABLE and COMBO_OVERRIDE only while SessionInfo
+    /// byte 29 bit1 (<see cref="ProfileFlags.Supported"/>) is set: a module before the revision
+    /// answers them UNKNOWN_OP.
+    /// </summary>
+    ProfileInfo = 0x0093,
+
+    /// <summary>
+    /// Revision 1.24: <c>u8 on, u8 setup</c>. Writes the console-wide <c>profiles.enabled</c>
+    /// and, with <see cref="ProfileSetup.Copy"/> or <see cref="ProfileSetup.Fresh"/>, sets up the
+    /// signed-in user's profile if it has never been set up. No reply. BAD_ARG for on &gt; 1 or
+    /// setup &gt; 2, UNSUPPORTED where byte 29 bit1 is clear.
+    /// </summary>
+    ProfileEnable = 0x0094,
+
+    /// <summary>
+    /// Revision 1.24: <c>u8 action, u8 set, u8 pad[2], u32 mask</c>. <c>set</c> 1 stores the mask
+    /// (0 allowed: the combo is off for this user) as the active profile's override of that one
+    /// combo; 0 removes the override, so the shared mask is in force again (removing one that is
+    /// not there is OK). No reply. BAD_ARG for an action past the last combo or set &gt; 1,
+    /// UNSUPPORTED where byte 29 bit1 is clear, NOT_FOUND when no profile is active. COMBO_LIST flags
+    /// an overridden row with <see cref="ComboEntryFlags.Overridden"/>.
+    /// </summary>
+    ComboOverride = 0x0095,
+
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
@@ -582,6 +610,77 @@ public enum SessionFlags : byte
     /// qwark-rpcs3, and never by a module before build 55, where the bit was always 0.
     /// </summary>
     UiPakBad = 1 << 7,
+}
+
+/// <summary>
+/// The per-user settings bits of SessionInfo byte 29, <c>flags2</c> (revision 1.24, build 56),
+/// and of the first byte of PROFILE_INFO, which adds <see cref="HasProfile"/>. Byte 29 bit0 is
+/// USB_MODS, which is not a profile bit (<see cref="SessionInfo.ProfileBits"/>). Per-user
+/// settings: with the console-wide switch on, each console user's position slots, auto-load and
+/// auto-apply choices, manip and planet choices and <c>menu.help</c> come from that user's
+/// profile; each combo stays shared unless the profile overrides it (COMBO_OVERRIDE).
+/// </summary>
+[Flags]
+public enum ProfileFlags : byte
+{
+    None = 0,
+
+    /// <summary>
+    /// bit1: the module has per-user settings and the console has users to have them for. Set by
+    /// the PS3 module from build 56 and by qwark-host; never by qwark-rpcs3 (RPCS3 has one user)
+    /// or an earlier build. The client's capability bit: everything about profiles hides without it.
+    /// </summary>
+    Supported = 1 << 1,
+
+    /// <summary>bit2: the console-wide switch, config.txt's <c>profiles.enabled</c>, is on.</summary>
+    On = 1 << 2,
+
+    /// <summary>bit3: per-user settings come from a console user's profile now (switch on, a user signed in).</summary>
+    Active = 1 << 3,
+
+    /// <summary>
+    /// bit5, PROFILE_INFO only: the signed-in user's profile folder exists (it was set up before),
+    /// whether or not the switch is on. Never set in SessionInfo.
+    /// </summary>
+    HasProfile = 1 << 5,
+}
+
+/// <summary>
+/// COMBO_LIST's per-entry flags, the byte after each action that was pad before revision 1.24.
+/// </summary>
+[Flags]
+public enum ComboEntryFlags : byte
+{
+    None = 0,
+
+    /// <summary>bit0: the mask is the active profile's override of this combo, not the shared one.</summary>
+    Overridden = 1 << 0,
+}
+
+/// <summary>PROFILE_INFO's <c>kind</c>: whose per-user settings are in use.</summary>
+public enum ProfileKind : byte
+{
+    /// <summary>The console's shared settings (the switch is off, or nobody is signed in).</summary>
+    Shared = 0,
+
+    /// <summary>A console user's profile.</summary>
+    User = 1,
+
+    /// <summary>Reserved for named profiles, a later revision.</summary>
+    Named = 2,
+}
+
+/// <summary>PROFILE_ENABLE's <c>setup</c>: how a profile that has never been set up starts.</summary>
+public enum ProfileSetup : byte
+{
+    /// <summary>Set nothing up.</summary>
+    None = 0,
+
+    /// <summary>A copy of the shared per-user settings and position files.</summary>
+    Copy = 1,
+
+    /// <summary>Empty: every per-user setting at its default.</summary>
+    Fresh = 2,
 }
 
 /// <summary>

@@ -1500,6 +1500,53 @@ public sealed class QwarkClient : IDisposable
             w.WriteU8((byte)(on ? 1 : 0));
         }), cancellationToken);
 
+    /// <summary>
+    /// PROFILE_INFO, revision 1.24 (build 56): who is signed in on the console and whose per-user
+    /// settings are in use. Answered in every session state. Send it only while
+    /// <see cref="SessionInfo.ProfilesSupported"/> is set: a module before the revision answers
+    /// UNKNOWN_OP. A reply shorter than 64 bytes throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<ProfileInfo> ProfileInfoAsync(CancellationToken cancellationToken = default) =>
+        ProfileInfo.Parse(await RequestAsync(Opcode.ProfileInfo, null, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// PROFILE_ENABLE, revision 1.24: turns the console-wide per-user settings switch on or off,
+    /// and with <paramref name="setup"/> sets up the signed-in user's profile if it has never been
+    /// set up (a profile that exists is never overwritten). Takes effect at once; the answer comes
+    /// back in SessionInfo byte 29 and a move of <see cref="SessionInfo.ProfileSeq"/>.
+    /// </summary>
+    public Task ProfileEnableAsync(bool on, ProfileSetup setup, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.ProfileEnable, Bytes(2, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)(on ? 1 : 0));
+            w.WriteU8((byte)setup);
+        }), cancellationToken);
+
+    /// <summary>
+    /// COMBO_OVERRIDE with <c>set</c> 1, revision 1.24: <paramref name="mask"/> (0 allowed, the
+    /// combo off for this user) becomes the active profile's override of <paramref name="action"/>,
+    /// which wins over the shared mask for that combo alone. NOT_FOUND when no profile is active.
+    /// COMBO_SET goes on writing the shared mask.
+    /// </summary>
+    public Task ComboOverrideAsync(ComboAction action, uint mask, CancellationToken cancellationToken = default) =>
+        ComboOverrideRequestAsync(action, set: true, mask, cancellationToken);
+
+    /// <summary>
+    /// COMBO_OVERRIDE with <c>set</c> 0: the active profile's override of <paramref name="action"/>
+    /// goes, and the shared mask is in force again. Removing one that is not there is OK.
+    /// </summary>
+    public Task ComboOverrideClearAsync(ComboAction action, CancellationToken cancellationToken = default) =>
+        ComboOverrideRequestAsync(action, set: false, 0, cancellationToken);
+
+    private Task ComboOverrideRequestAsync(ComboAction action, bool set, uint mask, CancellationToken cancellationToken) =>
+        RequestAsync(Opcode.ComboOverride, Bytes(8, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)action);
+            w.WriteU8((byte)(set ? 1 : 0));
+            w.WriteZeros(2);
+            w.WriteU32(mask);
+        }), cancellationToken);
+
     public Task ConfigReloadAsync(CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.ConfigReload, null, cancellationToken);
 

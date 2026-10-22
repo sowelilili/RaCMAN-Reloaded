@@ -7,6 +7,12 @@ public static class CombosPanel
 {
     private static ComboAction? _capturing;
 
+    /// <summary>
+    /// Whether the capture in flight is committed as the active profile's override
+    /// (COMBO_OVERRIDE) rather than as the shared combo (COMBO_SET).
+    /// </summary>
+    private static bool _capturingOverride;
+
     /// <summary>The pad watcher behind the Capture button; only one row captures at a time.</summary>
     private static readonly ComboCapture Capture = new();
 
@@ -29,9 +35,10 @@ public static class CombosPanel
     /// telemetry, so the buttons the user is about to press would fire the combos already stored:
     /// COMBO_SUSPEND holds them off until the capture commits, is cancelled or is dropped.
     /// </summary>
-    public static void BeginCapture(AppState state, ComboAction action)
+    public static void BeginCapture(AppState state, ComboAction action, bool asOverride = false)
     {
         _capturing = action;
+        _capturingOverride = asOverride;
         Capture.Reset();
         Suspend(state, true);
     }
@@ -118,13 +125,69 @@ public static class CombosPanel
     /// </summary>
     public static bool InGameMenusBlocked(SessionInfo session) => session.IsEmulator || session.CodePatchesUnsupported;
 
-    /// <summary>What the row says about itself when the pointer rests on it.</summary>
+    /// <summary>
+    /// What the row says about itself when the pointer rests on it. The console menu's combo is
+    /// the one with a mask out of the box, and its tooltip names it, so a user who cleared or
+    /// changed it can capture it again by hand: there is no Default button any more.
+    /// </summary>
     public static string? Tooltip(ComboAction action) => action switch
     {
         ComboAction.OpenConsoleMenu =>
-            "Opens the Trainer menu in-game.",
+            $"Opens the Trainer menu in-game. Default: {PadButtons.Describe(ComboDefaults.OpenConsoleMenu)}.",
         _ => null,
     };
+
+    /// <summary>
+    /// Whether the rows get their Override button: per-user settings exist on this console
+    /// (SessionInfo byte 29 bit1, never under RPCS3), the switch is on and a user's profile is
+    /// active. Without an active profile COMBO_OVERRIDE can only answer NOT_FOUND.
+    /// </summary>
+    public static bool ShowsOverride(SessionInfo session) =>
+        SettingsPanel.ShowsProfiles(session) && session.ProfilesOn && session.ProfileActive;
+
+    /// <summary>The Override button is on the rows that have none yet; an overridden row's Capture re-captures it.</summary>
+    public static bool ShowsOverrideButton(SessionInfo session, ComboEntry entry) =>
+        ShowsOverride(session) && !entry.Overridden;
+
+    /// <summary>What one press of Clear sends, by row.</summary>
+    public enum ClearRequest
+    {
+        /// <summary>COMBO_OVERRIDE(action, 0): only this user's override goes; the shared combo shows again.</summary>
+        RemoveOverride,
+
+        /// <summary>COMBO_SET(action, 0): the shared combo goes, as before per-user settings.</summary>
+        ClearShared,
+    }
+
+    /// <summary>
+    /// Clear on an overridden row removes the override; on any other row it clears the shared
+    /// combo. So two presses on an overridden row clear the combo completely: the second press
+    /// finds the row plain.
+    /// </summary>
+    public static ClearRequest ClearFor(ComboEntry entry) =>
+        entry.Overridden ? ClearRequest.RemoveOverride : ClearRequest.ClearShared;
+
+    /// <summary>Whether Capture on a row commits as the override (COMBO_OVERRIDE) rather than the shared combo (COMBO_SET).</summary>
+    public static bool CaptureIsOverride(ComboEntry entry) => entry.Overridden;
+
+    /// <summary>The line under the switch while overrides can be made.</summary>
+    public static string OverrideHint(ProfileInfo profile) =>
+        $"Orange rows are {SettingsPanel.PossessiveName(profile)} own combos; the others are shared by every user. "
+        + "Override gives one combo to this user only.";
+
+    /// <summary>
+    /// The row's entry from the last COMBO_LIST, or a plain one with no mask when the console
+    /// listed nothing for it.
+    /// </summary>
+    private static ComboEntry EntryFor(AppState state, ComboAction action)
+    {
+        foreach (var entry in state.Combos)
+        {
+            if (entry.Action == action) return entry;
+        }
+
+        return new ComboEntry(action, 0);
+    }
 
     public static string Label(ComboAction action) => action switch
     {
@@ -160,14 +223,16 @@ public static class CombosPanel
         if (Capture.Feed(state.Session.PadMask) is not { } value) return;
 
         _capturing = null;
+        bool asOverride = _capturingOverride;
         state.Run(async () =>
         {
-            await state.Client.ComboSetAsync(action, value);
+            if (asOverride) await state.Client.ComboOverrideAsync(action, value);
+            else await state.Client.ComboSetAsync(action, value);
             // The pad is empty by now, which is why the capture committed, so handing the combos
             // back here cannot fire the one just stored: qwark waits for the next press.
             await state.Client.ComboSuspendAsync(false);
             state.Post(() => state.RefreshCombos());
-        }, $"{Label(action)} = {PadButtons.Describe(value)}");
+        }, $"{Label(action)} = {PadButtons.Describe(value)}{(asOverride ? " (this user's own)" : "")}");
     }
 
     /// <summary>
@@ -254,7 +319,14 @@ public static class CombosPanel
 
         DrawSwitch(state);
 
-        var current = state.Combos.ToDictionary(c => c.Action, c => c.Mask);
+        // Per-user settings on and a user's profile active (revision 1.24): each row can carry
+        // this user's own combo, drawn in orange, over the shared one.
+        bool overrides = ShowsOverride(state.Session);
+        if (overrides)
+        {
+            Ui.Hint(OverrideHint(state.Profile));
+            ImGui.Spacing();
+        }
 
         if (!ImGui.BeginTable("combos", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp)) return;
 
@@ -266,6 +338,9 @@ public static class CombosPanel
         foreach (var action in Actions)
         {
             if (!ShowsRow(action, state.Session.QwarkVersion)) continue;
+
+            var entry = EntryFor(state, action);
+            bool overridden = entry.Overridden;
 
             ImGui.TableNextRow();
             ImGui.PushID((int)action);
@@ -293,12 +368,13 @@ public static class CombosPanel
             }
             else
             {
-                ImGui.TextUnformatted(Label(action));
+                if (overridden) Ui.Text(Ui.Orange, Label(action));
+                else ImGui.TextUnformatted(Label(action));
                 if (Tooltip(action) is { } tip && ImGui.IsItemHovered()) Ui.SetTooltip(tip);
             }
 
             ImGui.TableNextColumn();
-            uint mask = current.GetValueOrDefault(action);
+            uint mask = entry.Mask;
             if (_capturing == action)
             {
                 uint held = Capture.Captured;
@@ -308,7 +384,11 @@ public static class CombosPanel
             }
             else
             {
-                Ui.Text(mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
+                Ui.Text(overridden ? Ui.Orange : mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
+                if (overridden && ImGui.IsItemHovered())
+                {
+                    Ui.SetTooltip($"{SettingsPanel.PossessiveName(state.Profile)} own combo. Other users have the shared one.");
+                }
             }
 
             ImGui.TableNextColumn();
@@ -316,34 +396,41 @@ public static class CombosPanel
             {
                 if (ImGui.SmallButton("Cancel")) EndCapture(state);
             }
-            else if (ImGui.SmallButton("Capture"))
+            else
             {
-                BeginCapture(state, action);
+                // An overridden row's Capture records the override again; a plain row's, the shared combo.
+                if (ImGui.SmallButton("Capture")) BeginCapture(state, action, CaptureIsOverride(entry));
+                if (overridden && ImGui.IsItemHovered()) Ui.SetTooltip("Capture this user's own combo again.");
             }
 
             ImGui.SameLine();
             if (ImGui.SmallButton("Clear"))
             {
                 var target = action;
+                var request = ClearFor(entry);
                 state.Run(async () =>
                 {
-                    await state.Client.ComboSetAsync(target, 0);
+                    if (request == ClearRequest.RemoveOverride) await state.Client.ComboOverrideClearAsync(target);
+                    else await state.Client.ComboSetAsync(target, 0);
                     state.Post(() => state.RefreshCombos());
                 });
             }
 
-            // The console menu's combo is the one with a mask of its own; Clear turns it off, and
-            // this puts the console's default back.
-            if (action == ComboAction.OpenConsoleMenu && mask != ComboDefaults.OpenConsoleMenu)
+            if (overridden && ImGui.IsItemHovered())
+            {
+                Ui.SetTooltip("Removes this user's own combo, so the shared one is in force again. "
+                              + "Clear again to clear the shared combo.");
+            }
+
+            // Where the Default button was: a capture whose result is this user's own combo.
+            if (_capturing != action && overrides && ShowsOverrideButton(state.Session, entry))
             {
                 ImGui.SameLine();
-                if (ImGui.SmallButton("Default"))
+                if (ImGui.SmallButton("Override")) BeginCapture(state, action, asOverride: true);
+                if (ImGui.IsItemHovered())
                 {
-                    state.Run(async () =>
-                    {
-                        await state.Client.ComboSetAsync(ComboAction.OpenConsoleMenu, ComboDefaults.OpenConsoleMenu);
-                        state.Post(() => state.RefreshCombos());
-                    });
+                    Ui.SetTooltip($"Capture a combo for {SettingsPanel.UserName(state.Profile)} only. "
+                                  + "Other users keep the shared one.");
                 }
             }
 

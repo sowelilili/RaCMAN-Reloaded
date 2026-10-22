@@ -228,6 +228,10 @@ public sealed class AppState : IDisposable
             _connection++;
             _describeOwed = true;
             AdoptSession();
+
+            // Who is signed in is read again on every connection, and the setup question is
+            // asked again on it (once per user).
+            ForgetProfile();
         });
 
         Client.Disconnected += ex => Post(() =>
@@ -241,6 +245,7 @@ public sealed class AppState : IDisposable
             _lastPlanet = 0xFF;
             _liveStale = true;
             ForgetVshMemory();
+            ForgetProfile();
             _uiPakCheckIn = 0;
             _drops++;
 
@@ -817,6 +822,139 @@ public sealed class AppState : IDisposable
         }
     }
 
+    // ---------------------------------------------------------------- per-user settings
+
+    /// <summary>
+    /// PROFILE_INFO's last answer (revision 1.24): who is signed in on the console and whose
+    /// per-user settings are in use. Read on every connection to a module that has per-user
+    /// settings (SessionInfo byte 29 bit1, never under RPCS3) and again whenever profile_seq moves.
+    /// <see cref="ProfileInfo.None"/> while there is nothing to show.
+    /// </summary>
+    public ProfileInfo Profile { get; private set; } = ProfileInfo.None;
+
+    /// <summary>
+    /// The copy-or-defaults question waiting for the user, or null. Asked only when the switch is
+    /// ticked on for a signed-in user who has never been set up; a user who signs in later with no
+    /// profile starts from the defaults without one. <see cref="Panels.ProfileSetupModal"/> draws
+    /// it; <see cref="AnswerProfileQuestion"/> is the only way it goes.
+    /// </summary>
+    public ProfileQuestion? ProfileQuestion { get; private set; }
+
+    /// <summary>The profile_seq the last PROFILE_INFO was asked for on this connection, or null before the first.</summary>
+    private int? _profileSeqSeen;
+
+    private bool _profileInFlight;
+
+    private void ForgetProfile()
+    {
+        Profile = ProfileInfo.None;
+        _profileSeqSeen = null;
+        ProfileQuestion = null;
+    }
+
+    /// <summary>
+    /// Once a frame while connected: PROFILE_INFO on the first frame of a connection and after
+    /// every move of profile_seq, and on a move the lists that follow the active profile too:
+    /// the combos, the mods' auto flags, the position slots and the manip choices. Nothing at all
+    /// against a module without per-user settings or under RPCS3.
+    /// </summary>
+    private void WatchProfile(SessionInfo session)
+    {
+        if (!Panels.SettingsPanel.ShowsProfiles(session))
+        {
+            if (_profileSeqSeen is not null || ProfileQuestion is not null) ForgetProfile();
+            return;
+        }
+
+        if (!_profileInFlight && !ConsoleBusy && _profileSeqSeen != session.ProfileSeq)
+        {
+            bool moved = _profileSeqSeen is not null;
+            _profileSeqSeen = session.ProfileSeq;
+            RefreshProfile();
+
+            if (moved)
+            {
+                RefreshCombos(quiet: true);
+                RefreshMods(quiet: true);
+                if (Ingame) RefreshPositions(quiet: true);
+                RefreshManips();
+            }
+        }
+    }
+
+    /// <summary>Reads PROFILE_INFO. Quiet: nobody pressed anything.</summary>
+    public void RefreshProfile()
+    {
+        if (!Connected) return;
+
+        _profileInFlight = true;
+        int connection = _connection;
+        Run(async () =>
+        {
+            try
+            {
+                var info = await Client.ProfileInfoAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    if (connection == _connection) Profile = info;
+                });
+            }
+            finally
+            {
+                Post(() => _profileInFlight = false);
+            }
+        }, null, quiet: true);
+    }
+
+    /// <summary>
+    /// The Settings panel's checkbox, ticked. PROFILE_INFO first, for whether the signed-in user
+    /// has been set up before: if not, the copy-or-defaults question; if so, the switch goes on
+    /// and that user's saved settings are back.
+    /// </summary>
+    public void TurnProfilesOn()
+    {
+        int connection = _connection;
+        Run(() => Client.ProfileInfoAsync(), info =>
+        {
+            if (connection != _connection) return;
+            Profile = info;
+
+            string who = Panels.SettingsPanel.UserName(info);
+            if (info.SignedIn && !info.HasProfile)
+            {
+                ProfileQuestion = new ProfileQuestion(info.UserId, who);
+                return;
+            }
+
+            Run(() => Client.ProfileEnableAsync(true, ProfileSetup.None),
+                info.SignedIn
+                    ? $"Per-user settings on. {Panels.SettingsPanel.Possessive(who)} saved settings are back."
+                    : "Per-user settings on. Nobody is signed in on the console yet.");
+        });
+    }
+
+    /// <summary>The Settings panel's checkbox, unticked: everyone back on the console's shared settings.</summary>
+    public void TurnProfilesOff() =>
+        Run(() => Client.ProfileEnableAsync(false, ProfileSetup.None),
+            "Per-user settings off. The console's shared settings are in use.");
+
+    /// <summary>
+    /// The answer to <see cref="ProfileQuestion"/>: <see cref="ProfileSetup.Copy"/> or
+    /// <see cref="ProfileSetup.Fresh"/> sends PROFILE_ENABLE(1, setup); null (Cancel) sends
+    /// nothing, and the switch stays off.
+    /// </summary>
+    public void AnswerProfileQuestion(ProfileSetup? setup)
+    {
+        var question = ProfileQuestion;
+        ProfileQuestion = null;
+        if (question is null || setup is not { } chosen || chosen == ProfileSetup.None) return;
+
+        Run(() => Client.ProfileEnableAsync(true, chosen),
+            chosen == ProfileSetup.Copy
+                ? $"{question.Who} starts with a copy of the current settings."
+                : $"{question.Who} starts from the default settings.");
+    }
+
     // ---------------------------------------------------------------- plumbing
 
     public void Post(Action action) => _actions.Enqueue(action);
@@ -941,8 +1079,10 @@ public sealed class AppState : IDisposable
         if (!Connected)
         {
             // The Disconnect button and a change of target take the link down without raising
-            // Disconnected, and the VSH figures go with the link however it went.
+            // Disconnected, and the VSH figures go with the link however it went. So do the
+            // profile and any question about it.
             ForgetVshMemory();
+            ForgetProfile();
             return;
         }
 
@@ -951,6 +1091,9 @@ public sealed class AppState : IDisposable
         // Nothing to do with the game either: the console's own memory, read on a timer whatever
         // the session is doing (see VshMemoryPollSeconds).
         PollVshMemory(session, deltaSeconds);
+
+        // Nor are the console's per-user settings: who is signed in, and whose settings are in use.
+        WatchProfile(session);
 
         // Nothing to do with the game: a standalone console whose module is older than this client
         // has the new one written to its boot path, once, as soon as the session is somewhere the
