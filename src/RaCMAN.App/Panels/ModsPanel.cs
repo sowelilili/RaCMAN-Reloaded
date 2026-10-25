@@ -176,7 +176,11 @@ public static class ModsPanel
                 var (text, tone) = ModTable.ConsoleStatus(row);
                 Ui.Text(ColourOf(tone), text);
                 if (row.UsbOnly) Ui.Tooltip(UsbTooltip(row, title));
-                else if (row.ConsoleOnly) Ui.Tooltip(row.FolderNameTooLong ? $"{ConsoleOnlyTooltip} qwark cannot load it: {ModFolderName.TooLongFact(row.FolderName)}" : ConsoleOnlyTooltip);
+                else if (row.ConsoleOnly)
+                {
+                    string tip = row.FolderNameTooLong ? $"{ConsoleOnlyTooltip} qwark cannot load it: {ModFolderName.TooLongFact(row.FolderName)}" : ConsoleOnlyTooltip;
+                    Ui.Tooltip(row.Usb is null ? tip : $"{tip}\n{UsbTooltip(row, title)}");
+                }
                 else if (row.FolderNameTooLong) Ui.Tooltip($"This mod cannot be uploaded or loaded: {ModFolderName.TooLongReason(row.FolderName)}");
                 else if (row.Usb is not null) Ui.Tooltip(UsbTooltip(row, title));
 
@@ -224,25 +228,31 @@ public static class ModsPanel
     };
 
     /// <summary>
-    /// What hovering the Console cell of a row with a USB copy says (revision 1.24): where the copy
-    /// is, and what the console does with it at the next load.
+    /// What hovering the Console cell of a row with a USB copy says (revision 1.24). The cell itself
+    /// is only a word or two ("update ready", "on USB"); this is where the detail lives: where the
+    /// copy is, both versions, and what the console does with it. A copy with the console's version
+    /// and other contents is a warning that the console uses its own.
     /// </summary>
     public static string UsbTooltip(ModRow row, string title)
     {
         var usb = row.Usb!;
-        string where = $"{usb.PathFor(title)}, version {(usb.Version.Length > 0 ? usb.Version : "none")}";
+        string version = usb.Version.Length > 0 ? usb.Version : "none";
+        string where = $"{usb.PathFor(title)}, version {version}";
+        string consoleVersion = row.Console is { Version.Length: > 0 } c ? c.Version : "none";
         return usb.State switch
         {
             UsbModState.Available when row.UsbOnly =>
                 $"Only on the console's USB drive, at {where}. Load copies it onto the console and loads it.",
-            UsbModState.Available => $"The console's USB drive has this mod, at {where}.",
+            UsbModState.Available => $"Not on the console yet. The console's USB drive has this mod, at {where}.",
             UsbModState.Newer when usb.Waiting =>
-                $"The USB drive has a newer version, at {where}. The mod is loaded, so the console takes the update the next time it loads.",
-            UsbModState.Newer => $"The USB drive has a newer version, at {where}. The console takes it the next time the mod loads.",
+                $"Update ready: USB version {version}, console version {consoleVersion}, at {usb.PathFor(title)}. The mod is loaded now, so the console applies the update the next time it loads.",
+            UsbModState.Newer =>
+                $"Update ready: USB version {version}, console version {consoleVersion}, at {usb.PathFor(title)}. Loading the mod takes the update.",
             UsbModState.Older => $"The USB drive has an older version, at {where}. The console keeps its own.",
             UsbModState.Conflict =>
-                $"The USB drive has other contents for this mod, at {where}, and no newer version. The console keeps its own; uninstall it from the console to load the USB copy instead.",
-            UsbModState.Broken => $"The copy on the USB drive, at {where}, cannot be used: {usb.ProblemText}.",
+                $"Warning: the copy on the USB drive, at {usb.PathFor(title)}, has the same version ({version}) as the console's but different contents. The console uses its own copy, not the USB one. Uninstall the mod from the console to load the USB copy instead.",
+            UsbModState.Broken =>
+                $"The copy on the USB drive, at {where}, cannot be used: {usb.ProblemText}." + (row.Console is null ? string.Empty : " The console uses its own copy."),
             _ => $"The console's USB drive has this same copy, at {where}.",
         };
     }

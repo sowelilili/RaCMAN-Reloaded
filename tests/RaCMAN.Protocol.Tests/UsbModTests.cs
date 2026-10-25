@@ -169,23 +169,23 @@ public class UsbModTests
             ModTable.ConsoleStatus(Assert.Single(ModTable.Build(new[] { Local("lock_rng") }, new[] { Row("lock_rng", flags: flags) },
                 new[] { "lock_rng" }, new[] { usb })));
 
-        Assert.Equal(("ready, update 1.2 on USB", ModTone.Update), Status(Usb("lock_rng", UsbModState.Newer, "1.2")));
-        Assert.Equal(("loaded, update 1.2 on USB at next load", ModTone.Good),
+        Assert.Equal(("update ready", ModTone.Update), Status(Usb("lock_rng", UsbModState.Newer, "1.2")));
+        Assert.Equal(("loaded, update", ModTone.Good),
             Status(Usb("lock_rng", UsbModState.Newer, "1.2", UsbModFlags.Waiting), ModFlags.Loaded));
-        Assert.Equal(("ready, differs on USB", ModTone.Quiet), Status(Usb("lock_rng", UsbModState.Conflict)));
+        Assert.Equal(("ready", ModTone.Quiet), Status(Usb("lock_rng", UsbModState.Conflict)));
         Assert.Equal(("ready", ModTone.Quiet), Status(Usb("lock_rng", UsbModState.Same)));
         Assert.Equal(("ready", ModTone.Quiet), Status(Usb("lock_rng", UsbModState.Older, "0.9")));
 
         // A library mod the console does not have yet, and the drive does.
         var notUploaded = Assert.Single(ModTable.Build(new[] { Local("lock_rng") }, Array.Empty<ModEntry>(), Array.Empty<string>(),
             new[] { Usb("lock_rng", UsbModState.Available) }));
-        Assert.Equal(("not uploaded, on USB", ModTone.Quiet), ModTable.ConsoleStatus(notUploaded));
+        Assert.Equal(("on USB", ModTone.Quiet), ModTable.ConsoleStatus(notUploaded));
         Assert.False(notUploaded.UsbOnly);
 
         // A console-only mod with an update on the drive.
         var consoleOnly = Assert.Single(ModTable.Build(Array.Empty<LocalMod>(), new[] { Row("old-one") }, new[] { "old-one" },
             new[] { Usb("old-one", UsbModState.Newer, "2.0") }));
-        Assert.Equal(("Console only, update 2.0 on USB", ModTone.Update), ModTable.ConsoleOnlyStatus(consoleOnly));
+        Assert.Equal(("Console only, update ready", ModTone.Update), ModTable.ConsoleOnlyStatus(consoleOnly));
     }
 
     [Fact]
@@ -204,6 +204,38 @@ public class UsbModTests
         // And the console cell says the console's copy is newer rather than stale.
         Assert.Equal("newer on console", ModTable.ConsoleStatus(RowWith(Row("lock_rng", "2.0") with { Hash = 1 }, null)).Text);
         Assert.Equal("stale", ModTable.ConsoleStatus(RowWith(Row("lock_rng", "1.0") with { Hash = 1 }, null)).Text);
+
+        // A console copy that is the drive's (state SAME) is just ready, even with the library behind it.
+        Assert.Equal("ready", ModTable.ConsoleStatus(RowWith(Row("lock_rng", "2.0") with { Hash = 1 }, Usb("lock_rng", UsbModState.Same, "2.0"))).Text);
+        Assert.Equal("ready", ModTable.ConsoleStatus(RowWith(Row("lock_rng", "1.1"), Usb("lock_rng", UsbModState.Same, "1.1"))).Text);
+    }
+
+    [Fact]
+    public void TheCellIsShortAndTheTooltipHasTheDetail()
+    {
+        var local = Local("lock_rng", "1.0");
+        ModRow RowWith(UsbModEntry usb, bool loaded = false) =>
+            new(local, Row("lock_rng", "1.0", loaded ? ModFlags.Loaded : ModFlags.None), "lock_rng", true) { Usb = usb };
+
+        // Every cell fits the 130-pixel column: nothing longer than a few words.
+        Assert.Equal(("ready, USB bad", ModTone.Quiet),
+            ModTable.ConsoleStatus(RowWith(Usb("lock_rng", UsbModState.Broken, problem: UsbModProblem.TooBig))));
+
+        var update = RowWith(Usb("lock_rng", UsbModState.Newer, "1.1", port: 2));
+        string tip = ModsPanel.UsbTooltip(update, Title);
+        Assert.Contains("Update ready", tip);
+        Assert.Contains("USB version 1.1", tip);
+        Assert.Contains("console version 1.0", tip);
+        Assert.Contains("/dev_usb002/", tip);
+        Assert.Contains("Loading the mod takes the update", tip);
+
+        var waiting = RowWith(Usb("lock_rng", UsbModState.Newer, "1.1", UsbModFlags.Waiting), loaded: true);
+        Assert.Contains("next time it loads", ModsPanel.UsbTooltip(waiting, Title));
+
+        string warning = ModsPanel.UsbTooltip(RowWith(Usb("lock_rng", UsbModState.Conflict)), Title);
+        Assert.StartsWith("Warning:", warning);
+        Assert.Contains("different contents", warning);
+        Assert.Contains("uses its own copy", warning);
     }
 
     // ================================================================ against the fake console

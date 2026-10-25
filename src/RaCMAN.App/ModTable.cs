@@ -219,7 +219,14 @@ public static class ModTable
 
         // Revision 1.24: a console copy newer than the library's came off a USB drive (or another
         // PC), and Load keeps it rather than uploading the older one over it.
-        if (remote.Hash != local.Hash) parts.Add(!remote.ParseError && ModVersion.IsNewer(remote.Version, local.Version) ? "newer on console" : "stale");
+        // When the drive's copy is the console's (USB state SAME) that is the whole story, so the
+        // row is just ready: the library is behind both and Load keeps what the console has.
+        if (remote.Hash != local.Hash)
+        {
+            bool newer = !remote.ParseError && ModVersion.IsNewer(remote.Version, local.Version);
+            if (!newer) parts.Add("stale");
+            else if (row.Usb is not { State: UsbModState.Same }) parts.Add("newer on console");
+        }
 
         var tone = remote.Loaded ? ModTone.Good : remote.ParseError ? ModTone.Bad : ModTone.Quiet;
         if (parts.Count == 0) parts.Add("ready");
@@ -227,26 +234,33 @@ public static class ModTable
     }
 
     /// <summary>
-    /// What a row's USB copy adds to its status (revision 1.24): an update, one that waits for the
-    /// mod's next load because the console's copy is loaded, a copy only the drive has, one whose
-    /// contents differ with no newer version, or one the console cannot copy. A copy that is the
-    /// console's, or older, adds nothing. An update colours a row that is not wrong otherwise.
+    /// What a row's USB copy adds to its status (revision 1.24). The cell is 130 pixels wide, so it
+    /// says as little as it can and ModsPanel.UsbTooltip says the rest (versions, port, path, what
+    /// the console does): an update is "update ready" (just "update" after another word, and while
+    /// the mod is loaded it waits for the next load, which the tooltip says); a copy only the drive
+    /// has, for a library mod not on the console yet, is "on USB"; one the console cannot copy is
+    /// "USB bad". A copy that is the console's, an older one, or one with the same version and other
+    /// contents (a warning on the tooltip, the console keeps its own) adds nothing. An update
+    /// colours a row that is not wrong otherwise.
     /// </summary>
     private static (string Text, ModTone Tone) WithUsb(ModRow row, List<string> parts, ModTone tone)
     {
-        string? words = row.Usb switch
+        switch (row.Usb?.State)
         {
-            { State: UsbModState.Newer, Waiting: true } usb => $"update {usb.Version} on USB at next load",
-            { State: UsbModState.Newer } usb => $"update {usb.Version} on USB",
-            { State: UsbModState.Available } => "on USB",
-            { State: UsbModState.Conflict } => "differs on USB",
-            { State: UsbModState.Broken } => "USB copy unusable",
-            _ => null,
-        };
+            case UsbModState.Newer:
+                if (parts.Count == 1 && parts[0] == "ready") parts[0] = "update ready";
+                else parts.Add(parts.Count == 1 && parts[0] != "loaded" ? "update ready" : "update");
+                if (tone == ModTone.Quiet) tone = ModTone.Update;
+                break;
+            case UsbModState.Available:
+                if (parts.Count == 1 && parts[0] == "not uploaded") parts[0] = "on USB";
+                else parts.Add("on USB");
+                break;
+            case UsbModState.Broken:
+                parts.Add("USB bad");
+                break;
+        }
 
-        if (words is null) return (string.Join(", ", parts), tone);
-        parts.Add(words);
-        if (row.Usb!.State == UsbModState.Newer && tone == ModTone.Quiet) tone = ModTone.Update;
         return (string.Join(", ", parts), tone);
     }
 

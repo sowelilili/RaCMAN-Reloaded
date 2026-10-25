@@ -89,7 +89,7 @@ A PS3 can load mods from a USB drive. Put each mod folder in `qwark/mods/<TITLEI
 
 The Mods panel lists these mods as **On USB000** (or the port they are on). Nothing is installed until you press **Load** or tick **Auto**: then the console copies the mod from the drive and keeps it.
 
-When the drive has a newer version of a mod than the console, the panel says **update on USB**, and the console takes it the next time the mod loads. A mod that is loaded right now keeps its files until it loads again. The console compares the `#- version` line in each `patch.txt`, so give each new release a higher number. An older copy, or one with the same version, never replaces the console's copy. If the same mod is on more than one drive or folder, the console uses the newest.
+When the drive has a newer version of a mod than the console, the Console column says **update ready**, and the console takes it the next time the mod loads. Hover over the cell to see the USB version, the console's version and the path on the drive. A mod that is loaded right now keeps its files until it loads again. The console compares the `#- version` line in each `patch.txt`, so give each new release a higher number. An older copy, or one with the same version, never replaces the console's copy. If the same mod is on more than one drive or folder, the console uses the newest. A copy with the console's version but different contents is not flagged in the column: the mod just says **ready**, and its tooltip warns that the console uses its own copy.
 
 **Load** also uses the console's copy when it is newer than the one in your mods folder, and does not upload yours over it. Under RPCS3 there are no USB mods: use the mods folder on your PC.
 
