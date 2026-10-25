@@ -1039,18 +1039,57 @@ public static class GamePanel
                 ((packed >> 8) & 0xFF) / 255f,
                 (packed & 0xFF) / 255f);
 
+            // Revision 1.24: a shade is optional. While qwark works it out it is drawn faded, as
+            // the "on boot" boxes are, and stays pickable: a pick is an override, and an
+            // overridden shade draws as any colour does, with Auto beside it to hand it back.
+            bool automatic = ShadeIsAutomatic(feature, packed);
+            if (automatic) ImGui.PushStyleVar(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * ShadeAlpha);
+
             ImGui.SetNextItemWidth(240);
-            if (ImGui.ColorEdit3(feature.Label, ref colour))
+            bool picked = ImGui.ColorEdit3(feature.Label, ref colour);
+
+            if (automatic) ImGui.PopStyleVar();
+            if (feature.IsShade && ImGui.IsItemHovered()) Ui.SetTooltip(ShadeTooltip(describe, feature, automatic));
+
+            if (picked)
             {
                 uint value = ((uint)(colour.X * 255) << 16) | ((uint)(colour.Y * 255) << 8) | (uint)(colour.Z * 255);
                 byte id = feature.Id;
                 LastSet[id] = value;
                 state.Run(() => state.Client.FeatureSetAsync(id, value));
             }
+
+            if (feature.IsShade && !automatic)
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Auto"))
+                {
+                    byte id = feature.Id;
+                    LastSet[id] = Feature.ColorAuto;
+                    state.Run(() => state.Client.FeatureSetAsync(id, Feature.ColorAuto));
+                }
+
+                if (ImGui.IsItemHovered()) Ui.SetTooltip($"Work this shade out from {FollowedLabel(describe, feature)} again");
+            }
         }
 
         ImGui.PopID();
     }
+
+    /// <summary>How faded an automatic shade is drawn, as a share of the style's own alpha.</summary>
+    private const float ShadeAlpha = 0.45f;
+
+    /// <summary>A shade qwark is working out for itself: its readout carries the AUTO bit (revision 1.24).</summary>
+    public static bool ShadeIsAutomatic(Feature feature, uint readout) =>
+        feature.IsShade && (readout & Feature.ColorAuto) != 0;
+
+    /// <summary>The label of the COLOR a shade follows, as DESCRIBE names it.</summary>
+    private static string FollowedLabel(DescribeResult describe, Feature shade) =>
+        describe.Features.FirstOrDefault(f => f.Id == shade.ShadeOf)?.Label ?? "its colour";
+
+    public static string ShadeTooltip(DescribeResult describe, Feature shade, bool automatic) => automatic
+        ? $"Optional: worked out from {FollowedLabel(describe, shade)}. Pick a colour to override it."
+        : $"Overridden: stays as it is when {FollowedLabel(describe, shade)} changes.";
 
     // ---------------------------------------------------------------- colour presets
 
@@ -1182,13 +1221,9 @@ public static class GamePanel
     /// </summary>
     private static void ApplyPreset(AppState state, Feature[] colours, ColourPreset preset)
     {
-        var wanted = new List<(byte Id, uint Value)>();
-        foreach (var feature in colours)
-        {
-            if (!preset.TryGetColour(feature.Label, out uint rgb)) continue;
-            wanted.Add((feature.Id, rgb));
-            LastSet[feature.Id] = rgb;
-        }
+        // Revision 1.24: a shade the preset leaves out goes back to automatic (ColourPreset.Writes).
+        var wanted = preset.Writes(colours);
+        foreach (var (id, value) in wanted) LastSet[id] = value;
 
         if (wanted.Count == 0)
         {
@@ -1208,9 +1243,7 @@ public static class GamePanel
     private static void SavePreset(AppState state, GameId game, Feature[] colours, string key)
     {
         string name = _presetName.Trim();
-        var values = colours
-            .Select(f => new KeyValuePair<string, uint>(f.Label, CurrentValue(state, f) & 0xFFFFFFu))
-            .ToArray();
+        var values = ColourPreset.ValuesToSave(colours, f => CurrentValue(state, f));
 
         try
         {

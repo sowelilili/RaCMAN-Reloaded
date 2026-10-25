@@ -134,7 +134,10 @@
       "headings": {
         "Cosmetics": {
           "HUD": [
-            "HUD colour"
+            "HUD colour",
+            "HUD vivid shade",
+            "HUD dark shade",
+            "HUD light shade"
           ]
         }
       }

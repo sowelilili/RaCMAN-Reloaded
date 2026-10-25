@@ -281,6 +281,16 @@ public class GameLayoutTests
         Assert.Equal(new[] { "Skin" }, blocks[0].Features.Select(f => f.Label));
         Assert.Equal("HUD", blocks[1].Heading);
         Assert.Equal(new[] { "HUD colour" }, blocks[1].Features.Select(f => f.Label));
+
+        // Revision 1.24: its three shades join it under the same heading, in DESCRIBE's order,
+        // so the preset row above the block covers all four.
+        var shades = new[] { "HUD vivid shade", "HUD dark shade", "HUD light shade" }
+            .Select((label, i) => new Feature((byte)(19 + i), FeatureKind.Color, 5, 18, FeatureFlags.Shade, (byte)(9 + i), 0, 0, label))
+            .ToArray();
+        blocks = GameLayout.Blocks("NPEA00423", GameId.Rac4, "Cosmetics", new[] { skin, hud }.Concat(shades));
+        Assert.Equal(2, blocks.Count);
+        Assert.Equal(new[] { "HUD colour", "HUD vivid shade", "HUD dark shade", "HUD light shade" },
+            blocks[1].Features.Select(f => f.Label));
     }
 
     [Fact]

@@ -2473,3 +2473,92 @@ public class SaveFileNameTests
         }
     }
 }
+
+/// <summary>
+/// Revision 1.24: a COLOR flagged SHADE (Deadlocked's HUD shades), which qwark works out from the
+/// colour its <c>aux</c> names until the user overrides it, and what the colour presets do with one.
+/// </summary>
+public class ColourShadeTests
+{
+    private static readonly Feature Hud = new(18, FeatureKind.Color, 5, 0, FeatureFlags.None, 8, 0, 0, "HUD colour");
+
+    private static Feature Shade(byte id, string label) =>
+        new(id, FeatureKind.Color, 5, 18, FeatureFlags.Shade, (byte)(id - 10), 0, 0, label);
+
+    private static readonly Feature Vivid = Shade(19, "HUD vivid shade");
+    private static readonly Feature Dark = Shade(20, "HUD dark shade");
+    private static readonly Feature Light = Shade(21, "HUD light shade");
+    private static readonly Feature[] Hud4 = { Hud, Vivid, Dark, Light };
+
+    [Fact]
+    public void TheRowParsesAsAShadeOfItsAux()
+    {
+        var row = new byte[Feature.Size];
+        row[0] = 21;
+        row[1] = (byte)FeatureKind.Color;
+        row[2] = 5;
+        row[3] = 18;
+        row[4] = 0x40;
+        row[5] = 11;
+        "HUD light shade"u8.CopyTo(row.AsSpan(16));
+
+        var feature = Feature.Parse(row);
+        Assert.True(feature.IsShade);
+        Assert.Equal((byte?)18, feature.ShadeOf);
+        Assert.Equal((byte)0, feature.OptionCount);
+        Assert.Equal((byte?)11, feature.MirrorReadout);
+
+        // The same flag on any other kind means nothing, and a plain COLOR follows nothing.
+        Assert.False((Hud with { Flags = FeatureFlags.None }).IsShade);
+        Assert.Null(Hud.ShadeOf);
+        Assert.False(new Feature(3, FeatureKind.Value, 0, 18, FeatureFlags.Shade, 0xFF, 0, 0, "x").IsShade);
+    }
+
+    [Fact]
+    public void AShadeIsAutomaticWhileItsReadoutCarriesBit24()
+    {
+        Assert.True(GamePanel.ShadeIsAutomatic(Vivid, 0x01FF72AC));
+        Assert.False(GamePanel.ShadeIsAutomatic(Vivid, 0x00123456));
+        Assert.False(GamePanel.ShadeIsAutomatic(Hud, 0x01FF72AC));
+
+        var describe = new DescribeResult(GameId.Rac4, Array.Empty<string>(), Array.Empty<string>(), Hud4);
+        Assert.Contains("worked out from HUD colour", GamePanel.ShadeTooltip(describe, Dark, automatic: true));
+        Assert.Contains("when HUD colour changes", GamePanel.ShadeTooltip(describe, Dark, automatic: false));
+    }
+
+    [Fact]
+    public void SaveLeavesTheAutomaticShadesOut()
+    {
+        var readouts = new Dictionary<byte, uint>
+        {
+            [18] = 0x00FF4C73, [19] = 0x00123456, [20] = 0x017F2639, [21] = 0x01FFA5B9,
+        };
+
+        var saved = ColourPreset.ValuesToSave(Hud4, f => readouts[f.Id]);
+        Assert.Equal(new[] { ("HUD colour", 0xFF4C73u), ("HUD vivid shade", 0x123456u) },
+            saved.Select(p => (p.Key, p.Value)));
+    }
+
+    [Fact]
+    public void ApplyHandsTheLeftOutShadesBackToAutomatic()
+    {
+        var preset = new ColourPreset { Name = "mine" };
+        preset.Colours["HUD colour"] = "FF4C73";
+        preset.Colours["hud VIVID shade"] = "123456";
+
+        Assert.Equal(new[] { ((byte)18, 0xFF4C73u), ((byte)19, 0x123456u), ((byte)20, Feature.ColorAuto), ((byte)21, Feature.ColorAuto) },
+            preset.Writes(Hud4));
+
+        // A preset that does not name the colour leaves the shades alone, as it leaves any colour
+        // it does not name; and a preset for plain COLORs sends what it always sent.
+        var shadesOnly = new ColourPreset { Name = "dark" };
+        shadesOnly.Colours["HUD dark shade"] = "000000";
+        Assert.Equal(new[] { ((byte)20, 0u) }, shadesOnly.Writes(Hud4));
+
+        var boots = new ColourPreset { Name = "boots" };
+        boots.Colours[ColourPresetStore.ChargebootFront] = "2080FF";
+        var front = new Feature(34, FeatureKind.Color, 5, 0, FeatureFlags.None, 3, 0, 0, ColourPresetStore.ChargebootFront);
+        var back = new Feature(35, FeatureKind.Color, 5, 0, FeatureFlags.None, 4, 0, 0, ColourPresetStore.ChargebootBack);
+        Assert.Equal(new[] { ((byte)34, 0x2080FFu) }, boots.Writes(new[] { front, back }));
+    }
+}

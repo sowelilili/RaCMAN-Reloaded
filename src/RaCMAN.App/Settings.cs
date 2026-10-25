@@ -1262,6 +1262,44 @@ public sealed class ColourPreset
         rgb = 0;
         return false;
     }
+
+    /// <summary>
+    /// What Save writes for a section's colours: each one's current colour, but a shade only while
+    /// it is overridden (revision 1.24). A preset that leaves a shade out means "automatic", so an
+    /// automatic shade is left out rather than frozen at the colour it happens to be worked out as.
+    /// </summary>
+    public static KeyValuePair<string, uint>[] ValuesToSave(IEnumerable<Feature> colours, Func<Feature, uint> current) =>
+        colours
+            .Select(f => (Feature: f, Value: current(f)))
+            .Where(c => !(c.Feature.IsShade && (c.Value & Feature.ColorAuto) != 0))
+            .Select(c => new KeyValuePair<string, uint>(c.Feature.Label, c.Value & 0xFFFFFFu))
+            .ToArray();
+
+    /// <summary>
+    /// The FEATURE_SETs that apply this preset to a section's colours, in their order: every colour
+    /// it names, and an automatic one (<see cref="Feature.ColorAuto"/>) for each shade it leaves out
+    /// whose own colour it names, so a preset saved with automatic shades brings them back
+    /// automatic. A shade whose colour the preset does not name is left as it is.
+    /// </summary>
+    public List<(byte Id, uint Value)> Writes(IReadOnlyList<Feature> colours)
+    {
+        var writes = new List<(byte Id, uint Value)>();
+        foreach (var feature in colours)
+        {
+            if (TryGetColour(feature.Label, out uint rgb))
+            {
+                writes.Add((feature.Id, rgb));
+            }
+            else if (feature.ShadeOf is { } of
+                     && colours.FirstOrDefault(f => f.Id == of) is { } followed
+                     && TryGetColour(followed.Label, out _))
+            {
+                writes.Add((feature.Id, Feature.ColorAuto));
+            }
+        }
+
+        return writes;
+    }
 }
 
 /// <summary>

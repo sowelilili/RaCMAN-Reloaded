@@ -95,9 +95,13 @@ When the drive has a newer version of a mod than the console, the Console column
 
 ## Deadlocked's HUD colour
 
-In Deadlocked, **Game**, then **Cosmetics**, has a **HUD colour** picker, like the chargeboot colours in Going Commando and Up Your Arsenal. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. It works on a console and under RPCS3. The health bar changes at once, and the rest of the HUD at the next load. The colour stays until the game restarts.
+In Deadlocked, **Game**, then **Cosmetics**, has a **HUD colour** picker, like the chargeboot colours in Going Commando and Up Your Arsenal. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. It works on a console and under RPCS3. The health bar changes at once, and the rest of the HUD at the next load.
 
-The picker changes the colour of the team that the HUD colour cheat picks, so other things the game draws in that team's colour change too. With the cheat at Default, it changes the player's own team.
+The game draws the HUD in that colour and three shades of it: **vivid** (brighter: the health bar, the ammo, the radar's cursor), **dark** (the bottom of the HUD's gradients) and **light** (the top of the prompt and pickup boxes, and the radar cursor's pulse). You don't have to set them. The pickers under **HUD colour** are faded while the console works them out from the HUD colour, and they follow it when you change it. Pick a colour in one to override that shade. It then stays as you set it when the HUD colour changes, and an **Auto** button beside it hands it back to the HUD colour.
+
+The colours stay until the game restarts. To keep a set, type a name next to **Presets** and press **Save**: it saves the HUD colour and the shades you overrode. Pick it from **Presets** after a restart to put it all back, with the other shades worked out again.
+
+The picker changes the colour of the team that the HUD colour cheat picks, so other things the game draws in that team's colour change too, and the cheat menu's preview of that team shows your colour. With the cheat at Default, it changes the player's own team. If you pick another team in the cheat menu, the HUD uses that team's colours, and the pickers show them; set the picker again to change that team.
 
 ## Updates
 

@@ -768,6 +768,13 @@ public enum FeatureFlags : byte
     /// (revision 1.7).
     /// </summary>
     Signed = 1 << 5,
+
+    /// <summary>
+    /// This COLOR is a shade qwark works out from the COLOR whose id is <see cref="Feature.Aux"/>,
+    /// until the user overrides it. Its readout carries <see cref="Feature.ColorAuto"/> while it is
+    /// worked out, and a FEATURE_SET of that bit makes it automatic again (revision 1.24).
+    /// </summary>
+    Shade = 1 << 6,
 }
 
 /// <summary>

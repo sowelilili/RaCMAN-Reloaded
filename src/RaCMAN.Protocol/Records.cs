@@ -338,6 +338,18 @@ public sealed record Feature(
     public byte OptionCount => Kind == FeatureKind.Enum ? Aux : (byte)0;
 
     /// <summary>
+    /// Bit 24 of a shade's readout while qwark works the shade out, and the FEATURE_SET value that
+    /// makes it automatic again (revision 1.24, PROTOCOL.md 5.3.3).
+    /// </summary>
+    public const uint ColorAuto = 0x01000000;
+
+    /// <summary>This COLOR is a shade of another, optional: worked out from it unless overridden.</summary>
+    public bool IsShade => Kind == FeatureKind.Color && (Flags & FeatureFlags.Shade) != 0;
+
+    /// <summary>The id of the COLOR a shade follows, or null for any other row.</summary>
+    public byte? ShadeOf => IsShade ? Aux : null;
+
+    /// <summary>
     /// The width in bits of the field behind this VALUE: 8, 16 or 32, and 32 for the 0 an older
     /// module sends and for anything the console names that is not one of the three. Meaningless
     /// for the other kinds, which never carry a width.
