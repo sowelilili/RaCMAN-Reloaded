@@ -130,6 +130,13 @@
         "Max all weapon ammo": "Unlocks",
 
         "Skin": "Cosmetics"
+      },
+      "headings": {
+        "Cosmetics": {
+          "HUD": [
+            "HUD colour"
+          ]
+        }
       }
     }
   }

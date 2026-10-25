@@ -219,7 +219,7 @@ public class GameLayoutTests
         Assert.Equal(GameLayout.PlayerSection, GameLayout.SectionFor("NPEA00423", GameId.Rac4, planets, d));
         Assert.Equal("Manips", GameLayout.SectionFor("NPEA00423", GameId.Rac4, actTune, d));
 
-        // Deadlocked has no Cosmetics group from qwark; the move creates the section, in configured order.
+        // Before build 56 Deadlocked had no Cosmetics group from qwark; the move creates the section, in configured order.
         var order = GameLayout.TabOrder("NPEA00423", GameId.Rac4, new[] { "Cheats", "Player", "Cosmetics" });
         Assert.Equal(new[] { "Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug" }, order);
     }
@@ -254,6 +254,33 @@ public class GameLayoutTests
         Assert.Equal(
             new[] { "Chargeboots primary front", "Chargeboots primary back", "Chargeboots tint" },
             blocks[1].Features.Select(f => f.Label));
+    }
+
+    /// <summary>
+    /// qwark build 56 describes Deadlocked's HUD colour, a COLOR in a Cosmetics group of its own;
+    /// the shipped file puts it under a "HUD" header there, below the skin the layout moves in.
+    /// </summary>
+    [Fact]
+    public void Rac4CosmeticsPutsTheHudColourUnderAHeading()
+    {
+        var skin = Make(10, FeatureKind.Enum, 1, "Skin");
+        var hud = Make(18, FeatureKind.Color, 5, "HUD colour");
+        var d = Describe(GameId.Rac4, new[] { "Cheats", "Player", "Progress", "Savefile", "Fixes", "Cosmetics" },
+            skin, hud);
+
+        Assert.Equal("Cosmetics", GameLayout.SectionFor("NPEA00423", GameId.Rac4, skin, d));
+        Assert.Equal("Cosmetics", GameLayout.SectionFor("NPEA00423", GameId.Rac4, hud, d));
+
+        var headings = GameLayout.HeadingsFor("NPEA00423", GameId.Rac4, "Cosmetics");
+        Assert.Equal("HUD", headings["HUD colour"]);
+        Assert.False(headings.ContainsKey("Skin"));
+
+        var blocks = GameLayout.Blocks("NPEA00423", GameId.Rac4, "Cosmetics", new[] { skin, hud });
+        Assert.Equal(2, blocks.Count);
+        Assert.Null(blocks[0].Heading);
+        Assert.Equal(new[] { "Skin" }, blocks[0].Features.Select(f => f.Label));
+        Assert.Equal("HUD", blocks[1].Heading);
+        Assert.Equal(new[] { "HUD colour" }, blocks[1].Features.Select(f => f.Label));
     }
 
     [Fact]

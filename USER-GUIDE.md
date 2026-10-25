@@ -93,6 +93,12 @@ When the drive has a newer version of a mod than the console, the Console column
 
 **Load** also uses the console's copy when it is newer than the one in your mods folder, and does not upload yours over it. Under RPCS3 there are no USB mods: use the mods folder on your PC.
 
+## Deadlocked's HUD colour
+
+In Deadlocked, **Game**, then **Cosmetics**, has a **HUD colour** picker, like the chargeboot colours in Going Commando and Up Your Arsenal. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. It works on a console and under RPCS3. The health bar changes at once, and the rest of the HUD at the next load. The colour stays until the game restarts.
+
+The picker changes the colour of the team that the HUD colour cheat picks, so other things the game draws in that team's colour change too. With the cheat at Default, it changes the player's own team.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.
