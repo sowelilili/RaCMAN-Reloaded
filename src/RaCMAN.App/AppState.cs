@@ -222,8 +222,8 @@ public sealed class AppState : IDisposable
             if (_helloStale && QwarkUpdateStaged == 0)
             {
                 AddToast(QwarkClient.IsStaleBuild(info.QwarkVersion)
-                    ? "qwark.sprx on the console is older than this client; see the Connection panel"
-                    : "qwark.sprx on the console is another test build than this client's; see the Connection panel");
+                    ? "qwark.sprx on your console is older than this client; see the Connection panel"
+                    : "qwark.sprx on your console is another test build than this client's; see the Connection panel");
             }
 
             // Not a re-read of everything: if this is the game that was running when the link
@@ -716,7 +716,7 @@ public sealed class AppState : IDisposable
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
                 Post(() => AddToast(
-                    $"Updating {WebManLoader.SprxName} on the console failed while reading {reading}: {error.Message}",
+                    $"Updating {WebManLoader.SprxName} on your console failed while reading {reading}: {error.Message}",
                     ToastKind.Error));
                 return;
             }
@@ -746,7 +746,7 @@ public sealed class AppState : IDisposable
                 // The message already names the step and carries what the console said, so this is
                 // the whole of what the user is told, once.
                 Post(() => AddToast(
-                    $"Updating {WebManLoader.SprxName} on the console failed while {error.Message}",
+                    $"Updating {WebManLoader.SprxName} on your console failed while {error.Message}",
                     ToastKind.Error));
             }
         });
@@ -756,7 +756,7 @@ public sealed class AppState : IDisposable
 
     /// <summary>The Connection panel's line for <see cref="UiPakNeeded"/>, and the start of its toast.</summary>
     public const string UiPakWarning =
-        "The console's ui.pak is missing or from another build, so the Trainer menu cannot load in games.";
+        "Your console's ui.pak is missing or from another build, so the Trainer menu cannot load in games.";
 
     /// <summary>
     /// How long after a send that went through the flag is looked at again. The module checks the
@@ -814,7 +814,7 @@ public sealed class AppState : IDisposable
 
                 Post(() =>
                 {
-                    AddToast($"Sent {UiPak.FileName} to the console", ToastKind.Success);
+                    AddToast($"Sent {UiPak.FileName} to your console", ToastKind.Success);
                     if (connection == _connection) _uiPakCheckIn = UiPakCheckSeconds;
                 });
             }
@@ -850,8 +850,8 @@ public sealed class AppState : IDisposable
         _uiPakCheckIn = 0;
         if (needed)
         {
-            AddToast("The console still says its ui.pak is missing or from another build. The ui.pak beside "
-                     + "this client may be from another build; the console's qwark log says why.", ToastKind.Error);
+            AddToast("Your console still says its ui.pak is missing or from another build. The ui.pak beside "
+                     + "this client may be from another build; your console's qwark log says why.", ToastKind.Error);
         }
     }
 
@@ -946,6 +946,9 @@ public sealed class AppState : IDisposable
     /// </summary>
     public void TurnProfilesOn()
     {
+        // Never to a module without per-user settings (a release of build 56, or under RPCS3).
+        if (!Panels.SettingsPanel.ShowsProfiles(Session)) return;
+
         int connection = _connection;
         Run(() => Client.ProfileInfoAsync(), info =>
         {
@@ -962,14 +965,18 @@ public sealed class AppState : IDisposable
             Run(() => Client.ProfileEnableAsync(true, ProfileSetup.None),
                 info.SignedIn
                     ? $"Per-user settings on. {Panels.SettingsPanel.Possessive(who)} saved settings are back."
-                    : "Per-user settings on. Nobody is signed in on the console yet.");
+                    : "Per-user settings on. Nobody is signed in on your console yet.");
         });
     }
 
     /// <summary>The Settings panel's checkbox, unticked: everyone back on the console's shared settings.</summary>
-    public void TurnProfilesOff() =>
+    public void TurnProfilesOff()
+    {
+        if (!Panels.SettingsPanel.ShowsProfiles(Session)) return;
+
         Run(() => Client.ProfileEnableAsync(false, ProfileSetup.None),
-            "Per-user settings off. The console's shared settings are in use.");
+            "Per-user settings off. Your console's shared settings are in use.");
+    }
 
     /// <summary>
     /// The answer to <see cref="ProfileQuestion"/>: <see cref="ProfileSetup.Copy"/> or
@@ -981,6 +988,7 @@ public sealed class AppState : IDisposable
         var question = ProfileQuestion;
         ProfileQuestion = null;
         if (question is null || setup is not { } chosen || chosen == ProfileSetup.None) return;
+        if (!Panels.SettingsPanel.ShowsProfiles(Session)) return;
 
         Run(() => Client.ProfileEnableAsync(true, chosen),
             chosen == ProfileSetup.Copy

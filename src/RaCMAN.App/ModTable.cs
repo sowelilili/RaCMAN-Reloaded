@@ -332,19 +332,19 @@ public static class ModTable
     {
         bool loaded = row.Loaded;
 
-        string loadReason = !connected ? "Connect to the console first."
+        string loadReason = !connected ? "Connect to your console first."
             : row.FolderNameTooLong ? "It cannot be loaded: " + (row.ConsoleOnly
                 ? ModFolderName.TooLongFact(row.FolderName)
                 : ModFolderName.TooLongReason(row.FolderName))
-            : row.UsbOnly && row.Usb!.State == UsbModState.Broken ? $"The console cannot copy it from {row.Usb.DriveName}: {row.Usb.ProblemText}."
+            : row.UsbOnly && row.Usb!.State == UsbModState.Broken ? $"Your console cannot copy it from {row.Usb.DriveName}: {row.Usb.ProblemText}."
             : row.ConsoleOnly && row.Console is null ? "qwark does not list this folder. Press Rescan console folder first."
             : row.ConsoleOnly && row.Console!.ParseError ? "qwark could not parse this mod's patch.txt, or a .bin it names is missing."
             : string.Empty;
 
-        string uninstallReason = row.UsbOnly ? $"It is only on the console's USB drive ({row.Usb!.DriveName}); qwark never deletes anything there."
-            : !connected ? (rpcs3 ? "Connect to qwark-rpcs3 first." : "Connect to the console first.")
+        string uninstallReason = row.UsbOnly ? $"It is only on your console's USB drive ({row.Usb!.DriveName}); qwark never deletes anything there."
+            : !connected ? (rpcs3 ? "Connect to qwark-rpcs3 first." : "Connect to your console first.")
             : busy ? "Wait for the game to finish starting or stopping, and for any change under way to finish."
-            : !row.FoldersListed ? "Reading the console's mod folder..."
+            : !row.FoldersListed ? "Reading your console's mod folder..."
             : string.Empty;
 
         return new ModRowActions(

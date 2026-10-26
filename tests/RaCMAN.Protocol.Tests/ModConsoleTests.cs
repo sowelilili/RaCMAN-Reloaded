@@ -239,7 +239,7 @@ public class ModConsoleTests : IDisposable
         Assert.Equal(2, table.Count);
         Assert.All(table, row => Assert.False(row.FoldersListed));
         Assert.Equal("extra", table[1].FolderName);
-        Assert.Equal("Reading the console's mod folder...", ModTable.ActionsFor(table[1], false, true, false).UninstallReason);
+        Assert.Equal("Reading your console's mod folder...", ModTable.ActionsFor(table[1], false, true, false).UninstallReason);
     }
 
     [Fact]
@@ -340,7 +340,7 @@ public class ModConsoleTests : IDisposable
 
         var ps3Offline = ModTable.ActionsFor(new ModRow(Local("lock_rng"), null, null, true), false, false, false);
         Assert.False(ps3Offline.LoadEnabled || ps3Offline.UninstallEnabled || ps3Offline.AutoEnabled);
-        Assert.Equal("Connect to the console first.", ps3Offline.LoadReason);
+        Assert.Equal("Connect to your console first.", ps3Offline.LoadReason);
     }
 
     [Fact]
@@ -455,8 +455,8 @@ public class ModConsoleTests : IDisposable
 
             Assert.True(outcome.Succeeded, outcome.Failure);
             Assert.Null(outcome.RescanProblem);
-            Assert.Equal(new[] { "unloaded", "auto flag off", "deleted from the console", "deleted from your mods folder" }, outcome.Done);
-            Assert.Equal("Bolt mod uninstalled: unloaded, auto flag off, deleted from the console, deleted from your mods folder.",
+            Assert.Equal(new[] { "unloaded", "auto flag off", "deleted from your console", "deleted from your mods folder" }, outcome.Done);
+            Assert.Equal("Bolt mod uninstalled: unloaded, auto flag off, deleted from your console, deleted from your mods folder.",
                 ModUninstall.Describe(plan, outcome));
 
             // In that order, the unload before the folder goes, and the rescan last.
@@ -522,7 +522,7 @@ public class ModConsoleTests : IDisposable
 
             var outcome = await ModUninstall.RunAsync(ModUninstall.Plan(cut, Title, rpcs3: false), client, library, new Rpcs3PatchWriter());
             Assert.True(outcome.Succeeded, outcome.Failure);
-            Assert.Equal(new[] { "auto flag off", "deleted from the console" }, outcome.Done);
+            Assert.Equal(new[] { "auto flag off", "deleted from your console" }, outcome.Done);
 
             Assert.DoesNotContain(server.Files.Keys, k => k.StartsWith(ConsolePath(GuidFolder), StringComparison.Ordinal));
             Assert.DoesNotContain(server.Mods, m => m.DirName == GuidFolder[..31]);
@@ -627,7 +627,7 @@ public class ModConsoleTests : IDisposable
             var outcome = await ModUninstall.RunAsync(plan, client, library, new Rpcs3PatchWriter());
 
             Assert.True(outcome.Succeeded, outcome.Failure);
-            Assert.Equal(new[] { "already gone from the console" }, outcome.Done);
+            Assert.Equal(new[] { "already gone from your console" }, outcome.Done);
         }
     }
 
@@ -777,7 +777,7 @@ public class ModConsoleTests : IDisposable
         ModUninstall.Start(state, ModUninstall.Plan(helper, Title, rpcs3: false));
         Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Text.StartsWith("Savefile helper", StringComparison.Ordinal))));
         Assert.Contains(state.Toasts, t => t.Kind == ToastKind.Success
-                                           && t.Text == "Savefile helper uninstalled: auto flag off, deleted from the console.");
+                                           && t.Text == "Savefile helper uninstalled: auto flag off, deleted from your console.");
 
         Assert.True(await PumpAsync(state, () => state.ModRows().All(r => r.FolderName != "sfhelper-old")));
         Assert.Contains(state.ModRows(), r => r.FolderName == GuidFolder);

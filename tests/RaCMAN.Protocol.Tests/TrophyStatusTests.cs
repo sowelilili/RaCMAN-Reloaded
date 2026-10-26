@@ -127,7 +127,7 @@ public class TrophyStatusLineTests
     [Theory]
     [InlineData(TrophyResetFailure.DeleteStopped, "Trophy reset failed: a trophy file could not be deleted")]
     [InlineData(TrophyResetFailure.Unregistered, "Trophy reset failed: the game could not re-register its trophies")]
-    [InlineData(TrophyResetFailure.NoAnswer, "Trophy reset failed: the console did not answer, restart the game")]
+    [InlineData(TrophyResetFailure.NoAnswer, "Trophy reset failed: your console did not answer, restart the game")]
     [InlineData(TrophyResetFailure.LoadEnded, "Trophy reset failed: the Veldin load ended first")]
     [InlineData(TrophyResetFailure.GameRefused, "Trophy reset failed: the game refused it")]
     [InlineData(TrophyResetFailure.NotTaken, "Trophy reset failed: the game did not respond")]

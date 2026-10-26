@@ -78,7 +78,7 @@ public static class ModUninstall
     {
         var steps = new List<UninstallStep>();
         var notes = new List<string>();
-        string where = rpcs3 ? "qwark-rpcs3's folder" : "the console";
+        string where = rpcs3 ? "qwark-rpcs3's folder" : "your console";
 
         if (!rpcs3 && row.Console is { Loaded: true })
         {
@@ -120,12 +120,12 @@ public static class ModUninstall
         }
         else if (row.Console is not null)
         {
-            notes.Add($"qwark lists it, but its folder is already gone from {where}. A rescan of the console's mod folder drops it from the list"
+            notes.Add($"qwark lists it, but its folder is already gone from {where}. A rescan of your console's mod folder drops it from the list"
                       + (row.Loaded && !rpcs3 ? " once it is unloaded." : "."));
         }
         else if (row.Local is not null)
         {
-            notes.Add(rpcs3 ? "qwark-rpcs3's folder has no copy of it." : "The console has no copy of it.");
+            notes.Add(rpcs3 ? "qwark-rpcs3's folder has no copy of it." : "Your console has no copy of it.");
         }
 
         if (row.Local is { Shipped: false } mine)
@@ -139,7 +139,7 @@ public static class ModUninstall
         else if (row.Local is { Shipped: true })
         {
             notes.Add("It ships with RaCMAN Reloaded, so it cannot be deleted from the application folder: only "
-                      + (rpcs3 ? "the copy in qwark-rpcs3's folder and its RPCS3 patch are" : "the console's copy is")
+                      + (rpcs3 ? "the copy in qwark-rpcs3's folder and its RPCS3 patch are" : "your console's copy is")
                       + " removed, and the mod stays available here"
                       + (rpcs3 ? " to enable again." : ", shown as not uploaded."));
         }
@@ -186,11 +186,11 @@ public static class ModUninstall
                         {
                             await client.DirDeleteAsync(ModLibrary.ConsoleFolder(plan.TitleId, row.ConsoleFolder!), cancellationToken)
                                 .ConfigureAwait(false);
-                            done.Add(plan.Rpcs3 ? "deleted from qwark-rpcs3's folder" : "deleted from the console");
+                            done.Add(plan.Rpcs3 ? "deleted from qwark-rpcs3's folder" : "deleted from your console");
                         }
                         catch (QwarkStatusException ex) when (ex.Status == Status.NotFound)
                         {
-                            done.Add(plan.Rpcs3 ? "already gone from qwark-rpcs3's folder" : "already gone from the console");
+                            done.Add(plan.Rpcs3 ? "already gone from qwark-rpcs3's folder" : "already gone from your console");
                         }
 
                         break;
@@ -203,7 +203,7 @@ public static class ModUninstall
             }
             catch (QwarkStatusException ex)
             {
-                failure = $"\"{step.Text}\" failed: {(plan.Rpcs3 ? "qwark-rpcs3" : "the console")} answered {ex.Status} to {ex.Opcode}";
+                failure = $"\"{step.Text}\" failed: {(plan.Rpcs3 ? "qwark-rpcs3" : "your console")} answered {ex.Status} to {ex.Opcode}";
                 break;
             }
             catch (Exception ex)

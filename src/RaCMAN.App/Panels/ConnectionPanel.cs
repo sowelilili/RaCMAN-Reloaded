@@ -115,7 +115,7 @@ public static class ConnectionPanel
             Ui.DebugHint($"Telemetry port {state.Client.TelemetryPort} | {(state.Telemetry is null ? "no packet yet" : $"{state.Telemetry.Watches.Length} watch values")}");
             if (state.Client.TelemetryViaTcp)
             {
-                Ui.Warning("Live state is coming over TCP: the console's UDP telemetry isn't reaching this PC. "
+                Ui.Warning("Live state is coming over TCP: your console's UDP telemetry isn't reaching this PC. "
                            + "Everything works, but for lower-latency updates allow RaCMAN through the firewall.");
                 DrawFirewallButton(state);
             }
@@ -335,7 +335,7 @@ public static class ConnectionPanel
             _ => "boot_plugins.txt already starts with it.",
         }
         + (result.UiPakSent ? $" Sent {UiPak.FileName} to {UiPak.ConsoleDirectory}." : $" No {UiPak.FileName} was sent.")
-        + " Restart the console; the module only loads at boot.";
+        + " Restart your console; the module only loads at boot.";
 
     /// <summary>
     /// Under the SPRX's path, where it is drawn: a release has ui.pak beside qwark.sprx, so only
@@ -358,7 +358,7 @@ public static class ConnectionPanel
         if (!Ui.Debug || !state.Settings.Ps3.StandaloneConnection) return;
 
         ImGui.BeginDisabled(!state.Connected || !File.Exists(sprx));
-        if (ImGui.Button("Update qwark.sprx on the console now"))
+        if (ImGui.Button("Update qwark.sprx on your console now"))
         {
             state.Settings.Ps3.SprxPath = _sprxPath;
             state.Settings.Save();
@@ -870,8 +870,8 @@ public static class ConnectionPanel
     /// figure it is about, and what to do if the game starts to suffer for it.
     /// </summary>
     public static string VshMemoryLowTooltip(VshMemoryInfo info) =>
-        $"The console's system software (the VSH) is low on memory: {Kb(info.FreeKb)} KB free of "
-        + $"{Kb(info.TotalKb)} KB. Close other plugins or reboot the console if the game becomes unstable.";
+        $"Your console's system software (the VSH) is low on memory: {Kb(info.FreeKb)} KB free of "
+        + $"{Kb(info.TotalKb)} KB. Close other plugins or reboot your console if the game becomes unstable.";
 
     /// <summary>
     /// The debug line under the figures: when and where the lowest reading was, the figure at
@@ -948,9 +948,9 @@ public static class ConnectionPanel
         // setting is about consoles and says nothing about it.
         string sprx = Ps3Connect.ResolveSprx(state.Settings.Ps3.SprxPath);
         string fix = !state.Settings.Ps3.StandaloneConnection || state.Settings.Rpcs3Target
-            ? "Re-upload qwark.sprx with the button below and the console will reload it."
+            ? "Re-upload qwark.sprx with the button below and your console will reload it."
             : File.Exists(sprx)
-                ? "The client is putting the new qwark.sprx on the console by itself; it will say here when "
+                ? "The client is putting the new qwark.sprx on your console by itself; it will say here when "
                   + "the console has to be restarted to load it."
                 : $"There is no qwark.sprx beside this client to send ({sprx}).";
 
@@ -961,12 +961,12 @@ public static class ConnectionPanel
             // Revision 1.24: the same number, and not the same module (PROTOCOL.md 3.1.1).
             string console = hello.DevBuild ? $"test build 0x{hello.BuildId:X8}" : "the release";
             string ours = state.ShippedModule is { } shipped ? shipped.Describe() : $"build {QwarkClient.ExpectedQwarkBuild}";
-            Ui.Warning($"The console is running {console} of qwark build {hello.QwarkVersion}; this client shipped with "
+            Ui.Warning($"Your console is running {console} of qwark build {hello.QwarkVersion}; this client shipped with "
                        + $"{ours}. " + fix);
             return;
         }
 
-        Ui.Warning($"The console is running qwark build {hello.QwarkVersion}; this client shipped with build "
+        Ui.Warning($"Your console is running qwark build {hello.QwarkVersion}; this client shipped with build "
                    + $"{QwarkClient.ExpectedQwarkBuild}. " + fix);
     }
 
@@ -1011,7 +1011,7 @@ public static class ConnectionPanel
 
         if (hello.ProtocolVersion != QwarkClient.ClientProtocolVersion)
         {
-            Ui.Error($"Protocol mismatch: the console speaks version {hello.ProtocolVersion}, this client speaks "
+            Ui.Error($"Protocol mismatch: your console speaks version {hello.ProtocolVersion}, this client speaks "
                      + $"{QwarkClient.ClientProtocolVersion}. Payload layouts differ between versions; update "
                      + "whichever side is older.");
         }

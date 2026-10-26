@@ -187,7 +187,7 @@ public sealed partial class FakeQwarkServer
     // ------------------------------------------------------------------ under the gate
 
     /// <summary>Byte 29 bit1, as this fake reports it.</summary>
-    private bool ProfilesLive => _profilesSupported && (_session.Flags & SessionFlags.Emulator) == 0;
+    private bool ProfilesLive => _profilesSupported && !_releaseModule && (_session.Flags & SessionFlags.Emulator) == 0;
 
     /// <summary>Whose profile is active: the signed-in user's with the switch on, 0 (the shared settings) otherwise.</summary>
     private uint ActiveUser => ProfilesLive && _profilesEnabled ? _signedInUser : 0;

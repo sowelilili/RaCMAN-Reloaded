@@ -496,7 +496,7 @@ public class SprxUpdateTests
 
         var error = Assert.Single(state.Toasts, t => t.Kind == ToastKind.Error);
         Assert.StartsWith(
-            $"Updating qwark.sprx on the console failed while uploading ui.pak to {UiPak.StagedPath}: ",
+            $"Updating qwark.sprx on your console failed while uploading ui.pak to {UiPak.StagedPath}: ",
             error.Text, StringComparison.Ordinal);
         Assert.Equal(onConsole, server.Files[WebManLoader.BootPath]);
         Assert.Equal(0, state.QwarkUpdateStaged);

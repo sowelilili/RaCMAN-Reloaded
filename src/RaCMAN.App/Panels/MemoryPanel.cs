@@ -246,7 +246,7 @@ public static class MemoryPanel
         if (_mobyRows.Length == 0)
         {
             Ui.Hint(enabled
-                ? "Read the table to list the mobys the console is updating."
+                ? "Read the table to list the mobys your console is updating."
                 : $"Reading the moby table needs INGAME (state is {state.Session.State.DisplayName()}).");
             return;
         }
@@ -1446,7 +1446,7 @@ public static class MemoryPanel
                     state.RefreshFreezes();
                     state.RefreshPatches();
                 });
-            }, "Client state cleared on the console");
+            }, "Client state cleared on your console");
         }
 
         ImGui.EndDisabled();

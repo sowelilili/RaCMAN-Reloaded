@@ -514,8 +514,8 @@ public class VshMemoryTests
     [Fact]
     public void TheLowMemoryHoverGivesTheFigureAndWhatToDo()
     {
-        Assert.Equal("The console's system software (the VSH) is low on memory: 400 KB free of 20,480 KB. "
-                     + "Close other plugins or reboot the console if the game becomes unstable.",
+        Assert.Equal("Your console's system software (the VSH) is low on memory: 400 KB free of 20,480 KB. "
+                     + "Close other plugins or reboot your console if the game becomes unstable.",
             ConnectionPanel.VshMemoryLowTooltip(Figures with { Free = 400 * 1024, Total = 20480 * 1024 }));
     }
 

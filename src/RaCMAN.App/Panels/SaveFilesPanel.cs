@@ -269,8 +269,8 @@ public static class SaveFilesPanel
         Ui.Text(Ui.Grey, premade
             ? "Premade savefiles ship with RaCMAN Reloaded and are read-only."
             : state.Settings.MirrorSaveFiles
-                ? "Saves are stored on the console and mirrored here."
-                : "Saves are stored on the console. Mirroring to this PC is off.");
+                ? "Saves are stored on your console and mirrored here."
+                : "Saves are stored on your console. Mirroring to this PC is off.");
 
         if (hasHelper)
         {
@@ -326,7 +326,7 @@ public static class SaveFilesPanel
         if (_listing)
         {
             ImGui.SameLine();
-            Ui.Text(Ui.Grey, "reading the console...");
+            Ui.Text(Ui.Grey, "reading your console...");
         }
 
         ImGui.SetNextItemWidth(220);
@@ -634,17 +634,17 @@ public static class SaveFilesPanel
     /// <summary>What the rename dialog says will be renamed, by where the save lives.</summary>
     public static string RenameWhere(SaveFileEntry entry) => entry.Location switch
     {
-        SaveFileLocation.Console => "Only the console has this save, so only its copy is renamed.",
+        SaveFileLocation.Console => "Only your console has this save, so only its copy is renamed.",
         SaveFileLocation.Pc => "Only this PC has this save, so only its copy is renamed.",
-        _ => "The console's copy and this PC's are both renamed.",
+        _ => "Your console's copy and this PC's are both renamed.",
     };
 
     /// <summary>What the delete dialog says will be deleted, by where the save lives.</summary>
     public static string DeleteWhere(SaveFileEntry entry) => entry.Location switch
     {
-        SaveFileLocation.Console => $"{entry.DisplayName} will be deleted from the console. This PC has no copy of it.",
-        SaveFileLocation.Pc => $"{entry.DisplayName} will be deleted from this PC. The console has no copy of it.",
-        _ => $"{entry.DisplayName} will be deleted from the console and from this PC.",
+        SaveFileLocation.Console => $"{entry.DisplayName} will be deleted from your console. This PC has no copy of it.",
+        SaveFileLocation.Pc => $"{entry.DisplayName} will be deleted from this PC. Your console has no copy of it.",
+        _ => $"{entry.DisplayName} will be deleted from your console and from this PC.",
     };
 
     /// <summary>
@@ -846,7 +846,7 @@ public static class SaveFilesPanel
 
         _busy = true;
         _transferred = 0;
-        _status = "Asking the console to save...";
+        _status = "Asking your console to save...";
 
         var status = new Progress<string>(text => state.Post(() => _status = text));
         var bytes = new Progress<long>(count => state.Post(() => _transferred = count));
@@ -903,8 +903,8 @@ public static class SaveFilesPanel
         _busy = true;
         _transferred = 0;
         _status = SaveFileMerge.PlanLoad(entry) == SaveFileLoadPlan.UploadThenRestore
-            ? $"Uploading {entry.DisplayName} to the console..."
-            : $"Asking the console to load {entry.DisplayName}...";
+            ? $"Uploading {entry.DisplayName} to your console..."
+            : $"Asking your console to load {entry.DisplayName}...";
 
         var status = new Progress<string>(text => state.Post(() => _status = text));
         var bytes = new Progress<long>(count => state.Post(() => _transferred = count));
@@ -921,8 +921,8 @@ public static class SaveFilesPanel
                 state.Post(() =>
                 {
                     _status = uploaded
-                        ? "Uploaded to the console and loaded into the game"
-                        : "Loaded into the game from the console";
+                        ? "Uploaded to your console and loaded into the game"
+                        : "Loaded into the game from your console";
                     state.AddToast($"Loaded '{entry.DisplayName}'", ToastKind.Success);
                     if (uploaded) Rescan(state, title);
 

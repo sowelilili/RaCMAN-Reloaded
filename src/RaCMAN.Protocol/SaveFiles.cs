@@ -586,7 +586,7 @@ public static class SaveFileTransfer
         var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
         if (!info.Supported)
         {
-            throw new NotAnsweredException("this game has no savefile helper on the console");
+            throw new NotAnsweredException("this game has no savefile helper on your console");
         }
 
         status?.Report($"FEATURE_TRIGGER {saveActionId} (set aside)");
@@ -596,14 +596,14 @@ public static class SaveFileTransfer
         info = await WaitAsync(client, i => !i.SetAsidePending, timeout, cancellationToken)
             .ConfigureAwait(false);
 
-        status?.Report($"Reading {info.Size} bytes from the console");
+        status?.Report($"Reading {info.Size} bytes from your console");
         var data = await client.SaveFileDownloadAsync(info.Size, bytes, cancellationToken)
             .ConfigureAwait(false);
 
         if (data.Length != info.Size)
         {
             throw new NotAnsweredException(
-                $"the console sent {data.Length} bytes of a {info.Size}-byte save");
+                $"your console sent {data.Length} bytes of a {info.Size}-byte save");
         }
 
         return data;
@@ -664,7 +664,7 @@ public static class SaveFileTransfer
         var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
         if (!info.Supported)
         {
-            throw new NotAnsweredException("this game has no savefile helper on the console");
+            throw new NotAnsweredException("this game has no savefile helper on your console");
         }
 
         if (data.Length != info.Size)
@@ -674,7 +674,7 @@ public static class SaveFileTransfer
                 "so it is not a save this game can take");
         }
 
-        status?.Report($"Writing {data.Length} bytes to the console");
+        status?.Report($"Writing {data.Length} bytes to your console");
         await client.SaveFileUploadAsync(data, bytes, cancellationToken).ConfigureAwait(false);
 
         status?.Report($"FEATURE_TRIGGER {loadActionId} (load set aside)");
@@ -813,7 +813,7 @@ public static class SaveFileTransfer
             if (DateTime.UtcNow >= deadline)
             {
                 throw new NotAnsweredException(
-                    $"the console was still copying after {limit.TotalSeconds:0.#} s. The helper only " +
+                    $"your console was still copying after {limit.TotalSeconds:0.#} s. The helper only " +
                     "runs while the game is running, so try again once the game is in play.");
             }
 
@@ -849,7 +849,7 @@ public static class SaveFileTransfer
     {
         if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("nothing can be saved into them");
 
-        status?.Report($"Asking the console to save '{SaveFileLibrary.DisplayName(name)}'...");
+        status?.Report($"Asking your console to save '{SaveFileLibrary.DisplayName(name)}'...");
         await RaiseAsync(client, SaveFileRequest.Store,
                 token => client.SaveFileStoreAsync(category, name, token), cancellationToken)
             .ConfigureAwait(false);
@@ -887,7 +887,7 @@ public static class SaveFileTransfer
         var data = library.Read(titleId, category, name);
         var path = QwarkClient.SaveFileConsolePath(titleId, category, name);
 
-        status?.Report($"Uploading {data.Length} bytes to the console");
+        status?.Report($"Uploading {data.Length} bytes to your console");
 
         // The category may only exist here, and a file cannot be written into a folder that is
         // not there. Creating one that already exists is not an error.
@@ -931,7 +931,7 @@ public static class SaveFileTransfer
                 .ConfigureAwait(false);
         }
 
-        status?.Report($"Asking the console to load '{entry.DisplayName}'...");
+        status?.Report($"Asking your console to load '{entry.DisplayName}'...");
         await RaiseAsync(client, SaveFileRequest.Restore,
                 token => client.SaveFileRestoreAsync(category, entry.Name, token), cancellationToken)
             .ConfigureAwait(false);
@@ -1027,7 +1027,7 @@ public static class SaveFileTransfer
             if (DateTime.UtcNow >= deadline)
             {
                 throw new NotAnsweredException(
-                    $"the console did not answer within {limit.TotalSeconds:0.#} s. The helper only " +
+                    $"your console did not answer within {limit.TotalSeconds:0.#} s. The helper only " +
                     "runs while the game is running, so try again once the game is in play.");
             }
 

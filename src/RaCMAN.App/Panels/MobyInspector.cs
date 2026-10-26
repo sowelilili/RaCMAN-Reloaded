@@ -235,7 +235,7 @@ public static class MobyInspector
         {
             Ui.Hint(canRead
                 ? "Reading the row..."
-                : "The row is read while the console is connected and answering.");
+                : "The row is read while your console is connected and answering.");
             return;
         }
 

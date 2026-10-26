@@ -198,7 +198,7 @@ public static class ModsPanel
                 }
 
                 ImGui.EndDisabled();
-                if (row.UsbOnly && actions.AutoEnabled) Ui.Tooltip("Ticking it copies the mod from the USB drive onto the console, which then loads it by itself whenever the game boots.");
+                if (row.UsbOnly && actions.AutoEnabled) Ui.Tooltip("This will copy the mod onto your console.");
 
                 ImGui.TableNextColumn();
                 DrawActions(state, title, row, actions);
@@ -217,7 +217,7 @@ public static class ModsPanel
     }
 
     private const string ConsoleOnlyTooltip =
-        "Only the console has this mod: no mods folder on this PC holds it. Right-click it to uninstall it from the console.";
+        "This mod isn't installed on this PC. It's still available on your console.";
 
     private static Vector4 ColourOf(ModTone tone) => tone switch
     {
@@ -229,31 +229,28 @@ public static class ModsPanel
 
     /// <summary>
     /// What hovering the Console cell of a row with a USB copy says (revision 1.24). The cell itself
-    /// is only a word or two ("update ready", "on USB"); this is where the detail lives: where the
-    /// copy is, both versions, and what the console does with it. A copy with the console's version
-    /// and other contents is a warning that the console uses its own.
+    /// is only a word or two ("update ready", "on USB"); this says a little more: which drive, the
+    /// USB copy's version, and which copy the console uses.
     /// </summary>
     public static string UsbTooltip(ModRow row, string title)
     {
         var usb = row.Usb!;
         string version = usb.Version.Length > 0 ? usb.Version : "none";
-        string where = $"{usb.PathFor(title)}, version {version}";
-        string consoleVersion = row.Console is { Version.Length: > 0 } c ? c.Version : "none";
+        string drive = usb.DriveName;
         return usb.State switch
         {
-            UsbModState.Available when row.UsbOnly =>
-                $"Only on the console's USB drive, at {where}. Load copies it onto the console and loads it.",
-            UsbModState.Available => $"Not on the console yet. The console's USB drive has this mod, at {where}.",
+            UsbModState.Available =>
+                $"Available on {drive}",
             UsbModState.Newer when usb.Waiting =>
-                $"Update ready: USB version {version}, console version {consoleVersion}, at {usb.PathFor(title)}. The mod is loaded now, so the console applies the update the next time it loads.",
+                $"Update {version} ready on {drive}: reload to update",
             UsbModState.Newer =>
-                $"Update ready: USB version {version}, console version {consoleVersion}, at {usb.PathFor(title)}. Loading the mod takes the update.",
-            UsbModState.Older => $"The USB drive has an older version, at {where}. The console keeps its own.",
+                $"Update {version} ready on {drive}: enable to update",
+            UsbModState.Older => $"Outdated copy (version {version}) found on {drive}: using your console's copy instead",
             UsbModState.Conflict =>
-                $"Warning: the copy on the USB drive, at {usb.PathFor(title)}, has the same version ({version}) as the console's but different contents. The console uses its own copy, not the USB one. Uninstall the mod from the console to load the USB copy instead.",
+                $"Conflicting copy found on {drive}: using your console's copy instead",
             UsbModState.Broken =>
-                $"The copy on the USB drive, at {where}, cannot be used: {usb.ProblemText}." + (row.Console is null ? string.Empty : " The console uses its own copy."),
-            _ => $"The console's USB drive has this same copy, at {where}.",
+                $"The copy on {drive} cannot be used: {usb.ProblemText}" + (row.Console is null ? string.Empty : ". Using the console's copy instead."),
+            _ => $"Also on {drive}",
         };
     }
 
@@ -403,7 +400,7 @@ public static class ModsPanel
         if (!plan.NothingToDo)
         {
             ImGui.Spacing();
-            Ui.Hint((plan.Rpcs3 ? "qwark-rpcs3" : "The console") + " then rescans its mod folder. If a step fails, the steps after it are not done.");
+            Ui.Hint((plan.Rpcs3 ? "qwark-rpcs3" : "Your console") + " then rescans its mod folder. If a step fails, the steps after it are not done.");
             if (plan.Rpcs3 && plan.Steps.Any(step => step.Kind == UninstallStepKind.RemoveRpcs3Patch))
             {
                 Ui.Hint("RPCS3 applies patches when the game boots, so a mod in the game now stays there until the game is restarted in RPCS3.");
@@ -480,7 +477,7 @@ public static class ModsPanel
         ImGui.Spacing();
         Ui.Paragraph($"Rename the folder to {newName}?");
         ImGui.Spacing();
-        Ui.Hint("Only the folder in your mods folder is renamed. A copy the console already has under the old name stays "
+        Ui.Hint("Only the folder in your mods folder is renamed. A copy your console already has under the old name stays "
                 + "there; it shows in this list as a console-only mod, and Uninstall removes it.");
         ImGui.Separator();
 
@@ -852,8 +849,8 @@ public static class ModsPanel
         if (row.Local is { } mod) return TooltipFor(mod);
 
         string text = string.IsNullOrWhiteSpace(row.Author) ? row.Name : $"{row.Name}\nby {row.Author}";
-        if (row.UsbOnly) return text + $"\nOnly on the console's USB drive ({row.Usb!.DriveName}), in {row.FolderName}";
-        return text + $"\nOnly on the console, in {row.FolderName}";
+        if (row.UsbOnly) return text + $"\nOnly on your console's USB drive ({row.Usb!.DriveName}), in {row.FolderName}";
+        return text + $"\nOnly on your console, in {row.FolderName}";
     }
 
     private static void DrawActions(AppState state, string title, ModRow row, ModRowActions actions)
@@ -903,7 +900,7 @@ public static class ModsPanel
 
                     await state.Client.ModLoadAsync(mod.DirName);
                     state.Post(() => state.RefreshMods());
-                }, keep ? $"{mod.Name} loaded: the console's newer copy" : $"{mod.Name} loaded");
+                }, keep ? $"{mod.Name} loaded: your console's newer copy" : $"{mod.Name} loaded");
             }
             else if (load && (row.ListedName ?? (row.UsbOnly ? row.Usb!.DirName : null)) is { } dir)
             {
@@ -977,7 +974,7 @@ public static class ModsPanel
         DrawUsbLine(title, row);
         if (ModTable.LoadKeepsNewerConsoleCopy(row))
         {
-            Ui.Hint("The console has a newer version of this mod, or its USB drive does, so Load uses that one and does not upload this PC's copy.");
+            Ui.Hint("Your console has a newer version of this mod, or its USB drive does, so Load uses that one and does not upload this PC's copy.");
         }
 
         if (mod.FolderNameTooLong)
@@ -1040,22 +1037,22 @@ public static class ModsPanel
     private static void DrawUsbOnlyDetails(string title, ModRow row)
     {
         var usb = row.Usb!;
-        ImGui.TextUnformatted($"Folder: {usb.PathFor(title)}  (on the console's USB drive, {usb.DriveName})");
+        ImGui.TextUnformatted($"Folder: {usb.PathFor(title)}  (on your console's USB drive, {usb.DriveName})");
         ImGui.TextUnformatted($"Version: {(string.IsNullOrEmpty(usb.Version) ? "-" : usb.Version)}    Author: {(string.IsNullOrEmpty(usb.Author) ? "-" : usb.Author)}");
 
         if (usb.State == UsbModState.Broken)
         {
-            Ui.Error($"The console cannot copy this mod: {usb.ProblemText}.");
+            Ui.Error($"Your console cannot copy this mod: {usb.ProblemText}.");
             return;
         }
 
-        Ui.Hint("It is not installed on the console. Load copies it onto the console and loads it; ticking Auto copies it and loads it at every boot. Nothing is ever written to the USB drive.");
+        Ui.Hint("It is not installed on your console. Load copies it onto your console and loads it; ticking Auto copies it and loads it at every boot. Nothing is ever written to the USB drive.");
     }
 
     /// <summary>What there is to say about a mod only the console has: where it is, what qwark makes of it, and what to do about it.</summary>
     private static void DrawConsoleOnlyDetails(AppState state, string title, ModRow row, bool rpcs3)
     {
-        string where = rpcs3 ? "qwark-rpcs3's folder" : "the console";
+        string where = rpcs3 ? "qwark-rpcs3's folder" : "your console";
         ImGui.TextUnformatted(row.ConsoleFolder is { } folder
             ? $"Folder: {ModLibrary.ConsoleFolder(title, folder)}  (only on {where})"
             : $"qwark lists it as {row.ListedName}, and its folder is not in {where}'s mod folder any more.");

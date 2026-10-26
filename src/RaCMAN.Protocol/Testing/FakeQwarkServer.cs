@@ -512,7 +512,29 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// </summary>
     public bool ReportsUsbMods { get; set; } = true;
 
-    private bool UsbModsOn => ReportsUsbMods && !NoCodePatches;
+    /// <summary>
+    /// A release module of build 56 (qwark's <c>make release</c>, PROTOCOL.md 3.1.2): it leaves out
+    /// the features still being tried out, the USB mods and the per-user settings. flags2 bits 0
+    /// to 3 and byte 30 stay 0, no COMBO_LIST row is overridden, and MOD_USB_LIST, PROFILE_INFO,
+    /// PROFILE_ENABLE and COMBO_OVERRIDE answer UNSUPPORTED rather than a module before build 56's
+    /// UNKNOWN_OP. Whatever <see cref="ReportsUsbMods"/> and <see cref="ProfilesSupported"/> say.
+    /// </summary>
+    public bool ReleaseModule
+    {
+        get { lock (_gate) return _releaseModule; }
+        set
+        {
+            lock (_gate)
+            {
+                _releaseModule = value;
+                SyncProfiles();
+            }
+        }
+    }
+
+    private bool _releaseModule;
+
+    private bool UsbModsOn => ReportsUsbMods && !NoCodePatches && !_releaseModule;
 
     /// <summary>How many mods a load or an auto-load switch has copied in from a USB drive.</summary>
     public int UsbTakes { get; private set; }
@@ -2822,6 +2844,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                 // Revision 1.24: the mods on the fake console's USB drives, read out of Files.
                 case Opcode.ModUsbList:
                 {
+                    if (_releaseModule) return (Status.Unsupported, null);
                     if (!ReportsUsbMods) return (Status.UnknownOp, null);
                     if (NoCodePatches) return (Status.Unsupported, null);
 
@@ -2965,6 +2988,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                 case Opcode.ProfileInfo:
                 case Opcode.ProfileEnable:
                 case Opcode.ComboOverride:
+                    if (_releaseModule) return (Status.Unsupported, null);
                     return HandleProfiles(opcode, payload);
 
                 case Opcode.DirCreate:

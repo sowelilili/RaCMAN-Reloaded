@@ -698,7 +698,7 @@ public class ProfileTests
     [Fact]
     public void TheStatusLineSaysWhoseSettingsAreBeingEdited()
     {
-        Assert.Equal("Editing the console's shared settings", SettingsPanel.ProfileStatus(ConsoleSession, User1));
+        Assert.Equal("Editing your console's shared settings", SettingsPanel.ProfileStatus(ConsoleSession, User1));
         Assert.Equal("Per-user settings are on; waiting for a user to sign in",
             SettingsPanel.ProfileStatus(With(ProfileFlags.On), ProfileInfo.None));
 
@@ -748,14 +748,33 @@ public class ProfileTests
     [Fact]
     public void ClearTwiceOnAnOverriddenRowClearsTheOverrideThenTheCombo()
     {
+        var active = With(ProfileFlags.On | ProfileFlags.Active);
         var overridden = new ComboEntry(ComboAction.Die, Own, ComboEntryFlags.Overridden);
-        Assert.Equal(CombosPanel.ClearRequest.RemoveOverride, CombosPanel.ClearFor(overridden));
-        Assert.True(CombosPanel.CaptureIsOverride(overridden));
+        Assert.Equal(CombosPanel.ClearRequest.RemoveOverride, CombosPanel.ClearFor(active, overridden));
+        Assert.True(CombosPanel.CaptureIsOverride(active, overridden));
 
         // What COMBO_LIST says after the first Clear: the shared combo, unflagged.
         var afterFirst = new ComboEntry(ComboAction.Die, Shared);
-        Assert.Equal(CombosPanel.ClearRequest.ClearShared, CombosPanel.ClearFor(afterFirst));
-        Assert.False(CombosPanel.CaptureIsOverride(afterFirst));
+        Assert.Equal(CombosPanel.ClearRequest.ClearShared, CombosPanel.ClearFor(active, afterFirst));
+        Assert.False(CombosPanel.CaptureIsOverride(active, afterFirst));
+    }
+
+    /// <summary>
+    /// A module without per-user settings (a release of build 56, PROTOCOL.md 3.1.2) never flags a
+    /// row; if one did, the row is a shared one all the same: drawn plain, cleared with COMBO_SET,
+    /// captured with COMBO_SET, and given no Override button.
+    /// </summary>
+    [Fact]
+    public void WithoutPerUserSettingsNoRowIsAnOverride()
+    {
+        var release = SessionInfo.Empty with { QwarkVersion = 56 };
+        var flagged = new ComboEntry(ComboAction.Die, Own, ComboEntryFlags.Overridden);
+
+        Assert.False(CombosPanel.IsOverridden(release, flagged));
+        Assert.Equal(CombosPanel.ClearRequest.ClearShared, CombosPanel.ClearFor(release, flagged));
+        Assert.False(CombosPanel.CaptureIsOverride(release, flagged));
+        Assert.False(CombosPanel.ShowsOverride(release));
+        Assert.False(CombosPanel.ShowsOverrideButton(release, new ComboEntry(ComboAction.Die, Shared)));
     }
 
     /// <summary>The Default button is gone; the console menu's row names its default in the tooltip instead.</summary>
@@ -828,6 +847,36 @@ public class ProfileTests
         await PumpForAsync(other, 600);
         Assert.Equal(0, Count(old, Opcode.ProfileInfo));
         Assert.Equal(ProfileInfo.None, other.Profile);
+    }
+
+    /// <summary>
+    /// A release module of build 56 leaves the per-user settings out (PROTOCOL.md 3.1.2): no bits,
+    /// and the ops UNSUPPORTED. The client shows nothing of them and sends none of the three ops,
+    /// even when the Settings panel's switch or the copy-or-defaults answer is reached for anyway.
+    /// </summary>
+    [Fact]
+    public async Task AReleaseModuleWithoutPerUserSettingsIsNeverAskedAnything()
+    {
+        using var server = StartServer();
+        server.ReleaseModule = true;
+        using var state = await ConnectedStateAsync(server);
+
+        Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0));
+        await PumpForAsync(state, 600);
+        Assert.False(SettingsPanel.ShowsProfiles(state.Session));
+        Assert.False(CombosPanel.ShowsOverride(state.Session));
+        Assert.Equal(ProfileInfo.None, state.Profile);
+
+        state.TurnProfilesOn();
+        state.TurnProfilesOff();
+        state.AnswerProfileQuestion(ProfileSetup.Copy);
+        await PumpForAsync(state, 300);
+
+        Assert.Null(state.ProfileQuestion);
+        Assert.Equal(0, Count(server, Opcode.ProfileInfo));
+        Assert.Equal(0, Count(server, Opcode.ProfileEnable));
+        Assert.Equal(0, Count(server, Opcode.ComboOverride));
+        Assert.True(state.Combos.All(c => !CombosPanel.IsOverridden(state.Session, c)));
     }
 
     [Fact]

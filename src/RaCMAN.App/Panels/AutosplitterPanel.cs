@@ -141,7 +141,7 @@ public static class AutosplitterPanel
         if (descriptors.Length == 0)
         {
             Ui.Hint(state.QwarkStale
-                ? "The console's qwark is older than this client and has no autosplitter for this game. Re-upload qwark.sprx."
+                ? "Your console's qwark is older than this client and has no autosplitter for this game. Re-upload qwark.sprx."
                 : "qwark has no autosplitter for this game, so there is nothing to configure.");
             return;
         }
@@ -329,7 +329,7 @@ public static class AutosplitterPanel
         var entries = splitter.Log();
         if (entries.Length == 0)
         {
-            Ui.Hint("Nothing yet. Events arrive from the console the moment it detects them.");
+            Ui.Hint("Nothing yet. Events arrive from your console the moment it detects them.");
             return;
         }
 

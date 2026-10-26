@@ -142,8 +142,8 @@ public class UsbModTests
         Assert.False(actions.Unload);
         Assert.False(actions.UninstallEnabled);
         Assert.Contains("USB drive", actions.UninstallReason);
-        Assert.Contains("Only on the console's USB drive", ModsPanel.TooltipFor(usb));
-        Assert.Contains("Load copies it onto the console", ModsPanel.UsbTooltip(usb, Title));
+        Assert.Contains("Only on your console's USB drive", ModsPanel.TooltipFor(usb));
+        Assert.Equal("Available on USB000", ModsPanel.UsbTooltip(usb, Title));
 
         Assert.False(table[1].UsbOnly);
         Assert.True(table[1].ConsoleOnly);
@@ -222,20 +222,16 @@ public class UsbModTests
             ModTable.ConsoleStatus(RowWith(Usb("lock_rng", UsbModState.Broken, problem: UsbModProblem.TooBig))));
 
         var update = RowWith(Usb("lock_rng", UsbModState.Newer, "1.1", port: 2));
-        string tip = ModsPanel.UsbTooltip(update, Title);
-        Assert.Contains("Update ready", tip);
-        Assert.Contains("USB version 1.1", tip);
-        Assert.Contains("console version 1.0", tip);
-        Assert.Contains("/dev_usb002/", tip);
-        Assert.Contains("Loading the mod takes the update", tip);
+        Assert.Equal("Update 1.1 ready on USB002: enable to update", ModsPanel.UsbTooltip(update, Title));
 
         var waiting = RowWith(Usb("lock_rng", UsbModState.Newer, "1.1", UsbModFlags.Waiting), loaded: true);
-        Assert.Contains("next time it loads", ModsPanel.UsbTooltip(waiting, Title));
+        Assert.Equal("Update 1.1 ready on USB000: reload to update", ModsPanel.UsbTooltip(waiting, Title));
 
-        string warning = ModsPanel.UsbTooltip(RowWith(Usb("lock_rng", UsbModState.Conflict)), Title);
-        Assert.StartsWith("Warning:", warning);
-        Assert.Contains("different contents", warning);
-        Assert.Contains("uses its own copy", warning);
+        Assert.Equal("Outdated copy (version 0.9) found on USB000: using your console's copy instead",
+            ModsPanel.UsbTooltip(RowWith(Usb("lock_rng", UsbModState.Older, "0.9")), Title));
+        Assert.Equal("Conflicting copy found on USB000: using your console's copy instead",
+            ModsPanel.UsbTooltip(RowWith(Usb("lock_rng", UsbModState.Conflict)), Title));
+        Assert.Equal("Also on USB000", ModsPanel.UsbTooltip(RowWith(Usb("lock_rng", UsbModState.Same)), Title));
     }
 
     // ================================================================ against the fake console
@@ -424,5 +420,54 @@ public class UsbModTests
             }
 
         }
+    }
+
+    /// <summary>
+    /// A release module of build 56 leaves the USB mods out (PROTOCOL.md 3.1.2): flags2 bit0 clear
+    /// and MOD_USB_LIST UNSUPPORTED. With a drive full of mods on the fake console the client never
+    /// asks for the list, and the Mods panel has no USB row, cell or tooltip to draw.
+    /// </summary>
+    [Fact]
+    public async Task AReleaseModuleWithoutUsbModsIsNeverAskedAndShowsNoUsbRows()
+    {
+        using var server = new FakeQwarkServer { ReleaseModule = true };
+        server.Start();
+        server.AddUsbMod(0, "usb-only", "USB only");
+
+        using (var client = new QwarkClient { AutoReconnect = false })
+        {
+            await client.ConnectAsync("127.0.0.1", server.Port);
+            Assert.False((await client.HelloAsync()).UsbMods);
+            var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => client.ModUsbListAsync());
+            Assert.Equal(Status.Unsupported, refused.Status);
+        }
+
+        server.ClearRequestLog();
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+
+        var sw = Stopwatch.StartNew();
+        bool refreshed = false;
+        while (sw.ElapsedMilliseconds < 1500)
+        {
+            state.Tick(1f / 60f);
+            if (state.Connected && !refreshed)
+            {
+                state.RefreshMods();
+                state.RefreshUsbMods();
+                refreshed = true;
+            }
+
+            await Task.Delay(16);
+        }
+
+        state.Tick(1f / 60f);
+        Assert.True(refreshed);
+        Assert.False(state.Session.UsbMods);
+        Assert.Empty(state.ConsoleUsbMods);
+        Assert.DoesNotContain(state.ModRows(), row => row.UsbOnly || row.Usb is not null);
+        Assert.DoesNotContain(server.RequestLog(), op => op == Opcode.ModUsbList);
+        Assert.Contains(server.RequestLog(), op => op == Opcode.ModList);
     }
 }

@@ -41,7 +41,7 @@ public static class UiPak
     public const string MissingNote = "No ui.pak beside qwark.sprx: the Trainer menu will not load in games";
 
     /// <summary>The one sentence for a pak the console's FTP server refused; the module is sent all the same.</summary>
-    public const string SendFailedNote = "Could not send ui.pak to the console: the Trainer menu will not load in games";
+    public const string SendFailedNote = "Could not send ui.pak to your console: the Trainer menu will not load in games";
 
     /// <summary>
     /// The client's own copy: beside the qwark.sprx it sends, whichever path that resolved to.

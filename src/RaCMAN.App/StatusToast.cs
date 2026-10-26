@@ -32,9 +32,9 @@ public static class StatusToast
     /// </summary>
     public static string WhileBusy(SessionState state) => state switch
     {
-        SessionState.Booting => "The console is starting a game; try again in a moment",
-        SessionState.Quitting => "The console is putting a game away; try again in a moment",
-        _ => "The console is busy; try again in a moment",
+        SessionState.Booting => "Your console is starting a game; try again in a moment",
+        SessionState.Quitting => "Your console is putting a game away; try again in a moment",
+        _ => "Your console is busy; try again in a moment",
     };
 
     /// <summary>
@@ -53,7 +53,7 @@ public static class StatusToast
         // or a transfer, and "Busy" on its own is not something anyone can act on.
         if (status == Status.Busy && state != SessionState.Ingame) return WhileBusy(state);
 
-        return debug ? $"{opcode}: {status}" : $"The console refused that: {status}";
+        return debug ? $"{opcode}: {status}" : $"Your console refused that: {status}";
     }
 }
 

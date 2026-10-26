@@ -178,7 +178,7 @@ public static class SettingsPanel
     /// </summary>
     public static string ProfileStatus(SessionInfo session, ProfileInfo profile)
     {
-        if (!session.ProfilesOn) return "Editing the console's shared settings";
+        if (!session.ProfilesOn) return "Editing your console's shared settings";
         if (!session.ProfileActive) return "Per-user settings are on; waiting for a user to sign in";
         if (!profile.SignedIn) return "Editing the signed-in user's settings";
 
@@ -580,10 +580,10 @@ public static class SettingsPanel
                               + $"on {planets} planet{(planets == 1 ? string.Empty : "s")}");
 
         Ui.Hint(state.Ingame && state.Positions.Slots.Length > 0
-            ? "Only the planet the console has loaded is imported, and a slot that already holds a "
+            ? "Only the planet your console has loaded is imported, and a slot that already holds a "
               + $"position is left alone. {_positionPlan.Describe()}. Load another planet and import "
               + "again for the rest."
-            : "They are imported into the planet the console has loaded, so connect, start the game "
+            : "They are imported into the planet your console has loaded, so connect, start the game "
               + "and go to the planet they were saved on.");
     }
 
@@ -747,7 +747,7 @@ public static class SettingsPanel
                         if (left > 0)
                         {
                             state.AddToast(
-                                $"The console refused {left} saved position(s) for {positions.PlanetName}: {refused}",
+                                $"Your console refused {left} saved position(s) for {positions.PlanetName}: {refused}",
                                 ToastKind.Error);
                         }
 
@@ -773,7 +773,7 @@ public static class SettingsPanel
 
                     if (missing.Length > 0)
                     {
-                        state.AddToast($"Not on the console yet, so not flagged: {string.Join(", ", missing)}. Load each once, then import again.");
+                        state.AddToast($"Not on your console yet, so not flagged: {string.Join(", ", missing)}. Load each once, then import again.");
                     }
                 });
             }

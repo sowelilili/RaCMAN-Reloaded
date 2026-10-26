@@ -147,7 +147,16 @@ public static class CombosPanel
 
     /// <summary>The Override button is on the rows that have none yet; an overridden row's Capture re-captures it.</summary>
     public static bool ShowsOverrideButton(SessionInfo session, ComboEntry entry) =>
-        ShowsOverride(session) && !entry.Overridden;
+        ShowsOverride(session) && !IsOverridden(session, entry);
+
+    /// <summary>
+    /// Whether a row is this user's own combo: COMBO_LIST flags it, and only while the console has
+    /// per-user settings at all. A module without them (a release of build 56, PROTOCOL.md 3.1.2)
+    /// never flags a row; if one did, the row is still drawn and cleared as a shared one, so
+    /// nothing here sends COMBO_OVERRIDE to it.
+    /// </summary>
+    public static bool IsOverridden(SessionInfo session, ComboEntry entry) =>
+        SettingsPanel.ShowsProfiles(session) && entry.Overridden;
 
     /// <summary>What one press of Clear sends, by row.</summary>
     public enum ClearRequest
@@ -164,11 +173,11 @@ public static class CombosPanel
     /// combo. So two presses on an overridden row clear the combo completely: the second press
     /// finds the row plain.
     /// </summary>
-    public static ClearRequest ClearFor(ComboEntry entry) =>
-        entry.Overridden ? ClearRequest.RemoveOverride : ClearRequest.ClearShared;
+    public static ClearRequest ClearFor(SessionInfo session, ComboEntry entry) =>
+        IsOverridden(session, entry) ? ClearRequest.RemoveOverride : ClearRequest.ClearShared;
 
     /// <summary>Whether Capture on a row commits as the override (COMBO_OVERRIDE) rather than the shared combo (COMBO_SET).</summary>
-    public static bool CaptureIsOverride(ComboEntry entry) => entry.Overridden;
+    public static bool CaptureIsOverride(SessionInfo session, ComboEntry entry) => IsOverridden(session, entry);
 
     /// <summary>The line under the switch while overrides can be made.</summary>
     public static string OverrideHint(ProfileInfo profile) =>
@@ -224,6 +233,15 @@ public static class CombosPanel
 
         _capturing = null;
         bool asOverride = _capturingOverride;
+        if (asOverride && !ShowsOverride(state.Session))
+        {
+            // The per-user settings went away under the capture: the switch went off, or the
+            // console has none. There is no user to store it for, and COMBO_OVERRIDE is not sent.
+            Suspend(state, false);
+            state.AddToast($"{Label(action)} was not stored: per-user settings are off.");
+            return;
+        }
+
         state.Run(async () =>
         {
             if (asOverride) await state.Client.ComboOverrideAsync(action, value);
@@ -340,7 +358,7 @@ public static class CombosPanel
             if (!ShowsRow(action, state.Session.QwarkVersion)) continue;
 
             var entry = EntryFor(state, action);
-            bool overridden = entry.Overridden;
+            bool overridden = IsOverridden(state.Session, entry);
 
             ImGui.TableNextRow();
             ImGui.PushID((int)action);
@@ -399,7 +417,7 @@ public static class CombosPanel
             else
             {
                 // An overridden row's Capture records the override again; a plain row's, the shared combo.
-                if (ImGui.SmallButton("Capture")) BeginCapture(state, action, CaptureIsOverride(entry));
+                if (ImGui.SmallButton("Capture")) BeginCapture(state, action, CaptureIsOverride(state.Session, entry));
                 if (overridden && ImGui.IsItemHovered()) Ui.SetTooltip("Capture this user's own combo again.");
             }
 
@@ -407,7 +425,7 @@ public static class CombosPanel
             if (ImGui.SmallButton("Clear"))
             {
                 var target = action;
-                var request = ClearFor(entry);
+                var request = ClearFor(state.Session, entry);
                 state.Run(async () =>
                 {
                     if (request == ClearRequest.RemoveOverride) await state.Client.ComboOverrideClearAsync(target);

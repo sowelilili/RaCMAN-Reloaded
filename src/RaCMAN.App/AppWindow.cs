@@ -508,7 +508,7 @@ public sealed class AppWindow : GameWindow
             ImGui.TextUnformatted("|");
             ImGui.SameLine();
             Ui.Text(Ui.Yellow, "TCP fallback");
-            Ui.Tooltip("The console's UDP telemetry is not reaching this PC, likely due to a "
+            Ui.Tooltip("Your console's UDP telemetry is not reaching this PC, likely due to a "
                        + "firewall issue, so live state is being polled over TCP instead. "
                        + "Everything works; readouts and the input display just update more slowly. "
                        + "To update your firewall, go to the Connection panel.");

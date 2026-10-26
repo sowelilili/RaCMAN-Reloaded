@@ -2281,7 +2281,7 @@ public class SaveFileRefusalToastTests
                 new SaveFileTransfer.TransferFailedException(SaveFileError.NoSave, SaveFileRequest.Restore)));
 
         Assert.Equal(
-            "The save did not finish: the console could not read or write the file",
+            "The save did not finish: your console could not read or write the file",
             SaveFilesPanel.FailureToast(load: false, new SaveFileTransfer.TransferFailedException(SaveFileError.IoError)));
     }
 
@@ -2343,12 +2343,12 @@ public class SaveFileRowMenuTests
     [Fact]
     public void TheDialogsSayWhichCopiesAreRenamedOrDeleted()
     {
-        Assert.Equal("veldin will be deleted from the console and from this PC.", SaveFilesPanel.DeleteWhere(Category[0]));
-        Assert.Equal("Kerwan will be deleted from the console. This PC has no copy of it.", SaveFilesPanel.DeleteWhere(Category[1]));
-        Assert.Equal("novalis will be deleted from this PC. The console has no copy of it.", SaveFilesPanel.DeleteWhere(Category[2]));
+        Assert.Equal("veldin will be deleted from your console and from this PC.", SaveFilesPanel.DeleteWhere(Category[0]));
+        Assert.Equal("Kerwan will be deleted from your console. This PC has no copy of it.", SaveFilesPanel.DeleteWhere(Category[1]));
+        Assert.Equal("novalis will be deleted from this PC. Your console has no copy of it.", SaveFilesPanel.DeleteWhere(Category[2]));
 
         Assert.Contains("both renamed", SaveFilesPanel.RenameWhere(Category[0]));
-        Assert.StartsWith("Only the console", SaveFilesPanel.RenameWhere(Category[1]));
+        Assert.StartsWith("Only your console", SaveFilesPanel.RenameWhere(Category[1]));
         Assert.StartsWith("Only this PC", SaveFilesPanel.RenameWhere(Category[2]));
     }
 

@@ -342,11 +342,11 @@ public static class SaveFileErrorExtensions
     public static string Describe(this SaveFileError error, SaveFileRequest request = SaveFileRequest.Store) => error switch
     {
         SaveFileError.None => "no error",
-        SaveFileError.FileMissing => "the console no longer has that file",
-        SaveFileError.IoError => "the console could not read or write the file",
+        SaveFileError.FileMissing => "your console no longer has that file",
+        SaveFileError.IoError => "your console could not read or write the file",
         SaveFileError.ShortFile => "the file is not the size this game's save has to be",
-        SaveFileError.HelperMissing => "the game stopped while the console was copying",
-        SaveFileError.BufferBusy => "the console was already busy with another save",
+        SaveFileError.HelperMissing => "the game stopped while your console was copying",
+        SaveFileError.BufferBusy => "your console was already busy with another save",
         // Not "leave the menu": the RaC1-3 helper pauses the game from almost anywhere since build
         // 53, so what is left is a load under way, space, a screen that cannot pause and
         // multiplayer. A set-aside is refused only by Deadlocked, for the same kinds of moment.

@@ -386,7 +386,7 @@ public class UiPakTests
 
         Assert.Equal(pak, server.Files[UiPak.ConsolePath]);
         Assert.False(server.Files.ContainsKey(UiPak.StagedPath));
-        Assert.Contains(frames.Seen, t => t.Text == "Sent ui.pak to the console" && t.Kind == ToastKind.Success);
+        Assert.Contains(frames.Seen, t => t.Text == "Sent ui.pak to your console" && t.Kind == ToastKind.Success);
 
         await frames.ForAsync(state, AppState.UiPakCheckSeconds + 1);
 
@@ -416,7 +416,7 @@ public class UiPakTests
         var error = Assert.Single(frames.Errors);
         Assert.Contains("still says its ui.pak is missing", error.Text, StringComparison.Ordinal);
         Assert.Contains("qwark log", error.Text, StringComparison.Ordinal);
-        Assert.Contains(frames.Seen, t => t.Text == "Sent ui.pak to the console");
+        Assert.Contains(frames.Seen, t => t.Text == "Sent ui.pak to your console");
         Assert.True(state.UiPakNeeded);
     }
 

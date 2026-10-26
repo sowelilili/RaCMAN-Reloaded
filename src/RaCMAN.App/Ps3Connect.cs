@@ -181,7 +181,7 @@ public static class Ps3Connect
                     $"{WebManLoader.SprxName} is loaded in slot {status.SlotText}"
                     + (status.Path.Length > 0 ? $" from {status.Path}" : string.Empty)
                     + $", but nothing answered on {ip}: {error.Message}. The module is loaded and not "
-                    + "running; unload it in webMAN, or restart the console, and try again.");
+                    + "running; unload it in webMAN, or restart your console, and try again.");
             }
         }
 

@@ -79,7 +79,7 @@ public static class ManipsArea
     {
         TrophyResetFailure.DeleteStopped => "a trophy file could not be deleted",
         TrophyResetFailure.Unregistered => "the game could not re-register its trophies",
-        TrophyResetFailure.NoAnswer => "the console did not answer, restart the game",
+        TrophyResetFailure.NoAnswer => "your console did not answer, restart the game",
         TrophyResetFailure.LoadEnded => "the Veldin load ended first",
         TrophyResetFailure.GameRefused => "the game refused it",
         TrophyResetFailure.NotTaken => "the game did not respond",

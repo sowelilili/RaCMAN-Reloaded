@@ -140,7 +140,7 @@ public static class InputDisplayPanel
             DrawPad(state, loaded, FitScale(loaded));
         }
 
-        if (!state.Connected) Ui.Hint("Not connected: the pad shows what the console last sent, if anything.");
+        if (!state.Connected) Ui.Hint("Not connected: the pad shows what your console last sent, if anything.");
     }
 
     /// <summary>

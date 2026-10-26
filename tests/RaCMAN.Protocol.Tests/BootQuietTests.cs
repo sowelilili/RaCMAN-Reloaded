@@ -77,7 +77,7 @@ public class BootQuietTests
         Assert.Null(StatusToast.For(Status.UnknownOp, Opcode.AutosplitEvents, SessionState.Ingame, quiet: true, debug: false));
 
         // Everything else a background read can collect is still a failure worth showing.
-        Assert.Equal("The console refused that: IoError",
+        Assert.Equal("Your console refused that: IoError",
             StatusToast.For(Status.IoError, Opcode.FileRead, SessionState.Ingame, quiet: true, debug: false));
     }
 
@@ -95,7 +95,7 @@ public class BootQuietTests
         Assert.NotEqual(StatusToast.WhileBusy(SessionState.Booting), StatusToast.WhileBusy(SessionState.Quitting));
 
         // INGAME, BUSY keeps the meaning it has there: a save transfer in flight, or a full ring.
-        Assert.Equal("The console refused that: Busy",
+        Assert.Equal("Your console refused that: Busy",
             StatusToast.For(Status.Busy, Opcode.SaveFileRead, SessionState.Ingame, quiet: false, debug: false));
 
         // And the five ops a launch does not stop are not part of any of this.
