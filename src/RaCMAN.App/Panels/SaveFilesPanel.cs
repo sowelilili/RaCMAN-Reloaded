@@ -236,6 +236,13 @@ public static class SaveFilesPanel
             Ui.Warning(Ui.NeedsSaveFileHelper);
             ImGui.Spacing();
         }
+        else if (state.UiPakNeeded && !info.Installed)
+        {
+            // Build 56: a console installs the helper out of ui.pak, so without it every save and
+            // load is refused (SaveFileError.NoUiPak) until the pak is sent.
+            Ui.Warning(AppState.UiPakSaveFilesWarning);
+            ImGui.Spacing();
+        }
         else if (info.Installed && !info.Running)
         {
             Ui.Hint("The helper is installed but has not run a frame yet. It runs while the game " +

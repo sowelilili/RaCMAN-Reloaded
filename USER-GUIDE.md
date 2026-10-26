@@ -4,7 +4,7 @@ The [README](README.md) is the quickstart. This guide has the details.
 
 ## Downloads
 
-Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, the console menu's file `ui.pak`, the RPCS3 helper and a console installer.
+Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, `ui.pak` (the file the console menu and save files need), the RPCS3 helper and a console installer.
 
 - **Windows, installer**: run `RaCMANReloaded-win-Setup.exe`. It installs for your user account only. It does not need administrator rights.
 - **Windows, portable**: unzip `RaCMANReloaded-win-Portable.zip` and run `RaCMAN.App.exe`.

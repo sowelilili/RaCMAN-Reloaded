@@ -1839,8 +1839,10 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// What the running game says when it is asked whether a save can be taken or put back, for as
     /// long as it is set. <see cref="SaveFileError.NotIdle"/> (build 43) is a game that is not
     /// sitting still, and refuses both actions, STORE and RESTORE; <see cref="SaveFileError.NoSave"/>
-    /// (build 53) is one with no save yet, and refuses both actions and STORE. A refusal is BUSY with
-    /// SAVEFILE_INFO's error set, and raises nothing at the game.
+    /// (build 53) is one with no save yet, and refuses both actions and STORE;
+    /// <see cref="SaveFileError.NoUiPak"/> (build 56) is a console whose ui.pak cannot give it the
+    /// helper, and refuses both actions, STORE and RESTORE. A refusal is BUSY with SAVEFILE_INFO's
+    /// error set, and raises nothing at the game.
     /// </summary>
     public SaveFileError SaveFileRefusal { get; set; } = SaveFileError.None;
 
@@ -2513,7 +2515,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                     // the client can observe: one fills the aside buffer, the other consumes it.
                     // Both stay "pending" for a poll or two, as the console's helper does.
                     if ((action.SavesAside || action.LoadsAside) && !SaveFileHelperMissing
-                        && SaveFileRefusal is SaveFileError.NotIdle or SaveFileError.NoSave)
+                        && SaveFileRefusal is SaveFileError.NotIdle or SaveFileError.NoSave or SaveFileError.NoUiPak)
                     {
                         // Builds 43 and 53: the game is asked first, and a refusal raises nothing.
                         _transferError = SaveFileRefusal;
@@ -3328,7 +3330,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                     // Builds 43 and 53: a game that is not sitting still refuses both before a file
                     // is touched, and one with no save yet refuses a STORE. A RESTORE brings its own
                     // save, so "no save" only stops one after the copy (SaveFileTransferError).
-                    if (SaveFileRefusal == SaveFileError.NotIdle
+                    if (SaveFileRefusal is SaveFileError.NotIdle or SaveFileError.NoUiPak
                         || (SaveFileRefusal == SaveFileError.NoSave && opcode == Opcode.SaveFileStore))
                     {
                         _transferError = SaveFileRefusal;

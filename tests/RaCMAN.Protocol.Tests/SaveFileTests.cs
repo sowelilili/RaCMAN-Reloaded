@@ -1036,6 +1036,14 @@ public class SaveFileTests : IDisposable
         Assert.True(SaveFileError.NotIdle.IsRefusal());
         Assert.True(SaveFileError.NoSave.IsRefusal());
         Assert.False(SaveFileError.None.IsRefusal());
+
+        // Build 56: a console with no usable ui.pak refuses anything that needs the helper, and
+        // says so in words that point at the fix, the same for every request.
+        Assert.True(SaveFileError.NoUiPak.IsRefusal());
+        Assert.Equal(8, (byte)SaveFileError.NoUiPak);
+        Assert.Contains("your console's ui.pak", SaveFileError.NoUiPak.Describe());
+        Assert.Contains("Connection panel", SaveFileError.NoUiPak.Describe(SaveFileRequest.Load));
+        Assert.Equal(SaveFileError.NoUiPak.Describe(), SaveFileError.NoUiPak.Describe(SaveFileRequest.Restore));
         Assert.False(SaveFileError.IoError.IsRefusal());
         Assert.False(SaveFileError.HelperMissing.IsRefusal());
     }
@@ -1043,6 +1051,7 @@ public class SaveFileTests : IDisposable
     [Theory]
     [InlineData(SaveFileError.NotIdle)]
     [InlineData(SaveFileError.NoSave)]
+    [InlineData(SaveFileError.NoUiPak)]
     public async Task AStoreTheGameRefusesSaysWhyAndWritesNothing(SaveFileError refusal)
     {
         var (server, client) = await ConnectAsync();
@@ -1096,6 +1105,34 @@ public class SaveFileTests : IDisposable
     }
 
     [Fact]
+    public async Task ARestoreWithNoUiPakOnTheConsoleIsRefusedAndWorksOnceItIsSent()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+
+            // Build 56: the console cannot install the helper without its ui.pak.
+            server.SaveFileRefusal = SaveFileError.NoUiPak;
+            var refused = await Assert.ThrowsAsync<SaveFileTransfer.RefusedException>(
+                () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.Equal(SaveFileError.NoUiPak, refused.Error);
+            Assert.Equal(SaveFileRequest.Restore, refused.Request);
+            Assert.Null(server.LoadedSaveFile);
+
+            // The pak sent, the same load goes through.
+            server.SaveFileRefusal = SaveFileError.None;
+            Assert.False(await SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.NotNull(server.LoadedSaveFile);
+        }
+    }
+
+    [Fact]
     public async Task ARestoreOfAFileThatIsNotASaveOfThisGameStopsWithErrorSeven()
     {
         var (server, client) = await ConnectAsync();
@@ -1124,6 +1161,8 @@ public class SaveFileTests : IDisposable
     [InlineData(SaveFileError.NotIdle, SaveFileRequest.Load)]
     [InlineData(SaveFileError.NoSave, SaveFileRequest.Store)]
     [InlineData(SaveFileError.NoSave, SaveFileRequest.Load)]
+    [InlineData(SaveFileError.NoUiPak, SaveFileRequest.Store)]
+    [InlineData(SaveFileError.NoUiPak, SaveFileRequest.Load)]
     public async Task TheSetAsideAndLoadActionsTheGameRefusesSayWhy(SaveFileError refusal, SaveFileRequest request)
     {
         var (server, client) = await ConnectAsync();

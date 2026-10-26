@@ -315,6 +315,14 @@ public enum SaveFileError : byte
     /// the file it copied in is not a save of the running game, so it loaded nothing.
     /// </summary>
     NoSave = 7,
+
+    /// <summary>
+    /// The console could not put the savefile helper into the game because its
+    /// <c>/dev_hdd0/qwark/ui.pak</c>, which carries the helper since build 56, is missing or from
+    /// another build (SessionInfo <see cref="SessionFlags.UiPakBad"/> says the same). Nothing was
+    /// raised at the game. Sending the pak from the Connection panel fixes it in the same session.
+    /// </summary>
+    NoUiPak = 8,
 }
 
 /// <summary>
@@ -362,6 +370,9 @@ public static class SaveFileErrorExtensions
                 "there is no save to load yet: wait for an autosave (or use Force autosave in RaC1), or set a save aside first",
             _ => "the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
         },
+        SaveFileError.NoUiPak =>
+            "your console's ui.pak is missing or from another build, and save files need it. "
+            + "Send it from the Connection panel, then try again",
         _ => $"error {(byte)error}",
     };
 
@@ -370,7 +381,7 @@ public static class SaveFileErrorExtensions
     /// console refused it outright rather than why a copy stopped.
     /// </summary>
     public static bool IsRefusal(this SaveFileError error) =>
-        error is SaveFileError.BufferBusy or SaveFileError.NotIdle or SaveFileError.NoSave;
+        error is SaveFileError.BufferBusy or SaveFileError.NotIdle or SaveFileError.NoSave or SaveFileError.NoUiPak;
 }
 
 /// <summary>

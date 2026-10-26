@@ -5,10 +5,11 @@ namespace RaCMAN.Protocol;
 /// <summary>
 /// The console menu's file. Since build 55 the four renderers qwark writes into a game are not
 /// inside qwark.sprx any more but in <c>/dev_hdd0/qwark/ui.pak</c>, which frees a page of the
-/// VSH's memory. A release ships it beside qwark.sprx, and every way this client puts the module on
-/// a console puts the pak there too. Without a pak built with the running module the module works
-/// as before, and only the Trainer menu stays out of the games; the console says so in
-/// <see cref="SessionFlags.UiPakBad"/>.
+/// VSH's memory, and since build 56 the four savefile helpers are in it too. A release ships it
+/// beside qwark.sprx, and every way this client puts the module on a console puts the pak there
+/// too. Without a pak built with the running module everything else works as before, but the
+/// Trainer menu stays out of the games and saving and loading are refused
+/// (<see cref="SaveFileError.NoUiPak"/>); the console says so in <see cref="SessionFlags.UiPakBad"/>.
 /// <para>
 /// The client reads the 32-byte header and nothing else: the magic and the build it was made
 /// with, so that a pak which could not fix anything is not sent. Whether a pak is good is the
@@ -38,10 +39,10 @@ public static class UiPak
     public static ReadOnlySpan<byte> Magic => "QPAK"u8;
 
     /// <summary>The one sentence for a client that has no pak to send beside its qwark.sprx.</summary>
-    public const string MissingNote = "No ui.pak beside qwark.sprx: the Trainer menu will not load in games";
+    public const string MissingNote = "No ui.pak beside qwark.sprx: the Trainer menu and save files will not work in games";
 
     /// <summary>The one sentence for a pak the console's FTP server refused; the module is sent all the same.</summary>
-    public const string SendFailedNote = "Could not send ui.pak to your console: the Trainer menu will not load in games";
+    public const string SendFailedNote = "Could not send ui.pak to your console: the Trainer menu and save files will not work in games";
 
     /// <summary>
     /// The client's own copy: beside the qwark.sprx it sends, whichever path that resolved to.

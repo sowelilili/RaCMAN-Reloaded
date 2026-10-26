@@ -756,7 +756,12 @@ public sealed class AppState : IDisposable
 
     /// <summary>The Connection panel's line for <see cref="UiPakNeeded"/>, and the start of its toast.</summary>
     public const string UiPakWarning =
-        "Your console's ui.pak is missing or from another build, so the Trainer menu cannot load in games.";
+        "Your console's ui.pak is missing or from another build, so the Trainer menu and save files can't work in games.";
+
+    /// <summary>The Save files panel's line for <see cref="UiPakNeeded"/>: since build 56 the helper is in the pak.</summary>
+    public const string UiPakSaveFilesWarning =
+        "Your console's ui.pak is missing or from another build, and saving and loading need it. "
+        + "Send it from the Connection panel.";
 
     /// <summary>
     /// How long after a send that went through the flag is looked at again. The module checks the
@@ -766,7 +771,8 @@ public sealed class AppState : IDisposable
 
     /// <summary>
     /// The console runs the module this client shipped with and says its ui.pak is missing or not
-    /// that module's (<see cref="SessionInfo.UiPakBad"/>), so sending the pak alone fixes the menu.
+    /// that module's (<see cref="SessionInfo.UiPakBad"/>), so sending the pak alone fixes the menu and,
+    /// since build 56, the savefile helper's install.
     /// Never under RPCS3, which has no console menu and never sets the flag. Never for an older
     /// module either: its update carries the pak, and the stale-build warning already covers it.
     /// A newer module than this client's is beyond any pak this client has.
