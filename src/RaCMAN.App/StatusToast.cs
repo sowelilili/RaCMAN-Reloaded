@@ -53,7 +53,23 @@ public static class StatusToast
         // or a transfer, and "Busy" on its own is not something anyone can act on.
         if (status == Status.Busy && state != SessionState.Ingame) return WhileBusy(state);
 
-        return debug ? $"{opcode}: {status}" : $"Your console refused that: {status}";
+        if (debug) return $"{opcode}: {status}";
+        if (status == Status.Full && IsSettingsWrite(opcode)) return SettingsFull;
+        return $"Your console refused that: {status}";
     }
+
+    /// <summary>
+    /// What a FULL from a settings write means (qwark build 56, PROTOCOL.md 5.10): the console's
+    /// config.txt, or the signed-in user's, has no room for the setting, or is too big for qwark to
+    /// rewrite without losing part of it. Either way nothing was changed, the per-user settings
+    /// switch included.
+    /// </summary>
+    public const string SettingsFull = "Your console's settings file is full, so nothing was changed";
+
+    /// <summary>The ops that write a setting into config.txt or a user's profile.</summary>
+    public static bool IsSettingsWrite(Opcode opcode) => opcode is
+        Opcode.FeatureSetAuto or Opcode.ModSetAuto or Opcode.PlanetSelect or Opcode.ComboSet or
+        Opcode.ComboEnable or Opcode.ConfigSave or Opcode.MenuHelp or Opcode.ProfileEnable or
+        Opcode.ComboOverride or Opcode.ManipSelect or Opcode.ManipOptions;
 }
 

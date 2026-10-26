@@ -103,6 +103,23 @@ public class BootQuietTests
         Assert.False(FakeQwarkServer.IsControlOp(Opcode.WatchList));
     }
 
+    [Fact]
+    public void AFullSettingsFileIsSaidInWords()
+    {
+        // qwark build 56: per-user settings turned on against a config.txt with no room.
+        Assert.Equal(StatusToast.SettingsFull,
+            StatusToast.For(Status.Full, Opcode.ProfileEnable, SessionState.Xmb, quiet: false, debug: false));
+        Assert.Equal(StatusToast.SettingsFull,
+            StatusToast.For(Status.Full, Opcode.FeatureSetAuto, SessionState.Ingame, quiet: false, debug: false));
+        Assert.Contains("your console", StatusToast.SettingsFull, StringComparison.OrdinalIgnoreCase);
+
+        // FULL from anything else keeps its status, and debug information still shows the op.
+        Assert.Equal("Your console refused that: Full",
+            StatusToast.For(Status.Full, Opcode.PatchApply, SessionState.Ingame, quiet: false, debug: false));
+        Assert.Equal("ProfileEnable: Full",
+            StatusToast.For(Status.Full, Opcode.ProfileEnable, SessionState.Xmb, quiet: false, debug: true));
+    }
+
     // ---------------------------------------------------------------- the fake console's half
 
     [Fact]
