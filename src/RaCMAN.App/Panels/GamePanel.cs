@@ -641,7 +641,8 @@ public static class GamePanel
                 ImGui.Spacing();
                 Ui.Heading(headings[i].Heading!);
                 ImGui.PushID($"manip-header-{i}");
-                DrawFeatureBlock(state, describe, headings[i].Features, section, toggleColumns, leadingSpace: false);
+                DrawFeatureBlock(state, describe, headings[i].Features, section, toggleColumns, leadingSpace: false,
+                    heading: headings[i].Heading);
 
                 // Revision 1.21: what an ACTION with a status readout is doing, under the block
                 // (UYA's trophy reset), and nothing for one that names none.
@@ -678,7 +679,7 @@ public static class GamePanel
             // The gap before the first block is the caller's to ask for; a block under a heading
             // has that heading's own spacing above it already.
             DrawFeatureBlock(state, describe, block.Features, section, toggleColumns,
-                leadingSpace && i == 0 && block.Heading is null);
+                leadingSpace && i == 0 && block.Heading is null, block.Heading);
 
             ImGui.PopID();
         }
@@ -690,6 +691,13 @@ public static class GamePanel
     /// caps the toggle grid (the narrow Options and Quick columns ask for one) and
     /// <paramref name="leadingSpace"/> is off for a body that has to line up with the top of a
     /// table cell.
+    /// <para>
+    /// 2026-10-26: a block whose colours have the game's own to go back to makes a theme of its
+    /// toggles (<see cref="ThemeToggles"/>): they are drawn among the colours rather than in the
+    /// toggle grid, and the presets and the block's "on boot" carry them with the colours. The
+    /// colours and the theme's toggles follow the order of the block's heading in the layout file,
+    /// with a line wherever it has a separator.
+    /// </para>
     /// </summary>
     private static void DrawFeatureBlock(
         AppState state,
@@ -697,12 +705,14 @@ public static class GamePanel
         IReadOnlyList<Feature> features,
         string? section,
         int toggleColumns,
-        bool leadingSpace)
+        bool leadingSpace,
+        string? heading = null)
     {
         var values = features.Where(f => f.Kind == FeatureKind.Value).ToArray();
-        var toggles = features.Where(f => f.Kind == FeatureKind.Toggle).ToArray();
         var actions = features.Where(f => f.Kind == FeatureKind.Action).ToArray();
         var choices = features.Where(f => f.Kind is FeatureKind.Enum or FeatureKind.Color).ToArray();
+        var theme = ThemeToggles(features);
+        var toggles = features.Where(f => f.Kind == FeatureKind.Toggle && !theme.Contains(f)).ToArray();
 
         if (leadingSpace) ImGui.Spacing();
 
@@ -724,20 +734,88 @@ public static class GamePanel
         DrawActionGrid(state, actions);
         if (choices.Length > 0) ImGui.Spacing();
 
+        // The heading's own order, where the layout gives one; a feature it does not list keeps
+        // its place after the ones it does (OrderBy is stable).
+        var list = section is null
+            ? Array.Empty<string>()
+            : GameLayout.HeadingList(state.DescribedTitle, state.DescribedGame, section, heading);
+        var separators = section is null
+            ? new HashSet<string>()
+            : GameLayout.SeparatorsBefore(state.DescribedTitle, state.DescribedGame, section, heading);
+        var drawn = choices.Concat(theme)
+            .OrderBy(f => list.Contains(f.Label) ? list.ToList().IndexOf(f.Label) : int.MaxValue)
+            .ToArray();
+
         // The preset row belongs to the colour editors, so it goes in front of the first of them
         // rather than at the top of the section: an ENUM that shares the section keeps its place.
         var colours = choices.Where(f => f.Kind == FeatureKind.Color).ToArray();
-        bool presetsDrawn = false;
-        foreach (var feature in choices)
+        bool presetsDrawn = false, anyDrawn = false;
+        foreach (var feature in drawn)
         {
+            if (anyDrawn && separators.Contains(feature.Label))
+            {
+                ImGui.Spacing();
+                ImGui.Separator();
+                ImGui.Spacing();
+            }
+
+            anyDrawn = true;
             if (feature.Kind == FeatureKind.Color && !presetsDrawn)
             {
                 presetsDrawn = true;
-                DrawColourPresets(state, colours, section);
+                DrawColourPresets(state, colours, theme, section);
             }
 
-            DrawChoice(state, describe, feature);
+            if (feature.Kind == FeatureKind.Toggle) DrawThemeToggle(state, feature, colours);
+            else DrawChoice(state, describe, feature);
         }
+    }
+
+    /// <summary>
+    /// The toggles of a block that are part of its colours' theme: every toggle of a block with a
+    /// colour the game has its own of (a STOCK COLOR), which is Deadlocked's HUD block and its two
+    /// brightness corrections. Empty for every other block, whose toggles are drawn as they always
+    /// were.
+    /// </summary>
+    public static Feature[] ThemeToggles(IEnumerable<Feature> block)
+    {
+        var all = block.ToArray();
+        return all.Any(f => f.Kind == FeatureKind.Color && f.IsStock)
+            ? all.Where(f => f.Kind == FeatureKind.Toggle && !f.IsLive).ToArray()
+            : Array.Empty<Feature>();
+    }
+
+    /// <summary>
+    /// One of a theme's toggles, among its colours: a checkbox with no "on boot" box of its own,
+    /// since the block's "on boot" keeps it with the colours, greyed with the reason where it needs
+    /// a code patch the platform does not have.
+    /// </summary>
+    private static void DrawThemeToggle(AppState state, Feature feature, Feature[] colours)
+    {
+        ImGui.PushID(feature.Id);
+
+        bool on = (state.Session.ToggleState & (1UL << feature.Id)) != 0;
+        bool blocked = BeginCodeFeature(state, feature);
+        bool changed = ImGui.Checkbox(feature.Label, ref on);
+        EndCodeFeature(blocked);
+        if (changed && !blocked) SendTheme(state, colours, Array.Empty<(byte, uint)>(), new[] { (feature.Id, on ? 1u : 0u) }, null);
+        if (!blocked && ImGui.IsItemHovered()) Ui.SetTooltip(ThemeToggleTooltip(feature));
+
+        ImGui.PopID();
+    }
+
+    /// <summary>What a theme toggle's tooltip says: what it does, where the game is known, and that the presets carry it.</summary>
+    public static string ThemeToggleTooltip(Feature feature)
+    {
+        string what = feature.Label switch
+        {
+            "Correct HUD brightness" =>
+                "Draws the radar, the quick-select slots, the boxes, the end screen and the rest of the HUD's flat parts as bright as the game meant them. ",
+            "Correct gradient brightness" =>
+                "Draws the health bar and the EXP bars as bright as the game meant them. ",
+            _ => string.Empty,
+        };
+        return what + "Part of these colours: saved with the presets and kept by \"on boot\".";
     }
 
     // ---------------------------------------------------------------- the quick block
@@ -1052,19 +1130,24 @@ public static class GamePanel
             if (automatic) ImGui.PushStyleVar(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * ShadeAlpha);
 
             ImGui.SetNextItemWidth(240);
+            bool blocked = BeginCodeFeature(state, feature);
             bool picked = ImGui.ColorEdit3(feature.Label, ref hsv, ImGuiColorEditFlags.InputHSV);
+            ImGui.EndDisabled();
 
             if (automatic) ImGui.PopStyleVar();
-            if (feature.IsShade && ImGui.IsItemHovered()) Ui.SetTooltip(ShadeTooltip(describe, feature, automatic));
+            if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(Ui.NeedsQwarkPatches);
+            else if (feature.IsShade && ImGui.IsItemHovered()) Ui.SetTooltip(ShadeTooltip(describe, feature, automatic));
 
-            if (picked) SendColour(state, feature.Id, pick.Pick(hsv, now), fromPicker: true);
+            if (picked && !blocked) SendColour(state, feature.Id, pick.Pick(hsv, now), fromPicker: true);
 
             if (feature.IsShade && !automatic)
             {
                 ImGui.SameLine();
-                if (ImGui.SmallButton("Auto")) SendColour(state, feature.Id, Feature.ColorAuto);
+                ImGui.BeginDisabled(blocked);
+                if (ImGui.SmallButton("Auto") && !blocked) SendColour(state, feature.Id, Feature.ColorAuto);
+                ImGui.EndDisabled();
 
-                if (ImGui.IsItemHovered()) Ui.SetTooltip($"Work this shade out from {FollowedLabel(describe, feature)} again");
+                if (!blocked && ImGui.IsItemHovered()) Ui.SetTooltip($"Work this shade out from {FollowedLabel(describe, feature)} again");
             }
         }
 
@@ -1120,7 +1203,7 @@ public static class GamePanel
     /// Save to capture what the section currently shows, Delete... to drop the picked one. Presets
     /// are the PC's and are keyed by game, so they survive a game change and a reconnect alike.
     /// </summary>
-    private static void DrawColourPresets(AppState state, Feature[] colours, string? section)
+    private static void DrawColourPresets(AppState state, Feature[] colours, Feature[] theme, string? section)
     {
         if (colours.Length == 0) return;
 
@@ -1135,10 +1218,16 @@ public static class GamePanel
         bool hasStock = colours.Any(f => f.IsStock);
         string preview = _presetIndex >= 0 && _presetIndex < _presets.Length
             ? _presets[_presetIndex].Name
-            : hasStock && !AtStock(colours, f => CurrentValue(state, f)) ? "(custom)" : "(none)";
+            : hasStock && !ThemeAtStock(colours, theme, f => CurrentValue(state, f), state.Session.ToggleState)
+                ? "(custom)"
+                : "(none)";
+
+        // Revision 1.24: a block whose colours need a code patch the platform does not have
+        // (Deadlocked's HUD under RPCS3 without qwark's patches) cannot be applied or kept either.
+        bool blocked = colours.Concat(theme).Any(f => CodeFeatureBlocked(f, state.Session));
 
         ImGui.SetNextItemWidth(200);
-        ImGui.BeginDisabled(_presets.Length == 0 && !hasStock);
+        ImGui.BeginDisabled(blocked || (_presets.Length == 0 && !hasStock));
         if (ImGui.BeginCombo("Presets", preview))
         {
             if (hasStock && ImGui.Selectable("(none)", false))
@@ -1146,10 +1235,11 @@ public static class GamePanel
                 _presetIndex = -1;
                 _presetDeleteArmed = false;
                 _presetName = string.Empty;
-                ApplyNone(state, colours);
+                ApplyNone(state, colours, theme);
             }
 
-            if (hasStock && ImGui.IsItemHovered()) Ui.SetTooltip("The game's own colours");
+            if (hasStock && ImGui.IsItemHovered())
+                Ui.SetTooltip(theme.Length > 0 ? "The game's own colours, with no correction" : "The game's own colours");
 
             for (int i = 0; i < _presets.Length; i++)
             {
@@ -1158,13 +1248,14 @@ public static class GamePanel
                 _presetIndex = i;
                 _presetDeleteArmed = false;
                 _presetName = _presets[i].Name;
-                ApplyPreset(state, colours, _presets[i]);
+                ApplyPreset(state, colours, theme, _presets[i]);
             }
 
             ImGui.EndCombo();
         }
 
         ImGui.EndDisabled();
+        if (blocked && ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(Ui.NeedsQwarkPatches);
         ImGui.SameLine();
 
         // The same two-step the watchlists use: nothing here deletes a saved file on one click.
@@ -1200,7 +1291,7 @@ public static class GamePanel
         // button's own greying out asks.
         bool named = _presetName.Trim().Length > 0;
         ImGui.BeginDisabled(!named);
-        if (ImGui.Button("Save") || (save && named)) SavePreset(state, game, colours, key);
+        if (ImGui.Button("Save") || (save && named)) SavePreset(state, game, colours, theme, key);
         ImGui.EndDisabled();
 
         // Revision 1.24: the console keeps these colours and sets them again at every boot, also
@@ -1210,12 +1301,18 @@ public static class GamePanel
         {
             ImGui.SameLine();
             bool kept = KeptForBoot(colours, state.Session.ToggleAuto);
+            ImGui.BeginDisabled(blocked);
             ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
             bool changed = ImGui.Checkbox("on boot", ref kept);
             ImGui.PopStyleColor();
-            if (changed) KeepForBoot(state, colours, kept);
-            if (ImGui.IsItemHovered())
-                Ui.SetTooltip("Apply these colours again every time the game boots, also with no PC connected");
+            ImGui.EndDisabled();
+            if (changed && !blocked) KeepForBoot(state, colours, theme, kept);
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                Ui.SetTooltip(blocked ? Ui.NeedsQwarkPatches
+                    : theme.Length > 0 ? "Apply these colours and corrections again every time the game boots, also with no PC connected"
+                    : "Apply these colours again every time the game boots, also with no PC connected");
+            }
         }
 
         ImGui.PopID();
@@ -1277,23 +1374,69 @@ public static class GamePanel
         }, TaskScheduler.Default);
     }
 
-    /// <summary>Ticks or clears "on boot" for a block: every colour in it, each with what it shows now.</summary>
-    private static void KeepForBoot(AppState state, Feature[] colours, bool keep)
+    /// <summary>
+    /// Ticks or clears "on boot" for a block: every colour in it, each with what it shows now, and
+    /// (2026-10-26) every theme toggle, applied at boot while it is on (<see cref="ThemeBootWrites"/>).
+    /// </summary>
+    private static void KeepForBoot(AppState state, Feature[] colours, Feature[] theme, bool keep)
     {
         var values = colours.Select(f => (f.Id, Value: keep ? CurrentValue(state, f) & BootValueMask : 0u)).ToArray();
+        var toggles = ThemeBootWrites(theme, keep, state.Session.ToggleState);
         state.Run(async () =>
         {
             foreach (var (id, value) in values)
                 await state.Client.FeatureSetAutoAsync(id, keep, value).ConfigureAwait(false);
+            foreach (var (id, on) in toggles)
+                await state.Client.FeatureSetAutoAsync(id, on).ConfigureAwait(false);
         });
+    }
+
+    /// <summary>
+    /// The FEATURE_SET_AUTOs that keep a block's theme toggles with its colours: a toggle the
+    /// console turns on at boot is one that is on now, so each one's auto flag is its state while
+    /// the block is kept, and off when it is not.
+    /// </summary>
+    public static List<(byte Id, bool On)> ThemeBootWrites(IReadOnlyList<Feature> theme, bool keep, ulong toggleState) =>
+        theme.Where(f => f.Id < 64)
+            .Select(f => (f.Id, keep && (toggleState & (1UL << f.Id)) != 0))
+            .ToList();
+
+    /// <summary>
+    /// A block's colours and theme toggles, sent in one go: the colours as <see cref="SendColours"/>
+    /// sends them, then the toggles, each kept for the boot as it now stands while the block is.
+    /// </summary>
+    private static void SendTheme(AppState state, Feature[] colours, IReadOnlyList<(byte Id, uint Value)> colourWrites,
+        IReadOnlyList<(byte Id, uint Value)> toggleWrites, string? success)
+    {
+        foreach (var (id, value) in colourWrites) Noted(state, id, value, fromPicker: false);
+        bool kept = KeptForBoot(colours, state.Session.ToggleAuto);
+        state.Run(async () =>
+        {
+            foreach (var (id, value) in colourWrites)
+                await state.Client.FeatureSetAsync(id, value).ConfigureAwait(false);
+            foreach (var (id, value) in toggleWrites)
+            {
+                await state.Client.FeatureSetAsync(id, value).ConfigureAwait(false);
+                if (kept) await state.Client.FeatureSetAutoAsync(id, value != 0).ConfigureAwait(false);
+            }
+        }, success);
     }
 
     /// <summary>What of a readout the console keeps for the boot: the colour and the AUTO bit.</summary>
     public const uint BootValueMask = 0x01FFFFFF;
 
-    /// <summary>"(none)": every colour the game has its own of, and the shades of those, back to it.</summary>
-    private static void ApplyNone(AppState state, Feature[] colours) =>
-        SendColours(state, NoneWrites(colours), "The game's own colours are back");
+    /// <summary>"(none)": every colour the game has its own of, and the shades of those, back to it, and the theme's toggles off.</summary>
+    private static void ApplyNone(AppState state, Feature[] colours, Feature[] theme) =>
+        SendTheme(state, colours, NoneWrites(colours), NoneToggleWrites(theme), "The game's own colours are back");
+
+    /// <summary>The FEATURE_SETs "(none)" sends a block's theme toggles: every one off, the game's own look.</summary>
+    public static List<(byte Id, uint Value)> NoneToggleWrites(IReadOnlyList<Feature> theme) =>
+        theme.Select(f => (f.Id, 0u)).ToList();
+
+    /// <summary>Whether a block is the game's own: every STOCK colour is (<see cref="AtStock"/>) and every theme toggle is off.</summary>
+    public static bool ThemeAtStock(IReadOnlyList<Feature> colours, IReadOnlyList<Feature> theme,
+        Func<Feature, uint> current, ulong toggleState) =>
+        AtStock(colours, current) && theme.All(f => f.Id >= 64 || (toggleState & (1UL << f.Id)) == 0);
 
     /// <summary>
     /// The FEATURE_SETs "(none)" sends: AUTO to every STOCK colour of the block, and to every shade
@@ -1335,28 +1478,34 @@ public static class GamePanel
     /// Sends every colour the preset names, in one go. LastSet is updated as well as the console,
     /// so a COLOR feature that mirrors no readout still shows what was just applied.
     /// </summary>
-    private static void ApplyPreset(AppState state, Feature[] colours, ColourPreset preset)
+    private static void ApplyPreset(AppState state, Feature[] colours, Feature[] theme, ColourPreset preset)
     {
         // Revision 1.24: a shade the preset leaves out goes back to automatic (ColourPreset.Writes).
+        // 2026-10-26: and the theme's toggles the preset names go as it saved them.
         var wanted = preset.Writes(colours);
+        var toggles = preset.ToggleWrites(theme);
 
-        if (wanted.Count == 0)
+        if (wanted.Count == 0 && toggles.Count == 0)
         {
             state.AddToast($"Preset {preset.Name} has nothing for these colours", ToastKind.Error);
             return;
         }
 
-        SendColours(state, wanted, $"Applied colour preset {preset.Name}");
+        SendTheme(state, colours, wanted, toggles, $"Applied colour preset {preset.Name}");
     }
 
-    private static void SavePreset(AppState state, GameId game, Feature[] colours, string key)
+    private static void SavePreset(AppState state, GameId game, Feature[] colours, Feature[] theme, string key)
     {
         string name = _presetName.Trim();
         var values = ColourPreset.ValuesToSave(colours, f => CurrentValue(state, f));
+        ulong on = state.Session.ToggleState;
+        var toggles = theme.Length > 0
+            ? ColourPreset.TogglesToSave(theme, f => f.Id < 64 && (on & (1UL << f.Id)) != 0)
+            : null;
 
         try
         {
-            state.ColourPresets.Save(game, name, values);
+            state.ColourPresets.Save(game, name, values, toggles);
             state.AddToast($"Colour preset {name} saved to {state.ColourPresets.FileFor(game)}", ToastKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)

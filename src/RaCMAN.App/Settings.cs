@@ -1244,6 +1244,47 @@ public sealed class ColourPreset
     public Dictionary<string, string> Colours { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// 2026-10-26: the block's toggles that are part of its theme (Deadlocked's two brightness
+    /// corrections), by label, on or off. Left out of the file for a preset that has none, so a
+    /// preset saved before them reads as it did, and applying one leaves the toggles as they are.
+    /// </summary>
+    [JsonPropertyName("toggles")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public Dictionary<string, bool>? Toggles { get; set; }
+
+    /// <summary>The state saved for one toggle label, matched as <see cref="TryGetColour"/> matches.</summary>
+    public bool TryGetToggle(string label, out bool on)
+    {
+        foreach (var (key, value) in Toggles ?? new Dictionary<string, bool>())
+        {
+            if (string.Equals(key, label, StringComparison.OrdinalIgnoreCase))
+            {
+                on = value;
+                return true;
+            }
+        }
+
+        on = false;
+        return false;
+    }
+
+    /// <summary>What Save writes for a block's theme toggles: every one, on or off.</summary>
+    public static KeyValuePair<string, bool>[] TogglesToSave(IEnumerable<Feature> toggles, Func<Feature, bool> isOn) =>
+        toggles.Select(f => new KeyValuePair<string, bool>(f.Label, isOn(f))).ToArray();
+
+    /// <summary>The FEATURE_SETs that apply this preset's toggles: each one it names, 1 or 0.</summary>
+    public List<(byte Id, uint Value)> ToggleWrites(IReadOnlyList<Feature> toggles)
+    {
+        var writes = new List<(byte Id, uint Value)>();
+        foreach (var feature in toggles)
+        {
+            if (TryGetToggle(feature.Label, out bool on)) writes.Add((feature.Id, on ? 1u : 0u));
+        }
+
+        return writes;
+    }
+
+    /// <summary>
     /// The colour saved for one feature label, as 0xRRGGBB. The lookup is a scan rather than a
     /// dictionary hit because deserialization replaces <see cref="Colours"/> with a plain
     /// dictionary of its own, comparer and all, and a hand-typed label should still match.
@@ -1368,8 +1409,12 @@ public sealed class ColourPresetStore
     public ColourPreset? Load(GameId game, string name) =>
         List(game).FirstOrDefault(p => string.Equals(p.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
 
-    /// <summary>Writes one preset, replacing any that already had that name (names differ by more than case).</summary>
-    public void Save(GameId game, string name, IEnumerable<KeyValuePair<string, uint>> colours)
+    /// <summary>
+    /// Writes one preset, replacing any that already had that name (names differ by more than case).
+    /// <paramref name="toggles"/> are the block's theme toggles, none for a block that has none.
+    /// </summary>
+    public void Save(GameId game, string name, IEnumerable<KeyValuePair<string, uint>> colours,
+        IEnumerable<KeyValuePair<string, bool>>? toggles = null)
     {
         name = (name ?? string.Empty).Trim();
         if (name.Length == 0) throw new ArgumentException("A colour preset needs a name", nameof(name));
@@ -1379,6 +1424,12 @@ public sealed class ColourPresetStore
 
         var preset = new ColourPreset { Name = name };
         foreach (var (label, rgb) in colours) preset.Colours[label] = FormatColour(rgb);
+        foreach (var (label, on) in toggles ?? Array.Empty<KeyValuePair<string, bool>>())
+        {
+            preset.Toggles ??= new Dictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+            preset.Toggles[label] = on;
+        }
+
         presets.Add(preset);
 
         Write(game, presets);

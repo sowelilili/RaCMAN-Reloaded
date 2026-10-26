@@ -388,8 +388,9 @@ public static class FakeScript
 
     /// <summary>
     /// Deadlocked's Cosmetics as revision 1.24 describes them, so a headless run draws the HUD
-    /// block: the colour, its shades, the weapons' colours and the brightness toggle, under a
-    /// "Cosmetics" group of their own. No readout mirrors them here; the page shows what it sent.
+    /// block: the colour, its shades, the weapons' colours and the two brightness toggles, every
+    /// one WRITES_CODE (qwark's own code in the game since 2026-10-26), under a "Cosmetics" group
+    /// of their own. No readout mirrors them here; the page shows what it sent.
     /// </summary>
     public static DescribeResult WithHudColours(DescribeResult describe)
     {
@@ -399,8 +400,9 @@ public static class FakeScript
         var groups = existing >= 0 ? describe.Groups : describe.Groups.Append("Cosmetics").ToArray();
         byte group = (byte)(existing >= 0 ? existing : describe.Groups.Length);
         var stock = FeatureFlags.Stock;
+        var code = FeatureFlags.WritesCode;
         Feature Colour(byte id, string label, FeatureFlags flags = FeatureFlags.Stock, byte aux = 0) =>
-            new(id, FeatureKind.Color, group, aux, flags, 0xFF, 0, 0, label);
+            new(id, FeatureKind.Color, group, aux, flags | code, 0xFF, 0, 0, label);
 
         var hud = new[]
         {
@@ -411,13 +413,14 @@ public static class FakeScript
             Colour(22, "Weapon colour V11", stock),
             Colour(23, "Weapon colour V99", stock),
             Colour(24, "Gadget colour", stock),
-            new Feature(25, FeatureKind.Toggle, group, 0, FeatureFlags.None, 0xFF, 0, 0, "Correct HUD brightness"),
+            new Feature(25, FeatureKind.Toggle, group, 0, code, 0xFF, 0, 0, "Correct HUD brightness"),
+            new Feature(26, FeatureKind.Toggle, group, 0, code, 0xFF, 0, 0, "Correct gradient brightness"),
         };
 
         return describe with
         {
             Groups = groups,
-            Features = describe.Features.Where(f => f.Id < 18 || f.Id > 25).Concat(hud).ToArray(),
+            Features = describe.Features.Where(f => f.Id < 18 || f.Id > 26).Concat(hud).ToArray(),
         };
     }
 }

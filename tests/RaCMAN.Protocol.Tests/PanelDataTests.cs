@@ -2647,4 +2647,65 @@ public class ColourShadeTests
         var back = new Feature(35, FeatureKind.Color, 5, 0, FeatureFlags.None, 4, 0, 0, ColourPresetStore.ChargebootBack);
         Assert.Equal(new[] { ((byte)34, 0x2080FFu) }, boots.Writes(new[] { front, back }));
     }
+
+    // 2026-10-26: Deadlocked's two brightness corrections are part of the HUD's theme.
+    private static readonly Feature FlatFix = new(25, FeatureKind.Toggle, 5, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Correct HUD brightness");
+    private static readonly Feature GradientFix = new(26, FeatureKind.Toggle, 5, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Correct gradient brightness");
+
+    [Fact]
+    public void ABlockWithAStockColourMakesATheme()
+    {
+        Assert.Equal(new[] { 25, 26 }, GamePanel.ThemeToggles(new[] { Hud, Vivid, FlatFix, GradientFix, GunLow }).Select(f => (int)f.Id));
+
+        // Colours with no game's own to go back to (the chargeboots before revision 1.24) keep
+        // their toggles where they always were, and so does a block of toggles alone.
+        var plain = Hud with { Flags = FeatureFlags.None };
+        Assert.Empty(GamePanel.ThemeToggles(new[] { plain, FlatFix }));
+        Assert.Empty(GamePanel.ThemeToggles(new[] { FlatFix, GradientFix }));
+        Assert.Contains("on boot", GamePanel.ThemeToggleTooltip(GradientFix));
+        Assert.Contains("health bar", GamePanel.ThemeToggleTooltip(GradientFix));
+    }
+
+    [Fact]
+    public void APresetCarriesTheThemeToggles()
+    {
+        var store = new ColourPresetStore(Path.Combine(TestDataFolder.Root, "theme-presets"));
+        var theme = new[] { FlatFix, GradientFix };
+        store.Save(GameId.Rac4, "gold",
+            ColourPreset.ValuesToSave(new[] { Hud }, _ => 0x00FFD700u),
+            ColourPreset.TogglesToSave(theme, f => f.Id == 25));
+
+        var loaded = store.Load(GameId.Rac4, "gold")!;
+        Assert.Equal(new[] { ((byte)25, 1u), ((byte)26, 0u) }, loaded.ToggleWrites(theme));
+        Assert.Equal(new[] { ((byte)18, 0xFFD700u) }, loaded.Writes(new[] { Hud }));
+        Assert.Contains("\"toggles\"", File.ReadAllText(store.FileFor(GameId.Rac4)));
+
+        // A preset saved before the toggles were part of it leaves them as they are, and writes
+        // no "toggles" of its own.
+        store.Save(GameId.Rac4, "old", ColourPreset.ValuesToSave(new[] { Hud }, _ => 0x00102030u));
+        Assert.Empty(store.Load(GameId.Rac4, "old")!.ToggleWrites(theme));
+        Assert.Null(store.Load(GameId.Rac4, "old")!.Toggles);
+    }
+
+    [Fact]
+    public void NoneTurnsTheThemeTogglesOffAndReadsAsNoneOnlyWhileTheyAre()
+    {
+        var colours = new[] { Hud, Vivid };
+        var theme = new[] { FlatFix, GradientFix };
+        Assert.Equal(new[] { ((byte)25, 0u), ((byte)26, 0u) }, GamePanel.NoneToggleWrites(theme));
+
+        Func<Feature, uint> stock = _ => 0x01DA262Au;
+        Assert.True(GamePanel.ThemeAtStock(colours, theme, stock, 0));
+        Assert.False(GamePanel.ThemeAtStock(colours, theme, stock, 1UL << 26));
+        Assert.True(GamePanel.ThemeAtStock(colours, theme, stock, 1UL << 3));
+        Assert.False(GamePanel.ThemeAtStock(colours, theme, f => f.Id == 18 ? 0x00123456u : 0x01DA262Au, 0));
+    }
+
+    [Fact]
+    public void OnBootKeepsATogglesStateWithTheColours()
+    {
+        var theme = new[] { FlatFix, GradientFix };
+        Assert.Equal(new[] { ((byte)25, false), ((byte)26, true) }, GamePanel.ThemeBootWrites(theme, keep: true, 1UL << 26));
+        Assert.Equal(new[] { ((byte)25, false), ((byte)26, false) }, GamePanel.ThemeBootWrites(theme, keep: false, ulong.MaxValue));
+    }
 }

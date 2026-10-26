@@ -103,21 +103,26 @@ The colours stay until the game restarts. Tick **on boot** beside **Save** to ha
 
 ## Deadlocked's HUD colour
 
-In Deadlocked, **Game**, then **Cosmetics**, has a **HUD** heading with a **HUD colour** picker. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. It works on a console and under RPCS3. The whole HUD changes at once.
+In Deadlocked, **Game**, then **Cosmetics**, has a **HUD** heading with a **HUD colour** picker. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. The whole HUD changes at once: the health bar, the EXP bars, the ammo, the quick-select slots, the radar and its outline, the prompt and pickup boxes, the bot HUD and the end screen.
+
+The HUD colour is qwark's own code in the game, so it works on a console as soon as you connect. Under RPCS3 it needs qwark's patches: press **Install qwark patches...** on the Connection panel, then restart the game in RPCS3. Until then the HUD block is greyed out, and its pickers show the game's own colours.
 
 The game draws the HUD in that colour and three shades of it: **vivid** (brighter: the health bar, the ammo, the radar's cursor), **dark** (the bottom of the HUD's gradients) and **light** (the top of the prompt and pickup boxes, and the radar cursor's pulse). You don't have to set them. The pickers under **HUD colour** are faded while the console works them out from the HUD colour, and they follow it when you change it. Pick a colour in one to override that shade. It then stays as you set it when the HUD colour changes, and an **Auto** button beside it hands it back to the HUD colour.
 
-**Correct HUD brightness.** The PS3 version draws its HUD colours twice as bright as the game's own numbers say, the game's own HUD too. Tick **Correct HUD brightness** to make up for it: the console then stores your colours at half brightness, so the HUD shows exactly the colour you pick (an odd number can come back one higher), and with no colour picked the game's own HUD is drawn at the brightness it was made for. Untick it to have the brighter look of the PS3 version: your colours go in as you pick them, and the game's own HUD is left as it is. The pickers always show the colours you picked. Tick **on boot** beside it to have it on at every boot.
+**Brightness.** The PS3 version draws its HUD twice as bright as the game's own colours say, the game's own HUD too. Two boxes under the pickers make up for it, each for its own part of the HUD:
 
-**Weapon colours.** The game colours each weapon's icon by its level: grey up to V10, then from blue at V11 to purple at V99. In multiplayer, every level is blue. **Weapon colour V11** and **Weapon colour V99** set the two ends of that gradient, and **Gadget colour** the colour of an item that is no weapon. A HUD colour leaves them alone. The brightness correction does not change them: the icons are drawn at the brightness the game meant already.
+- **Correct gradient brightness**: the health bar and the two EXP bars.
+- **Correct HUD brightness**: everything else: the radar and its outline, the quick-select slots (the d-pad), the prompt and pickup boxes, the end screen and the bot HUD.
 
-The game keeps the HUD's colours and the weapons' colours in one table of team colours, and the HUD colour cheat picks the HUD's team from it. With the cheat on the blue, yellow or purple team, the HUD shares one colour with the weapons: blue is the V11 colour, purple the V99 colour, and yellow's light shade the gadget colour. Then a change to either one changes both, and the last one you set wins. With the cheat at Default, or on any other colour, they are separate.
+A ticked box draws its part as bright as the game meant it, so it shows exactly the colour you picked (an odd number can come out one higher). An unticked box keeps the brighter look of the PS3 version. So to keep the bright health and EXP bars without a washed-out radar, tick **Correct HUD brightness** only. The boxes change the colours the HUD draws, not the colours you picked: the pickers show the same either way.
 
-The picker changes the colours of the team that the HUD colour cheat picks, so other things the game draws in that team's colour change too, and the cheat menu's preview of that team shows your colour. With the cheat at Default, it changes the player's own team. If you pick another team in the cheat menu, the HUD uses that team's colours, and the pickers show them; set the picker again to change that team.
+Below a line, **Weapon colour V11**, **Weapon colour V99** and **Gadget colour** set the colours of the weapon icons. The game colours each weapon's icon by its level: grey up to V10, then from blue at V11 to purple at V99. In multiplayer, every level is blue. V11 and V99 set the two ends of that gradient, and **Gadget colour** the colour of an item that is no weapon. They are separate from the HUD colour, and the brightness boxes don't change them: the icons are drawn at the brightness the game meant already.
 
-**Presets** above the pickers works as for the chargeboots. A preset keeps the colours you changed: the HUD colour, the shades you overrode and the weapon colours you picked. Picking it changes those and leaves the rest as they are. Pick **(none)** to put the game's own colours back: the HUD colour, its shades and the weapon colours.
+The HUD colour is your HUD's own. It doesn't change the game's team colours, so the HUD colour cheat's preview, the vehicle health bar, the menus and multiplayer keep their colours. While a colour is set, it is the HUD's colour whatever the HUD colour cheat says. Pick **(none)** to go back to the game's own, cheat included. In multiplayer the HUD keeps the team colours.
 
-The colours stay until the game restarts. Tick **on boot** beside **Save** to have the console set them again whenever you play, also with no PC connected. In Deadlocked the console sets them as each level starts, in the team the HUD colour cheat of your save picks.
+**Presets** above the pickers works as for the chargeboots, and a preset is the whole look: the HUD colour, the shades you overrode, the weapon colours you picked, and both brightness boxes. Picking it puts all of that back, and leaves the colours it doesn't name as they are. Pick **(none)** to put the game's own look back: the game's colours, and both brightness boxes unticked.
+
+The colours and the boxes stay until the game restarts. Tick **on boot** beside **Save** to have the console set all of them again every time the game boots, also with no PC connected. While it is ticked, a change to a colour or a box is kept too.
 
 ## Updates
 

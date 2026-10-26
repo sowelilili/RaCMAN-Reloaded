@@ -294,6 +294,26 @@ public class GameLayoutTests
     }
 
     [Fact]
+    public void DeadlockedsHudHeadingHasALineBeforeTheWeaponsAndTheCorrectionsAboveIt()
+    {
+        var list = GameLayout.HeadingList("NPEA00423", GameId.Rac4, "Cosmetics", "HUD");
+        int line = list.ToList().IndexOf(GameLayout.Separator);
+        Assert.True(line > 0);
+        Assert.Equal("Weapon colour V11", list[line + 1]);
+        Assert.True(list.ToList().IndexOf("Correct gradient brightness") < line);
+        Assert.True(list.ToList().IndexOf("Correct HUD brightness") < line);
+
+        Assert.Equal(new[] { "Weapon colour V11" },
+            GameLayout.SeparatorsBefore("NPEA00423", GameId.Rac4, "Cosmetics", "HUD"));
+        Assert.Empty(GameLayout.SeparatorsBefore("NPEA00423", GameId.Rac4, "Cosmetics", null));
+        Assert.Empty(GameLayout.SeparatorsBefore("NPEA00387", GameId.Rac3, "Cosmetics", "Chargeboots"));
+
+        // A separator is no label: it never draws a heading of its own.
+        Assert.False(GameLayout.HeadingsFor("NPEA00423", GameId.Rac4, "Cosmetics").ContainsKey(GameLayout.Separator));
+        Assert.Equal("HUD", GameLayout.HeadingsFor("NPEA00423", GameId.Rac4, "Cosmetics")["Correct gradient brightness"]);
+    }
+
+    [Fact]
     public void ASectionNoHeadingNamesIsStillOneBlock()
     {
         var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");

@@ -354,13 +354,58 @@ public static class GameLayout
             if (string.IsNullOrWhiteSpace(heading) || labels is null) continue;
 
             // First heading to name a label wins, so a label listed twice cannot draw two headers.
+            // A separator (2026-10-26) is no label.
             foreach (var label in labels)
             {
-                if (!string.IsNullOrWhiteSpace(label)) headings.TryAdd(label, heading);
+                if (!string.IsNullOrWhiteSpace(label) && label != Separator) headings.TryAdd(label, heading);
             }
         }
 
         return headings;
+    }
+
+    /// <summary>
+    /// The entry a heading's list can carry between two labels for a line across the block there
+    /// (2026-10-26: Deadlocked's HUD colours above it, the weapons' below).
+    /// </summary>
+    public const string Separator = "---";
+
+    /// <summary>
+    /// The labels of one heading's features that have a separator drawn in front of them: each
+    /// label that follows a <see cref="Separator"/> in the heading's list, so a separator with
+    /// nothing after it, or at the very start, draws nothing. Empty for a heading the file does not
+    /// have.
+    /// </summary>
+    public static IReadOnlySet<string> SeparatorsBefore(string titleId, GameId game, string section, string? heading)
+    {
+        var before = new HashSet<string>(StringComparer.Ordinal);
+        bool pending = false;
+        foreach (var label in HeadingList(titleId, game, section, heading))
+        {
+            if (label == Separator)
+            {
+                pending = true;
+                continue;
+            }
+
+            if (pending && !string.IsNullOrWhiteSpace(label)) before.Add(label);
+            pending = false;
+        }
+
+        return before;
+    }
+
+    /// <summary>
+    /// One heading's list as the file has it, labels and separators in order: empty for no heading,
+    /// or one the file does not have.
+    /// </summary>
+    public static IReadOnlyList<string> HeadingList(string titleId, GameId game, string section, string? heading)
+    {
+        if (heading is null || string.IsNullOrEmpty(section)) return Array.Empty<string>();
+        if (LayoutFor(titleId, game) is not { } layout) return Array.Empty<string>();
+        if (layout.Headings is not { } table || !table.TryGetValue(section, out var forSection) || forSection is null)
+            return Array.Empty<string>();
+        return forSection.TryGetValue(heading, out var labels) && labels is not null ? labels : Array.Empty<string>();
     }
 
     /// <summary>

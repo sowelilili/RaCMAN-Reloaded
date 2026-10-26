@@ -23,7 +23,9 @@
 // "headings" breaks a section up: it is keyed by section name, then by the heading text, and each
 // heading lists the feature labels (again, the exact DESCRIBE ones) it is drawn in front of. The
 // features a heading names are collected under it in their own order, and the ones no heading names
-// stay where they were. A section nothing lists is drawn exactly as before.
+// stay where they were. A section nothing lists is drawn exactly as before. A "---" between two
+// labels draws a line across the block in front of the second (Deadlocked's HUD colours above it,
+// the weapons' below).
 //
 // Four section names are reserved, because a panel decides where each of them is drawn. None of
 // them can be a sub-page, a stacked header or a tab-order entry:
@@ -139,6 +141,8 @@
             "HUD dark shade",
             "HUD light shade",
             "Correct HUD brightness",
+            "Correct gradient brightness",
+            "---",
             "Weapon colour V11",
             "Weapon colour V99",
             "Gadget colour"
