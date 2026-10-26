@@ -915,6 +915,40 @@ public sealed class AppState : IDisposable
         }
     }
 
+    /// <summary>
+    /// Telemetry's <c>mod_loaded</c> and <c>mod_auto</c> as last seen, and the generation they were
+    /// seen in; null outside a game and before the first look.
+    /// </summary>
+    private (uint Loaded, uint Auto, uint Generation)? _modBitsSeen;
+
+    /// <summary>
+    /// Once a frame while connected: the mods read again (MOD_LIST, the USB list and the console's
+    /// folders) when telemetry's <c>mod_loaded</c> or <c>mod_auto</c> moves within one process. The
+    /// console menu's Mods page (qwark build 56, a preview feature) loads, unloads and auto-flags
+    /// mods from the TV with no client in the loop, and the Mods panel draws MOD_LIST's rows, not
+    /// the bits, so without this it showed a mod switched on from the TV as off until something
+    /// else read the list. The client's own changes move the bits as well, which only reads the
+    /// list once more. The first bits of a game, or of a reboot, are only noted: the way into a
+    /// game reads the mods anyway (<see cref="RefreshLive"/>).
+    /// </summary>
+    private void WatchModBits(SessionInfo session)
+    {
+        if (!Ingame || UnknownGame)
+        {
+            _modBitsSeen = null;
+            return;
+        }
+
+        var bits = (session.ModLoaded, session.ModAuto, session.Generation);
+        if (_modBitsSeen == bits) return;
+
+        bool moved = _modBitsSeen is { } seen && seen.Generation == session.Generation;
+        if (moved && HoldsBackgroundWork()) return;
+
+        _modBitsSeen = bits;
+        if (moved) RefreshMods(quiet: true);
+    }
+
     /// <summary>Reads PROFILE_INFO. Quiet: nobody pressed anything.</summary>
     public void RefreshProfile()
     {
@@ -1124,6 +1158,7 @@ public sealed class AppState : IDisposable
             // profile and any question about it.
             ForgetVshMemory();
             ForgetProfile();
+            _modBitsSeen = null;
             return;
         }
 
@@ -1135,6 +1170,9 @@ public sealed class AppState : IDisposable
 
         // Nor are the console's per-user settings: who is signed in, and whose settings are in use.
         WatchProfile(session);
+
+        // The mods the console has loaded, which its own menu changes too (build 56).
+        WatchModBits(session);
 
         // Nothing to do with the game: a standalone console whose module is older than this client
         // has the new one written to its boot path, once, as soon as the session is somewhere the

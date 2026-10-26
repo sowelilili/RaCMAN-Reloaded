@@ -870,7 +870,42 @@ public sealed partial class FakeQwarkServer : IDisposable
             ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
             Flags2 = (UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None)
                      | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None),
+            ModLoaded = ModBits(ModFlags.Loaded),
+            ModAuto = ModBits(ModFlags.Auto),
         };
+    }
+
+    /// <summary>
+    /// SessionInfo's <c>mod_loaded</c> or <c>mod_auto</c> out of the mod table, a bit at each
+    /// row's index, as qwark works them out. Caller holds the gate.
+    /// </summary>
+    private uint ModBits(ModFlags flag)
+    {
+        uint bits = 0;
+        foreach (var mod in Mods)
+        {
+            if ((mod.Flags & flag) != 0 && mod.Index < 32) bits |= 1u << mod.Index;
+        }
+
+        return bits;
+    }
+
+    /// <summary>
+    /// What the console menu's Mods page (qwark build 56, a preview feature) does from the TV, with
+    /// no request from any client: a mod loaded or unloaded, its auto flag set or cleared. A client
+    /// sees it only in telemetry's mod bits and the next MOD_LIST.
+    /// </summary>
+    public void SetModFromConsole(string dirName, bool loaded, bool auto)
+    {
+        lock (_gate)
+        {
+            int at = Mods.FindIndex(m => string.Equals(m.DirName, dirName, StringComparison.Ordinal));
+            if (at < 0) return;
+            var flags = Mods[at].Flags & ~(ModFlags.Loaded | ModFlags.Auto);
+            if (loaded) flags |= ModFlags.Loaded;
+            if (auto) flags |= ModFlags.Auto;
+            Mods[at] = Mods[at] with { Flags = flags };
+        }
     }
 
     /// <summary>

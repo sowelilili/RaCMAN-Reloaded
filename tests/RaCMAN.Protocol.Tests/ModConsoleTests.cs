@@ -783,6 +783,35 @@ public class ModConsoleTests : IDisposable
         Assert.Contains(state.ModRows(), r => r.FolderName == GuidFolder);
     }
 
+    /// <summary>
+    /// qwark build 56's console menu has a Mods page (a preview feature) that loads, unloads and
+    /// auto-flags mods from the TV with no client in the loop. The client sees that only in
+    /// telemetry's mod bits, and reads MOD_LIST again when they move, so the panel follows.
+    /// </summary>
+    [Fact]
+    public async Task AModSwitchedFromTheConsoleMenuShowsOnThePanel()
+    {
+        using var server = new FakeQwarkServer();
+        server.AddConsoleMod("tv-mod", "TV Mod");
+        server.Start();
+
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false }, ModsPath = UserRoot });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+
+        Assert.True(await PumpAsync(state, () => state.ConsoleMods.Any(m => m.DirName == "tv-mod")));
+        Assert.False(state.ConsoleMods.Single(m => m.DirName == "tv-mod").Loaded);
+
+        server.SetModFromConsole("tv-mod", loaded: true, auto: true);
+        Assert.True(await PumpAsync(state, () => state.ConsoleMods.Single(m => m.DirName == "tv-mod") is { Loaded: true, Auto: true }));
+        var row = state.ModRows().Single(r => r.FolderName == "tv-mod");
+        Assert.True(row.Loaded);
+        Assert.True(row.Console!.Auto);
+
+        server.SetModFromConsole("tv-mod", loaded: false, auto: false);
+        Assert.True(await PumpAsync(state, () => state.ConsoleMods.Single(m => m.DirName == "tv-mod") is { Loaded: false, Auto: false }));
+    }
+
     // ================================================================ the fake, as qwark
 
     [Fact]
