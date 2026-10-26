@@ -137,7 +137,11 @@
             "HUD colour",
             "HUD vivid shade",
             "HUD dark shade",
-            "HUD light shade"
+            "HUD light shade",
+            "Correct HUD brightness",
+            "Weapon colour V11",
+            "Weapon colour V99",
+            "Gadget colour"
           ]
         }
       }

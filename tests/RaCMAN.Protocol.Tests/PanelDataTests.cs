@@ -2514,8 +2514,12 @@ public class ColourShadeTests
         Assert.False(new Feature(3, FeatureKind.Value, 0, 18, FeatureFlags.Shade, 0xFF, 0, 0, "x").IsShade);
     }
 
+    // Revision 1.24, 2026-10-26: Deadlocked's weapon colours, STOCK COLORs beside the HUD's.
+    private static readonly Feature GunLow = new(22, FeatureKind.Color, 5, 0, FeatureFlags.Stock, 12, 0, 0, "Weapon colour V11");
+    private static readonly Feature GunHigh = new(23, FeatureKind.Color, 5, 0, FeatureFlags.Stock, 13, 0, 0, "Weapon colour V99");
+
     [Fact]
-    public void AStockColourOffersItsWayBackOnlyWhileItIsNotTheGamesOwn()
+    public void AStockColourIsParsedAndReadsAsTheGamesOwnWhileItsReadoutCarriesBit24()
     {
         var row = new byte[Feature.Size];
         row[0] = 18;
@@ -2530,13 +2534,70 @@ public class ColourShadeTests
         Assert.False(feature.IsShade);
         Assert.Null(feature.ShadeOf);
 
-        Assert.False(GamePanel.StockButtonShown(feature, 0x01DA262A));
-        Assert.True(GamePanel.StockButtonShown(feature, 0x00FF8E00));
+        var block = new[] { feature, Vivid, GunLow };
+        Assert.True(GamePanel.AtStock(block, f => f.Id == 19 ? 0x00123456u : 0x01DA262Au));
+        Assert.False(GamePanel.AtStock(block, f => f.Id == 22 ? 0x00123456u : 0x01DA262Au));
 
-        // The flag on any other kind means nothing, and a plain COLOR has no way back.
+        // The flag on any other kind means nothing.
         Assert.False(new Feature(3, FeatureKind.Value, 0, 0, FeatureFlags.Stock, 0xFF, 0, 0, "x").IsStock);
-        Assert.False(GamePanel.StockButtonShown(Hud with { Flags = FeatureFlags.None }, 0x00FF8E00));
-        Assert.False(GamePanel.StockButtonShown(Vivid, 0x00FF8E00));
+    }
+
+    [Fact]
+    public void NoneSendsAutoToEveryStockColourAndItsShades()
+    {
+        var block = new[] { Hud, Vivid, Dark, Light, GunLow, GunHigh };
+        Assert.Equal(new[] { 18, 19, 20, 21, 22, 23 }, GamePanel.NoneWrites(block).Select(w => (int)w.Id));
+        Assert.All(GamePanel.NoneWrites(block), w => Assert.Equal(Feature.ColorAuto, w.Value));
+
+        // A plain COLOR has no game's own to go back to, and a shade of one follows it.
+        var plain = Hud with { Flags = FeatureFlags.None };
+        Assert.Empty(GamePanel.NoneWrites(new[] { plain, Vivid }));
+        Assert.Equal(new[] { 22 }, GamePanel.NoneWrites(new[] { plain, Vivid, GunLow }).Select(w => (int)w.Id));
+    }
+
+    [Fact]
+    public void OnBootIsTickedOnlyWhileTheConsoleKeepsEveryColourOfTheBlock()
+    {
+        var block = new[] { Hud, Vivid, GunLow };
+        ulong all = (1UL << 18) | (1UL << 19) | (1UL << 22);
+        Assert.True(GamePanel.KeptForBoot(block, all));
+        Assert.True(GamePanel.KeptForBoot(block, all | 1));
+        Assert.False(GamePanel.KeptForBoot(block, all & ~(1UL << 19)));
+        Assert.False(GamePanel.KeptForBoot(Array.Empty<Feature>(), ulong.MaxValue));
+        Assert.Equal(0x01DA262Au, 0x01DA262Au & GamePanel.BootValueMask);
+    }
+
+    [Fact]
+    public void SaveLeavesTheGamesOwnColoursOut()
+    {
+        var readouts = new Dictionary<byte, uint>
+        {
+            [18] = 0x00FF8E00, [19] = 0x01FFD500, [22] = 0x01004C73, [23] = 0x00FF0000,
+        };
+
+        var saved = ColourPreset.ValuesToSave(new[] { Hud, Vivid, GunLow, GunHigh }, f => readouts[f.Id]);
+        Assert.Equal(new[] { ("HUD colour", 0xFF8E00u), ("Weapon colour V99", 0xFF0000u) },
+            saved.Select(p => (p.Key, p.Value)));
+    }
+
+    [Fact]
+    public async Task TheConsoleKeepsAColourForTheBootWithItsValue()
+    {
+        using var server = new RaCMAN.Protocol.Testing.FakeQwarkServer();
+        server.Describe = new DescribeResult(GameId.Rac4, new[] { "Cosmetics" }, Array.Empty<string>(), new[] { Hud, Vivid });
+        server.Start();
+        using var client = new QwarkClient();
+        await client.ConnectAsync("127.0.0.1", server.Port);
+
+        await client.FeatureSetAutoAsync(18, true, 0x00FF8E00);
+        await client.FeatureSetAutoAsync(19, true, Feature.ColorAuto);
+        Assert.Equal(0x00FF8E00u, server.KeptColours[18]);
+        Assert.Equal(Feature.ColorAuto, server.KeptColours[19]);
+        var state = await client.GetStateAsync();
+        Assert.Equal((1UL << 18) | (1UL << 19), state.Session.ToggleAuto);
+
+        await client.FeatureSetAutoAsync(18, false, 0);
+        Assert.False(server.KeptColours.ContainsKey(18));
     }
 
     [Fact]

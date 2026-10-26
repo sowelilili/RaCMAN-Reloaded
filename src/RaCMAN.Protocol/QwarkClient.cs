@@ -803,6 +803,15 @@ public sealed class QwarkClient : IDisposable
     public Task FeatureSetAutoAsync(byte id, bool auto, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.FeatureSetAuto, new[] { id, auto ? (byte)1 : (byte)0 }, cancellationToken);
 
+    /// <summary>
+    /// Revision 1.24, FEATURE_SET_AUTO on a COLOR: the console keeps <paramref name="value"/>, a
+    /// FEATURE_SET value with its AUTO bit, and sets it again at every boot (PROTOCOL.md 5.3.5).
+    /// </summary>
+    public Task FeatureSetAutoAsync(byte id, bool auto, uint value, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.FeatureSetAuto,
+            Bytes(6, (scoped ref SpanWriter w) => { w.WriteU8(id); w.WriteU8(auto ? (byte)1 : (byte)0); w.WriteU32(value); }),
+            cancellationToken);
+
     public async Task<string[]> FeatureOptionsAsync(byte id, CancellationToken cancellationToken = default)
     {
         var payload = await RequestAsync(Opcode.FeatureOptions, new[] { id }, cancellationToken).ConfigureAwait(false);

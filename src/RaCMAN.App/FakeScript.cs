@@ -321,7 +321,8 @@ public static class FakeScript
             // normalisation differ most from the other three. Its two fixes come with it, so the
             // manips area has something under its Fixes heading.
             case "rac4":
-                fake.Describe = FakeQwarkServer.WithManipHeaderFeatures(fake.Describe with { Game = GameId.Rac4 }, GameId.Rac4);
+                fake.Describe = WithHudColours(
+                    FakeQwarkServer.WithManipHeaderFeatures(fake.Describe with { Game = GameId.Rac4 }, GameId.Rac4));
                 fake.Session = session with
                 {
                     State = SessionState.Ingame,
@@ -383,5 +384,40 @@ public static class FakeScript
                 Console.Error.WriteLine($"fake-script: unknown step '{step}'. {Usage}");
                 break;
         }
+    }
+
+    /// <summary>
+    /// Deadlocked's Cosmetics as revision 1.24 describes them, so a headless run draws the HUD
+    /// block: the colour, its shades, the weapons' colours and the brightness toggle, under a
+    /// "Cosmetics" group of their own. No readout mirrors them here; the page shows what it sent.
+    /// </summary>
+    public static DescribeResult WithHudColours(DescribeResult describe)
+    {
+        if (describe.Features.Any(f => f.Label == "HUD colour")) return describe;
+
+        int existing = Array.IndexOf(describe.Groups, "Cosmetics");
+        var groups = existing >= 0 ? describe.Groups : describe.Groups.Append("Cosmetics").ToArray();
+        byte group = (byte)(existing >= 0 ? existing : describe.Groups.Length);
+        var stock = FeatureFlags.Stock;
+        Feature Colour(byte id, string label, FeatureFlags flags = FeatureFlags.Stock, byte aux = 0) =>
+            new(id, FeatureKind.Color, group, aux, flags, 0xFF, 0, 0, label);
+
+        var hud = new[]
+        {
+            Colour(18, "HUD colour"),
+            Colour(19, "HUD vivid shade", FeatureFlags.Shade, 18),
+            Colour(20, "HUD dark shade", FeatureFlags.Shade, 18),
+            Colour(21, "HUD light shade", FeatureFlags.Shade, 18),
+            Colour(22, "Weapon colour V11", stock),
+            Colour(23, "Weapon colour V99", stock),
+            Colour(24, "Gadget colour", stock),
+            new Feature(25, FeatureKind.Toggle, group, 0, FeatureFlags.None, 0xFF, 0, 0, "Correct HUD brightness"),
+        };
+
+        return describe with
+        {
+            Groups = groups,
+            Features = describe.Features.Where(f => f.Id < 18 || f.Id > 25).Concat(hud).ToArray(),
+        };
     }
 }

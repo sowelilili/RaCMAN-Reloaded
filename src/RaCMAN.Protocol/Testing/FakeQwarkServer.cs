@@ -2299,6 +2299,12 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
         or Opcode.FeatureSet or Opcode.FeatureTrigger;
 
+    /// <summary>
+    /// Revision 1.24: the colours a client asked the console to keep for the boot, by feature id,
+    /// each the FEATURE_SET value FEATURE_SET_AUTO carried.
+    /// </summary>
+    public ConcurrentDictionary<byte, uint> KeptColours { get; } = new();
+
     private (Status, byte[]?) HandleOp(Opcode opcode, byte[] payload, IPEndPoint remote)
     {
         lock (_gate)
@@ -2404,6 +2410,14 @@ public sealed partial class FakeQwarkServer : IDisposable
                     // A live toggle is the game's own byte: there is nothing to apply on boot.
                     var target = Array.Find(Describe.Features, f => f.Id == payload[0]);
                     if (target is not null && target.IsLive) return (Status.Unsupported, null);
+
+                    // Revision 1.24: a COLOR's request carries the value to keep for the boot.
+                    if (target is not null && target.Kind == FeatureKind.Color)
+                    {
+                        uint kept = payload.Length >= 6 ? new SpanReader(payload.AsSpan(2, 4)).ReadU32() : 0;
+                        if (payload[1] != 0) KeptColours[payload[0]] = kept;
+                        else KeptColours.TryRemove(payload[0], out _);
+                    }
 
                     ulong bit = 1UL << payload[0];
                     _session = payload[1] != 0

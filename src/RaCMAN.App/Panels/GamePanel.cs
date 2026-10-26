@@ -34,6 +34,7 @@ public static class GamePanel
     {
         Drafts.Clear();
         LastSet.Clear();
+        Picks.Clear();
         CodeFeaturesDrawn.Clear();
         AsideButtonsDrawn.Clear();
         SubPageNav.Open = null;
@@ -1034,57 +1035,36 @@ public static class GamePanel
         else // Color
         {
             uint packed = CurrentValue(state, feature);
-            var colour = new Vector3(
-                ((packed >> 16) & 0xFF) / 255f,
-                ((packed >> 8) & 0xFF) / 255f,
-                (packed & 0xFF) / 255f);
+
+            // The picker edits its own hue, saturation and value (HsvPick), so taking the
+            // saturation or the value to 0 and back keeps the hue; the RGB is worked out again
+            // only when the colour changes from outside.
+            if (!Picks.TryGetValue(feature.Id, out var pick)) Picks[feature.Id] = pick = new HsvPick();
+            double now = ImGui.GetTime();
+            pick.Sync(packed, now);
+            var hsv = pick.Hsv;
 
             // Revision 1.24: a shade is optional. While qwark works it out it is drawn faded, as
             // the "on boot" boxes are, and stays pickable: a pick is an override, and an
             // overridden shade draws as any colour does, with Auto beside it to hand it back.
+            // The way back to the game's own colours is the presets' "(none)".
             bool automatic = ShadeIsAutomatic(feature, packed);
             if (automatic) ImGui.PushStyleVar(ImGuiStyleVar.Alpha, ImGui.GetStyle().Alpha * ShadeAlpha);
 
             ImGui.SetNextItemWidth(240);
-            bool picked = ImGui.ColorEdit3(feature.Label, ref colour);
+            bool picked = ImGui.ColorEdit3(feature.Label, ref hsv, ImGuiColorEditFlags.InputHSV);
 
             if (automatic) ImGui.PopStyleVar();
             if (feature.IsShade && ImGui.IsItemHovered()) Ui.SetTooltip(ShadeTooltip(describe, feature, automatic));
 
-            if (picked)
-            {
-                uint value = ((uint)(colour.X * 255) << 16) | ((uint)(colour.Y * 255) << 8) | (uint)(colour.Z * 255);
-                byte id = feature.Id;
-                LastSet[id] = value;
-                state.Run(() => state.Client.FeatureSetAsync(id, value));
-            }
+            if (picked) SendColour(state, feature.Id, pick.Pick(hsv, now), fromPicker: true);
 
             if (feature.IsShade && !automatic)
             {
                 ImGui.SameLine();
-                if (ImGui.SmallButton("Auto"))
-                {
-                    byte id = feature.Id;
-                    LastSet[id] = Feature.ColorAuto;
-                    state.Run(() => state.Client.FeatureSetAsync(id, Feature.ColorAuto));
-                }
+                if (ImGui.SmallButton("Auto")) SendColour(state, feature.Id, Feature.ColorAuto);
 
                 if (ImGui.IsItemHovered()) Ui.SetTooltip($"Work this shade out from {FollowedLabel(describe, feature)} again");
-            }
-
-            // Revision 1.24: a colour the game has its own of gets a way back to it while it is
-            // not the game's own; its shades go back to automatic with it.
-            if (StockButtonShown(feature, packed))
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Stock"))
-                {
-                    byte id = feature.Id;
-                    LastSet[id] = Feature.ColorAuto;
-                    state.Run(() => state.Client.FeatureSetAsync(id, Feature.ColorAuto));
-                }
-
-                if (ImGui.IsItemHovered()) Ui.SetTooltip("Put the game's own colour back, and its shades");
             }
         }
 
@@ -1097,13 +1077,6 @@ public static class GamePanel
     /// <summary>A shade qwark is working out for itself: its readout carries the AUTO bit (revision 1.24).</summary>
     public static bool ShadeIsAutomatic(Feature feature, uint readout) =>
         feature.IsShade && (readout & Feature.ColorAuto) != 0;
-
-    /// <summary>
-    /// Whether a STOCK colour shows its Stock button: while its readout says it is not the game's
-    /// own (no <see cref="Feature.ColorAuto"/>).
-    /// </summary>
-    public static bool StockButtonShown(Feature feature, uint readout) =>
-        feature.IsStock && (readout & Feature.ColorAuto) == 0;
 
     /// <summary>The label of the COLOR a shade follows, as DESCRIBE names it.</summary>
     private static string FollowedLabel(DescribeResult describe, Feature shade) =>
@@ -1157,12 +1130,27 @@ public static class GamePanel
 
         ImGui.PushID("colour-presets");
 
-        string preview = _presetIndex >= 0 && _presetIndex < _presets.Length ? _presets[_presetIndex].Name : "(none)";
+        // Revision 1.24: a block with a colour the game has its own of offers "(none)" first, which
+        // puts the game's own colours back, and reads "(none)" while they are.
+        bool hasStock = colours.Any(f => f.IsStock);
+        string preview = _presetIndex >= 0 && _presetIndex < _presets.Length
+            ? _presets[_presetIndex].Name
+            : hasStock && !AtStock(colours, f => CurrentValue(state, f)) ? "(custom)" : "(none)";
 
         ImGui.SetNextItemWidth(200);
-        ImGui.BeginDisabled(_presets.Length == 0);
+        ImGui.BeginDisabled(_presets.Length == 0 && !hasStock);
         if (ImGui.BeginCombo("Presets", preview))
         {
+            if (hasStock && ImGui.Selectable("(none)", false))
+            {
+                _presetIndex = -1;
+                _presetDeleteArmed = false;
+                _presetName = string.Empty;
+                ApplyNone(state, colours);
+            }
+
+            if (hasStock && ImGui.IsItemHovered()) Ui.SetTooltip("The game's own colours");
+
             for (int i = 0; i < _presets.Length; i++)
             {
                 if (!ImGui.Selectable(_presets[i].Name, i == _presetIndex)) continue;
@@ -1215,9 +1203,115 @@ public static class GamePanel
         if (ImGui.Button("Save") || (save && named)) SavePreset(state, game, colours, key);
         ImGui.EndDisabled();
 
+        // Revision 1.24: the console keeps these colours and sets them again at every boot, also
+        // with no PC connected. Ticked while it keeps every one of them; a change to one while it
+        // is ticked is kept too (SendColour).
+        if (hasStock)
+        {
+            ImGui.SameLine();
+            bool kept = KeptForBoot(colours, state.Session.ToggleAuto);
+            ImGui.PushStyleColor(ImGuiCol.Text, Ui.Grey);
+            bool changed = ImGui.Checkbox("on boot", ref kept);
+            ImGui.PopStyleColor();
+            if (changed) KeepForBoot(state, colours, kept);
+            if (ImGui.IsItemHovered())
+                Ui.SetTooltip("Apply these colours again every time the game boots, also with no PC connected");
+        }
+
         ImGui.PopID();
         ImGui.Spacing();
     }
+
+    // ---------------------------------------------------------------- the game's own colours, and the boot
+
+    /// <summary>Each colour picker's own hue, saturation and value, by feature id.</summary>
+    private static readonly Dictionary<byte, HsvPick> Picks = new();
+
+    /// <summary>
+    /// Bumped per feature at every send, so only the last of a run of picks (a drag) is kept for
+    /// the boot. Written on the render thread, read by the timer that follows a send.
+    /// </summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<byte, int> BootVersions = new();
+
+    /// <summary>How long a colour has to stay put before the console is asked to keep it.</summary>
+    private const int BootKeepDelayMs = 600;
+
+    /// <summary>
+    /// Sends one colour. A colour the console keeps for the boot is kept again with its new value,
+    /// once it has stayed put a moment, so a drag writes the console's config once rather than
+    /// once a frame. A send that did not come from the colour's own picker hands the picker back
+    /// to the readout at once.
+    /// </summary>
+    private static void SendColour(AppState state, byte id, uint value, bool fromPicker = false)
+    {
+        Noted(state, id, value, fromPicker);
+        state.Run(() => state.Client.FeatureSetAsync(id, value));
+    }
+
+    /// <summary>
+    /// Several colours, sent one after another in their order (a colour before its shades, as
+    /// qwark needs), with <paramref name="success"/> toasted when all of them landed.
+    /// </summary>
+    private static void SendColours(AppState state, IReadOnlyList<(byte Id, uint Value)> writes, string? success)
+    {
+        foreach (var (id, value) in writes) Noted(state, id, value, fromPicker: false);
+        state.Run(async () =>
+        {
+            foreach (var (id, value) in writes)
+                await state.Client.FeatureSetAsync(id, value).ConfigureAwait(false);
+        }, success);
+    }
+
+    /// <summary>The bookkeeping of a send: LastSet, the picker, and the boot value if the console keeps one.</summary>
+    private static void Noted(AppState state, byte id, uint value, bool fromPicker)
+    {
+        LastSet[id] = value;
+        if (!fromPicker && Picks.TryGetValue(id, out var pick)) pick.Release();
+
+        if (id >= 64 || (state.Session.ToggleAuto & (1UL << id)) == 0) return;
+        int version = BootVersions.AddOrUpdate(id, 1, (_, was) => was + 1);
+        _ = Task.Delay(BootKeepDelayMs).ContinueWith(_ =>
+        {
+            if (BootVersions.TryGetValue(id, out int now) && now == version)
+                state.Run(() => state.Client.FeatureSetAutoAsync(id, true, value));
+        }, TaskScheduler.Default);
+    }
+
+    /// <summary>Ticks or clears "on boot" for a block: every colour in it, each with what it shows now.</summary>
+    private static void KeepForBoot(AppState state, Feature[] colours, bool keep)
+    {
+        var values = colours.Select(f => (f.Id, Value: keep ? CurrentValue(state, f) & BootValueMask : 0u)).ToArray();
+        state.Run(async () =>
+        {
+            foreach (var (id, value) in values)
+                await state.Client.FeatureSetAutoAsync(id, keep, value).ConfigureAwait(false);
+        });
+    }
+
+    /// <summary>What of a readout the console keeps for the boot: the colour and the AUTO bit.</summary>
+    public const uint BootValueMask = 0x01FFFFFF;
+
+    /// <summary>"(none)": every colour the game has its own of, and the shades of those, back to it.</summary>
+    private static void ApplyNone(AppState state, Feature[] colours) =>
+        SendColours(state, NoneWrites(colours), "The game's own colours are back");
+
+    /// <summary>
+    /// The FEATURE_SETs "(none)" sends: AUTO to every STOCK colour of the block, and to every shade
+    /// of one, so the client's own record and a kept boot value say automatic as qwark does.
+    /// </summary>
+    public static List<(byte Id, uint Value)> NoneWrites(IReadOnlyList<Feature> colours) =>
+        colours
+            .Where(f => f.IsStock || (f.ShadeOf is { } of && colours.Any(c => c.Id == of && c.IsStock)))
+            .Select(f => (f.Id, Feature.ColorAuto))
+            .ToList();
+
+    /// <summary>Whether every STOCK colour of a block is the game's own: its readout carries AUTO.</summary>
+    public static bool AtStock(IReadOnlyList<Feature> colours, Func<Feature, uint> current) =>
+        colours.Where(f => f.IsStock).All(f => (current(f) & Feature.ColorAuto) != 0);
+
+    /// <summary>Whether the console keeps every colour of a block for the boot: each one's toggle_auto bit.</summary>
+    public static bool KeptForBoot(IReadOnlyList<Feature> colours, ulong toggleAuto) =>
+        colours.Count > 0 && colours.All(f => f.Id < 64 && (toggleAuto & (1UL << f.Id)) != 0);
 
     private static void RefreshPresets(AppState state, GameId game, string key)
     {
@@ -1245,7 +1339,6 @@ public static class GamePanel
     {
         // Revision 1.24: a shade the preset leaves out goes back to automatic (ColourPreset.Writes).
         var wanted = preset.Writes(colours);
-        foreach (var (id, value) in wanted) LastSet[id] = value;
 
         if (wanted.Count == 0)
         {
@@ -1253,13 +1346,7 @@ public static class GamePanel
             return;
         }
 
-        state.Run(async () =>
-        {
-            foreach (var (id, value) in wanted)
-            {
-                await state.Client.FeatureSetAsync(id, value).ConfigureAwait(false);
-            }
-        }, $"Applied colour preset {preset.Name}");
+        SendColours(state, wanted, $"Applied colour preset {preset.Name}");
     }
 
     private static void SavePreset(AppState state, GameId game, Feature[] colours, string key)

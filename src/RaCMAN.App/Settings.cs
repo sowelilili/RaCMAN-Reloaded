@@ -1267,11 +1267,14 @@ public sealed class ColourPreset
     /// What Save writes for a section's colours: each one's current colour, but a shade only while
     /// it is overridden (revision 1.24). A preset that leaves a shade out means "automatic", so an
     /// automatic shade is left out rather than frozen at the colour it happens to be worked out as.
+    /// Since 2026-10-26 a colour that is the game's own (STOCK, its readout flagged AUTO) is left
+    /// out the same way, so a HUD preset does not pin the weapons to the colours they had, and
+    /// applying it leaves them as they are; "(none)" is what puts the game's own back.
     /// </summary>
     public static KeyValuePair<string, uint>[] ValuesToSave(IEnumerable<Feature> colours, Func<Feature, uint> current) =>
         colours
             .Select(f => (Feature: f, Value: current(f)))
-            .Where(c => !(c.Feature.IsShade && (c.Value & Feature.ColorAuto) != 0))
+            .Where(c => !((c.Feature.IsShade || c.Feature.IsStock) && (c.Value & Feature.ColorAuto) != 0))
             .Select(c => new KeyValuePair<string, uint>(c.Feature.Label, c.Value & 0xFFFFFFu))
             .ToArray();
 
