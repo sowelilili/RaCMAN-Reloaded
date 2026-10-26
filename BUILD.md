@@ -40,4 +40,4 @@ There is no macOS job yet. macOS needs signing and notarisation first.
 - `controllerskins/`: input display skins.
 - `mods/`: the mod library each release ships.
 - `packaging/`: the Windows firewall helper and the AppImage icon.
-- `docs/`: the game layout reference, the firewall notes, the standalone module update and the OBS page.
+- `docs/`: the game layout reference, the firewall notes, the standalone module update, the OBS page and the features in test builds only.
