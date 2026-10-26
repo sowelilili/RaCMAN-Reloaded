@@ -775,6 +775,13 @@ public enum FeatureFlags : byte
     /// worked out, and a FEATURE_SET of that bit makes it automatic again (revision 1.24).
     /// </summary>
     Shade = 1 << 6,
+
+    /// <summary>
+    /// This COLOR has a colour of the game's own to go back to. Its readout carries
+    /// <see cref="Feature.ColorAuto"/> while it is the game's own, and a FEATURE_SET of that bit puts
+    /// it back, with every shade that follows it automatic again (revision 1.24, PROTOCOL.md 5.3.4).
+    /// </summary>
+    Stock = 1 << 7,
 }
 
 /// <summary>

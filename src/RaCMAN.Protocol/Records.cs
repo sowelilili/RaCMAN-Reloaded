@@ -346,6 +346,9 @@ public sealed record Feature(
     /// <summary>This COLOR is a shade of another, optional: worked out from it unless overridden.</summary>
     public bool IsShade => Kind == FeatureKind.Color && (Flags & FeatureFlags.Shade) != 0;
 
+    /// <summary>This COLOR has the game's own colour to go back to (revision 1.24).</summary>
+    public bool IsStock => Kind == FeatureKind.Color && (Flags & FeatureFlags.Stock) != 0;
+
     /// <summary>The id of the COLOR a shade follows, or null for any other row.</summary>
     public byte? ShadeOf => IsShade ? Aux : null;
 

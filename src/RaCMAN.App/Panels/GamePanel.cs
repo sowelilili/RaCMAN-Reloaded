@@ -1071,6 +1071,21 @@ public static class GamePanel
 
                 if (ImGui.IsItemHovered()) Ui.SetTooltip($"Work this shade out from {FollowedLabel(describe, feature)} again");
             }
+
+            // Revision 1.24: a colour the game has its own of gets a way back to it while it is
+            // not the game's own; its shades go back to automatic with it.
+            if (StockButtonShown(feature, packed))
+            {
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Stock"))
+                {
+                    byte id = feature.Id;
+                    LastSet[id] = Feature.ColorAuto;
+                    state.Run(() => state.Client.FeatureSetAsync(id, Feature.ColorAuto));
+                }
+
+                if (ImGui.IsItemHovered()) Ui.SetTooltip("Put the game's own colour back, and its shades");
+            }
         }
 
         ImGui.PopID();
@@ -1082,6 +1097,13 @@ public static class GamePanel
     /// <summary>A shade qwark is working out for itself: its readout carries the AUTO bit (revision 1.24).</summary>
     public static bool ShadeIsAutomatic(Feature feature, uint readout) =>
         feature.IsShade && (readout & Feature.ColorAuto) != 0;
+
+    /// <summary>
+    /// Whether a STOCK colour shows its Stock button: while its readout says it is not the game's
+    /// own (no <see cref="Feature.ColorAuto"/>).
+    /// </summary>
+    public static bool StockButtonShown(Feature feature, uint readout) =>
+        feature.IsStock && (readout & Feature.ColorAuto) == 0;
 
     /// <summary>The label of the COLOR a shade follows, as DESCRIBE names it.</summary>
     private static string FollowedLabel(DescribeResult describe, Feature shade) =>

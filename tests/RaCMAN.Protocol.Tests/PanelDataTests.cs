@@ -2480,7 +2480,7 @@ public class SaveFileNameTests
 /// </summary>
 public class ColourShadeTests
 {
-    private static readonly Feature Hud = new(18, FeatureKind.Color, 5, 0, FeatureFlags.None, 8, 0, 0, "HUD colour");
+    private static readonly Feature Hud = new(18, FeatureKind.Color, 5, 0, FeatureFlags.Stock, 8, 0, 0, "HUD colour");
 
     private static Feature Shade(byte id, string label) =>
         new(id, FeatureKind.Color, 5, 18, FeatureFlags.Shade, (byte)(id - 10), 0, 0, label);
@@ -2512,6 +2512,31 @@ public class ColourShadeTests
         Assert.False((Hud with { Flags = FeatureFlags.None }).IsShade);
         Assert.Null(Hud.ShadeOf);
         Assert.False(new Feature(3, FeatureKind.Value, 0, 18, FeatureFlags.Shade, 0xFF, 0, 0, "x").IsShade);
+    }
+
+    [Fact]
+    public void AStockColourOffersItsWayBackOnlyWhileItIsNotTheGamesOwn()
+    {
+        var row = new byte[Feature.Size];
+        row[0] = 18;
+        row[1] = (byte)FeatureKind.Color;
+        row[2] = 5;
+        row[4] = 0x80;
+        row[5] = 8;
+        "HUD colour"u8.CopyTo(row.AsSpan(16));
+
+        var feature = Feature.Parse(row);
+        Assert.True(feature.IsStock);
+        Assert.False(feature.IsShade);
+        Assert.Null(feature.ShadeOf);
+
+        Assert.False(GamePanel.StockButtonShown(feature, 0x01DA262A));
+        Assert.True(GamePanel.StockButtonShown(feature, 0x00FF8E00));
+
+        // The flag on any other kind means nothing, and a plain COLOR has no way back.
+        Assert.False(new Feature(3, FeatureKind.Value, 0, 0, FeatureFlags.Stock, 0xFF, 0, 0, "x").IsStock);
+        Assert.False(GamePanel.StockButtonShown(Hud with { Flags = FeatureFlags.None }, 0x00FF8E00));
+        Assert.False(GamePanel.StockButtonShown(Vivid, 0x00FF8E00));
     }
 
     [Fact]

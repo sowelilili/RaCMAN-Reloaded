@@ -95,7 +95,9 @@ When the drive has a newer version of a mod than the console, the Console column
 
 ## Deadlocked's HUD colour
 
-In Deadlocked, **Game**, then **Cosmetics**, has a **HUD colour** picker, like the chargeboot colours in Going Commando and Up Your Arsenal. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. It works on a console and under RPCS3. The health bar changes at once, and the rest of the HUD at the next load.
+In Deadlocked, **Game**, then **Cosmetics**, has a **HUD colour** picker, like the chargeboot colours in Going Commando and Up Your Arsenal. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. It works on a console and under RPCS3. The whole HUD changes at once.
+
+The HUD shows the colour you pick. The PS3 version draws its HUD colours twice as bright as the game's own numbers say, so the console stores your colour at half brightness to make up for it, and the pickers show the colours as the HUD draws them. An odd number in a colour can come back one higher. Press **Stock** beside **HUD colour** to put the game's own colours back, shades included.
 
 The game draws the HUD in that colour and three shades of it: **vivid** (brighter: the health bar, the ammo, the radar's cursor), **dark** (the bottom of the HUD's gradients) and **light** (the top of the prompt and pickup boxes, and the radar cursor's pulse). You don't have to set them. The pickers under **HUD colour** are faded while the console works them out from the HUD colour, and they follow it when you change it. Pick a colour in one to override that shade. It then stays as you set it when the HUD colour changes, and an **Auto** button beside it hands it back to the HUD colour.
 
