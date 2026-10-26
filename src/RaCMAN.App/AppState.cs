@@ -181,6 +181,11 @@ public sealed class AppState : IDisposable
         Client.SessionEstablished += info => Post(() =>
         {
             Hello = info;
+
+            // Which module this client ships, read again on every connection (the settings' path
+            // may have changed), and the one verdict every check below and every panel uses.
+            ShippedModule = QwarkBuildInfo.BesideOrNull(Ps3Connect.ResolveSprx(Settings.Ps3.SprxPath));
+            _helloStale = QwarkClient.IsStaleModule(info, ShippedModule);
             AddToast($"Connected: {(string.IsNullOrEmpty(info.TitleId) ? "no game" : info.TitleId)}", ToastKind.Success);
 
             // A new connection, so the standalone update gets its one attempt again.
@@ -207,16 +212,18 @@ public sealed class AppState : IDisposable
             // was put on it, and it belongs to that console: connecting to another one, or to the
             // helper on this PC, has nothing staged on it to restart for.
             if (QwarkUpdateStaged != 0
-                && (!QwarkClient.IsStaleBuild(info.QwarkVersion)
+                && (!_helloStale
                     || !string.Equals(ConnectedTo, _sprxUpdateTarget, StringComparison.OrdinalIgnoreCase)))
             {
                 QwarkUpdateStaged = 0;
             }
 
             // The panels would silently show the old module's feature tables, so say it up front.
-            if (QwarkClient.IsStaleBuild(info.QwarkVersion) && QwarkUpdateStaged == 0)
+            if (_helloStale && QwarkUpdateStaged == 0)
             {
-                AddToast("qwark.sprx on the console is older than this client; see the Connection panel");
+                AddToast(QwarkClient.IsStaleBuild(info.QwarkVersion)
+                    ? "qwark.sprx on the console is older than this client; see the Connection panel"
+                    : "qwark.sprx on the console is another test build than this client's; see the Connection panel");
             }
 
             // Not a re-read of everything: if this is the game that was running when the link
@@ -385,7 +392,26 @@ public sealed class AppState : IDisposable
     /// with. Nothing refuses to work, but its feature tables are the previous build's, so every
     /// panel is a warning away from lying and the header says so.
     /// </summary>
-    public bool QwarkStale => Connected && Hello is not null && QwarkClient.IsStaleBuild(Hello.QwarkVersion);
+    public bool QwarkStale => Connected && Hello is not null && _helloStale;
+
+    /// <summary>
+    /// <see cref="QwarkClient.IsStaleModule"/> for the last HELLO, against <see cref="ShippedModule"/>:
+    /// worked out once per connection, since it reads a file.
+    /// </summary>
+    private bool _helloStale;
+
+    /// <summary>
+    /// The module this client ships, from the qwark.build beside its qwark.sprx (revision 1.24), as
+    /// it was when the connection came up; null when there is none, and the build number alone then
+    /// decides whether the console's module is stale.
+    /// </summary>
+    public QwarkBuildInfo? ShippedModule { get; private set; }
+
+    /// <summary>
+    /// The console runs a module of the very build this client expects that is still not this
+    /// client's: another test build of the number, or a release when this client ships a test build.
+    /// </summary>
+    public bool QwarkOtherTestBuild => QwarkStale && Hello!.QwarkVersion == QwarkClient.ExpectedQwarkBuild;
 
     /// <summary>
     /// The build this client has put on the console's boot path and the console has not loaded yet,
@@ -752,6 +778,7 @@ public sealed class AppState : IDisposable
         && !CodePatchesUnsupported
         && Hello is { } hello
         && hello.QwarkVersion == QwarkClient.ExpectedQwarkBuild
+        && !QwarkStale
         && Session.UiPakBad;
 
     /// <summary>A send of ui.pak is under way; the button waits for it.</summary>

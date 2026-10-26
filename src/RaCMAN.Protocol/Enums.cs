@@ -630,6 +630,13 @@ public enum SessionFlags2 : byte
     /// build 56). Never set by qwark-rpcs3, where a mod is an RPCS3 patch, nor by an older module.
     /// </summary>
     UsbMods = 1 << 0,
+
+    /// <summary>
+    /// bit4 DEV (revision 1.24, test builds): the module is a test build, told from another build of
+    /// its number by the build ID after HELLO's SessionInfo (<see cref="SessionInfo.BuildId"/>). A
+    /// release module never sets it, and neither does qwark-rpcs3. PROTOCOL.md 3.1.1.
+    /// </summary>
+    Dev = 1 << 4,
 }
 
 /// <summary>

@@ -846,7 +846,8 @@ public sealed partial class FakeQwarkServer : IDisposable
             Flags = sessionFlags,
             ProfileFlags = ReportedProfileFlags(),
             ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
-            Flags2 = UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None,
+            Flags2 = (UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None)
+                     | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None),
         };
     }
 
@@ -1924,6 +1925,18 @@ public sealed partial class FakeQwarkServer : IDisposable
     public int HelloCount { get; private set; }
 
     /// <summary>
+    /// The build ID HELLO carries after SessionInfo (revision 1.24, PROTOCOL.md 3.1.1); 0, no ID,
+    /// out of the box. A test module sets <see cref="SessionFlags2.Dev"/> in the session as well.
+    /// </summary>
+    public uint HelloBuildId { get; set; }
+
+    /// <summary>HELLO answers SessionInfo alone, as a module before revision 1.24 does.</summary>
+    public bool HelloWithoutBuildId { get; set; }
+
+    /// <summary>The module is a test build: SessionInfo <c>flags2</c> bit4 DEV (revision 1.24).</summary>
+    public bool DevBuild { get; set; }
+
+    /// <summary>
     /// How many times DESCRIBE was asked. The client keeps what a game described for as long as
     /// the same game keeps coming back, so this is how a test tells a re-read from a reuse.
     /// </summary>
@@ -2344,7 +2357,11 @@ public sealed partial class FakeQwarkServer : IDisposable
                 case Opcode.Hello:
                     if (payload.Length < 1) return (Status.BadArg, null);
                     HelloCount++;
-                    return (Status.Ok, ReportedSession().ToBytes());
+                    // Revision 1.24: the build ID after SessionInfo, unless this fake is a module
+                    // from before it (HelloWithoutBuildId).
+                    return (Status.Ok, HelloWithoutBuildId
+                        ? ReportedSession().ToBytes()
+                        : (ReportedSession() with { BuildId = HelloBuildId }).ToHelloBytes());
 
                 case Opcode.Heartbeat:
                     HeartbeatCount++;

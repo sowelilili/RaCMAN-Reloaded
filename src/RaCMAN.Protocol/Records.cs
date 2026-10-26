@@ -126,6 +126,26 @@ public sealed record SessionInfo(
     /// </summary>
     public bool UsbMods => (Flags2 & SessionFlags2.UsbMods) != 0;
 
+    /// <summary>The bits of byte 29 that are not the profile's: USB_MODS and DEV.</summary>
+    public const SessionFlags2 Flags2Bits = SessionFlags2.UsbMods | SessionFlags2.Dev;
+
+    /// <summary>
+    /// The module is a test build (revision 1.24, <c>flags2</c> bit4): its build number is the one
+    /// every test build before the next release reports, so <see cref="BuildId"/> says which it is.
+    /// </summary>
+    public bool DevBuild => (Flags2 & SessionFlags2.Dev) != 0;
+
+    /// <summary>
+    /// The build ID HELLO carries after SessionInfo (revision 1.24): the CRC of the module's
+    /// sources, or 0 when there is none (qwark-rpcs3, or a module before the revision, whose HELLO
+    /// is SessionInfo alone). Only <see cref="ParseHello"/> fills it in; GET_STATE and telemetry
+    /// carry no ID, so a session read from them has 0 here.
+    /// </summary>
+    public uint BuildId { get; init; }
+
+    /// <summary>The bytes HELLO's ID takes after SessionInfo.</summary>
+    public const int HelloBuildIdSize = 4;
+
     public bool IsIngame => State == SessionState.Ingame;
 
     /// <summary>
@@ -171,7 +191,7 @@ public sealed record SessionInfo(
         byte currentPlanet = r.ReadU8();
         byte flags2Byte = r.ReadU8();
         var profileFlags = (ProfileFlags)flags2Byte & ProfileBits;
-        var flags2 = (SessionFlags2)flags2Byte & SessionFlags2.UsbMods;
+        var flags2 = (SessionFlags2)flags2Byte & Flags2Bits;
         byte profileSeq = r.ReadU8();
         r.Skip(1);
         float x = r.ReadF32();
@@ -199,6 +219,28 @@ public sealed record SessionInfo(
         };
     }
 
+    /// <summary>
+    /// HELLO's reply: SessionInfo, then (revision 1.24) the module's build ID, big-endian. A module
+    /// before the revision sends SessionInfo alone, which reads as ID 0.
+    /// </summary>
+    public static SessionInfo ParseHello(ReadOnlySpan<byte> payload)
+    {
+        var info = Parse(payload);
+        if (payload.Length < Size + HelloBuildIdSize) return info;
+
+        uint id = System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(payload.Slice(Size, HelloBuildIdSize));
+        return info with { BuildId = id };
+    }
+
+    /// <summary>HELLO's reply as a module of revision 1.24 sends it: SessionInfo and <see cref="BuildId"/>.</summary>
+    public byte[] ToHelloBytes()
+    {
+        var buffer = new byte[Size + HelloBuildIdSize];
+        Write(buffer);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(Size), BuildId);
+        return buffer;
+    }
+
     public byte[] ToBytes()
     {
         var buffer = new byte[Size];
@@ -221,7 +263,7 @@ public sealed record SessionInfo(
         w.WriteU8(SelectedPlanet);
         w.WriteU8((byte)PlanetFlags);
         w.WriteU8(CurrentPlanet);
-        w.WriteU8((byte)((byte)(ProfileFlags & ProfileBits) | (byte)(Flags2 & SessionFlags2.UsbMods)));
+        w.WriteU8((byte)((byte)(ProfileFlags & ProfileBits) | (byte)(Flags2 & Flags2Bits)));
         w.WriteU8(ProfileSeq);
         w.WriteZeros(1);
         w.WriteF32(PosX);

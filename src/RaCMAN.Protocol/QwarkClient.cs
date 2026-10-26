@@ -26,8 +26,33 @@ public sealed class QwarkClient : IDisposable
     /// <summary>
     /// True when the console's module is older than the one shipped with this client. A newer
     /// build than expected is fine: the client is the side that is behind, and nothing breaks.
+    /// The build number alone; <see cref="IsStaleModule"/> is the whole rule.
     /// </summary>
     public static bool IsStaleBuild(byte reported) => reported < ExpectedQwarkBuild;
+
+    /// <summary>
+    /// Whether the module HELLO described is not the one this client ships, so the client replaces
+    /// it (PROTOCOL.md 3.1.1). An older build is stale and a newer one is not, as
+    /// <see cref="IsStaleBuild"/> has it. Within the expected build, which every test build before
+    /// a release reports, the build ID decides when either side is a test build: a console's test
+    /// module whose ID is not the shipped module's is stale, and so is a console's release module
+    /// when the client ships a test build of its number (a test build is the newer). The same ID is
+    /// current, so a module once replaced is never sent again; two release modules of one build are
+    /// current, as before.
+    /// <para>
+    /// The build number alone decides when <paramref name="shipped"/> is null (no qwark.build beside
+    /// the client's module, or one for another build: nothing to compare with) and under an
+    /// emulator: qwark-rpcs3.exe is started by the client from beside itself, so it is never a
+    /// module left behind, and it carries no ID.
+    /// </para>
+    /// </summary>
+    public static bool IsStaleModule(SessionInfo hello, QwarkBuildInfo? shipped)
+    {
+        if (hello.QwarkVersion != ExpectedQwarkBuild) return IsStaleBuild(hello.QwarkVersion);
+        if (hello.IsEmulator || shipped is not { } ours || ours.Build != ExpectedQwarkBuild) return false;
+        if (!hello.DevBuild && !ours.Dev) return false;
+        return hello.BuildId != ours.Id;
+    }
 
     private static readonly TimeSpan HeartbeatInterval = TimeSpan.FromSeconds(2);
 
@@ -675,7 +700,7 @@ public sealed class QwarkClient : IDisposable
     public async Task<SessionInfo> HelloAsync(CancellationToken cancellationToken = default)
     {
         var payload = await RequestAsync(Opcode.Hello, new[] { ClientProtocolVersion }, cancellationToken).ConfigureAwait(false);
-        var info = SessionInfo.Parse(payload);
+        var info = SessionInfo.ParseHello(payload);
         _latestSession = info;
         return info;
     }

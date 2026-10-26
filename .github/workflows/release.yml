@@ -66,13 +66,19 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak qwark/dist/qwark-installer.pkg qwark/dist/qwark-rpcs3.exe; do
+          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak qwark/dist/qwark.build qwark/dist/qwark-installer.pkg qwark/dist/qwark-rpcs3.exe; do
             if [ ! -f "$file" ]; then
               echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no ${file#qwark/}. Build it and commit it to that repository's dist/ folder before tagging a release."
               missing=1
             fi
           done
           exit $missing
+
+      # Revision 1.24: a module from a plain `make` is a test build, which every client replaces;
+      # a release takes one `make release` built.
+      - name: Check qwark's module is a release build
+        shell: pwsh
+        run: ./client/packaging/check-qwark-build.ps1 -Dist qwark/dist -ProtoH qwark/src/core/proto.h
 
       - name: Install .NET
         uses: actions/setup-dotnet@v4
@@ -190,13 +196,17 @@ jobs:
       - name: Check qwark built what this release needs
         run: |
           missing=0
-          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak; do
+          for file in qwark/dist/qwark.sprx qwark/dist/ui.pak qwark/dist/qwark.build; do
             if [ ! -f "$file" ]; then
               echo "::error::${QWARK_REPO}@${{ steps.qwark.outputs.ref }} has no ${file#qwark/}. Build it and commit it to that repository's dist/ folder before tagging a release."
               missing=1
             fi
           done
           exit $missing
+
+      - name: Check qwark's module is a release build
+        shell: pwsh
+        run: ./client/packaging/check-qwark-build.ps1 -Dist qwark/dist -ProtoH qwark/src/core/proto.h
 
       - name: Install .NET
         uses: actions/setup-dotnet@v4

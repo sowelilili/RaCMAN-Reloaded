@@ -7,6 +7,7 @@
     osx-x64 as well), then stages ..\build\RaCMAN-Reloaded\ with the published app, the
     controller skins, the moby layout data, the mod library from this repo's mods\ folder, the
     premade savefiles from its premade-savefiles\ folder, ..\qwark\dist\qwark.sprx,
+    ..\qwark\dist\qwark.build (which build of qwark that module is, revision 1.24),
     ..\qwark\dist\ui.pak (the console menu's file, which the module reads from the console's HDD)
     and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
     ..\build\RaCMAN-Reloaded.zip.
@@ -61,6 +62,7 @@ param(
     [string]$ModsSource,
     [string]$SprxPath,
     [string]$UiPakPath,
+    [string]$BuildInfoPath,
     [string]$Rpcs3Path,
     [string]$PkgPath,
     [string]$Rid,
@@ -82,6 +84,8 @@ if (-not $OutputRoot) { $OutputRoot = Combine $repo '..' 'build' }
 if (-not $ModsSource) { $ModsSource = Combine $repo 'mods' }
 if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.sprx' }
 if (-not $UiPakPath)  { $UiPakPath  = Combine $repo '..' 'qwark' 'dist' 'ui.pak' }
+# qwark.build sits beside the qwark.sprx it describes, so it follows -SprxPath unless it is named.
+if (-not $BuildInfoPath) { $BuildInfoPath = Combine ([System.IO.Path]::GetDirectoryName($SprxPath)) 'qwark.build' }
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 if (-not $PkgPath)    { $PkgPath    = Combine $repo '..' 'qwark' 'dist' 'qwark-installer.pkg' }
 
@@ -174,6 +178,18 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
     }
     else {
         Write-Warning "qwark.sprx not found at $SprxPath; the release will not carry the module"
+    }
+
+    # Which build of qwark that module is, test build or release, and its build ID (revision 1.24).
+    # The client reads it from beside the qwark.sprx it sends, to tell the console's module from its
+    # own when the build numbers agree; without it the number alone decides.
+    if (Test-Path $BuildInfoPath) {
+        Copy-Item -Force $BuildInfoPath (Join-Path $stageDir 'qwark.build')
+        $dev = Select-String -Path $BuildInfoPath -Pattern '^dev 1' -Quiet
+        Write-Host "  qwark.build: $(Resolve-Full $BuildInfoPath)$(if ($dev) { ' (a TEST build)' })"
+    }
+    else {
+        Write-Warning "qwark.build not found at $BuildInfoPath; the client will judge the console's module by its build number alone"
     }
 
     # The console menu's renderers, which the module reads from the console's HDD. The client sends

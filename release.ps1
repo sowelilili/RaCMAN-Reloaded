@@ -15,8 +15,9 @@
       2. Refuses a working tree with uncommitted changes, in either repository.
       3. Refuses a branch that has diverged from the remote, and pushes one that is merely ahead.
       4. Refuses a tag that already exists, locally or on the remote.
-      5. Refuses a qwark dist\ folder committed before the last change to qwark's sources, or
-         missing a file.
+      5. Refuses a qwark dist\ folder committed before the last change to qwark's sources,
+         missing a file, or holding a test build (packaging\check-qwark-build.ps1: its
+         qwark.build says dev 1; a release dist\ is made with `make release` in qwark).
       6. Refuses a client that expects a newer qwark build than qwark carries.
       7. Runs both test suites.
       8. Shows what it is about to do and asks, then tags and pushes qwark and then this repository.
@@ -196,25 +197,31 @@ foreach ($r in $repos) {
 
 Write-Step 'checking the console payload'
 
-foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark-installer.pkg', 'qwark-rpcs3.exe')) {
+foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark.build', 'qwark-installer.pkg', 'qwark-rpcs3.exe')) {
     $path = Combine $qwark 'dist' $file
     if (-not (Test-Path $path)) {
-        throw "qwark has no dist\$file. Build it in qwark (make, then make dist) and commit it."
+        throw "qwark has no dist\$file. Build it in qwark (make release) and commit it."
     }
 }
+
+# A plain `make` builds a test module (revision 1.24), which every client replaces with its own
+# whenever the IDs differ, so a release must not carry one. `make release` builds the module
+# without the DEV bit and fills dist\ from it.
+& (Combine $repo 'packaging' 'check-qwark-build.ps1') -Dist (Combine $qwark 'dist') -ProtoH (Combine $qwark 'src' 'core' 'proto.h')
 
 # The release takes the committed binaries, so a source committed after the module in dist\ means
 # the module is not the module in src\. File timestamps cannot tell: a checkout or a merge writes
 # the files in its own order, dist\ before src\, so a tree merged a moment ago reads as stale by
 # milliseconds. The history can tell. The tree is clean by now, so the question is exactly whether
 # anything under src\ (or the Makefile that compiles it) has changed since the commit that last
-# touched the module.
+# touched the module. The makefile is `makefile` in qwark's history, and tools\buildid.py makes the
+# build ID the module reports, so both count as sources.
 $distCommit = (Invoke-Git $qwark @('log', '-1', '--format=%h', '--', 'dist/qwark.sprx') | Out-String).Trim()
 if (-not $distCommit) {
     throw "qwark's dist\qwark.sprx has never been committed. Build it (make, then make dist) and commit it."
 }
 
-$changedSince = @(Invoke-Git $qwark @('diff', '--name-only', $distCommit, 'HEAD', '--', 'src', 'Makefile') |
+$changedSince = @(Invoke-Git $qwark @('diff', '--name-only', $distCommit, 'HEAD', '--', 'src', 'Makefile', 'makefile', 'tools/buildid.py') |
     Where-Object { $_ })
 
 if ($changedSince.Count -gt 0) {
@@ -234,7 +241,12 @@ Write-Good "dist\qwark.sprx was committed in $distCommit and no source has chang
 $makeBat = Combine $qwark '_Make.bat'
 $scetool = Combine $qwark 'scetool.exe'
 if (-not $SkipTests -and (Test-Path $makeBat)) {
-    Invoke-Suite "qwark's SPRX build" { & cmd /c "`"$makeBat`"" }
+    # A release module (QWARK_DEV=0), as `make release` built the one in dist\: a test build of the
+    # same sources differs from it by the DEV bit. Objects a failed build left behind may have been
+    # compiled with the other bit, so they go first. The build ID is the sources' CRC, the same in
+    # every build of them, so the two modules can match byte for byte.
+    Remove-Item -Recurse -Force (Combine $qwark 'objs') -ErrorAction SilentlyContinue -WhatIf:$false
+    Invoke-Suite "qwark's SPRX build" { & cmd /c "`"$makeBat`" QWARK_DEV=0" }
 
     # Two builds of one source are not the same file: scetool writes a fresh nonce into 42 bytes
     # of the SELF header every time, so their hashes never agree, and a size is too coarse to
@@ -262,7 +274,7 @@ if (-not $SkipTests -and (Test-Path $makeBat)) {
         Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue -WhatIf:$false
 
         if (-not $same) {
-            throw ('qwark builds a different module from the one in dist\qwark.sprx. Run `make dist` in ' +
+            throw ('qwark builds a different module from the one in dist\qwark.sprx. Run `make release` in ' +
                    'qwark and commit it: the release takes dist\.')
         }
 

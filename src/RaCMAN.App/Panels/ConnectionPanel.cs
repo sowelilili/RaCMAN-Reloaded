@@ -955,7 +955,18 @@ public static class ConnectionPanel
                 : $"There is no qwark.sprx beside this client to send ({sprx}).";
 
         ImGui.Spacing();
-        Ui.Warning($"The console is running qwark build {state.Hello!.QwarkVersion}; this client shipped with build "
+        var hello = state.Hello!;
+        if (state.QwarkOtherTestBuild)
+        {
+            // Revision 1.24: the same number, and not the same module (PROTOCOL.md 3.1.1).
+            string console = hello.DevBuild ? $"test build 0x{hello.BuildId:X8}" : "the release";
+            string ours = state.ShippedModule is { } shipped ? shipped.Describe() : $"build {QwarkClient.ExpectedQwarkBuild}";
+            Ui.Warning($"The console is running {console} of qwark build {hello.QwarkVersion}; this client shipped with "
+                       + $"{ours}. " + fix);
+            return;
+        }
+
+        Ui.Warning($"The console is running qwark build {hello.QwarkVersion}; this client shipped with build "
                    + $"{QwarkClient.ExpectedQwarkBuild}. " + fix);
     }
 
@@ -993,7 +1004,10 @@ public static class ConnectionPanel
         }
 
         ImGui.Spacing();
-        Ui.DebugHint($"qwark build {hello.QwarkVersion} | protocol {hello.ProtocolVersion} (HELLO)");
+        Ui.DebugHint($"qwark build {hello.QwarkVersion}"
+                     + (hello.DevBuild ? $", test build 0x{hello.BuildId:X8}" : string.Empty)
+                     + $" | protocol {hello.ProtocolVersion} (HELLO)"
+                     + (state.ShippedModule is { } shipped ? $" | shipped: {shipped.Describe()}" : string.Empty));
 
         if (hello.ProtocolVersion != QwarkClient.ClientProtocolVersion)
         {
