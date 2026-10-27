@@ -1063,6 +1063,26 @@ public sealed class QwarkClient : IDisposable
             w.WriteU16(offset);
         }), cancellationToken);
 
+    /// <summary>
+    /// LEVELFLAGS_BIT (revision 1.28, pending): sets or clears one bit of the region LEVELFLAGS_GET
+    /// returns, the console reading and writing its byte, so a bit the game set in the same byte
+    /// since the last read is kept. Payload is `u8 planet, u8 on, u16 bit`.
+    /// </summary>
+    public Task LevelFlagsBitAsync(byte planet, ushort bit, bool on, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.LevelFlagsBit, Bytes(4, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8(planet);
+            w.WriteU8(on ? (byte)1 : (byte)0);
+            w.WriteU16(bit);
+        }), cancellationToken);
+
+    /// <summary>
+    /// LEVELFLAGS_NAMES (revision 1.28, pending): the names of the flag bits, for a game that names
+    /// them (ToD). UNSUPPORTED for every other game, UNKNOWN_OP from a module before the op.
+    /// </summary>
+    public async Task<LevelFlagNames> LevelFlagNamesAsync(CancellationToken cancellationToken = default) =>
+        LevelFlagNames.Parse(await RequestAsync(Opcode.LevelFlagsNames, null, cancellationToken).ConfigureAwait(false));
+
     // ---------------------------------------------------------------- 5.7 mods
 
     public async Task<ModEntry[]> ModListAsync(CancellationToken cancellationToken = default) =>

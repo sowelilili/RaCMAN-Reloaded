@@ -15,6 +15,12 @@ namespace RaCMAN.App.Panels;
 /// "Check all" is the bit checkboxes over the whole table: LEVELFLAGS_SET of FF for every byte
 /// LEVELFLAGS_GET reported, one request per byte, the way the Unlocks panel's bulk buttons loop
 /// UNLOCK_SET. The client knows nothing about which bits the game uses, so it sets them all.
+///
+/// A game that names its flags (LEVELFLAGS_NAMES, revision 1.28 pending: Tools of Destruction, whose
+/// flags are one table for the whole save) gets a list instead: every flag by name, grouped by
+/// planet as the old RaCMAN grouped them, each a checkbox read from the same LEVELFLAGS_GET and
+/// written with LEVELFLAGS_BIT, so the console changes that one bit and nothing beside it. A
+/// planet's group has a Reset, LEVELFLAGS_RESET of that planet, which clears its flags alone.
 /// </summary>
 public static class LevelFlagsPanel
 {
@@ -29,6 +35,9 @@ public static class LevelFlagsPanel
     /// <summary>True while "Check all" is waiting for its second click.</summary>
     private static bool _checkAllArmed;
 
+    /// <summary>The named list's filter: a flag shows when its name contains it or it is its number.</summary>
+    private static string _filter = string.Empty;
+
     /// <summary>The red of a confirmation button: the second click that writes game memory.</summary>
     private static readonly Vector4 ConfirmColour = new(0.6f, 0.2f, 0.2f, 1f);
 
@@ -39,6 +48,7 @@ public static class LevelFlagsPanel
     {
         ClearData();
         _planet = -1;
+        _filter = string.Empty;
     }
 
     /// <summary>
@@ -62,6 +72,12 @@ public static class LevelFlagsPanel
 
         // Default to the planet the player is on, and follow it until the user picks another.
         if (_planet < 0) _planet = session.CurrentPlanet;
+
+        if (state.LevelFlagNames is { } names)
+        {
+            DrawNamed(state, names);
+            return;
+        }
 
         ImGui.BeginDisabled(!state.Connected);
 
@@ -139,26 +155,7 @@ public static class LevelFlagsPanel
         ImGui.EndDisabled();
         ImGui.EndDisabled();
 
-        // Quiet outside INGAME: the automatic first read between sessions is not worth a toast.
-        // Nothing at all while the console is busy with a launch (section 1.1): _loadedPlanet is
-        // left alone, so the next frame after INGAME is the one that reads.
-        if (state.Connected && !state.ConsoleBusy && _loadedPlanet != _planet) Load(state, quiet: !state.Ingame);
-
-        // The interval is read every frame, so a change on the Settings panel takes effect at once.
-        float period = state.Settings.TableRefreshSeconds;
-        if (period > 0 && state.Connected && !state.ConsoleBusy)
-        {
-            _sinceRefresh += ImGui.GetIO().DeltaTime;
-            if (_sinceRefresh >= period)
-            {
-                _sinceRefresh = 0;
-                Load(state, quiet: true);
-            }
-        }
-        else
-        {
-            _sinceRefresh = 0;
-        }
+        KeepFresh(state);
 
         if (session.CurrentPlanet != _planet && state.Ingame)
         {
@@ -180,6 +177,157 @@ public static class LevelFlagsPanel
         }
 
         DrawBits(state);
+    }
+
+    /// <summary>
+    /// The first read of the planet picked, and the re-read every table refresh interval after it.
+    /// Quiet outside INGAME: the automatic first read between sessions is not worth a toast. Nothing
+    /// at all while the console is busy with a launch (section 1.1): _loadedPlanet is left alone, so
+    /// the next frame after INGAME is the one that reads.
+    /// </summary>
+    private static void KeepFresh(AppState state)
+    {
+        if (state.Connected && !state.ConsoleBusy && _loadedPlanet != _planet) Load(state, quiet: !state.Ingame);
+
+        // The interval is read every frame, so a change on the Settings panel takes effect at once.
+        float period = state.Settings.TableRefreshSeconds;
+        if (period > 0 && state.Connected && !state.ConsoleBusy)
+        {
+            _sinceRefresh += ImGui.GetIO().DeltaTime;
+            if (_sinceRefresh >= period)
+            {
+                _sinceRefresh = 0;
+                Load(state, quiet: true);
+            }
+        }
+        else
+        {
+            _sinceRefresh = 0;
+        }
+    }
+
+    /// <summary>
+    /// The named list: a filter, then one collapsing group per planet in the console's order, each
+    /// flag a checkbox. The region is the game's whole table whatever the planet, so it is read for
+    /// the planet the player is on and the list has no planet picker.
+    /// </summary>
+    private static void DrawNamed(AppState state, LevelFlagNames names)
+    {
+        ImGui.BeginDisabled(!state.Connected);
+        ImGui.SetNextItemWidth(240);
+        Ui.InputTextWithHint("##lf-filter", "Filter by name or number", ref _filter, 64);
+        if (!state.Settings.AutoRefreshesTables)
+        {
+            ImGui.SameLine();
+            if (ImGui.Button("Refresh")) Load(state);
+        }
+
+        ImGui.EndDisabled();
+
+        KeepFresh(state);
+
+        if (_flags.Length == 0)
+        {
+            ImGui.Spacing();
+            Ui.Hint(!state.Connected ? "Connect to read level flags."
+                : !state.Ingame ? $"Reading level flags needs INGAME (state is {state.Session.State.DisplayName()})."
+                : "Reading the level flags...");
+            return;
+        }
+
+        int setCount = names.Flags.Count(f => f.IsSetIn(_flags));
+        ImGui.SameLine();
+        Ui.TableLabel(Ui.Grey, $"{setCount} of {names.Flags.Length} set");
+        ImGui.Spacing();
+
+        string filter = _filter.Trim();
+        if (!ImGui.BeginChild("##lf-named", new Vector2(-1, -1), ImGuiChildFlags.Borders))
+        {
+            ImGui.EndChild();
+            return;
+        }
+
+        ImGui.BeginDisabled(!state.Ingame);
+        foreach (var group in GroupsInOrder(names))
+        {
+            var shown = group.Flags.Where(f => Matches(f, filter)).ToList();
+            if (shown.Count == 0) continue;
+
+            var info = group.Index < names.Groups.Length ? names.Groups[group.Index] : null;
+            int groupSet = group.Flags.Count(f => f.IsSetIn(_flags));
+            string current = info is { IsPlanet: true } && info.Planet == state.Session.CurrentPlanet && state.Ingame
+                ? ", current planet" : string.Empty;
+
+            // A filter opens every group it finds something in; without one each keeps its own state.
+            if (filter.Length > 0) ImGui.SetNextItemOpen(true);
+            string header = $"{names.GroupName(group.Index)}  ({groupSet}/{group.Flags.Count}{current})###lfg{group.Index}";
+            if (!ImGui.CollapsingHeader(header, ImGuiTreeNodeFlags.DefaultOpen)) continue;
+
+            ImGui.PushID(group.Index);
+            if (info is { IsPlanet: true })
+            {
+                byte planet = info.Planet;
+                if (ImGui.SmallButton("Reset")) ResetGroup(state, planet, names.GroupName(group.Index));
+                Ui.Tooltip("Clears every flag of this planet. The other planets' flags are left alone.");
+            }
+
+            foreach (var flag in shown)
+            {
+                bool set = flag.IsSetIn(_flags);
+                if (ImGui.Checkbox($"{flag.Label}##f{flag.Number}", ref set)) SendBit(state, flag, set);
+                Ui.Tooltip($"Flag {flag.Number}");
+            }
+
+            ImGui.PopID();
+        }
+
+        ImGui.EndDisabled();
+        ImGui.EndChild();
+    }
+
+    /// <summary>One group of the named list: its index and its flags, in the order the console sent them.</summary>
+    public sealed record NamedGroup(int Index, IReadOnlyList<LevelFlagName> Flags);
+
+    /// <summary>
+    /// The groups as the list draws them: in group order, each with its flags in the order the console
+    /// sent them; a group with no flags is left out.
+    /// </summary>
+    public static IReadOnlyList<NamedGroup> GroupsInOrder(LevelFlagNames names) =>
+        names.Flags.GroupBy(f => (int)f.Group)
+            .OrderBy(g => g.Key)
+            .Select(g => new NamedGroup(g.Key, g.ToList()))
+            .ToList();
+
+    /// <summary>Whether a flag shows under the filter: its name contains it, any case, or it is its number.</summary>
+    public static bool Matches(LevelFlagName flag, string filter) =>
+        filter.Length == 0
+        || flag.Label.Contains(filter, StringComparison.OrdinalIgnoreCase)
+        || flag.Number.ToString(System.Globalization.CultureInfo.InvariantCulture) == filter;
+
+    /// <summary>LEVELFLAGS_BIT for one named flag, optimistically updating the local copy, then a re-read.</summary>
+    private static void SendBit(AppState state, LevelFlagName flag, bool on)
+    {
+        byte planet = (byte)_loadedPlanet;
+        if (flag.Offset < _flags.Length)
+        {
+            _flags[flag.Offset] = on ? (byte)(_flags[flag.Offset] | flag.Mask) : (byte)(_flags[flag.Offset] & ~flag.Mask);
+        }
+
+        state.Run(async () =>
+        {
+            await state.Client.LevelFlagsBitAsync(planet, flag.Bit, on).ConfigureAwait(false);
+            state.Post(() => Load(state, quiet: true));
+        });
+    }
+
+    /// <summary>LEVELFLAGS_RESET of one planet's group, then a re-read.</summary>
+    private static void ResetGroup(AppState state, byte planet, string name)
+    {
+        state.Run(async () =>
+        {
+            await state.Client.LevelFlagsResetAsync(planet).ConfigureAwait(false);
+            state.Post(() => Load(state, quiet: true));
+        }, $"Level flags reset on {name}");
     }
 
     /// <summary>One byte per row: offset, eight bit checkboxes (7 down to 0), and the hex value.</summary>

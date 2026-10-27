@@ -112,6 +112,8 @@ For now ToD needs a test build of qwark with its `tod.sprx` (see [docs/test-buil
 
 **Game**, then **Debug**, has a small Lua box. **Lua test (half speed)** runs a line of Lua in the game: the game runs at half speed, and the box shows `Lua 5.0.2`. **Normal speed** puts the speed back. The box also runs a line you type, and shows the answer and the game's last script error. On a console, the first run after the game starts puts qwark's Lua helper into the game. Under RPCS3 the Lua helper is an RPCS3 patch: press **Install qwark patches...** on the Connection panel, then restart the game in RPCS3.
 
+The **Level flags** panel lists ToD's level flags by name, grouped by planet, as the old RaCMAN did. Each box shows the flag as it is in your console's game, and a click sets or clears it. **Reset** under a planet clears that planet's flags and leaves the others alone. The filter box finds a flag by name or by number.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.

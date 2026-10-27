@@ -219,6 +219,13 @@ public sealed partial class FakeQwarkServer : IDisposable
 
     public int LevelFlagsResetCount { get; private set; }
 
+    /// <summary>
+    /// What LEVELFLAGS_NAMES answers (revision 1.28, pending), or null for a game whose flags have
+    /// no names, which answers UNSUPPORTED. With names, LEVELFLAGS_RESET clears the bits of the
+    /// planet's group alone, as ToD's does.
+    /// </summary>
+    public LevelFlagNames? LevelFlagNames { get; set; }
+
     public DescribeResult Describe { get; set; }
 
     public List<ModEntry> Mods { get; }
@@ -2170,6 +2177,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.PlanetList or Opcode.PlanetSelect or Opcode.PlanetLoad or Opcode.Die or Opcode.MobyTable
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
+        or Opcode.LevelFlagsBit or Opcode.LevelFlagsNames
         or Opcode.ModList or Opcode.ModLoad or Opcode.ModUnload or Opcode.ModSetAuto
         or Opcode.ModRescan or Opcode.ModInfo or Opcode.ModPatch or Opcode.ModUsbList
         or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend or Opcode.ComboEnable
@@ -2379,6 +2387,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.PlanetLoad or Opcode.Die
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
+        or Opcode.LevelFlagsBit
         or Opcode.FeatureSet or Opcode.FeatureTrigger;
 
     /// <summary>
@@ -2822,10 +2831,41 @@ public sealed partial class FakeQwarkServer : IDisposable
                 {
                     if (payload.Length < 1) return (Status.BadArg, null);
                     if (!LevelFlags.TryGetValue(payload[0], out var flags)) return (Status.Unsupported, null);
-                    Array.Clear(flags);
+                    if (LevelFlagNames is { } named)
+                    {
+                        foreach (var f in named.Flags)
+                        {
+                            if (f.Group < named.Groups.Length && named.Groups[f.Group].Planet == payload[0]
+                                && f.Offset < flags.Length)
+                            {
+                                flags[f.Offset] &= (byte)~f.Mask;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        Array.Clear(flags);
+                    }
                     LevelFlagsResetCount++;
                     return (Status.Ok, null);
                 }
+
+                case Opcode.LevelFlagsBit:
+                {
+                    if (payload.Length < 4) return (Status.BadArg, null);
+                    var r = new SpanReader(payload);
+                    byte planet = r.ReadU8();
+                    bool on = r.ReadU8() != 0;
+                    ushort bit = r.ReadU16();
+                    if (!LevelFlags.TryGetValue(planet, out var flags)) return (Status.Unsupported, null);
+                    if ((bit >> 3) >= flags.Length) return (Status.BadArg, null);
+                    byte mask = (byte)(1 << (bit & 7));
+                    flags[bit >> 3] = on ? (byte)(flags[bit >> 3] | mask) : (byte)(flags[bit >> 3] & ~mask);
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.LevelFlagsNames:
+                    return LevelFlagNames is { } names ? (Status.Ok, names.ToBytes()) : (Status.Unsupported, null);
 
                 case Opcode.PlanetList:
                 {

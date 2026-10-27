@@ -510,6 +510,13 @@ public sealed class AppState : IDisposable
     public bool LevelFlagsUnsupported { get; private set; }
 
     /// <summary>
+    /// The described game's level flag names (LEVELFLAGS_NAMES, revision 1.28 pending), or null for
+    /// a game whose flags have none, which is every game but ToD. With names the Level flags panel
+    /// lists the flags by planet rather than drawing the region's bytes.
+    /// </summary>
+    public LevelFlagNames? LevelFlagNames { get; private set; }
+
+    /// <summary>
     /// Whether the described game has Lua (revision 1.27, ToD): LUA_STATUS has answered OK for it.
     /// UNSUPPORTED, the answer of every game without Lua, and UNKNOWN_OP, a module from before the
     /// op, leave it false. Kept for the described game, so the Lua box does not come and go with
@@ -1721,6 +1728,7 @@ public sealed class AppState : IDisposable
         Unlocks = UnlockList.Empty;
         UnlocksUnsupported = false;
         LevelFlagsUnsupported = false;
+        LevelFlagNames = null;
         HasLua = false;
         Lua = null;
         LuaStatusRefusal = null;
@@ -1901,7 +1909,38 @@ public sealed class AppState : IDisposable
         RefreshAutosplitEvents();
         RefreshSaveFileInfo();
         RefreshLevelFlagsSupport(quiet);
+        RefreshLevelFlagNames();
         RefreshLuaStatus();
+    }
+
+    /// <summary>
+    /// Reads LEVELFLAGS_NAMES once for the described game. UNSUPPORTED is every game but ToD and
+    /// UNKNOWN_OP a module from before the op; both leave the names null and the panel on its bytes,
+    /// and neither is worth a toast.
+    /// </summary>
+    public void RefreshLevelFlagNames()
+    {
+        if (UnknownGame) return;
+
+        int epoch = _describedEpoch;
+        Run(async () =>
+        {
+            try
+            {
+                var names = await Client.LevelFlagNamesAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    if (epoch == _describedEpoch) LevelFlagNames = names;
+                });
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp)
+            {
+                Post(() =>
+                {
+                    if (epoch == _describedEpoch) LevelFlagNames = null;
+                });
+            }
+        }, null, quiet: true);
     }
 
     /// <summary>

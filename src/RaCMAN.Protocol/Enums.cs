@@ -85,6 +85,8 @@ public enum Opcode : ushort
     LevelFlagsGet = 0x0053,
     LevelFlagsReset = 0x0054,
     LevelFlagsSet = 0x0055,
+    LevelFlagsBit = 0x0056,     // revision 1.28 (pending)
+    LevelFlagsNames = 0x0057,   // revision 1.28 (pending)
 
     // 5.7 Mods
     ModList = 0x0060,

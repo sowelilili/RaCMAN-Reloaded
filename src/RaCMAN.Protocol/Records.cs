@@ -863,6 +863,102 @@ public sealed record UnlockList(string[] Categories, UnlockField[] Fields, Unloc
     }
 }
 
+/// <summary>
+/// One group of LEVELFLAGS_NAMES (revision 1.28, pending), 24 bytes: the PLANET_LIST id whose flags
+/// these are, or <see cref="NoPlanet"/>, and the group's name.
+/// </summary>
+public sealed record LevelFlagGroup(byte Planet, string Name)
+{
+    public const int Size = 24;
+
+    /// <summary>A group that is no planet's: ToD's hints, RYNO messages and items, "Other".</summary>
+    public const byte NoPlanet = 0xFF;
+
+    public bool IsPlanet => Planet != NoPlanet;
+}
+
+/// <summary>
+/// One flag of LEVELFLAGS_NAMES: its bit in LEVELFLAGS_GET's region (byte <see cref="Offset"/>, mask
+/// <see cref="Mask"/>, the numbering LEVELFLAGS_BIT takes), the game's own number for it, its group
+/// and its name.
+/// </summary>
+public sealed record LevelFlagName(ushort Bit, ushort Number, byte Group, string Name)
+{
+    public int Offset => Bit >> 3;
+
+    public byte Mask => (byte)(1 << (Bit & 7));
+
+    /// <summary>What a row shows: the name, or the game's number when the console sent none.</summary>
+    public string Label => Name.Length > 0 ? Name : $"Flag {Number}";
+
+    /// <summary>Whether the flag is set in a region as LEVELFLAGS_GET returned it; false past its end.</summary>
+    public bool IsSetIn(ReadOnlySpan<byte> region) => Offset < region.Length && (region[Offset] & Mask) != 0;
+}
+
+/// <summary>
+/// LEVELFLAGS_NAMES (revision 1.28, pending): the names of a game's level flag bits, grouped, for a
+/// game whose flags are named one by one (Tools of Destruction). Static for the game: read once a
+/// session, the values come from LEVELFLAGS_GET.
+/// </summary>
+public sealed record LevelFlagNames(LevelFlagGroup[] Groups, LevelFlagName[] Flags)
+{
+    public const int FlagHeadSize = 6;
+
+    /// <summary>A group's name, or a placeholder for an index the reply did not list.</summary>
+    public string GroupName(int group) =>
+        group >= 0 && group < Groups.Length ? Groups[group].Name : $"Group {group}";
+
+    public static LevelFlagNames Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        int ngroups = r.ReadU8();
+        var groups = new LevelFlagGroup[ngroups];
+        for (int i = 0; i < ngroups; i++)
+        {
+            byte planet = r.ReadU8();
+            groups[i] = new LevelFlagGroup(planet, r.ReadFixedString(LevelFlagGroup.Size - 1));
+        }
+
+        int n = r.ReadU16();
+        var flags = new LevelFlagName[n];
+        for (int i = 0; i < n; i++)
+        {
+            ushort bit = r.ReadU16();
+            ushort number = r.ReadU16();
+            byte group = r.ReadU8();
+            int len = r.ReadU8();
+            flags[i] = new LevelFlagName(bit, number, group, r.ReadFixedString(len));
+        }
+        return new LevelFlagNames(groups, flags);
+    }
+
+    public byte[] ToBytes()
+    {
+        int size = 1 + Groups.Length * LevelFlagGroup.Size + 2
+                   + Flags.Sum(f => FlagHeadSize + Math.Min(255, System.Text.Encoding.ASCII.GetByteCount(f.Name)));
+        var buffer = new byte[size];
+        var w = new SpanWriter(buffer);
+        w.WriteU8((byte)Groups.Length);
+        foreach (var g in Groups)
+        {
+            w.WriteU8(g.Planet);
+            w.WriteFixedString(g.Name, LevelFlagGroup.Size - 1);
+        }
+        w.WriteU16((ushort)Flags.Length);
+        foreach (var f in Flags)
+        {
+            var name = System.Text.Encoding.ASCII.GetBytes(f.Name);
+            int len = Math.Min(255, name.Length);
+            w.WriteU16(f.Bit);
+            w.WriteU16(f.Number);
+            w.WriteU8(f.Group);
+            w.WriteU8((byte)len);
+            w.WriteBytes(name.AsSpan(0, len));
+        }
+        return buffer;
+    }
+}
+
 /// <summary>MOD_LIST entry, 120 bytes.</summary>
 public sealed record ModEntry(
     byte Index,
