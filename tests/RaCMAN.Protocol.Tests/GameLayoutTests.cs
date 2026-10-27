@@ -867,13 +867,17 @@ public class GameLayoutTests
         string title = RaCMAN.Protocol.Testing.FakeQwarkServer.TodTitleId;
 
         foreach (var label in new[] { "Unlock all skill points", "Reset skill points", "Unlock all gold bolts",
-                     "Reset gold bolts", "Unlock all RYNO plans", "Reset RYNO plans" })
+                     "Reset gold bolts" })
         {
             var feature = d.Features.Single(f => f.Label == label);
             Assert.Equal("Collectables", GameLayout.SectionFor(title, GameId.Tod, feature, d));
         }
 
-        Assert.Equal("Cheats", GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == "God Ratchet"), d));
+        // God Ratchet, the old trainer's, sits beside the values as RaC1's goodies menu does; the
+        // game's own cheats stay in Cheats.
+        Assert.Equal(GameLayout.OptionsSection, GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == "God Ratchet"), d));
+        foreach (var label in new[] { "Fast loads", "Infinite ammo", "Infinite health" })
+            Assert.Equal("Cheats", GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == label), d));
         Assert.Equal(GameLayout.ValuesSection, GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == "Bolts"), d));
         Assert.Equal(new[] { "Cheats", "Player", "Collectables", "Debug" },
             GameLayout.TabOrder(title, GameId.Tod, new[] { "Debug", "Collectables", "Player", "Cheats" }));

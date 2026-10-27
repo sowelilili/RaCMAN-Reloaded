@@ -131,6 +131,8 @@ public class TodTests
         var describe = await client.DescribeAsync();
         Assert.Equal(GameId.Tod, describe.Game);
         Assert.Contains(describe.Features, f => f.Label == "God Ratchet" && f.Kind == FeatureKind.Toggle);
+        Assert.Contains(describe.Features, f => f.Label == "Infinite health" && f.Kind == FeatureKind.Toggle);
+        Assert.DoesNotContain(describe.Features, f => f.Label.Contains("RYNO"));
         Assert.Equal(new[] { "Bolts", "Raritanium", "Challenge mode" }, describe.Readouts);
         Assert.Equal(19, (await client.PlanetListAsync()).Names.Length);
 
@@ -219,9 +221,10 @@ public class TodTests
 
         Assert.True(await PumpAsync(state, () => state.HasLua && state.Describe.Features.Length > 0 && state.Planets.Length == 19));
 
-        // The unlock table is the Unlocks panel's to read; its shape is ToD's six categories.
+        // The unlock table is the Unlocks panel's to read; its shape is ToD's four categories (the
+        // skill points and gold bolts are the Collectables buttons' since the first hardware test).
         var unlocks = await state.Client.UnlockListAsync();
-        Assert.Equal(new[] { "Weapons", "Devices", "Gadgets", "Items", "Skill points", "Gold bolts" }, unlocks.Categories);
+        Assert.Equal(new[] { "Weapons", "Devices", "Gadgets", "Items" }, unlocks.Categories);
         Assert.Equal(10, unlocks.Fields[1].Max);
         Assert.False(unlocks.Fields[2].IsNamed);
         Assert.Equal(GameId.Tod, state.DescribedGame);

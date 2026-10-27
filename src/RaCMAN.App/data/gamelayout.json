@@ -154,12 +154,12 @@
     "tod": {
       "tabOrder": ["Cheats", "Player", "Collectables", "Debug"],
       "moves": {
+        "God Ratchet": "Options",
+
         "Unlock all skill points": "Collectables",
         "Reset skill points": "Collectables",
         "Unlock all gold bolts": "Collectables",
-        "Reset gold bolts": "Collectables",
-        "Unlock all RYNO plans": "Collectables",
-        "Reset RYNO plans": "Collectables"
+        "Reset gold bolts": "Collectables"
       }
     }
   }

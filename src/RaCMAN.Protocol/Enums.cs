@@ -828,6 +828,13 @@ public enum SessionFlags2 : byte
     /// it is set. Never set by a release or by qwark-rpcs3. PROTOCOL.md 9.11.
     /// </summary>
     GameWaiting = 1 << 6,
+
+    /// <summary>
+    /// bit7 NO_MENU (revision 1.28, pending): the running game has no console menu (Tools of
+    /// Destruction), so the menu's combo opens nothing and the In-game menus switch has no Help
+    /// row to take. INGAME with the game's code in only; clear in every earlier build.
+    /// </summary>
+    NoMenu = 1 << 7,
 }
 
 /// <summary>GAME_MODULE's <c>state</c>, section 5.1.2 of PROTOCOL.md (revision 1.26).</summary>

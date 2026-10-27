@@ -126,9 +126,19 @@ public sealed record SessionInfo(
     /// </summary>
     public bool UsbMods => (Flags2 & SessionFlags2.UsbMods) != 0;
 
-    /// <summary>The bits of byte 29 that are not the profile's: USB_MODS, DEV and the two game-module bits.</summary>
+    /// <summary>
+    /// The bits of byte 29 that are not the profile's: USB_MODS, DEV, the two game-module bits and
+    /// NO_MENU.
+    /// </summary>
     public const SessionFlags2 Flags2Bits =
-        SessionFlags2.UsbMods | SessionFlags2.Dev | SessionFlags2.GameModuleBad | SessionFlags2.GameWaiting;
+        SessionFlags2.UsbMods | SessionFlags2.Dev | SessionFlags2.GameModuleBad | SessionFlags2.GameWaiting
+        | SessionFlags2.NoMenu;
+
+    /// <summary>
+    /// The running game has no console menu (revision 1.28, pending, <c>flags2</c> bit7): Tools of
+    /// Destruction. The Combos panel then leaves out the menu's combo and the In-game menus switch.
+    /// </summary>
+    public bool NoConsoleMenu => (Flags2 & SessionFlags2.NoMenu) != 0;
 
     /// <summary>
     /// The module is a test build (revision 1.24, <c>flags2</c> bit4): its build number is the one

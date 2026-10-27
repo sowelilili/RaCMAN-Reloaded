@@ -189,5 +189,48 @@ public class InGameMenusTests
         Assert.True(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3));
         Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, patched));
         Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.Die, rpcs3));
+
+        // ToD's Fast loads is a data write: under RPCS3 its combo needs no patch.
+        var tod = FakeQwarkServer.TodDescribe();
+        Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, tod));
+        var codeWriting = tod with
+        {
+            Features = tod.Features.Select(f => f.Label == "Fast loads" ? f with { Flags = FeatureFlags.WritesCode } : f).ToArray(),
+        };
+        Assert.True(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, codeWriting));
+        Assert.True(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, DescribeResult.Empty));
+    }
+
+    /// <summary>
+    /// Revision 1.28 (pending): a game with no console menu (flags2 bit7 NO_MENU, ToD) has neither
+    /// the menu's combo row nor the In-game menus box; every other combo row stays.
+    /// </summary>
+    [Fact]
+    public void AGameWithNoConsoleMenuHasNeitherTheMenuComboNorTheBox()
+    {
+        var console = SessionInfo.Empty with { QwarkVersion = QwarkClient.ExpectedQwarkBuild };
+        var tod = console with { Flags2 = SessionFlags2.NoMenu };
+
+        Assert.True(CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, console));
+        Assert.True(CombosPanel.ShowsInGameMenus(console));
+        Assert.False(CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, tod));
+        Assert.False(CombosPanel.ShowsInGameMenus(tod));
+        Assert.True(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, tod));
+        Assert.True(CombosPanel.ShowsRow(ComboAction.SavePosition, tod));
+
+        // The bit crosses the wire, and an older module never sends it.
+        Assert.True(SessionInfo.Parse(tod.ToBytes()).NoConsoleMenu);
+        Assert.False(SessionInfo.Parse(console.ToBytes()).NoConsoleMenu);
+    }
+
+    [Fact]
+    public async Task TheFakeToDConsoleSaysItHasNoConsoleMenu()
+    {
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Start();
+        using var client = new QwarkClient { AutoReconnect = false };
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        Assert.True((await client.HelloAsync()).NoConsoleMenu);
     }
 }

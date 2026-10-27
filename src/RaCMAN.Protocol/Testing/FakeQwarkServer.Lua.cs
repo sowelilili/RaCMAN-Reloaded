@@ -85,15 +85,21 @@ public sealed partial class FakeQwarkServer
         "Reepor", "Cragmite Battleship", "Meridian City", "Fastoon II",
     };
 
-    /// <summary>ToD's DESCRIBE as revision 1.27 lays it out: the labels and kinds qwark gives, no addresses.</summary>
+    /// <summary>
+    /// ToD's DESCRIBE as qwark lays it out since the first hardware test (2026-10-27): the labels
+    /// and kinds qwark gives, no addresses. The RYNO plans' buttons are gone, id 9 is Infinite
+    /// health, and God Ratchet (the old trainer's) and Fast loads are new.
+    /// </summary>
     public static DescribeResult TodDescribe() => new(
         GameId.Tod,
         new[] { "Cheats", "Player", "Progress" },
         new[] { "Bolts", "Raritanium", "Challenge mode" },
         new[]
         {
+            new Feature(17, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Fast loads"),
             new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Infinite ammo"),
-            new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "God Ratchet"),
+            new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Infinite health"),
+            new Feature(16, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "God Ratchet"),
             new Feature(2, FeatureKind.Action, 1, 0, FeatureFlags.None, 0xFF, 0, 0, "Die"),
             new Feature(3, FeatureKind.Value, 1, 0, FeatureFlags.None, 0, 0, 0, "Bolts"),
             new Feature(4, FeatureKind.Value, 1, 0, FeatureFlags.None, 1, 0, 0, "Raritanium"),
@@ -102,8 +108,6 @@ public sealed partial class FakeQwarkServer
             new Feature(7, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset skill points"),
             new Feature(8, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Unlock all gold bolts"),
             new Feature(9, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset gold bolts"),
-            new Feature(10, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Unlock all RYNO plans"),
-            new Feature(11, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset RYNO plans"),
         });
 
     /// <summary>
@@ -124,7 +128,7 @@ public sealed partial class FakeQwarkServer
             todFlags[3] = 0x80;   // flag 39, LVL_COBALIA_BRIDGE_EXTENDED
             for (byte planet = 0; planet < TodPlanets.Length; planet++) LevelFlags[planet] = todFlags;
             LevelFlagNames = TodLevelFlagNames();
-            UnlockCategories = new[] { "Weapons", "Devices", "Gadgets", "Items", "Skill points", "Gold bolts" };
+            UnlockCategories = new[] { "Weapons", "Devices", "Gadgets", "Items" };
             UnlockFields = new[]
             {
                 new UnlockField("Owned", UnlockFieldKind.Flag, 0),
@@ -139,9 +143,7 @@ public sealed partial class FakeQwarkServer
                 new Unlock(1, 0, 0b1011, new uint[] { 0, 0, 0, 0 }, "Fusion Grenade"),
                 new Unlock(2, 1, 0b0001, new uint[] { 1, 0, 0, 0 }, "Groovitron"),
                 new Unlock(3, 2, 0b0001, new uint[] { 1, 0, 0, 0 }, "Swingshot"),
-                new Unlock(4, 3, 0b0001, new uint[] { 0, 0, 0, 0 }, "Hypershot"),
-                new Unlock(5, 4, 0b0001, new uint[] { 0, 0, 0, 0 }, "Stay squeaky clean"),
-                new Unlock(6, 5, 0b0001, new uint[] { 1, 0, 0, 0 }, "Metropolis gold bolt 1"),
+                new Unlock(4, 3, 0b0001, new uint[] { 0, 0, 0, 0 }, "Heli-Pack"),
             });
 
             _hasLua = true;

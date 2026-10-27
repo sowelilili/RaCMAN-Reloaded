@@ -91,6 +91,21 @@ public static class CombosPanel
     public static bool FastLoadsComboBlocked(ComboAction action, SessionInfo session) =>
         action == ComboAction.ToggleFastLoads && session.CodeFeaturesUnavailable;
 
+    /// <summary>
+    /// The same, knowing the running game's DESCRIBE: a game whose Fast loads toggle is a data
+    /// write (no WRITES_CODE, Tools of Destruction's) needs no patch, so its combo is never greyed.
+    /// </summary>
+    public static bool FastLoadsComboBlocked(ComboAction action, SessionInfo session, DescribeResult describe)
+    {
+        if (!FastLoadsComboBlocked(action, session)) return false;
+        foreach (var feature in describe.Features)
+        {
+            if (feature.Kind == FeatureKind.Toggle && feature.Label == "Fast loads") return feature.WritesCode;
+        }
+
+        return true;
+    }
+
     /// <summary>The first qwark build with the console menu and its combo, revision 1.22.</summary>
     public const byte ConsoleMenuBuild = 54;
 
@@ -115,10 +130,26 @@ public static class CombosPanel
     };
 
     /// <summary>
+    /// The same, for the session: a game with no console menu (SessionInfo <c>flags2</c> bit7
+    /// NO_MENU, Tools of Destruction) has no row for the menu's combo either, since it opens
+    /// nothing there. The combo itself is the console's and stays stored for the other games.
+    /// </summary>
+    public static bool ShowsRow(ComboAction action, SessionInfo session) =>
+        ShowsRow(action, session.QwarkVersion)
+        && !(action == ComboAction.OpenConsoleMenu && session.NoConsoleMenu);
+
+    /// <summary>
     /// Whether the In-game menus box is drawn: only against a module that has MENU_HELP, which an
     /// older one answers UNKNOWN_OP.
     /// </summary>
     public static bool ShowsInGameMenus(byte qwarkBuild) => qwarkBuild >= InGameMenusBuild;
+
+    /// <summary>
+    /// The same, for the session: not in a game with no console menu (<c>flags2</c> bit7 NO_MENU),
+    /// which has no Help row for the switch to give to the Trainer menu.
+    /// </summary>
+    public static bool ShowsInGameMenus(SessionInfo session) =>
+        ShowsInGameMenus(session.QwarkVersion) && !session.NoConsoleMenu;
 
     /// <summary>
     /// Whether the In-game menus box is greyed: under RPCS3 there is no console menu, and qwark
@@ -335,7 +366,7 @@ public static class CombosPanel
     /// </summary>
     private static void DrawInGameMenus(AppState state)
     {
-        if (!ShowsInGameMenus(state.Session.QwarkVersion)) return;
+        if (!ShowsInGameMenus(state.Session)) return;
 
         bool blocked = InGameMenusBlocked(state.Session);
         bool on = !state.Session.MenuHelpOff;
@@ -404,7 +435,7 @@ public static class CombosPanel
 
         foreach (var action in Actions)
         {
-            if (!ShowsRow(action, state.Session.QwarkVersion)) continue;
+            if (!ShowsRow(action, state.Session)) continue;
 
             var entry = EntryFor(state, action);
             bool overridden = IsOverridden(state.Session, entry);
@@ -428,7 +459,7 @@ public static class CombosPanel
                 Ui.TextDisabled(Label(action));
                 if (ImGui.IsItemHovered()) Ui.SetTooltip("The console menu is not available under RPCS3.");
             }
-            else if (FastLoadsComboBlocked(action, state.Session))
+            else if (FastLoadsComboBlocked(action, state.Session, state.Describe))
             {
                 Ui.TextDisabled(Label(action));
                 if (ImGui.IsItemHovered()) Ui.SetTooltip(Ui.NeedsQwarkPatches);

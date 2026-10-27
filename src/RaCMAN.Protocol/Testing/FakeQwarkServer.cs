@@ -881,7 +881,10 @@ public sealed partial class FakeQwarkServer : IDisposable
             ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
             Flags2 = (UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None)
                      | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None)
-                     | moduleBits,
+                     | moduleBits
+                     // Revision 1.28 (pending): ToD has no console menu, as qwark says of it.
+                     | (moduleBits == SessionFlags2.None && _session.State == SessionState.Ingame
+                        && _session.Game == GameId.Tod ? SessionFlags2.NoMenu : SessionFlags2.None),
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };

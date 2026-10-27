@@ -106,7 +106,13 @@ The colours and the boxes stay until the game restarts. Tick **on boot** beside 
 
 ## Tools of Destruction
 
-ToD (NPEA00452, the PSN EU version 1.00) has a first set of features: **Infinite ammo**, **God Ratchet**, Die, bolts, raritanium and challenge mode, the unlock table, and buttons for skill points, gold bolts and RYNO plans on the **Collectables** tab. Position slots, the planet list and the input display work as in the other games. ToD has no savefile helper, autosplitter, manips or console menu yet.
+ToD (NPEA00452, the PSN EU version 1.00) has a first set of features: **Fast loads**, **Infinite ammo**, **Infinite health**, **God Ratchet**, Die, bolts, raritanium and challenge mode, the unlock table, and buttons for skill points and gold bolts on the **Collectables** tab. Position slots, the planet list and the input display work as in the other games. ToD has no savefile helper, autosplitter, manips or console menu yet, so the Combos panel leaves out **Open console menu** and **In-game menus** while ToD runs.
+
+- **Fast loads** skips the 5 seconds the planet-to-planet transition always plays before the game waits for the level to load. It works under RPCS3 too, and **Toggle fast loads** flips it.
+- **Infinite ammo** also keeps your devices full, the Visi-Copter included.
+- **Infinite health** is the game's own no-damage switch. It used to be called God Ratchet.
+- **God Ratchet** is the old RaCMAN's god ratchet, the one speedrunners use: it also makes enemies ignore Ratchet. It sits beside the values table, where RaC1's goodies menu is.
+- The Unlocks panel lists weapons, devices, gadgets and items. Use the Collectables buttons for skill points and gold bolts, and the RYNO's own row for the RYNO.
 
 For now ToD needs a test build of qwark with its `tod.sprx` (see [docs/test-builds.md](docs/test-builds.md)). With a release build, your console treats ToD as a game it does not know.
 
