@@ -1760,11 +1760,12 @@ public class Rpcs3PatchTests : IDisposable
         server.Start();
         using var state = await ConnectRpcs3Async(server, root);
 
-        // ToD has no savefile helper and no code switches, so the Lua helper is its one part.
+        // ToD's savefile helper is the game's own save system (revision 1.28, pending), active with
+        // no patch, and it has no code switches, so the Lua helper is its one part to install.
         var patch = state.Rpcs3Patch;
         Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Install && state.HasLua));
         Assert.Equal(new[] { QwarkPatchPart.LuaHelper }, patch.LastStatus.Installable);
-        Assert.Equal(QwarkPatchState.Absent, patch.LastStatus.Helper.State);
+        Assert.Equal(QwarkPatchState.Active, patch.LastStatus.Helper.State);
         Assert.Equal(QwarkPatchState.Absent, patch.LastStatus.Switches.State);
         Assert.Contains("Not installed", patch.LastStatus.Message);
 

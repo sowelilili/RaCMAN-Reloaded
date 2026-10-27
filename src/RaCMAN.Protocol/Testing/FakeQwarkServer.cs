@@ -1571,6 +1571,13 @@ public sealed partial class FakeQwarkServer : IDisposable
     public bool SaveFileHelperInstalled { get; set; }
 
     /// <summary>
+    /// Revision 1.28 (pending): the game's savefile "helper" is its own save system, driven by data
+    /// writes, as Tools of Destruction's is. SAVEFILE_INFO then says installed on every platform and
+    /// SAVEFILE_PATCH has nothing to hand out (UNSUPPORTED).
+    /// </summary>
+    public bool SaveFileOwnSystem { get; set; }
+
+    /// <summary>
     /// The words SAVEFILE_PATCH hands out for the running game: made up, and only ever copied into
     /// an RPCS3 patch file by the client, which is all a test needs of them.
     /// </summary>
@@ -1804,7 +1811,7 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// True while the ops that run the game's helper have none to run: a platform that cannot patch
     /// code, before revision 1.15 at all and since then until the RPCS3 patch has put it in.
     /// </summary>
-    private bool SaveFileHelperMissing => SaveFileUnsupported || (NoCodePatches && !SaveFileHelperInstalled);
+    private bool SaveFileHelperMissing => SaveFileUnsupported || (NoCodePatches && !SaveFileHelperInstalled && !SaveFileOwnSystem);
 
     /// <summary>What SAVEFILE_INFO reports for the helper's own byte.</summary>
     public bool SaveFileRunning { get; set; } = true;
@@ -3246,7 +3253,7 @@ public sealed partial class FakeQwarkServer : IDisposable
 
                     // Revision 1.15: where code cannot be patched, `installed` is whether the RPCS3
                     // patch put the helper in at this boot, and a helper that is not in never runs.
-                    bool installed = !NoCodePatches || SaveFileHelperInstalled;
+                    bool installed = !NoCodePatches || SaveFileHelperInstalled || SaveFileOwnSystem;
 
                     byte pending = 0;
                     if (_setAsidePending > 0) pending |= SaveFileInfo.PendingSetAside;
@@ -3271,7 +3278,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                 {
                     if (SaveFileUnsupported) return (Status.UnknownOp, null);
                     if (EnforceIngame && _session.State != SessionState.Ingame) return (Status.NotIngame, null);
-                    if (!SaveFileSupported) return (Status.Unsupported, null);
+                    if (!SaveFileSupported || SaveFileOwnSystem) return (Status.Unsupported, null);
 
                     return (Status.Ok,
                         new PatchReply(SaveFilePatchStamp, SaveFilePatchWords, SaveFilePatchBytes).ToBytes());

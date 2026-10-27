@@ -107,11 +107,12 @@ public sealed partial class FakeQwarkServer
     /// <summary>
     /// ToD's DESCRIBE as qwark lays it out since the first hardware test (2026-10-27): the labels
     /// and kinds qwark gives, no addresses. The RYNO plans' buttons are gone, id 9 is Infinite
-    /// health, and God Ratchet (the old trainer's) and Fast loads are new.
+    /// health, and God Ratchet (the old trainer's) and Fast loads are new. Revision 1.28 (pending):
+    /// the savefile manager's two flagged actions, 40 and 41, in a fourth group.
     /// </summary>
     public static DescribeResult TodDescribe() => new(
         GameId.Tod,
-        new[] { "Cheats", "Player", "Progress" },
+        new[] { "Cheats", "Player", "Progress", "Savefile" },
         new[] { "Bolts", "Raritanium", "Challenge mode" },
         new[]
         {
@@ -127,13 +128,20 @@ public sealed partial class FakeQwarkServer
             new Feature(7, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset skill points"),
             new Feature(8, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Unlock all gold bolts"),
             new Feature(9, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset gold bolts"),
+            new Feature(40, FeatureKind.Action, 3, 0, FeatureFlags.SaveAside, 0xFF, 0, 0, "Set aside file"),
+            new Feature(41, FeatureKind.Action, 3, 0, FeatureFlags.LoadAside, 0xFF, 0, 0, "Load set-aside file"),
         });
+
+    /// <summary>The size of a ToD save, the GAME.SAV image (revision 1.28, pending).</summary>
+    public const int TodSaveSize = 0x906F0;
 
     /// <summary>
     /// Makes this fake a ToD console: a new boot of NPEA00452 INGAME on Metropolis, ToD's feature
     /// table, unlock categories and planets, Lua, its level flags (one 40-byte region for every
-    /// planet, with names, revision 1.28 pending), its autosplitter (revision 1.28 pending), and
-    /// none of the savefile helper, manips or code switches, which ToD does not have.
+    /// planet, with names, revision 1.28 pending), its autosplitter (revision 1.28 pending), its
+    /// savefile manager (revision 1.28 pending: the game's own save system, so installed on every
+    /// platform and no patch to hand out), and none of the manips or code switches, which ToD does
+    /// not have.
     /// </summary>
     public void UseTod()
     {
@@ -166,7 +174,10 @@ public sealed partial class FakeQwarkServer
             });
 
             _hasLua = true;
-            SaveFileSupported = false;
+            SaveFileSupported = true;
+            SaveFileOwnSystem = true;
+            SaveAsideContent = BuildSaveAsideContent(TodSaveSize);
+            SaveFileBuffer = new byte[TodSaveSize];
             AutosplitSupported = true;
             AutosplitDescriptors = new List<AutosplitEventDesc>(TodAutosplitDescriptors());
             ManipsSupported = false;

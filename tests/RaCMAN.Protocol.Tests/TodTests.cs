@@ -230,7 +230,8 @@ public class TodTests
         Assert.False(unlocks.Fields[2].IsNamed);
         Assert.Equal(GameId.Tod, state.DescribedGame);
         Assert.Equal(LuaInstalled.No, state.Lua!.Installed);
-        Assert.False(state.SaveFile.Supported);
+        Assert.True(state.SaveFile.Supported);
+        Assert.True(state.Describe.HasSaveFileHelper);
         Assert.Contains(state.AutosplitEvents, d => d.Label == "Tachyon defeated");
         Assert.Null(state.Manips);
         Assert.Contains("Debug", GamePanel.SubPagesWithContent(state));
@@ -328,5 +329,65 @@ public class TodTests
         Assert.True(rows[4].Normalise && rows[4].ParamUs == 0);
         Assert.Equal(AutosplitKind.Pause, rows[5].Kind);
         Assert.Equal(19_950_000u, rows[5].ParamUs);
+    }
+
+    // ------------------------------------------- the savefile manager, revision 1.28 (pending)
+
+    [Fact]
+    public async Task ToDHasTheSaveFilePanelsTwoFlaggedActions()
+    {
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Start();
+        using var client = await ConnectAsync(server);
+
+        var describe = await client.DescribeAsync();
+        Assert.True(describe.HasSaveFileHelper);
+        Assert.Equal((byte)40, describe.SaveAsideAction!.Id);
+        Assert.Equal((byte)41, describe.LoadAsideAction!.Id);
+        Assert.Equal("Savefile", describe.Groups[describe.SaveAsideAction.Group]);
+
+        var info = await client.SaveFileInfoAsync();
+        Assert.True(info.Supported && info.Installed && info.Running);
+        Assert.Equal((uint)FakeQwarkServer.TodSaveSize, info.Size);
+    }
+
+    [Fact]
+    public async Task UnderRpcs3ToDsSaveFilesNeedNoPatchAndRoundTrip()
+    {
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
+        server.UseTod();
+        server.Start();
+        using var client = await ConnectAsync(server);
+        var root = Path.Combine(Path.GetTempPath(), "racman-tod-saves-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            // The game's own save system: in on every platform, and nothing for RPCS3 to patch in.
+            var info = await client.SaveFileInfoAsync();
+            Assert.True(info.Supported && info.Installed);
+            var rpcs3 = SessionInfo.Empty with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
+            Assert.True(SaveFilesPanel.HelperIn(rpcs3, info));
+            Assert.False(GamePanel.AsideBlocked(rpcs3, info));
+            var patch = await Assert.ThrowsAsync<QwarkStatusException>(() => client.SaveFilePatchAsync());
+            Assert.Equal(Status.Unsupported, patch.Status);
+
+            // Save to a slot and load it back, as the Save files panel does for any game.
+            var library = new SaveFileLibrary(root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, FakeQwarkServer.TodTitleId, "any%", "metropolis.sav",
+                mirror: true);
+            var saved = library.Read(FakeQwarkServer.TodTitleId, "any%", "metropolis.sav");
+            Assert.Equal(FakeQwarkServer.TodSaveSize, saved.Length);
+
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(FakeQwarkServer.TodTitleId, "any%")));
+            Assert.False(await SaveFileTransfer.LoadAsync(client, library, FakeQwarkServer.TodTitleId, "any%", entry));
+            Assert.Equal(saved, server.LoadedSaveFile);
+        }
+        finally
+        {
+            if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+        }
     }
 }
