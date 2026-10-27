@@ -2416,7 +2416,7 @@ public class AutosplitterTests
         FakeQwarkServer.TodAutosplitDescriptors().Single(d => d.Code == code);
 
     /// <summary>
-    /// ToD's level load is NORMALISE with no allowance (revision 1.28, pending): the whole of it
+    /// ToD's level load is NORMALISE with no allowance (revision 1.28): the whole of it
     /// comes off game time, a reload of the same planet like any other load.
     /// </summary>
     [Fact]

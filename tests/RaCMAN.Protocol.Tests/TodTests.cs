@@ -28,7 +28,7 @@ public class TodTests
         // The per-game files and settings are keyed by the lower-case enum name.
         Assert.Equal("tod", Settings.GameKey(GameId.Tod));
         Assert.Equal("tod", AutosplitRoutes.KeyFor(GameId.Tod));
-        // Revision 1.28 (pending): ToD has a planet route, one line per LEVEL_ id.
+        // Revision 1.28: ToD has a planet route, one line per LEVEL_ id.
         Assert.Equal(19, AutosplitRoutes.For(GameId.Tod).Count);
         Assert.Empty(LegacyLibraryImport.LegacyPlanets(GameId.Tod));
         Assert.Equal(new PlanetResetOptions(false, false), PlanetResetOptions.For(GameId.Tod, QwarkClient.ExpectedQwarkBuild));
@@ -331,7 +331,7 @@ public class TodTests
         Assert.Equal(19_950_000u, rows[5].ParamUs);
     }
 
-    // ------------------------------------------- the savefile manager, revision 1.28 (pending)
+    // ------------------------------------------- the savefile manager, revision 1.28
 
     [Fact]
     public async Task ToDHasTheSaveFilePanelsTwoFlaggedActions()

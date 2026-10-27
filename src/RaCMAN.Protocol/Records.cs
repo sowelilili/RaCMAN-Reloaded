@@ -135,7 +135,7 @@ public sealed record SessionInfo(
         | SessionFlags2.NoMenu;
 
     /// <summary>
-    /// The running game has no console menu (revision 1.28, pending, <c>flags2</c> bit7): Tools of
+    /// The running game has no console menu (revision 1.28, <c>flags2</c> bit7): Tools of
     /// Destruction. The Combos panel then leaves out the menu's combo and the In-game menus switch.
     /// </summary>
     public bool NoConsoleMenu => (Flags2 & SessionFlags2.NoMenu) != 0;
@@ -874,7 +874,7 @@ public sealed record UnlockList(string[] Categories, UnlockField[] Fields, Unloc
 }
 
 /// <summary>
-/// One group of LEVELFLAGS_NAMES (revision 1.28, pending), 24 bytes: the PLANET_LIST id whose flags
+/// One group of LEVELFLAGS_NAMES (revision 1.28), 24 bytes: the PLANET_LIST id whose flags
 /// these are, or <see cref="NoPlanet"/>, and the group's name.
 /// </summary>
 public sealed record LevelFlagGroup(byte Planet, string Name)
@@ -906,7 +906,7 @@ public sealed record LevelFlagName(ushort Bit, ushort Number, byte Group, string
 }
 
 /// <summary>
-/// LEVELFLAGS_NAMES (revision 1.28, pending): the names of a game's level flag bits, grouped, for a
+/// LEVELFLAGS_NAMES (revision 1.28): the names of a game's level flag bits, grouped, for a
 /// game whose flags are named one by one (Tools of Destruction). Static for the game: read once a
 /// session, the values come from LEVELFLAGS_GET.
 /// </summary>

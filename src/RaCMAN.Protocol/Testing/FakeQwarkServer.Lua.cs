@@ -87,7 +87,7 @@ public sealed partial class FakeQwarkServer
     };
 
     /// <summary>
-    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.28, pending): the planet split,
+    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.28): the planet split,
     /// Tachyon's defeat, the credits and every mission, the level load taken whole off game time
     /// (NORMALISE with no allowance) and the quit to the XMB at the old script's 19.95 s.
     /// </summary>
@@ -107,7 +107,7 @@ public sealed partial class FakeQwarkServer
     /// <summary>
     /// ToD's DESCRIBE as qwark lays it out since the first hardware test (2026-10-27): the labels
     /// and kinds qwark gives, no addresses. The RYNO plans' buttons are gone, id 9 is Infinite
-    /// health, and God Ratchet (the old trainer's) and Fast loads are new. Revision 1.28 (pending):
+    /// health, and God Ratchet (the old trainer's) and Fast loads are new. Revision 1.28:
     /// the savefile manager's two flagged actions, 40 and 41, in a fourth group.
     /// </summary>
     public static DescribeResult TodDescribe() => new(
@@ -132,14 +132,14 @@ public sealed partial class FakeQwarkServer
             new Feature(41, FeatureKind.Action, 3, 0, FeatureFlags.LoadAside, 0xFF, 0, 0, "Load set-aside file"),
         });
 
-    /// <summary>The size of a ToD save, the GAME.SAV image (revision 1.28, pending).</summary>
+    /// <summary>The size of a ToD save, the GAME.SAV image (revision 1.28).</summary>
     public const int TodSaveSize = 0x906F0;
 
     /// <summary>
     /// Makes this fake a ToD console: a new boot of NPEA00452 INGAME on Metropolis, ToD's feature
     /// table, unlock categories and planets, Lua, its level flags (one 40-byte region for every
-    /// planet, with names, revision 1.28 pending), its autosplitter (revision 1.28 pending), its
-    /// savefile manager (revision 1.28 pending: the game's own save system, so installed on every
+    /// planet, with names, revision 1.28), its autosplitter (revision 1.28), its
+    /// savefile manager (revision 1.28: the game's own save system, so installed on every
     /// platform and no patch to hand out), and none of the manips or code switches, which ToD does
     /// not have.
     /// </summary>

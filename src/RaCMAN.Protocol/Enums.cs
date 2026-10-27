@@ -85,8 +85,8 @@ public enum Opcode : ushort
     LevelFlagsGet = 0x0053,
     LevelFlagsReset = 0x0054,
     LevelFlagsSet = 0x0055,
-    LevelFlagsBit = 0x0056,     // revision 1.28 (pending)
-    LevelFlagsNames = 0x0057,   // revision 1.28 (pending)
+    LevelFlagsBit = 0x0056,     // revision 1.28
+    LevelFlagsNames = 0x0057,   // revision 1.28
 
     // 5.7 Mods
     ModList = 0x0060,
@@ -830,7 +830,7 @@ public enum SessionFlags2 : byte
     GameWaiting = 1 << 6,
 
     /// <summary>
-    /// bit7 NO_MENU (revision 1.28, pending): the running game has no console menu (Tools of
+    /// bit7 NO_MENU (revision 1.28): the running game has no console menu (Tools of
     /// Destruction), so the menu's combo opens nothing and the In-game menus switch has no Help
     /// row to take. INGAME with the game's code in only; clear in every earlier build.
     /// </summary>

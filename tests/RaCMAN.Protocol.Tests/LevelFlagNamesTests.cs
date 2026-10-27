@@ -6,7 +6,7 @@ using RaCMAN.Protocol.Testing;
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// Revision 1.28 (pending): LEVELFLAGS_NAMES and LEVELFLAGS_BIT, the layout, the fake console's ToD
+/// Revision 1.28: LEVELFLAGS_NAMES and LEVELFLAGS_BIT, the layout, the fake console's ToD
 /// flags (one region for every planet, named and grouped by planet), and the named list the Level
 /// flags panel draws from them. The fake listens on loopback only.
 /// </summary>

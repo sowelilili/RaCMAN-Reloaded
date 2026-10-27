@@ -202,7 +202,7 @@ public class InGameMenusTests
     }
 
     /// <summary>
-    /// Revision 1.28 (pending): a game with no console menu (flags2 bit7 NO_MENU, ToD) has neither
+    /// Revision 1.28: a game with no console menu (flags2 bit7 NO_MENU, ToD) has neither
     /// the menu's combo row nor the In-game menus box; every other combo row stays.
     /// </summary>
     [Fact]

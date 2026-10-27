@@ -510,7 +510,7 @@ public sealed class AppState : IDisposable
     public bool LevelFlagsUnsupported { get; private set; }
 
     /// <summary>
-    /// The described game's level flag names (LEVELFLAGS_NAMES, revision 1.28 pending), or null for
+    /// The described game's level flag names (LEVELFLAGS_NAMES, revision 1.28), or null for
     /// a game whose flags have none, which is every game but ToD. With names the Level flags panel
     /// lists the flags by planet rather than drawing the region's bytes.
     /// </summary>

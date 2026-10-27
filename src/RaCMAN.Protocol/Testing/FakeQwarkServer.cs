@@ -220,7 +220,7 @@ public sealed partial class FakeQwarkServer : IDisposable
     public int LevelFlagsResetCount { get; private set; }
 
     /// <summary>
-    /// What LEVELFLAGS_NAMES answers (revision 1.28, pending), or null for a game whose flags have
+    /// What LEVELFLAGS_NAMES answers (revision 1.28), or null for a game whose flags have
     /// no names, which answers UNSUPPORTED. With names, LEVELFLAGS_RESET clears the bits of the
     /// planet's group alone, as ToD's does.
     /// </summary>
@@ -882,7 +882,7 @@ public sealed partial class FakeQwarkServer : IDisposable
             Flags2 = (UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None)
                      | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None)
                      | moduleBits
-                     // Revision 1.28 (pending): ToD has no console menu, as qwark says of it.
+                     // Revision 1.28: ToD has no console menu, as qwark says of it.
                      | (moduleBits == SessionFlags2.None && _session.State == SessionState.Ingame
                         && _session.Game == GameId.Tod ? SessionFlags2.NoMenu : SessionFlags2.None),
             ModLoaded = ModBits(ModFlags.Loaded),
@@ -1571,7 +1571,7 @@ public sealed partial class FakeQwarkServer : IDisposable
     public bool SaveFileHelperInstalled { get; set; }
 
     /// <summary>
-    /// Revision 1.28 (pending): the game's savefile "helper" is its own save system, driven by data
+    /// Revision 1.28: the game's savefile "helper" is its own save system, driven by data
     /// writes, as Tools of Destruction's is. SAVEFILE_INFO then says installed on every platform and
     /// SAVEFILE_PATCH has nothing to hand out (UNSUPPORTED).
     /// </summary>
