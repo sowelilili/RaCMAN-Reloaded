@@ -196,6 +196,9 @@ public sealed class AppState : IDisposable
             _uiPakToasted = false;
             _uiPakCheckIn = 0;
 
+            // And the game modules' answer and look: this may be another console or module.
+            ForgetGameModule();
+
             // And the manip events start again from whatever the console holds now: the module on
             // the other end may be a new one, whose event numbers mean nothing next to the old
             // one's (see ManipEvents).
@@ -253,6 +256,7 @@ public sealed class AppState : IDisposable
             _liveStale = true;
             ForgetVshMemory();
             ForgetProfile();
+            ForgetGameModule();
             _uiPakCheckIn = 0;
             _drops++;
 
@@ -692,7 +696,9 @@ public sealed class AppState : IDisposable
     /// the ui.pak beside it to where the new module adopts it at its start. The automatic path
     /// above and the Connection panel's debug button both come here, and a failure at any step is
     /// one error toast that names the step and leaves the boot copy as it was. No ui.pak beside the
-    /// SPRX still updates the module, and says the pak was not sent.
+    /// SPRX still updates the module, and says the pak was not sent. The game modules beside it (a
+    /// test build's, revision 1.26) are staged too, each where the new module takes it as its game
+    /// boots; a release client has none and stages none.
     /// </summary>
     public void UpdateConsoleModule(string sprxPath)
     {
@@ -705,6 +711,7 @@ public sealed class AppState : IDisposable
         {
             byte[] bytes;
             byte[]? pak = null;
+            IReadOnlyList<GameModuleFile> modules;
             string reading = sprxPath;
             try
             {
@@ -712,6 +719,9 @@ public sealed class AppState : IDisposable
 
                 reading = pakPath;
                 if (File.Exists(pakPath)) pak = await File.ReadAllBytesAsync(pakPath).ConfigureAwait(false);
+
+                // A test build's game modules (revision 1.26), staged beside the pak; a release has none.
+                modules = await GameModule.ReadBesideAsync(sprxPath).ConfigureAwait(false);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
@@ -727,7 +737,7 @@ public sealed class AppState : IDisposable
                     new Progress<string>(message => Post(() =>
                     {
                         if (Panels.Ui.Debug) AddToast(message);
-                    }))).ConfigureAwait(false);
+                    })), gameModules: modules).ConfigureAwait(false);
 
                 Post(() =>
                 {
@@ -859,6 +869,298 @@ public sealed class AppState : IDisposable
             AddToast("Your console still says its ui.pak is missing or from another build. The ui.pak beside "
                      + "this client may be from another build; your console's qwark log says why.", ToastKind.Error);
         }
+    }
+
+    // ---------------------------------------------------------------- the game modules (revision 1.26)
+
+    /// <summary>
+    /// How often GAME_MODULE is read while the session says a game's module is not in (flags2 bit5
+    /// or bit6). The gate looks once a second, so the waiting figures move about that often.
+    /// </summary>
+    public const float GameModulePollSeconds = 1f;
+
+    /// <summary>
+    /// How long after a send that went through the flag is looked at again. The module looks at the
+    /// file within a tick of the rename, and then waits for memory, which is bit6 and not bit5.
+    /// </summary>
+    public const float GameModuleCheckSeconds = 3f;
+
+    /// <summary>
+    /// The last GAME_MODULE answer on this connection, while the session says a game's module is
+    /// not in; null otherwise, and before the first answer. It names the game, which SessionInfo's
+    /// <c>game</c> byte does not until the module is in, and says why.
+    /// </summary>
+    public GameModuleInfo? GameModuleReport { get; private set; }
+
+    /// <summary>
+    /// The console runs one of the four games and its module is not in (revision 1.26): waiting for
+    /// memory, or with none to be had. A test build whose games are modules is the only module that
+    /// says so; a release never does. The session is <see cref="UnknownGame"/> meanwhile, game ops
+    /// and all, but it is a game this client can name, so the unknown-title wording is not used.
+    /// </summary>
+    public bool GameModulePending => UnknownGame && Session.GameModulePending;
+
+    /// <summary>The module is on the console and waits for memory; it loads by itself (flags2 bit6).</summary>
+    public bool GameModuleWaiting => GameModulePending && Session.GameWaiting && !Session.GameModuleBad;
+
+    /// <summary>The game GAME_MODULE named, or <see cref="GameId.None"/> before it has answered.</summary>
+    public GameId PendingGame => GameModulePending && GameModuleReport is { } report ? report.Game : GameId.None;
+
+    /// <summary>
+    /// The console runs the module this client shipped with and says the running game's module is
+    /// missing, broken or another build's (flags2 bit5), so sending this client's copy puts the
+    /// game's features back without a restart. The conditions are <see cref="UiPakNeeded"/>'s: never
+    /// under RPCS3, which links its games in, and never for an older or another test build's module,
+    /// whose update carries the modules and whose warning already covers it. A release module never
+    /// sets the bit, so a release client against its own module never sees this.
+    /// </summary>
+    public bool GameModuleNeeded =>
+        Connected
+        && !Settings.Rpcs3Target
+        && !IsEmulator
+        && !CodePatchesUnsupported
+        && Hello is { } hello
+        && hello.QwarkVersion == QwarkClient.ExpectedQwarkBuild
+        && !QwarkStale
+        && GameModulePending
+        && Session.GameModuleBad;
+
+    /// <summary>This client's copy of the pending game's module, or null before the game is known.</summary>
+    public string? GameModuleLocalPath =>
+        GameModule.HasModule(PendingGame)
+            ? GameModule.BesideSprx(Ps3Connect.ResolveSprx(Settings.Ps3.SprxPath), PendingGame)
+            : null;
+
+    /// <summary>
+    /// The send is worth offering: the module is needed, the game is known, and this client has a
+    /// copy of its module. A release client ships none, so it never offers a file it does not have.
+    /// </summary>
+    public bool GameModuleCanSend => GameModuleNeeded && GameModuleLocalPath is { } path && File.Exists(path);
+
+    /// <summary>A send of a game module is under way; the button waits for it.</summary>
+    public bool GameModuleSending { get; private set; }
+
+    /// <summary>What to call the pending game: GAME_MODULE's game, or the title id until it has answered.</summary>
+    public static string PendingGameName(GameId game, string titleId) =>
+        GameModule.HasModule(game) ? game.DisplayName()
+        : string.IsNullOrEmpty(titleId) ? "this game" : titleId;
+
+    /// <summary>
+    /// The whole sentence for a game whose module is not to be had (flags2 bit5): which file, which
+    /// game, and why, from GAME_MODULE. Without an answer yet it says what the bit says.
+    /// </summary>
+    public static string GameModuleProblem(GameModuleInfo? info, string titleId)
+    {
+        var game = info?.Game ?? GameId.None;
+        string name = PendingGameName(game, titleId);
+        string file = GameModule.HasModule(game) ? GameModule.FileName(game) : "the game's module";
+        string what = info?.State switch
+        {
+            GameModuleState.Missing => $"Your console is missing {file}",
+            GameModuleState.Failed when info.Error == 0 => $"{file} on your console is damaged",
+            GameModuleState.Failed => $"{file} on your console would not load (error 0x{info.Error:X8})",
+            GameModuleState.Other => $"{file} on your console is from another build",
+            _ => $"Game support for {name} is missing or broken on your console",
+        };
+
+        return $"{what}, so {name} has no game features. The memory tools still work.";
+    }
+
+    /// <summary>The header's few words for <see cref="GameModuleProblem"/>.</summary>
+    public static string GameModuleProblemShort(GameModuleInfo? info, string titleId)
+    {
+        string name = PendingGameName(info?.Game ?? GameId.None, titleId);
+        return info?.State switch
+        {
+            GameModuleState.Missing => $"{name} support is missing",
+            GameModuleState.Failed when info.Error == 0 => $"{name} support is damaged",
+            GameModuleState.Failed => $"{name} support would not load",
+            GameModuleState.Other => $"{name} support is from another build",
+            _ => $"{name} support is not loaded",
+        };
+    }
+
+    /// <summary>
+    /// The sentence for a module that waits for memory (flags2 bit6), with GAME_MODULE's figures:
+    /// the lowest free reading, and what the gate wants, the module's need and the floor.
+    /// </summary>
+    public static string GameModuleWaitingText(GameModuleInfo? info, string titleId)
+    {
+        string name = PendingGameName(info?.Game ?? GameId.None, titleId);
+        string figures = info is { } i ? $": {i.LowestKb} KB free, it needs {i.RequiredKb} KB" : string.Empty;
+        return $"{name} support is waiting for memory on your console{figures}. It loads by itself when there is room.";
+    }
+
+    /// <summary>The line the panels draw while a game's module is not in: waiting, or why not.</summary>
+    public string GameModuleStatusText() =>
+        GameModuleWaiting
+            ? GameModuleWaitingText(GameModuleReport, Session.TitleId)
+            : GameModuleProblem(GameModuleReport, Session.TitleId);
+
+    /// <summary>The status line's game while a module is not in: its name, and what it is waiting for.</summary>
+    private string PendingGameStatus() =>
+        PendingGameName(PendingGame, Session.TitleId) + (GameModuleWaiting ? ", waiting for memory" : ", no game support");
+
+    private bool _gameModuleInFlight;
+
+    /// <summary>Set by a refusal of the op (a module from before it): not asked again on this connection.</summary>
+    private bool _gameModuleRefused;
+
+    /// <summary>Seconds since the last GAME_MODULE went out, held at the interval once one is due.</summary>
+    private float _sinceGameModule = GameModulePollSeconds;
+
+    /// <summary>The connection and title the last toast about a bad module was for, so each gets one.</summary>
+    private (int Connection, string Title)? _gameModuleToasted;
+
+    /// <summary>Seconds left before a send that went through is checked against the flag; 0 when none waits.</summary>
+    private float _gameModuleCheckIn;
+
+    private void ForgetGameModule()
+    {
+        GameModuleReport = null;
+        _gameModuleRefused = false;
+        _gameModuleCheckIn = 0;
+        _sinceGameModule = GameModulePollSeconds;
+    }
+
+    /// <summary>
+    /// Once a frame while connected: GAME_MODULE once a second while the session says a game's
+    /// module is not in, and never otherwise, so a module that does not know the op is never asked
+    /// it. The answer is dropped the moment the bits go, so the next game starts from nothing.
+    /// </summary>
+    private void PollGameModule(SessionInfo session, float deltaSeconds)
+    {
+        if (!session.GameModulePending || Hello is null)
+        {
+            GameModuleReport = null;
+            _sinceGameModule = GameModulePollSeconds;
+            return;
+        }
+
+        _sinceGameModule = Math.Min(_sinceGameModule + deltaSeconds, GameModulePollSeconds);
+        if (_gameModuleInFlight || _gameModuleRefused || _sinceGameModule < GameModulePollSeconds) return;
+
+        _sinceGameModule = 0;
+        _gameModuleInFlight = true;
+        int connection = _connection;
+
+        // Quiet whatever the console says: nobody pressed anything, and the panels already say
+        // what the bits say. A module that does not know the op is not asked again.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var info = await Client.GameModuleAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    if (connection == _connection && Session.GameModulePending) GameModuleReport = info;
+                });
+            }
+            catch (QwarkStatusException ex)
+            {
+                if (Panels.Ui.Debug) Console.WriteLine($"quiet {ex.Opcode}: {ex.Status}");
+                var status = ex.Status;
+                Post(() =>
+                {
+                    if (connection == _connection && status is Status.UnknownOp or Status.Unsupported) _gameModuleRefused = true;
+                });
+            }
+            catch (ProtocolException ex)
+            {
+                Post(() =>
+                {
+                    if (connection != _connection) return;
+                    _gameModuleRefused = true;
+                    AddToast($"Game module: {ex.Message}", ToastKind.Error);
+                });
+            }
+            catch (Exception)
+            {
+                // The link went; the next connection asks again.
+            }
+            finally
+            {
+                Post(() => _gameModuleInFlight = false);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Once a frame while connected: the one toast each game gets on a connection about a module
+    /// that is not to be had, once GAME_MODULE has said which game it is, and the look at the flag
+    /// that follows a send.
+    /// </summary>
+    private void WatchGameModule(float deltaSeconds)
+    {
+        bool needed = GameModuleNeeded;
+        if (needed && (GameModuleReport is not null || _gameModuleRefused))
+        {
+            var key = (_connection, Session.TitleId);
+            if (_gameModuleToasted != key)
+            {
+                _gameModuleToasted = key;
+                string fix = GameModuleCanSend ? " Send it from the Connection panel." : string.Empty;
+                AddToast(GameModuleProblem(GameModuleReport, Session.TitleId) + fix, ToastKind.Error);
+            }
+        }
+
+        if (_gameModuleCheckIn <= 0) return;
+
+        _gameModuleCheckIn -= deltaSeconds;
+        if (_gameModuleCheckIn > 0) return;
+
+        _gameModuleCheckIn = 0;
+        if (needed)
+        {
+            AddToast("Your console still says its game module is missing or from another build. The game modules "
+                     + "beside this client may be from another build; your console's qwark log says why.",
+                ToastKind.Error);
+        }
+    }
+
+    /// <summary>
+    /// The Send button for a missing or bad game module: this client's copy of the running game's
+    /// module, through qwark's own file ops (<see cref="GameModuleSend"/>). The module looks at the
+    /// file when the rename lands and loads it once there is memory for it, without a restart. Each
+    /// step shows as it starts, and a failure is one toast that names the step.
+    /// </summary>
+    public void SendGameModule()
+    {
+        if (GameModuleSending) return;
+
+        var game = PendingGame;
+        if (GameModuleLocalPath is not { } path)
+        {
+            AddToast("Your console has not said which game it is running yet; try again in a moment.", ToastKind.Error);
+            return;
+        }
+
+        int connection = _connection;
+        GameModuleSending = true;
+
+        Run(async () =>
+        {
+            try
+            {
+                await GameModuleSend.RunAsync(Client, game, path,
+                    new Progress<string>(message => Post(() => AddToast(message)))).ConfigureAwait(false);
+
+                Post(() =>
+                {
+                    AddToast($"Sent {GameModule.FileName(game)} to your console. {game.DisplayName()} support "
+                             + "loads as soon as your console has room for it.", ToastKind.Success);
+                    if (connection == _connection) _gameModuleCheckIn = GameModuleCheckSeconds;
+                });
+            }
+            catch (GameModuleSendException error)
+            {
+                Post(() => AddToast(error.Message, ToastKind.Error));
+            }
+            finally
+            {
+                Post(() => GameModuleSending = false);
+            }
+        });
     }
 
     // ---------------------------------------------------------------- per-user settings
@@ -1164,6 +1466,7 @@ public sealed class AppState : IDisposable
             // profile and any question about it.
             ForgetVshMemory();
             ForgetProfile();
+            GameModuleReport = null;
             _modBitsSeen = null;
             return;
         }
@@ -1187,6 +1490,10 @@ public sealed class AppState : IDisposable
 
         // Nor is the console menu's file, on a module that is current (see UiPakNeeded).
         WatchUiPak(deltaSeconds);
+
+        // A game whose module is not in (revision 1.26): which game, why, and the offer to send it.
+        PollGameModule(session, deltaSeconds);
+        WatchGameModule(deltaSeconds);
 
         // The process the values came out of, which a quit, a boot and a reboot all replace. The
         // title going empty is the trip to the XMB, and it is a session change like any other:
@@ -2341,7 +2648,8 @@ public sealed class AppState : IDisposable
 
         var session = Session;
         string title = string.IsNullOrEmpty(session.TitleId) ? "no title" : session.TitleId;
-        string line = $"{session.State.DisplayName()} | {title} | {session.GameName}";
+        string game = GameModulePending ? PendingGameStatus() : session.GameName;
+        string line = $"{session.State.DisplayName()} | {title} | {game}";
 
         // The console's combo switch is on the header rather than only on the Combos panel: a pad
         // that has stopped doing anything is noticed from whichever panel the user is looking at.

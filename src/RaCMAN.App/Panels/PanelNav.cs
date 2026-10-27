@@ -118,9 +118,14 @@ public static class PanelNav
     /// greyed out: greying says "this console cannot do that", and there is a tooltip to explain
     /// it, while these are panels the running game simply has no such thing for.
     /// </summary>
-    public static bool Visible(int panel, bool unknownGame, bool unlocksUnsupported, bool levelFlagsUnsupported)
+    /// <para>
+    /// A game whose module is not in yet (revision 1.26, <paramref name="gameModulePending"/>) is
+    /// such a session too, except that the Game panel stays: it says what the game is waiting for.
+    /// </para>
+    public static bool Visible(int panel, bool unknownGame, bool unlocksUnsupported, bool levelFlagsUnsupported,
+        bool gameModulePending = false)
     {
-        if (unknownGame) return !IsGamePanel(panel);
+        if (unknownGame) return (gameModulePending && panel == Game) || !IsGamePanel(panel);
 
         return panel switch
         {
@@ -134,7 +139,8 @@ public static class PanelNav
     /// Where the nav puts someone whose panel has just been hidden: the game, or the memory tools
     /// when there is no game to show.
     /// </summary>
-    public static int Fallback(bool unknownGame) => unknownGame ? Memory : Game;
+    public static int Fallback(bool unknownGame, bool gameModulePending = false) =>
+        unknownGame && !gameModulePending ? Memory : Game;
 
     /// <summary>
     /// Why the nav greys a panel out, or null when the panel is usable. A panel whose console

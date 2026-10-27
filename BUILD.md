@@ -10,20 +10,20 @@ dotnet test
 dotnet run --project src/RaCMAN.App
 ```
 
-`publish.ps1` makes `../build/RaCMAN-Reloaded/` and a zip of it. It takes `qwark.sprx`, `qwark.build`, `ui.pak` and `qwark-rpcs3.exe` from `../qwark/dist/`, which qwark commits, so a release needs no PS3 SDK. It puts `qwark-installer.pkg` from there beside the zip. `-All` adds linux-x64 and osx-x64.
+`publish.ps1` makes `../build/RaCMAN-Reloaded/` and a zip of it. It takes `qwark.sprx`, `qwark.build`, `ui.pak` and `qwark-rpcs3.exe` from `../qwark/dist/`, which qwark commits, so a release needs no PS3 SDK. From a test dist it also takes the game modules, `game-1.sprx` to `game-4.sprx` (qwark's `docs/PROTOCOL.md` 9.11), through `packaging/stage-game-modules.ps1`. That script stages them only when `qwark.build` says `dev 1`. A dist with none stages none and does not fail. A release dist's leftover modules are never staged. It puts `qwark-installer.pkg` from there beside the zip. `-All` adds linux-x64 and osx-x64.
 
 ### Test builds and release builds of qwark
 
 Every qwark build between two releases reports the same build number, so the module also says whether it is a test build and which one (qwark's `docs/PROTOCOL.md` 3.1.1). `make` writes `qwark.build` beside `qwark.sprx`: the build number, `dev 1` or `dev 0`, and the build ID, a CRC of qwark's sources. The client reads the `qwark.build` beside the `qwark.sprx` it sends. When the console runs a test module whose ID is not the shipped one's, or a release module of the same number while the client ships a test build, the client treats it as out of date and replaces it as it replaces an older build: by itself in standalone mode, with the out-of-date warning and the Load button in webMAN mode. When the IDs match, the module is current and nothing is sent again. Release modules of the same build are judged by the number alone, as before. So is `qwark-rpcs3.exe`, which the client starts from beside itself. Without a `qwark.build`, the number alone decides.
 
 - **A test dist:** in qwark, `make` (or `_Make.bat`), `./build-host.sh`, then `make dist`. This is the default: a plain `make` is a test build. `make dist` says which kind it copied.
-- **A release dist:** in qwark, `./build-host.sh`, then `make release` (or `_Make.bat release`). This builds the module without the test flag (`QWARK_DEV=0`) and runs `make dist`. Commit `dist/`.
+- **A release dist:** in qwark, `./build-host.sh`, then `make release` (or `_Make.bat release`). This builds the module without the test flag (`QWARK_DEV=0`) and runs `make dist`. Commit `dist/`. A release links its games in, so its `dist/` has no `game-*.sprx`; delete any a test build left there.
 
 To work without a console, build the qwark simulator with `../qwark/build-host.sh`. Run `qwark-host.exe`, type `boot NPEA00385`, and connect the client to `127.0.0.1`. `dotnet run --project src/RaCMAN.App -- --help` lists the flags for headless runs.
 
 ## Releasing
 
-1. Build a release dist in the qwark repository (`make release`, above) and commit `dist/`: `qwark.sprx`, `qwark.build`, `ui.pak`, `qwark-installer.pkg` and `qwark-rpcs3.exe`. The release fails without them, and it refuses a `dist/` whose `qwark.build` says `dev 1` (`packaging/check-qwark-build.ps1`).
+1. Build a release dist in the qwark repository (`make release`, above) and commit `dist/`: `qwark.sprx`, `qwark.build`, `ui.pak`, `qwark-installer.pkg` and `qwark-rpcs3.exe`. The release fails without them, and it refuses a `dist/` whose `qwark.build` says `dev 1`, or that holds any `game-*.sprx` (`packaging/check-qwark-build.ps1`).
 2. Run `.\release.ps1 X.Y.Z`. It checks both repositories, rebuilds the release module to compare it with `dist/`, runs the tests, then tags both repositories and pushes the tags. Or tag a commit here `vX.Y.Z` and push the tag yourself.
 
 `.github/workflows/release.yml` then builds the client, packs it with [Velopack](https://docs.velopack.io) and uploads it. The Windows job makes the release. The Linux job adds its AppImage to it. The version comes from the tag.

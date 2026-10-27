@@ -124,10 +124,13 @@ public static class ConnectionPanel
 
             // Why the nav is down to four entries: the console is running something qwark cannot
             // name, and the status line above says so.
-            if (state.UnknownGame) Ui.Warning(Ui.NoGameModule);
+            // A game whose module is not in yet (revision 1.26) is not an unknown title: it is named,
+            // and why its features are not there is the line under the stale-build warning.
+            if (state.UnknownGame && !state.GameModulePending) Ui.Warning(Ui.NoGameModule);
         }
 
         DrawStaleBuild(state);
+        DrawGameModule(state);
         DrawUiPak(state);
         DrawVersions(state);
 
@@ -324,7 +327,8 @@ public static class ConnectionPanel
 
     /// <summary>
     /// What the boot install did, in the one toast it gets: where qwark is on the list, whether
-    /// ui.pak went with it, and the restart a boot plugin needs. A missing pak has already been
+    /// ui.pak went with it (and, from a test build, how many game modules did), and the restart a
+    /// boot plugin needs. A missing pak has already been
     /// named, with what it costs, as the install went.
     /// </summary>
     public static string BootInstallMessage(BootInstallResult result) =>
@@ -335,7 +339,17 @@ public static class ConnectionPanel
             _ => "boot_plugins.txt already starts with it.",
         }
         + (result.UiPakSent ? $" Sent {UiPak.FileName} to {UiPak.ConsoleDirectory}." : $" No {UiPak.FileName} was sent.")
+        + GameModulesSentNote(result.GameModulesSent)
         + " Restart your console; the module only loads at boot.";
+
+    /// <summary>The boot install's word on the game modules: nothing for a release, which ships none.</summary>
+    private static string GameModulesSentNote(int sent) =>
+        sent switch
+        {
+            0 => string.Empty,
+            1 => " Sent 1 game module with it.",
+            _ => $" Sent {sent} game modules with it.",
+        };
 
     /// <summary>
     /// Under the SPRX's path, where it is drawn: a release has ui.pak beside qwark.sprx, so only
@@ -968,6 +982,46 @@ public static class ConnectionPanel
 
         Ui.Warning($"Your console is running qwark build {hello.QwarkVersion}; this client shipped with build "
                    + $"{QwarkClient.ExpectedQwarkBuild}. " + fix);
+    }
+
+    /// <summary>
+    /// A game whose module is not in (revision 1.26): waiting for memory, in the warning colour, or
+    /// not to be had, in the error colour with the button that sends this client's copy. The whole
+    /// game's features are missing, so it goes above the ui.pak line. The Game panel draws it too.
+    /// </summary>
+    private static void DrawGameModule(AppState state)
+    {
+        if (!state.GameModulePending) return;
+
+        ImGui.Spacing();
+        DrawGameModuleStatus(state);
+    }
+
+    /// <summary>
+    /// The waiting line, or the problem and the Send button. A module this client cannot send (none
+    /// beside it, as in a release, or a console whose qwark is out of date, whose update carries the
+    /// modules) gets the line and no button.
+    /// </summary>
+    public static void DrawGameModuleStatus(AppState state)
+    {
+        if (state.GameModuleWaiting || !state.GameModuleNeeded)
+        {
+            Ui.Warning(state.GameModuleStatusText());
+            return;
+        }
+
+        Ui.Error(state.GameModuleStatusText());
+        if (state.GameModuleCanSend)
+        {
+            // A launch answers the file ops BUSY, so the button waits for the game to be up.
+            ImGui.BeginDisabled(state.GameModuleSending || state.ConsoleBusy);
+            if (ImGui.Button($"Send {GameModule.FileName(state.PendingGame)}")) state.SendGameModule();
+            ImGui.EndDisabled();
+        }
+        else if (state.GameModuleLocalPath is { } path)
+        {
+            Ui.Hint($"This client has no {GameModule.FileName(state.PendingGame)} to send ({path}).");
+        }
     }
 
     /// <summary>

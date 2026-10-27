@@ -126,14 +126,37 @@ public sealed record SessionInfo(
     /// </summary>
     public bool UsbMods => (Flags2 & SessionFlags2.UsbMods) != 0;
 
-    /// <summary>The bits of byte 29 that are not the profile's: USB_MODS and DEV.</summary>
-    public const SessionFlags2 Flags2Bits = SessionFlags2.UsbMods | SessionFlags2.Dev;
+    /// <summary>The bits of byte 29 that are not the profile's: USB_MODS, DEV and the two game-module bits.</summary>
+    public const SessionFlags2 Flags2Bits =
+        SessionFlags2.UsbMods | SessionFlags2.Dev | SessionFlags2.GameModuleBad | SessionFlags2.GameWaiting;
 
     /// <summary>
     /// The module is a test build (revision 1.24, <c>flags2</c> bit4): its build number is the one
     /// every test build before the next release reports, so <see cref="BuildId"/> says which it is.
     /// </summary>
     public bool DevBuild => (Flags2 & SessionFlags2.Dev) != 0;
+
+    /// <summary>
+    /// The running game's module is missing, broken, would not load or is another build's
+    /// (revision 1.26, <c>flags2</c> bit5). Only a test build whose games are modules sets it, only
+    /// while INGAME, and <see cref="Game"/> reads <see cref="GameId.None"/> while it does.
+    /// GAME_MODULE says which game and why.
+    /// </summary>
+    public bool GameModuleBad => (Flags2 & SessionFlags2.GameModuleBad) != 0;
+
+    /// <summary>
+    /// The running game's module is on the console and waits for the VSH's memory; it loads by
+    /// itself when there is room (revision 1.26, <c>flags2</c> bit6). <see cref="Game"/> reads
+    /// <see cref="GameId.None"/> until it does.
+    /// </summary>
+    public bool GameWaiting => (Flags2 & SessionFlags2.GameWaiting) != 0;
+
+    /// <summary>
+    /// The session is a game whose module is not in yet, waiting or with none to be had: INGAME
+    /// with <c>game</c> 0, as an unknown title reads, but a game this client can name all the same
+    /// (from GAME_MODULE). The memory tools work, and the unknown-title wording does not apply.
+    /// </summary>
+    public bool GameModulePending => IsIngame && (GameModuleBad || GameWaiting);
 
     /// <summary>
     /// The build ID HELLO carries after SessionInfo (revision 1.24): the CRC of the module's
@@ -159,7 +182,8 @@ public sealed record SessionInfo(
     /// What to call the game on screen. "no game" belongs to the XMB, where nothing is running at
     /// all; a title the module has nothing for is a game, just not one this client can name.
     /// </summary>
-    public string GameName => IsUnknownGame ? "Unknown game" : Game.DisplayName();
+    public string GameName => GameModulePending ? "Game support not loaded"
+        : IsUnknownGame ? "Unknown game" : Game.DisplayName();
 
     /// <summary>The readout at <paramref name="index"/>, or null when the index names none.</summary>
     public uint? ReadoutAt(int index) =>
@@ -1083,6 +1107,108 @@ public sealed record VshMemoryInfo(
         w.WriteU8((byte)LowestAt);
         w.WriteU8((byte)LowestGame);
         w.WriteZeros(2);
+        return bytes;
+    }
+}
+
+/// <summary>
+/// The GAME_MODULE reply, section 5.1.2 of PROTOCOL.md (revision 1.26, build 57): the running
+/// game's module and the memory gate in front of it, for a test build whose games are modules.
+/// <code>
+/// u8 state, u8 game, u8 pages, u8 flags,
+/// u32 lowest_kb, u32 now_kb, u32 need_kb, u32 floor_kb, u32 window_ms, u32 waited_ms,
+/// u32 error, u32 load_us, u32 module_id
+/// </code>
+/// All big-endian, 40 bytes. The gate loads the module when <c>lowest_kb - need_kb &gt;= floor_kb</c>.
+/// <see cref="Game"/> is the session's game by its title, which SessionInfo's <c>game</c> byte
+/// does not say until the module is in.
+/// </summary>
+public sealed record GameModuleInfo(
+    GameModuleState State,
+    GameId Game,
+    byte Pages,
+    GameModuleFlags Flags,
+    uint LowestKb,
+    uint NowKb,
+    uint NeedKb,
+    uint FloorKb,
+    uint WindowMs,
+    uint WaitedMs,
+    uint Error,
+    uint LoadMicroseconds,
+    uint ModuleId)
+{
+    /// <summary>Forty bytes. A later revision only adds at the end, so a longer reply's first 40 are these.</summary>
+    public const int WireSize = 40;
+
+    /// <summary>OTHER's <see cref="Error"/>: the module names another build number.</summary>
+    public const uint OtherBuildNumber = 2;
+
+    /// <summary>OTHER's <see cref="Error"/>: the module names another build ID.</summary>
+    public const uint OtherBuildId = 3;
+
+    /// <summary>OTHER's <see cref="Error"/>: the module was made for another core table.</summary>
+    public const uint OtherCoreTable = 4;
+
+    /// <summary>What a load needs free at the lowest: the module's own need and the floor on top of it, KB.</summary>
+    public uint RequiredKb => NeedKb + FloorKb;
+
+    /// <summary>How much more the console needs free before the gate passes, KB; 0 when it has enough.</summary>
+    public uint ShortKb => RequiredKb > LowestKb ? RequiredKb - LowestKb : 0;
+
+    /// <summary>The file is there and waits for memory (flags2 bit6).</summary>
+    public bool IsWaiting => State == GameModuleState.Waiting;
+
+    /// <summary>There is no module to be had until a client writes the file (flags2 bit5).</summary>
+    public bool IsBad => State is GameModuleState.Missing or GameModuleState.Failed or GameModuleState.Other;
+
+    /// <summary>
+    /// A reply shorter than 40 bytes stops inside a field and throws, as every fixed-size reply
+    /// here does. Bytes past the 40th are left for a later revision.
+    /// </summary>
+    public static GameModuleInfo Parse(ReadOnlySpan<byte> payload)
+    {
+        if (payload.Length < WireSize)
+        {
+            throw new ProtocolException($"GAME_MODULE needs {WireSize} bytes, got {payload.Length}");
+        }
+
+        var r = new SpanReader(payload[..WireSize]);
+        var state = (GameModuleState)r.ReadU8();
+        var game = (GameId)r.ReadU8();
+        byte pages = r.ReadU8();
+        var flags = (GameModuleFlags)r.ReadU8();
+        uint lowest = r.ReadU32();
+        uint now = r.ReadU32();
+        uint need = r.ReadU32();
+        uint floor = r.ReadU32();
+        uint window = r.ReadU32();
+        uint waited = r.ReadU32();
+        uint error = r.ReadU32();
+        uint load = r.ReadU32();
+        uint id = r.ReadU32();
+
+        return new GameModuleInfo(state, game, pages, flags, lowest, now, need, floor, window, waited, error, load, id);
+    }
+
+    /// <summary>The other direction, for the fake console the tests drive.</summary>
+    public byte[] ToBytes()
+    {
+        var bytes = new byte[WireSize];
+        var w = new SpanWriter(bytes);
+        w.WriteU8((byte)State);
+        w.WriteU8((byte)Game);
+        w.WriteU8(Pages);
+        w.WriteU8((byte)Flags);
+        w.WriteU32(LowestKb);
+        w.WriteU32(NowKb);
+        w.WriteU32(NeedKb);
+        w.WriteU32(FloorKb);
+        w.WriteU32(WindowMs);
+        w.WriteU32(WaitedMs);
+        w.WriteU32(Error);
+        w.WriteU32(LoadMicroseconds);
+        w.WriteU32(ModuleId);
         return bytes;
     }
 }

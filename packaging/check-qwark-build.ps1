@@ -11,9 +11,10 @@
     bit and fills dist\ from it.
 
     This script stops when dist\qwark.build is missing, unreadable, says `dev 1`, or names another
-    build than qwark's src\core\proto.h. release.ps1 runs it before it tags anything, and the
-    release workflow runs it on the qwark it checked out. It writes one line when the dist\ is a
-    release, and throws with what to do otherwise.
+    build than qwark's src\core\proto.h, and when dist\ holds game modules (game-*.sprx, revision
+    1.26): a release links its games in, so any there are a test build's, left behind. release.ps1
+    runs it before it tags anything, and the release workflow runs it on the qwark it checked out.
+    It writes one line when the dist\ is a release, and throws with what to do otherwise.
 
 .PARAMETER Dist
     qwark's dist\ folder.
@@ -55,6 +56,14 @@ if ($fields['build'] -notmatch '^\d+$' -or $fields['dev'] -notmatch '^[01]$' -or
 if ($fields['dev'] -eq '1') {
     throw ("qwark's dist\ holds a TEST build (build $($fields['build']), id $($fields['id'])): every client " +
            "would replace it. $fix")
+}
+
+# Revision 1.26: a test build's games are game-1.sprx to game-4.sprx beside it. A release links its
+# games in, so a release dist\ with any is one a test build's `make dist` left them in.
+$modules = @(Get-ChildItem -Path $Dist -Filter 'game-*.sprx' -File -ErrorAction SilentlyContinue)
+if ($modules.Count -gt 0) {
+    throw ("qwark's dist\ holds a release module and $($modules.Count) game module(s) from a test build " +
+           "($(($modules | ForEach-Object { $_.Name }) -join ', ')). A release links its games in; delete them from dist\. $fix")
 }
 
 if ($ProtoH) {

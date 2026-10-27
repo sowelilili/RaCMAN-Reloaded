@@ -307,6 +307,16 @@ public static class GamePanel
 
     public static void Draw(AppState state)
     {
+        // A game whose module is not in yet (revision 1.26): the session has no game features, so
+        // the page says why, and offers the module when the console has none it can use. When the
+        // module arrives the game is described as any game is, and this page fills in.
+        if (state.GameModulePending)
+        {
+            Ui.Heading("Game");
+            ConnectionPanel.DrawGameModuleStatus(state);
+            return;
+        }
+
         var describe = state.Describe;
         // The described game, not the running one: at the XMB the page keeps the layout it had,
         // greyed out, rather than re-sorting itself into qwark's default groups and back again.

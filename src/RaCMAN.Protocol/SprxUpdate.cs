@@ -11,6 +11,13 @@ public enum SprxUpdateStep
     /// </summary>
     UiPak,
 
+    /// <summary>
+    /// Writing the new build's game modules (revision 1.26, a test build's) beside the console's
+    /// own as <see cref="GameModule.StagedPath"/> and reading each back. Before the module is
+    /// touched, so a failure here leaves it alone too.
+    /// </summary>
+    GameModule,
+
     /// <summary>Reading boot_plugins.txt to find out where the console loads the module from.</summary>
     BootPath,
 
@@ -42,9 +49,11 @@ public sealed class SprxUpdateException : Exception
 /// <summary>
 /// What the update did, for the message and for a test to read. <see cref="UiPakStaged"/> is false
 /// when the client had no ui.pak to send, and the console then keeps whatever pak it has.
+/// <see cref="GameModulesStaged"/> counts the game modules staged with it: none for a release
+/// client, which ships none.
 /// </summary>
 public readonly record struct SprxUpdateResult(
-    string BootPath, string BackupPath, bool ReplacedACopy, int Bytes, bool UiPakStaged = false);
+    string BootPath, string BackupPath, bool ReplacedACopy, int Bytes, bool UiPakStaged = false, int GameModulesStaged = 0);
 
 /// <summary>
 /// Replaces the console's boot copy of qwark.sprx with the one this client shipped, through the
@@ -63,6 +72,12 @@ public readonly record struct SprxUpdateResult(
 /// module that is running reads its own pak until the restart, and the next build's would be a bad
 /// one to it. The new module moves the staged pak into place when it starts, before it checks it.
 /// A failure there stops the update before the module is touched.
+/// </para>
+/// <para>
+/// The game modules a test build ships (revision 1.26) go the same way, each as
+/// <see cref="GameModule.StagedPath"/>, after the pak: the running module keeps the modules it has,
+/// and the new one puts each staged module in place the next time its game boots. A release
+/// client has none to send, and a module that links its games in never looks at them.
 /// </para>
 /// <para>
 /// Nothing here decides <em>whether</em> to update. The caller compares the build HELLO reported
@@ -98,15 +113,17 @@ public static class SprxUpdate
     /// <summary>
     /// Puts <paramref name="sprx"/> where the console boots its module from, and
     /// <paramref name="uiPak"/>, when there is one, where the new module will look for it at its
-    /// start. The console has to be restarted afterwards: a VSH plugin is read once, at boot, and
-    /// this client cannot restart it.
+    /// start, and <paramref name="gameModules"/> where it puts them in place as each game boots. The
+    /// console has to be restarted afterwards: a VSH plugin is read once, at boot, and this client
+    /// cannot restart it.
     /// </summary>
     public static async Task<SprxUpdateResult> RunAsync(
         QwarkClient client,
         ReadOnlyMemory<byte> sprx,
         byte[]? uiPak = null,
         IProgress<string>? progress = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<GameModuleFile>? gameModules = null)
     {
         if (uiPak is not null)
         {
@@ -129,6 +146,32 @@ public static class SprxUpdate
             {
                 throw new SprxUpdateException(SprxUpdateStep.UiPak, $"checking {UiPak.StagedPath}", error);
             }
+        }
+
+        int modules = 0;
+        foreach (var module in gameModules ?? Array.Empty<GameModuleFile>())
+        {
+            string staged = GameModule.StagedPath(module.Game);
+            progress?.Report($"Uploading {module.FileName} to {staged}");
+            try
+            {
+                await client.WriteFileAsync(staged, module.Bytes, progress: null, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                throw new SprxUpdateException(SprxUpdateStep.GameModule, $"uploading {module.FileName} to {staged}", error);
+            }
+
+            try
+            {
+                await VerifyAsync(client, staged, module.Bytes, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error) when (error is not OperationCanceledException)
+            {
+                throw new SprxUpdateException(SprxUpdateStep.GameModule, $"checking {staged}", error);
+            }
+
+            modules++;
         }
 
         string bootPath;
@@ -197,7 +240,7 @@ public static class SprxUpdate
         }
 
         progress?.Report($"{bootPath} is the new {WebManLoader.SprxName}");
-        return new SprxUpdateResult(bootPath, backup, replaced, sprx.Length, UiPakStaged: uiPak is not null);
+        return new SprxUpdateResult(bootPath, backup, replaced, sprx.Length, UiPakStaged: uiPak is not null, GameModulesStaged: modules);
     }
 
     /// <summary>

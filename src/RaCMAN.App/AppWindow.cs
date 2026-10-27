@@ -290,7 +290,7 @@ public sealed class AppWindow : GameWindow
                 // or, on a title qwark knows nothing about, to Memory, which is what such a session
                 // has; if it is one this console cannot drive at all, to Connection, which is the
                 // panel that says which target is connected.
-                if (!PanelVisible(_panel)) _panel = PanelNav.Fallback(_state.UnknownGame);
+                if (!PanelVisible(_panel)) _panel = PanelNav.Fallback(_state.UnknownGame, _state.GameModulePending);
                 if (DisabledReason(_panel) is not null) _panel = PanelNav.Connection;
 
                 for (int i = 0; i < PanelNames.Length; i++)
@@ -396,7 +396,8 @@ public sealed class AppWindow : GameWindow
     /// <see cref="PanelNav.Visible"/>; the state it reads is the session's.
     /// </summary>
     private bool PanelVisible(int panel) =>
-        PanelNav.Visible(panel, _state.UnknownGame, _state.UnlocksUnsupported, _state.LevelFlagsUnsupported);
+        PanelNav.Visible(panel, _state.UnknownGame, _state.UnlocksUnsupported, _state.LevelFlagsUnsupported,
+            _state.GameModulePending);
 
     /// <summary>
     /// Why the nav greys a panel out, or null when it is usable. The rule is
@@ -487,6 +488,32 @@ public sealed class AppWindow : GameWindow
             ImGui.TextUnformatted("|");
             ImGui.SameLine();
             Ui.Text(Ui.Yellow, "qwark.sprx is out of date");
+        }
+
+        // A game whose module is not in (revision 1.26). Not to be had is the whole game's features
+        // gone, so it is red and carries its own Send button; waiting fixes itself, so it only says so.
+        if (_state.GameModuleNeeded)
+        {
+            ImGui.SameLine();
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            Ui.Text(Ui.Red, AppState.GameModuleProblemShort(_state.GameModuleReport, session.TitleId));
+            Ui.Tooltip(_state.GameModuleStatusText());
+            if (_state.GameModuleCanSend)
+            {
+                ImGui.SameLine();
+                ImGui.BeginDisabled(_state.GameModuleSending || _state.ConsoleBusy);
+                if (ImGui.SmallButton($"Send {RaCMAN.Protocol.GameModule.FileName(_state.PendingGame)}")) _state.SendGameModule();
+                ImGui.EndDisabled();
+            }
+        }
+        else if (_state.GameModuleWaiting)
+        {
+            ImGui.SameLine();
+            ImGui.TextUnformatted("|");
+            ImGui.SameLine();
+            Ui.Text(Ui.Yellow, $"{AppState.PendingGameName(_state.PendingGame, session.TitleId)} is waiting for memory");
+            Ui.Tooltip(_state.GameModuleStatusText());
         }
 
         // The module is current and its menu file is not: the same kind of line, and the

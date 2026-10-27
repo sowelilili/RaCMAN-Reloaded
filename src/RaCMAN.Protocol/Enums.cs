@@ -20,6 +20,16 @@ public enum Opcode : ushort
     /// </summary>
     VshMemory = 0x0007,
 
+    /// <summary>
+    /// Revision 1.26 (build 57): the running game's module and the memory gate in front of it, 40
+    /// bytes (<see cref="GameModuleInfo"/>). No payload. A control op, answered in every session
+    /// state. A test build whose games are modules (qwark's PROTOCOL.md 9.11) is the only module
+    /// worth asking: a release answers state LINKED, and a module from before the op UNKNOWN_OP,
+    /// which is why the client asks only while <see cref="SessionFlags2.GameModuleBad"/> or
+    /// <see cref="SessionFlags2.GameWaiting"/> is set.
+    /// </summary>
+    GameModule = 0x0008,
+
     // 5.2 Telemetry
     Subscribe = 0x0010,
     Unsubscribe = 0x0011,
@@ -648,6 +658,69 @@ public enum SessionFlags2 : byte
     /// release module never sets it, and neither does qwark-rpcs3. PROTOCOL.md 3.1.1.
     /// </summary>
     Dev = 1 << 4,
+
+    /// <summary>
+    /// bit5 GAME_MODULE_BAD (revision 1.26, a test build whose games are modules): the running
+    /// game's module, <c>/dev_hdd0/qwark/game-&lt;n&gt;.sprx</c>, is missing, is no module, would
+    /// not load or start, or is another build's, so the session has no game features until a
+    /// client writes the file or the game boots again. INGAME only, and <c>game</c> reads 0 while
+    /// it is set. Never set by a module whose games are linked in (a release, qwark-rpcs3).
+    /// </summary>
+    GameModuleBad = 1 << 5,
+
+    /// <summary>
+    /// bit6 GAME_WAITING (revision 1.26): the running game's module is there and waits until the
+    /// VSH has the memory for it; it loads by itself when it has. INGAME only, <c>game</c> 0 while
+    /// it is set. Never set by a release or by qwark-rpcs3. PROTOCOL.md 9.11.
+    /// </summary>
+    GameWaiting = 1 << 6,
+}
+
+/// <summary>GAME_MODULE's <c>state</c>, section 5.1.2 of PROTOCOL.md (revision 1.26).</summary>
+public enum GameModuleState : byte
+{
+    /// <summary>No game: the XMB, BOOTING, a title no game claims.</summary>
+    None = 0,
+
+    /// <summary>The game is linked into the module (a release, qwark-rpcs3).</summary>
+    Linked = 1,
+
+    /// <summary>A module is wanted and its file not yet read (a tick at most).</summary>
+    Checking = 2,
+
+    /// <summary>The module is there and the memory gate holds it back (flags2 bit6).</summary>
+    Waiting = 3,
+
+    /// <summary>Loaded and started.</summary>
+    Loaded = 4,
+
+    /// <summary>No <c>game-&lt;n&gt;.sprx</c> on the console (flags2 bit5).</summary>
+    Missing = 5,
+
+    /// <summary>No module in the file, or lv2 would not load or start it (flags2 bit5).</summary>
+    Failed = 6,
+
+    /// <summary>The module is another build's (flags2 bit5).</summary>
+    Other = 7,
+}
+
+/// <summary>GAME_MODULE's <c>flags</c>, section 5.1.2 of PROTOCOL.md (revision 1.26).</summary>
+[Flags]
+public enum GameModuleFlags : byte
+{
+    None = 0,
+
+    /// <summary>config.txt's <c>game.keep</c> is 1: the module stays loaded over the XMB.</summary>
+    Keep = 1 << 0,
+
+    /// <summary>This wait's 30-second notification has gone to the TV.</summary>
+    Notified = 1 << 1,
+
+    /// <summary>This module's games are modules (0 for a release).</summary>
+    Modules = 1 << 2,
+
+    /// <summary>A module is loaded now, a kept one included.</summary>
+    Resident = 1 << 3,
 }
 
 /// <summary>

@@ -4,12 +4,14 @@
 
 .DESCRIPTION
     Stages a full copy (the app, the controller skins, the moby layout data, the mod library, the
-    premade savefiles, qwark.sprx, ui.pak and qwark-rpcs3.exe, plus the Windows firewall helper) into
+    premade savefiles, qwark.sprx, ui.pak, a test build's game-*.sprx and qwark-rpcs3.exe, plus the
+    Windows firewall helper) into
     .\run\ exactly the way the release is built, then launches it. Everything the input display,
     mods, firewall and the RPCS3 target need is therefore beside the executable, so a run behaves
     like the shipped build rather than a bare "dotnet run".
 
-    This does not rebuild qwark.sprx, ui.pak or qwark-rpcs3.exe; it copies the ones from ..\qwark. Rebuild
+    This does not rebuild qwark.sprx, ui.pak, the game modules or qwark-rpcs3.exe; it copies the ones
+    from ..\qwark\dist. Rebuild
     those separately (see ..\qwark\CLAUDE.md) if you changed the module.
 
     Anything after -Configuration is passed straight to the app.

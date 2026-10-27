@@ -1,6 +1,6 @@
 # Features in test builds only
 
-These two features are in qwark's test builds, and release builds leave them out until they are finished (qwark's docs/PROTOCOL.md 3.1.2). Their text moves back into [USER-GUIDE.md](../USER-GUIDE.md) when a release ships them. With per-user settings on, each user also keeps their own chargeboot and HUD colours for the boot.
+These features are in qwark's test builds, and release builds leave them out until they are finished (qwark's docs/PROTOCOL.md 3.1.2 and 9.11). Their text moves back into [USER-GUIDE.md](../USER-GUIDE.md) when a release ships them. With per-user settings on, each user also keeps their own chargeboot and HUD colours for the boot.
 
 ## Per-user settings
 
@@ -21,3 +21,14 @@ The Mods panel lists these mods as **On USB000** (or the port they are on). Noth
 When the drive has a newer version of a mod than the console, the Console column says **update ready**, and the console takes it the next time the mod loads. Hover over the cell to see the USB version, the console's version and the path on the drive. A mod that is loaded right now keeps its files until it loads again. The console compares the `#- version` line in each `patch.txt`, so give each new release a higher number. An older copy, or one with the same version, never replaces the console's copy. If the same mod is on more than one drive or folder, the console uses the newest. A copy with the console's version but different contents is not flagged in the column: the mod just says **ready**, and its tooltip warns that the console uses its own copy.
 
 **Load** also uses the console's copy when it is newer than the one in your mods folder, and does not upload yours over it. Under RPCS3 there are no USB mods: use the mods folder on your PC.
+
+## Game modules
+
+In a test build, each game's support is a file of its own: `game-1.sprx` (RaC1) to `game-4.sprx` (Deadlocked). They sit beside `qwark.sprx` and `ui.pak`, and the client sends them wherever it sends `ui.pak`: the webMAN load, **Install to boot_plugins.txt** and the standalone update. To copy them by hand, put them in `/dev_hdd0/qwark/` beside `ui.pak`.
+
+Your console loads a game's file when that game starts and it has the memory for it. Until then the game has no game features: the status line names the game, the Memory panel works, and the Game panel says why.
+
+- **Waiting for memory**: your console has too little free memory right now. The client shows how much it has and how much it needs. The game support loads by itself when there is room.
+- **Missing, damaged or from another build**: the status line shows it in red, and the client tells you once. Press **Send game-N.sprx** on the Connection panel, the Game panel or the status line. Your console loads it without a restart.
+
+A release links the games in and has no `game-*.sprx` files, so none of this shows.

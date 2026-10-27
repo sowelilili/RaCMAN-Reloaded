@@ -734,6 +734,15 @@ public sealed class QwarkClient : IDisposable
     public async Task<VshMemoryInfo> VshMemoryAsync(CancellationToken cancellationToken = default) =>
         VshMemoryInfo.Parse(await RequestAsync(Opcode.VshMemory, null, cancellationToken).ConfigureAwait(false));
 
+    /// <summary>
+    /// GAME_MODULE (revision 1.26): the running game's module and the memory gate in front of it.
+    /// Answered in every session state. A module from before the op answers UNKNOWN_OP, thrown as
+    /// any other status is; a caller that asks only while <see cref="SessionInfo.GameModulePending"/>
+    /// holds never meets it. A reply shorter than 40 bytes throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<GameModuleInfo> GameModuleAsync(CancellationToken cancellationToken = default) =>
+        GameModuleInfo.Parse(await RequestAsync(Opcode.GameModule, null, cancellationToken).ConfigureAwait(false));
+
     // ---------------------------------------------------------------- 5.2 telemetry
 
     public Task SubscribeAsync(ushort udpPort, CancellationToken cancellationToken = default) =>

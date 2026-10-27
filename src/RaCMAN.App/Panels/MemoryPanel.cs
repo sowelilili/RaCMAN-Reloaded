@@ -133,7 +133,8 @@ public static class MemoryPanel
         // A title the console has no game module for: the memory ops are the whole of what works,
         // which is why this is the only panel left in the nav.
         bool unknown = state.UnknownGame;
-        if (unknown) Ui.Hint(Ui.NoGameModule);
+        if (state.GameModulePending) Ui.Hint(state.GameModuleStatusText());
+        else if (unknown) Ui.Hint(Ui.NoGameModule);
 
         if (ImGui.BeginTabBar("memory-tabs"))
         {

@@ -19,6 +19,7 @@ string? connectTo = null;
 string? fakeScript = null;
 string? dataDir = null;
 string? fakeUiPak = null;
+string? fakeGameModule = null;
 bool fakeServer = false;
 bool fakeRpcs3 = false;
 bool padWindow = false;
@@ -52,6 +53,10 @@ for (int i = 0; i < args.Length; i++)
             fakeServer = true;
             fakeUiPak = args[++i].ToLowerInvariant();
             break;
+        case "--fake-gamemodule" when i + 1 < args.Length:
+            fakeServer = true;
+            fakeGameModule = args[++i].ToLowerInvariant();
+            break;
         case "--pad-window":
             padWindow = true;
             break;
@@ -75,6 +80,9 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --fake-rpcs3           as --fake-server, with the emulator and no-code-patches flags set");
             Console.WriteLine("  --fake-uipak <state>   as --fake-server, on this client's qwark build, with the console's");
             Console.WriteLine("                         ui.pak missing, stale (another build's) or good");
+            Console.WriteLine("  --fake-gamemodule <s>  as --fake-server, a test build whose games are modules, with the");
+            Console.WriteLine("                         running game's module missing, damaged, other (another build's),");
+            Console.WriteLine("                         waiting (for memory) or good");
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
 
             // The numbers come from the nav's own list, so the help cannot say one order while the
@@ -167,6 +175,39 @@ if (fakeServer)
         }
     }
 
+    // A test build whose games are modules (revision 1.26), on this client's build, with a good
+    // ui.pak so the only thing to see is the running game's module.
+    if (fakeGameModule is not null)
+    {
+        byte build = RaCMAN.Protocol.QwarkClient.ExpectedQwarkBuild;
+        var game = fake.Session.Game;
+        string path = RaCMAN.Protocol.GameModule.ConsolePath(game);
+        fake.Session = fake.Session with { QwarkVersion = build };
+        fake.PutUiPak();
+        fake.GameModules = true;
+        switch (fakeGameModule)
+        {
+            case "good":
+                fake.PutGameModule(game);
+                break;
+            case "waiting":
+                fake.PutGameModule(game);
+                fake.WaitsForMemory = true;
+                break;
+            case "other":
+                fake.PutGameModule(game, (byte)(build - 1));
+                break;
+            case "damaged":
+                fake.Files[path] = new byte[4096];
+                break;
+            case "missing":
+                break;
+            default:
+                Console.Error.WriteLine($"--fake-gamemodule: unknown state '{fakeGameModule}'; use missing, damaged, other, waiting or good");
+                break;
+        }
+    }
+
     fake.Start();
     connectTo ??= "127.0.0.1";
     Console.WriteLine($"Fake qwark listening on 127.0.0.1:{fake.Port}");
@@ -244,6 +285,9 @@ if (exitAfter > 0)
                       $"connected={state.Connected} telemetry={(state.Telemetry is null ? "none" : "yes")} " +
                       $"emulator={sess?.IsEmulator ?? false} nocodepatches={sess?.CodePatchesUnsupported ?? false} " +
                       $"codeswitches={sess?.CodeSwitches ?? false} uipakbad={sess?.UiPakBad ?? false} " +
+                      $"gamemodule={(state.GameModuleReport is { } module ? module.State.ToString() : "none")} " +
+                      $"gamemodulebad={sess?.GameModuleBad ?? false} gamewaiting={sess?.GameWaiting ?? false} " +
+                      $"gamemoduleneeded={state.GameModuleNeeded} " +
                       $"features={state.Describe.Features.Length} planets={state.Planets.Length} " +
                       $"slots={state.Positions.Slots.Length} mods={state.ConsoleMods.Length} " +
                       $"watches={state.Watches.Length} combos={state.Combos.Length} " +

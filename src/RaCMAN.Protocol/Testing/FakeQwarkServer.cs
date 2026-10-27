@@ -861,15 +861,20 @@ public sealed partial class FakeQwarkServer : IDisposable
     {
         var (planet, flags) = ReportedPlanetSelection();
         var sessionFlags = ReportsUiPakBad ? _session.Flags | SessionFlags.UiPakBad : _session.Flags;
+
+        // Revision 1.26: a game whose module is not in reads as game 0, and says why in flags2.
+        var moduleBits = GameModuleBits();
         return _session with
         {
+            Game = moduleBits == SessionFlags2.None ? _session.Game : GameId.None,
             SelectedPlanet = planet,
             PlanetFlags = flags,
             Flags = sessionFlags,
             ProfileFlags = ReportedProfileFlags(),
             ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
             Flags2 = (UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None)
-                     | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None),
+                     | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None)
+                     | moduleBits,
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };
@@ -2027,8 +2032,12 @@ public sealed partial class FakeQwarkServer : IDisposable
                 // Another build is another module, and a new generation a game whose menu install
                 // looks at the pak: either way the module has looked at it again.
                 bool look = value.QwarkVersion != _session.QwarkVersion || value.Generation != _session.Generation;
+                bool booted = value.Generation != _session.Generation;
                 _session = value;
                 if (look) CheckUiPak();
+
+                // A new generation is a boot, which takes a staged game module (revision 1.26).
+                if (booted) AdoptStagedGameModule();
 
                 // A session moved by hand to anything but BOOTING or QUITTING has finished
                 // launching, so the refusals below stop with it: the two ways of driving this
@@ -2219,7 +2228,7 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// </summary>
     public static bool IsControlOp(Opcode opcode) => opcode is
         Opcode.Hello or Opcode.Heartbeat or Opcode.Subscribe or Opcode.Unsubscribe or Opcode.GetState
-        or Opcode.VshMemory;
+        or Opcode.VshMemory or Opcode.GameModule;
 
     /// <summary>The ops a platform without writable instruction memory refuses outright.</summary>
     private bool RefusedWithoutCodePatches(Opcode opcode, byte[] payload)
@@ -2402,7 +2411,8 @@ public sealed partial class FakeQwarkServer : IDisposable
 
             // Build 36: the console is running a title this module has no game for. It can still
             // read and write the process, and knows nothing else about it.
-            if (_unknownGame && IsGameOp(opcode))
+            // Revision 1.26: so is a game whose module is not in, waiting or with none to be had.
+            if ((_unknownGame || GameModuleBits() != SessionFlags2.None) && IsGameOp(opcode))
             {
                 UnsupportedCount++;
                 return (Status.Unsupported, null);
@@ -2432,6 +2442,10 @@ public sealed partial class FakeQwarkServer : IDisposable
                 // Revision 1.22: a control op, so a launch does not stop it (IsControlOp).
                 case Opcode.VshMemory:
                     return _vshMemory is { } vsh ? (Status.Ok, vsh.ToBytes()) : (Status.Unsupported, null);
+
+                // Revision 1.26: a control op as well.
+                case Opcode.GameModule:
+                    return (Status.Ok, GameModuleReply().ToBytes());
 
                 case Opcode.Subscribe:
                 {

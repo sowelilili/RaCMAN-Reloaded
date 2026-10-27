@@ -21,8 +21,11 @@ public enum BootInstallOutcome
 /// What an install did and how many lines the list holds afterwards, which is the other thing the
 /// user has to be told: see <see cref="BeyondHenLimit"/>. <see cref="UiPakSent"/> says whether the
 /// console menu's ui.pak went with the module; it is false when the client had none beside it.
+/// <see cref="GameModulesSent"/> counts the game modules that went too (revision 1.26): a test
+/// build's, and none for a release, which ships none.
 /// </summary>
-public readonly record struct BootInstallResult(BootInstallOutcome Outcome, int Lines, bool UiPakSent = false)
+public readonly record struct BootInstallResult(
+    BootInstallOutcome Outcome, int Lines, bool UiPakSent = false, int GameModulesSent = 0)
 {
     /// <summary>
     /// Whether the console reads past the end of the list. qwark is the first line either way, so
@@ -35,7 +38,8 @@ public readonly record struct BootInstallResult(BootInstallOutcome Outcome, int 
 /// <summary>
 /// Gets qwark.sprx onto the console the way racman-official does it: FTP the file into
 /// /dev_hdd0/tmp/ and load it through webMAN's vshplugin.ps3mapi endpoint. The console menu's
-/// ui.pak travels in the same FTP session, to /dev_hdd0/qwark/ (see <see cref="UiPak"/>).
+/// ui.pak travels in the same FTP session, to /dev_hdd0/qwark/ (see <see cref="UiPak"/>), and so do
+/// the game modules a test build ships beside it (see <see cref="GameModule"/>).
 ///
 /// The console side of this cannot be tested here: it needs a console running webMAN MOD with its
 /// FTP server up. The FTP client below is checked against RFC 959 rather than against hardware, and
@@ -134,6 +138,7 @@ public sealed class WebManLoader
         progress?.Report($"Uploading {SprxName} to {RemotePath}");
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
         var pak = await ReadUiPakAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
+        var modules = await GameModule.ReadBesideAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
         bool sent;
         using (var ftp = new FtpSession(ip, FtpPort))
@@ -141,6 +146,7 @@ public sealed class WebManLoader
             await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
             await ftp.StoreAsync(RemotePath, bytes, cancellationToken).ConfigureAwait(false);
             sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
+            await StoreGameModulesAsync(ftp, modules, progress, cancellationToken).ConfigureAwait(false);
         }
 
         progress?.Report($"Loading {SprxName} into slot {slot}");
@@ -190,6 +196,47 @@ public sealed class WebManLoader
     }
 
     /// <summary>
+    /// Puts each game module beside the pak, where the module reads it as its game boots. Called
+    /// after <see cref="StoreUiPakAsync"/>, which has made the folder. None is nothing to say: a
+    /// release ships none. A refusal is said and the rest go on, as a refused pak is: the
+    /// Connection panel offers a missing module again once the console says so. Answers how many
+    /// went across.
+    /// </summary>
+    private static async Task<int> StoreGameModulesAsync(
+        FtpSession ftp, IReadOnlyList<GameModuleFile> modules, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        if (modules.Count == 0) return 0;
+
+        int sent = 0;
+        try
+        {
+            await ftp.MakeDirectoryAsync(UiPak.ConsoleDirectory, cancellationToken).ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            // The store below says what went wrong, with the server's reply.
+        }
+
+        foreach (var module in modules)
+        {
+            string path = GameModule.ConsolePath(module.Game);
+            progress?.Report($"Uploading {module.FileName} to {path}");
+            try
+            {
+                await ftp.StoreAsync(path, module.Bytes, cancellationToken).ConfigureAwait(false);
+                sent++;
+            }
+            catch (IOException error)
+            {
+                progress?.Report($"Could not send {module.FileName} to your console: {module.Game.DisplayName()} "
+                                 + $"will have no game features there ({error.Message})");
+            }
+        }
+
+        return sent;
+    }
+
+    /// <summary>
     /// Puts the SPRX in /dev_hdd0/plugins and makes that path the first line of
     /// /dev_hdd0/boot_plugins.txt so the console loads it at boot, before anything else on the list.
     /// The console menu's ui.pak goes to /dev_hdd0/qwark with it when the client has one; without
@@ -206,6 +253,7 @@ public sealed class WebManLoader
         if (!File.Exists(localSprxPath)) throw new FileNotFoundException($"{SprxName} not found", localSprxPath);
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
         var pak = await ReadUiPakAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
+        var modules = await GameModule.ReadBesideAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
         using var ftp = new FtpSession(ip, FtpPort);
         await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
@@ -214,11 +262,12 @@ public sealed class WebManLoader
         await ftp.MakeDirectoryAsync(PluginsDirectory, cancellationToken).ConfigureAwait(false);
         await ftp.StoreAsync(BootPath, bytes, cancellationToken).ConfigureAwait(false);
         bool sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
+        int modulesSent = await StoreGameModulesAsync(ftp, modules, progress, cancellationToken).ConfigureAwait(false);
 
         var existing = await ftp.RetrieveAsync(BootPluginsPath, cancellationToken).ConfigureAwait(false);
         var text = existing is null ? string.Empty : Encoding.UTF8.GetString(existing);
         var (rewritten, planned) = PlanBootList(text);
-        var result = planned with { UiPakSent = sent };
+        var result = planned with { UiPakSent = sent, GameModulesSent = modulesSent };
 
         if (result.Outcome is BootInstallOutcome.AlreadyFirst)
         {
