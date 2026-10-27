@@ -6,7 +6,7 @@ namespace RaCMAN.Protocol;
 /// <c>rac1.sprx</c> (RaC1) to <c>rac4.sprx</c> (Deadlocked), which the module loads while that game
 /// runs once the VSH has the memory for it. The name comes from <see cref="FileName(GameId)"/>'s
 /// table, the same as qwark's title index, never from the game id formatted into a name, so a later
-/// game takes a name of its own (Tools of Destruction's will be <c>tod.sprx</c>). A release links the games in, ships no module files
+/// game takes a name of its own (Tools of Destruction's is <c>tod.sprx</c>, revision 1.27). A release links the games in, ships no module files
 /// and never asks for one. The files are handled exactly as <see cref="UiPak"/> is: they sit beside
 /// qwark.sprx in qwark's dist\ and in the client's folder, every way this client puts the module on
 /// a console puts them beside the pak, and the standalone update stages each as <c>.new</c>, which
@@ -30,12 +30,13 @@ public static class GameModule
         (GameId.Rac2, "rac2.sprx"),
         (GameId.Rac3, "rac3.sprx"),
         (GameId.Rac4, "rac4.sprx"),
+        (GameId.Tod, "tod.sprx"),
     };
 
     /// <summary>The games that can have a module, in game-id order.</summary>
     public static IReadOnlyList<GameId> Games { get; } = Modules.Select(m => m.Game).ToArray();
 
-    /// <summary>Every module's file name, in game-id order: <c>rac1.sprx</c> to <c>rac4.sprx</c>.</summary>
+    /// <summary>Every module's file name, in game-id order: <c>rac1.sprx</c> to <c>rac4.sprx</c>, then <c>tod.sprx</c>.</summary>
     public static IReadOnlyList<string> FileNames { get; } = Modules.Select(m => m.File).ToArray();
 
     /// <summary>Whether <paramref name="game"/> is one of the games that have a module.</summary>

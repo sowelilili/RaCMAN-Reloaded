@@ -89,7 +89,7 @@ if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.s
 if (-not $UiPakPath)  { $UiPakPath  = Combine $repo '..' 'qwark' 'dist' 'ui.pak' }
 # qwark.build sits beside the qwark.sprx it describes, so it follows -SprxPath unless it is named.
 if (-not $BuildInfoPath) { $BuildInfoPath = Combine ([System.IO.Path]::GetDirectoryName($SprxPath)) 'qwark.build' }
-# So do a test build's game modules (revision 1.26), rac1.sprx to rac4.sprx.
+# So do a test build's game modules (revision 1.26), rac1.sprx to rac4.sprx and tod.sprx.
 if (-not $GameModulesDir) { $GameModulesDir = [System.IO.Path]::GetDirectoryName($SprxPath) }
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 if (-not $PkgPath)    { $PkgPath    = Combine $repo '..' 'qwark' 'dist' 'qwark-installer.pkg' }

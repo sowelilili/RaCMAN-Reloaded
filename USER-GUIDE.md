@@ -104,6 +104,14 @@ The HUD colour is your HUD's own. It doesn't change the game's team colours, so 
 
 The colours and the boxes stay until the game restarts. Tick **on boot** beside **Save** to have the console set all of them again every time the game boots, also with no PC connected. While it is ticked, a change to a colour or a box is kept too.
 
+## Tools of Destruction
+
+ToD (NPEA00452, the PSN EU version 1.00) has a first set of features: **Infinite ammo**, **God Ratchet**, Die, bolts, raritanium and challenge mode, the unlock table, and buttons for skill points, gold bolts and RYNO plans on the **Collectables** tab. Position slots, the planet list and the input display work as in the other games. ToD has no savefile helper, autosplitter, manips or console menu yet.
+
+For now ToD needs a test build of qwark with its `tod.sprx` (see [docs/test-builds.md](docs/test-builds.md)). With a release build, your console treats ToD as a game it does not know.
+
+**Game**, then **Debug**, has a small Lua box. **Lua test (half speed)** runs a line of Lua in the game: the game runs at half speed, and the box shows `Lua 5.0.2`. **Normal speed** puts the speed back. The box also runs a line you type, and shows the answer and the game's last script error. On a console, the first run after the game starts puts qwark's Lua helper into the game. Under RPCS3 the Lua helper is an RPCS3 patch: press **Install qwark patches...** on the Connection panel, then restart the game in RPCS3.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.

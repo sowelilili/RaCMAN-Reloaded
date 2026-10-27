@@ -909,6 +909,9 @@ public class Rpcs3PatchTests : IDisposable
 
     private const QwarkPatchPart SwitchesPart = QwarkPatchPart.CodeSwitches;
 
+    /// <summary>The two parts every game is asked for; the Lua helper is only a game with Lua's.</summary>
+    private static readonly QwarkPatchPart[] HelperAndSwitches = { QwarkPatchPart.SaveFileHelper, QwarkPatchPart.CodeSwitches };
+
     private static QwarkPatchSession Session(bool connected = true, bool rpcs3 = true, bool ingame = true,
         bool known = true, bool installed = false, bool switches = false) =>
         new(connected, rpcs3, ingame, known, Title, 50, new SaveFileInfo(true, installed, installed, 0, 0x1000), switches);
@@ -1226,7 +1229,11 @@ public class Rpcs3PatchTests : IDisposable
     [Fact]
     public void ThePartsAreNamedTheWayTheToastAndTheDialogSayThem()
     {
-        Assert.Equal("qwark's savefile helper and code switches", QwarkPatchParts.Names(QwarkPatchParts.All.ToList()));
+        Assert.Equal("qwark's savefile helper and code switches", QwarkPatchParts.Names(HelperAndSwitches));
+        Assert.Equal("qwark's savefile helper, code switches and Lua helper", QwarkPatchParts.Names(QwarkPatchParts.All.ToList()));
+        Assert.Equal("qwark's Lua helper", QwarkPatchParts.Names(new[] { QwarkPatchPart.LuaHelper }));
+        Assert.Equal(Rpcs3Patches.LuaDescription, QwarkPatchPart.LuaHelper.Description());
+        Assert.Equal("qwark Lua helper", Rpcs3Patches.LuaDescription);
         Assert.Equal("qwark's code switches", QwarkPatchParts.Names(new[] { SwitchesPart }));
         Assert.Equal("qwark's savefile helper", QwarkPatchParts.Names(new[] { HelperPart }));
         Assert.Equal(Rpcs3Patches.SwitchesDescription, SwitchesPart.Description());
@@ -1465,7 +1472,7 @@ public class Rpcs3PatchTests : IDisposable
         server.Start();
         using var state = await ConnectRpcs3Async(server, root);
 
-        state.Rpcs3Patch.Install(FolderAt(root), QwarkPatchParts.All);
+        state.Rpcs3Patch.Install(FolderAt(root), HelperAndSwitches);
         Assert.True(await PumpAsync(state, () => state.Toasts.Any(toast => toast.Kind == ToastKind.Error)));
 
         var toast = state.Toasts.Last(t => t.Kind == ToastKind.Error);
@@ -1565,7 +1572,7 @@ public class Rpcs3PatchTests : IDisposable
         Assert.Equal(new[] { QwarkPatchPart.SaveFileHelper }, patch.LastStatus.Installable);
 
         // Asked for both anyway, the write refuses the whole install and names the mod.
-        patch.Install(folder, QwarkPatchParts.All);
+        patch.Install(folder, HelperAndSwitches);
         Assert.True(await PumpAsync(state, () => state.Toasts.Any(toast => toast.Kind == ToastKind.Error)));
         Assert.Contains("the qwark code switches cannot be installed: DL Crash Patches",
             state.Toasts.Last(t => t.Kind == ToastKind.Error).Text, StringComparison.OrdinalIgnoreCase);
@@ -1674,5 +1681,128 @@ public class Rpcs3PatchTests : IDisposable
 
         Assert.Contains("\"folder\"", File.ReadAllText(path));
         Assert.Equal(@"D:\Emulators\rpcs3", Settings.Load(path).Rpcs3.Folder);
+    }
+
+    // ================================================================ the Lua helper (revision 1.27, ToD)
+
+    private const string TodTitle = FakeQwarkServer.TodTitleId;
+
+    private static readonly QwarkPatchReply LuaWords = QwarkPatchReply.Ok(new PatchReply(0x10A10A10,
+        new[] { new PatchWord(0x00F10000, 0x7C0802A6), new PatchWord(0x00412340, 0x48AFDCC1) }));
+
+    private static QwarkPatchSession LuaSession(bool hasLua = true, LuaInstalled? installed = LuaInstalled.No) =>
+        Session() with
+        {
+            HasLua = hasLua,
+            Lua = installed is { } i ? new LuaStatusInfo(i, LuaPhase.Idle, 0, 0, 0, 0, string.Empty, string.Empty) : null,
+        };
+
+    [Fact]
+    public void TheLuaHelperIsOnlyAPartOfAGameWithLua()
+    {
+        var none = Rpcs3PatchController.Decide(QwarkPatchPart.LuaHelper, LuaSession(hasLua: false), LuaWords, Disk());
+        Assert.Equal(QwarkPatchState.Absent, none.State);
+
+        // Before this boot's LUA_STATUS, and while qwark-rpcs3 is still looking, there is nothing to say yet.
+        Assert.Equal(QwarkPatchState.Waiting,
+            Rpcs3PatchController.Decide(QwarkPatchPart.LuaHelper, LuaSession(installed: null), LuaWords, Disk()).State);
+        var checking = Rpcs3PatchController.Decide(QwarkPatchPart.LuaHelper, LuaSession(installed: LuaInstalled.Checking), LuaWords, Disk());
+        Assert.Equal(QwarkPatchState.Waiting, checking.State);
+        Assert.Contains("still checking", checking.Message);
+
+        var active = Rpcs3PatchController.Decide(QwarkPatchPart.LuaHelper, LuaSession(installed: LuaInstalled.Yes), LuaWords, Disk());
+        Assert.Equal(QwarkPatchState.Active, active.State);
+
+        var install = Rpcs3PatchController.Decide(QwarkPatchPart.LuaHelper, LuaSession(), LuaWords, Disk());
+        Assert.Equal(QwarkPatchState.Install, install.State);
+        Assert.Contains("running Lua", install.Message);
+
+        // The two old parts are not asked about it, and a game without Lua shows no Lua line.
+        var old = Rpcs3PatchController.Decide(LuaSession(hasLua: false), Words47, Switches50, Disk());
+        Assert.Equal(QwarkPatchState.Absent, old.Lua!.State);
+        Assert.DoesNotContain(QwarkPatchPart.LuaHelper, old.Shown);
+    }
+
+    [Fact]
+    public void ALuaPatchIsFiledUnderItsOwnDescriptionAndSwitchedOn()
+    {
+        var folder = FolderAt(MakeRpcs3());
+        var lua = LuaWords.Patch!;
+        Rpcs3Patches.Write(Rpcs3Patches.PlanQwark(folder, TodTitle, "ToD", Hash, null, null, 60, lua), new HashSet<string>());
+
+        var file = Rpcs3Patches.ReadPatchFile(folder.PatchFile(TodTitle));
+        var entry = file.EntryFor(Hash, Rpcs3Patches.LuaDescription);
+        Assert.NotNull(entry);
+        Assert.True(entry!.Holds(lua));
+        Assert.True(entry.IsLua);
+        Assert.True(entry.IsQwarks);
+        Assert.Null(entry.ModDir);
+        Assert.Equal(Rpcs3Patches.NotesForLua(60, lua.Stamp), entry.Notes);
+        Assert.Null(file.EntryFor(Hash));
+        Assert.True(Rpcs3Patches.IsOurs(Rpcs3Patches.LuaDescription));
+        Assert.Equal("qwark's Lua helper", Rpcs3Patches.NameOf(Rpcs3Patches.LuaDescription));
+
+        var config = File.ReadAllText(folder.PatchConfigFile);
+        Assert.True(Rpcs3Patches.IsEnabled(config, entry.Key(TodTitle), folder.PatchConfigFile));
+
+        Assert.Throws<Rpcs3PatchException>(() =>
+            Rpcs3Patches.PlanQwark(folder, TodTitle, "ToD", Hash, null, null, 60, new PatchReply(1, Array.Empty<PatchWord>())));
+    }
+
+    [Fact]
+    public async Task ToDsLuaHelperGoesFromNotInstalledToActiveAgainstTheFakeRpcs3()
+    {
+        string root = MakeRpcs3();
+        File.WriteAllText(Path.Combine(root, "log", Rpcs3Patches.LogName), BootLog((TodTitle, Hash)));
+
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
+        server.UseTod();
+        server.Start();
+        using var state = await ConnectRpcs3Async(server, root);
+
+        // ToD has no savefile helper and no code switches, so the Lua helper is its one part.
+        var patch = state.Rpcs3Patch;
+        Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Install && state.HasLua));
+        Assert.Equal(new[] { QwarkPatchPart.LuaHelper }, patch.LastStatus.Installable);
+        Assert.Equal(QwarkPatchState.Absent, patch.LastStatus.Helper.State);
+        Assert.Equal(QwarkPatchState.Absent, patch.LastStatus.Switches.State);
+        Assert.Contains("Not installed", patch.LastStatus.Message);
+
+        // Without the patch qwark-rpcs3 cannot run Lua in the game.
+        var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => state.Client.LuaExecAsync("return _VERSION"));
+        Assert.Equal(Status.Unsupported, refused.Status);
+
+        patch.Install(patch.Folder!, patch.LastStatus.Installable);
+        Assert.True(await PumpAsync(state, () => !patch.Installing
+                                                 && patch.Update().For(QwarkPatchPart.LuaHelper).State == QwarkPatchState.RestartGame));
+        var written = Rpcs3Patches.ReadPatchFile(patch.Folder!.PatchFile(TodTitle)).EntryFor(Hash, Rpcs3Patches.LuaDescription);
+        Assert.NotNull(written);
+        Assert.Equal(server.LuaPatchWords, written!.Words);
+        Assert.Contains(state.Toasts, toast => toast.Kind == ToastKind.Success && toast.Text.StartsWith("Wrote qwark's Lua helper for"));
+
+        // The game started again with the patch in: LUA_STATUS says so, and Lua runs.
+        server.LuaPatchInstalled = true;
+        server.Session = server.Session with { Generation = server.Session.Generation + 1 };
+        Assert.True(await PumpAsync(state, () => patch.Update().For(QwarkPatchPart.LuaHelper).State == QwarkPatchState.Active));
+        var result = await state.Client.LuaExecAsync(LuaBox.HalfSpeedSource);
+        Assert.Equal("Lua 5.0.2", result.Output);
+    }
+
+    [Fact]
+    public async Task ARaC1UnderRpcs3NeverAsksForTheLuaPatch()
+    {
+        string root = MakeRpcs3();
+        File.WriteAllText(Path.Combine(root, "log", Rpcs3Patches.LogName), BootLog((Title, Hash)));
+
+        using var server = new FakeQwarkServer { Emulator = true, NoCodePatches = true };
+        server.Start();
+        using var state = await ConnectRpcs3Async(server, root);
+
+        var patch = state.Rpcs3Patch;
+        Assert.True(await PumpAsync(state, () => patch.Update().State == QwarkPatchState.Install && patch.LastStatus.Installable.Count == 2));
+        Assert.False(state.HasLua);
+        Assert.Equal(QwarkPatchState.Absent, patch.LastStatus.For(QwarkPatchPart.LuaHelper).State);
+        Assert.DoesNotContain(Opcode.LuaPatch, server.RequestLog());
+        Assert.DoesNotContain(Opcode.LuaExec, server.RequestLog());
     }
 }

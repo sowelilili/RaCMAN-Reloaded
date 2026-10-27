@@ -143,11 +143,14 @@ public sealed record PatchFileEntry(
     /// <summary>qwark's code switches (build 50).</summary>
     public bool IsSwitches => Description == Rpcs3Patches.SwitchesDescription;
 
+    /// <summary>qwark's Lua helper (revision 1.27, ToD).</summary>
+    public bool IsLua => Description == Rpcs3Patches.LuaDescription;
+
     /// <summary>
     /// One of qwark's own patches, the savefile helper or the code switches: the game's rather than
     /// the user's, installed from the Connection panel, and never switched off from the Mods panel.
     /// </summary>
-    public bool IsQwarks => IsHelper || IsSwitches;
+    public bool IsQwarks => IsHelper || IsSwitches || IsLua;
 
     /// <summary>The folder name of the mod this entry is, or null for one of qwark's own patches.</summary>
     public string? ModDir => Rpcs3Patches.ModDirOf(Description);
@@ -246,6 +249,12 @@ public static class Rpcs3Patches
     /// </summary>
     public const string SwitchesDescription = "qwark code switches";
 
+    /// <summary>
+    /// The description the Lua helper is filed under (revision 1.27, ToD): what lets qwark-rpcs3 run
+    /// Lua in the game, which qwark cannot write into a game RPCS3 has recompiled.
+    /// </summary>
+    public const string LuaDescription = "qwark Lua helper";
+
     /// <summary>How the description of a mod's entry begins; <see cref="ModDescription"/> has the rest.</summary>
     public const string ModDescriptionPrefix = "RaCMAN mod: ";
 
@@ -313,6 +322,7 @@ public static class Rpcs3Patches
     {
         if (description == Description) return "qwark's savefile helper";
         if (description == SwitchesDescription) return "the " + SwitchesDescription;
+        if (description == LuaDescription) return "qwark's Lua helper";
         if (ModDirOf(description) is null) return description;
 
         int open = description.LastIndexOf(" [", StringComparison.Ordinal);
@@ -321,7 +331,8 @@ public static class Rpcs3Patches
 
     /// <summary>Whether this client wrote the entry filed under <paramref name="description"/>.</summary>
     public static bool IsOurs(string description) =>
-        description == Description || description == SwitchesDescription || ModDirOf(description) is not null;
+        description == Description || description == SwitchesDescription || description == LuaDescription
+        || ModDirOf(description) is not null;
 
     /// <summary>The Flatpak's application id, whose sandbox keeps RPCS3's folders under ~/.var/app.</summary>
     public const string FlatpakId = "net.rpcs3.RPCS3";
@@ -852,6 +863,10 @@ public static class Rpcs3Patches
     public static string NotesFor(byte qwarkBuild, uint stamp) =>
         $"qwark build {qwarkBuild}, helper stamp 0x{stamp:x8}";
 
+    /// <summary>What the Notes line of the Lua helper's entry says, the same way.</summary>
+    public static string NotesForLua(byte qwarkBuild, uint stamp) =>
+        $"qwark build {qwarkBuild}, Lua helper stamp 0x{stamp:x8}";
+
     /// <summary>What the Notes line of the code switches' entry says, the same way.</summary>
     public static string NotesForSwitches(byte qwarkBuild, uint stamp) =>
         $"qwark build {qwarkBuild}, switches stamp 0x{stamp:x8}";
@@ -1272,12 +1287,13 @@ public static class Rpcs3Patches
     /// </para>
     /// </summary>
     public static Rpcs3PatchPlan PlanQwark(Rpcs3Folder folder, string titleId, string game, string hash,
-        PatchReply? helper, PatchReply? switches, byte qwarkBuild)
+        PatchReply? helper, PatchReply? switches, byte qwarkBuild, PatchReply? lua = null)
     {
         CheckNames(titleId, hash);
-        if (helper is null && switches is null) throw new Rpcs3PatchException("There is none of qwark's patches to write.");
+        if (helper is null && switches is null && lua is null) throw new Rpcs3PatchException("There is none of qwark's patches to write.");
         if (helper is { Words.Length: 0 }) throw new Rpcs3PatchException("qwark sent a savefile helper with no words in it.");
         if (switches is { Words.Length: 0 }) throw new Rpcs3PatchException("qwark sent code switches with no words in them.");
+        if (lua is { Words.Length: 0 }) throw new Rpcs3PatchException("qwark sent a Lua helper with no words in it.");
 
         var file = ReadOwnFile(folder, titleId);
         var (configFile, configExists, configText) = ReadConfig(folder);
@@ -1293,6 +1309,11 @@ public static class Rpcs3Patches
         {
             parts.Add(new PatchFileEntry(hash, name, switches.Words, switches.Bytes, NotesForSwitches(qwarkBuild, switches.Stamp),
                 SwitchesDescription));
+        }
+
+        if (lua is not null)
+        {
+            parts.Add(new PatchFileEntry(hash, name, lua.Words, lua.Bytes, NotesForLua(qwarkBuild, lua.Stamp), LuaDescription));
         }
 
         var mods = EnabledMods(file, hash, titleId, configText, configFile);

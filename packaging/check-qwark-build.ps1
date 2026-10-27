@@ -11,7 +11,7 @@
     bit and fills dist\ from it.
 
     This script stops when dist\qwark.build is missing, unreadable, says `dev 1`, or names another
-    build than qwark's src\core\proto.h, and when dist\ holds game modules (rac1.sprx to rac4.sprx,
+    build than qwark's src\core\proto.h, and when dist\ holds game modules (rac1.sprx to rac4.sprx and tod.sprx,
     or the first test builds' game-*.sprx, revision 1.26): a release links its games in, so any
     there are a test build's, left behind. release.ps1 runs it before it tags anything, and the release workflow runs it on the qwark it checked out.
     It writes one line when the dist\ is a release, and throws with what to do otherwise.
@@ -58,7 +58,7 @@ if ($fields['dev'] -eq '1') {
            "would replace it. $fix")
 }
 
-# Revision 1.26: a test build's games are rac1.sprx to rac4.sprx beside it (game-module-names.ps1;
+# Revision 1.26: a test build's games are rac1.sprx to rac4.sprx and tod.sprx beside it (game-module-names.ps1;
 # the first test builds named them game-<n>.sprx). A release links its games in, so a release dist\
 # with any is one a test build's `make dist` left them in.
 . (Join-Path $PSScriptRoot 'game-module-names.ps1')

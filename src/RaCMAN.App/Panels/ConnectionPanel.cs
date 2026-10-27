@@ -667,6 +667,11 @@ public static class ConnectionPanel
                 Ui.DebugHint($"SWITCH_PATCH: {switches.Words.Length} words, {switches.Bytes.Length} bytes, stamp 0x{switches.Stamp:x8}");
             }
 
+            if (patch.LuaReply.Patch is { } lua)
+            {
+                Ui.DebugHint($"LUA_PATCH: {lua.Words.Length} words, {lua.Bytes.Length} bytes, stamp 0x{lua.Stamp:x8}");
+            }
+
             if (patch.Disk?.Hash is { Hash: { } hash } lookup)
             {
                 var applied = QwarkPatchParts.All.Where(part => lookup.AppliedAtBoot(part.Description())).Select(part => part.Noun()).ToList();

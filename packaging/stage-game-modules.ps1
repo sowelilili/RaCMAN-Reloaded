@@ -4,14 +4,14 @@
 
 .DESCRIPTION
     Since revision 1.26 a qwark test build carries no game: each is an SPRX of its own, named for
-    its game, rac1.sprx (RaC1) to rac4.sprx (Deadlocked; the list is game-module-names.ps1), which
+    its game, rac1.sprx (RaC1) to rac4.sprx (Deadlocked) and tod.sprx (ToD; the list is game-module-names.ps1), which
     `make dist` puts in dist\ beside
     qwark.sprx, ui.pak and qwark.build (qwark's docs/PROTOCOL.md 9.11). A release links its games
     in, so its dist\ has none. The client sends the modules it finds beside its own qwark.sprx,
     exactly as it sends ui.pak.
 
     This script removes any module already in -Destination, and any game-*.sprx the first test
-    builds of revision 1.26 named them, then copies rac1.sprx to rac4.sprx from -Source when
+    builds of revision 1.26 named them, then copies each one game-module-names.ps1 lists from -Source when
     -BuildInfo (the qwark.build beside the module) says `dev 1`. A
     source with none of them copies none and is not an error. A release (`dev 0`), or a dist\ with
     no qwark.build, copies none even when some are there, and warns: those are a test build's,

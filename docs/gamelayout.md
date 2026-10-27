@@ -30,7 +30,7 @@ the client draws the `unlocksTabs` sections under Game, so nothing is lost.
 
 ## Per-game entries
 
-The `games` entries are keyed by game: `rac1`, `rac2`, `rac3` and `rac4`. The disc release
+The `games` entries are keyed by game: `rac1`, `rac2`, `rac3`, `rac4` and `tod`. The disc release
 BCES01503 holds three games under one title id, so a game key is what gives each of them the correct
 layout. An entry keyed by a title id is also possible. The client reads it first.
 
@@ -79,3 +79,6 @@ no heading.
 controls, and the client shows it even when no feature is in it. The console can also list features
 under headings of its own there: Deadlocked's **Fixes** and UYA's **Trophies**. Those features are
 always drawn under their heading, so a `moves` entry for one of them has no effect.
+
+`Debug` is an ordinary section as well. In a game with Lua (ToD) it starts with the Lua box, and
+the client shows it even when no feature is in it.

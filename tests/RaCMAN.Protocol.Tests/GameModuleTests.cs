@@ -210,12 +210,15 @@ public class GameModuleTests
         Assert.Equal("rac1.sprx", GameModule.FileName(GameId.Rac1));
         Assert.Equal("rac3.sprx", GameModule.FileName(GameId.Rac3));
         Assert.Equal("rac4.sprx", GameModule.FileName(4));
-        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx" }, GameModule.FileNames);
+        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx", "tod.sprx" }, GameModule.FileNames);
+        Assert.Equal("tod.sprx", GameModule.FileName(GameId.Tod));
+        Assert.Equal("/dev_hdd0/qwark/tod.sprx.new", GameModule.StagedPath(GameId.Tod));
+        Assert.True(GameModule.HasModule(GameId.Tod));
         Assert.Equal("/dev_hdd0/qwark/rac4.sprx", GameModule.ConsolePath(GameId.Rac4));
         Assert.Equal("/dev_hdd0/qwark/rac2.sprx.new", GameModule.StagedPath(GameId.Rac2));
         Assert.False(GameModule.HasModule(GameId.None));
         Assert.Throws<ArgumentOutOfRangeException>(() => GameModule.FileName(GameId.None));
-        Assert.Throws<ArgumentOutOfRangeException>(() => GameModule.FileName(5));
+        Assert.Throws<ArgumentOutOfRangeException>(() => GameModule.FileName(6));
 
         string sprx = Path.Combine(TestDataFolder.Root, "somewhere", WebManLoader.SprxName);
         Assert.Equal(Path.Combine(TestDataFolder.Root, "somewhere", "rac3.sprx"), GameModule.BesideSprx(sprx, GameId.Rac3));
@@ -870,10 +873,10 @@ public class GameModuleTests
     public void ATestDistHasItsModulesStaged()
     {
         // An earlier stage's rac2.sprx goes, and so does a module under the first test builds' name.
-        if (Stage(Dist(true, 1, 2, 3, 4), "rac2.sprx", "game-1.sprx") is not { } result) return;
+        if (Stage(Dist(true, 1, 2, 3, 4, 5), "rac2.sprx", "game-1.sprx") is not { } result) return;
 
         Assert.True(result.Exit == 0, result.Output);
-        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx" }, result.Staged);
+        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx", "tod.sprx" }, result.Staged);
     }
 
     [Fact]
@@ -910,6 +913,11 @@ public class GameModuleTests
 
         Assert.True(result.Exit != 0, result.Output);
         Assert.Contains("rac3.sprx", result.Output, StringComparison.Ordinal);
+
+        // ToD's module is a test build's too (revision 1.27).
+        if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", Dist(false, 5)) is not { } tod) return;
+        Assert.True(tod.Exit != 0, tod.Output);
+        Assert.Contains("tod.sprx", tod.Output, StringComparison.Ordinal);
 
         // A module under the first test builds' name is a test build's too.
         string legacy = Dist(false);

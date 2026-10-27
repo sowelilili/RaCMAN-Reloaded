@@ -10,7 +10,7 @@
 // that game the tabs are listed under Game instead and nothing goes missing.
 // ("sideSections", the older spelling of "subPages", still works.)
 //
-// "games" is keyed by game: "rac1", "rac2", "rac3", "rac4". An entry keyed by a title id is
+// "games" is keyed by game: "rac1", "rac2", "rac3", "rac4", "tod". An entry keyed by a title id is
 // honoured first, for a release that needs its own layout; the game key is what BCES01503 needs,
 // since that one disc hosts RaC1, RaC2 and RaC3.
 //
@@ -148,6 +148,18 @@
             "Gadget colour"
           ]
         }
+      }
+    },
+
+    "tod": {
+      "tabOrder": ["Cheats", "Player", "Collectables", "Debug"],
+      "moves": {
+        "Unlock all skill points": "Collectables",
+        "Reset skill points": "Collectables",
+        "Unlock all gold bolts": "Collectables",
+        "Reset gold bolts": "Collectables",
+        "Unlock all RYNO plans": "Collectables",
+        "Reset RYNO plans": "Collectables"
       }
     }
   }

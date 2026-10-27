@@ -853,6 +853,42 @@ public class GameLayoutTests
         Assert.Equal(new[] { "Cheats", "Player", "Savefile" }, order.Take(3));
         Assert.Equal("Extra", order[^1]);            // an unlisted tab is appended, not dropped
     }
+
+    // ---------------------------------------------------------------- ToD (revision 1.27)
+
+    /// <summary>
+    /// ToD's DESCRIBE as the fake console has it: the Progress actions go to Collectables beside
+    /// the unlock table, as RaC1's do, and a game with Lua always has a Debug page for the Lua box.
+    /// </summary>
+    [Fact]
+    public void ToDsProgressActionsAreCollectablesAndItsLuaBoxIsADebugPage()
+    {
+        var d = RaCMAN.Protocol.Testing.FakeQwarkServer.TodDescribe();
+        string title = RaCMAN.Protocol.Testing.FakeQwarkServer.TodTitleId;
+
+        foreach (var label in new[] { "Unlock all skill points", "Reset skill points", "Unlock all gold bolts",
+                     "Reset gold bolts", "Unlock all RYNO plans", "Reset RYNO plans" })
+        {
+            var feature = d.Features.Single(f => f.Label == label);
+            Assert.Equal("Collectables", GameLayout.SectionFor(title, GameId.Tod, feature, d));
+        }
+
+        Assert.Equal("Cheats", GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == "God Ratchet"), d));
+        Assert.Equal(GameLayout.ValuesSection, GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == "Bolts"), d));
+        Assert.Equal(new[] { "Cheats", "Player", "Collectables", "Debug" },
+            GameLayout.TabOrder(title, GameId.Tod, new[] { "Debug", "Collectables", "Player", "Cheats" }));
+
+        // The Progress group is gone, Die is the quick block's, and Debug is there only with Lua.
+        var sections = GamePanel.SectionsFor(title, GameId.Tod, d);
+        Assert.False(sections.ContainsKey("Progress"));
+        Assert.DoesNotContain(sections.Values.SelectMany(list => list), f => f.Label == "Die");
+        Assert.False(sections.ContainsKey(GameLayout.DebugSection));
+        Assert.True(GamePanel.SectionsFor(title, GameId.Tod, d, lua: true).ContainsKey(GameLayout.DebugSection));
+
+        Assert.Equal(new[] { "Collectables" }, GamePanel.UnlocksTabsWithContent(title, GameId.Tod, d));
+        Assert.Empty(GamePanel.SubPagesWithContent(title, GameId.Tod, d, unlocksHidden: false));
+        Assert.Equal(new[] { "Debug" }, GamePanel.SubPagesWithContent(title, GameId.Tod, d, unlocksHidden: false, lua: true));
+    }
 }
 
 /// <summary>

@@ -24,7 +24,7 @@ When the drive has a newer version of a mod than the console, the Console column
 
 ## Game modules
 
-In a test build, each game's support is a file of its own, named for the game: `rac1.sprx` (RaC1), `rac2.sprx` (RaC2), `rac3.sprx` (UYA) and `rac4.sprx` (Deadlocked). They sit beside `qwark.sprx` and `ui.pak`, and the client sends them wherever it sends `ui.pak`: the webMAN load, **Install to boot_plugins.txt** and the standalone update. To copy them by hand, put them in `/dev_hdd0/qwark/` beside `ui.pak`.
+In a test build, each game's support is a file of its own, named for the game: `rac1.sprx` (RaC1), `rac2.sprx` (RaC2), `rac3.sprx` (UYA), `rac4.sprx` (Deadlocked) and `tod.sprx` (Tools of Destruction). They sit beside `qwark.sprx` and `ui.pak`, and the client sends them wherever it sends `ui.pak`: the webMAN load, **Install to boot_plugins.txt** and the standalone update. To copy them by hand, put them in `/dev_hdd0/qwark/` beside `ui.pak`.
 
 Your console loads a game's file when that game starts and it has the memory for it. Until then the game has no game features: the status line names the game, the Memory panel works, and the Game panel says why.
 

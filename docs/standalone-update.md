@@ -16,7 +16,7 @@ It runs at most once per connection. It never installs an older module.
 ## What it does
 
 1. Uploads the `ui.pak` beside the client as `/dev_hdd0/qwark/ui.pak.new`, reads it back and compares its length and CRC32 with the file it sent. If there is no `ui.pak` beside the client, it skips this step and says that the pak was not sent.
-2. In a test build, uploads each game module beside the client (`rac1.sprx` to `rac4.sprx`) as `/dev_hdd0/qwark/rac1.sprx.new` and so on, and checks it the same way. A release has none, and sends none (see [test-builds.md](test-builds.md)).
+2. In a test build, uploads each game module beside the client (`rac1.sprx` to `rac4.sprx`, and `tod.sprx`) as `/dev_hdd0/qwark/rac1.sprx.new` and so on, and checks it the same way. A release has none, and sends none (see [test-builds.md](test-builds.md)).
 3. Reads `/dev_hdd0/boot_plugins.txt` and takes the line that names `qwark.sprx` as the boot path. If there is no such line, it uses `/dev_hdd0/plugins/qwark.sprx`.
 4. Uploads the new module beside it as `qwark.sprx.new`.
 5. Reads the upload back and compares its length and CRC32 with the file it sent.

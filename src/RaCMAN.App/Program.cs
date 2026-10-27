@@ -297,6 +297,8 @@ if (exitAfter > 0)
                       $"savehelper={state.SaveFile.Supported}/{state.SaveFile.Size} " +
                       $"sfinstalled={state.SaveFile.Installed} sfpatch={state.Rpcs3Patch.LastStatus.Helper.State} " +
                       $"switchpatch={state.Rpcs3Patch.LastStatus.Switches.State} " +
+                      $"luapatch={state.Rpcs3Patch.LastStatus.For(QwarkPatchPart.LuaHelper).State} " +
+                      $"lua={(state.HasLua ? state.Lua?.Installed.ToString() ?? "unread" : "none")} luabox=\"{LuaBox.LastSummary}\" " +
 
                       // What the Connection panel's RPCS3 section said about qwark's patches, and
                       // what the Game page drew each code-patching feature, each set-aside button

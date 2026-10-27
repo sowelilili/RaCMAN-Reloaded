@@ -510,6 +510,23 @@ public sealed class AppState : IDisposable
     public bool LevelFlagsUnsupported { get; private set; }
 
     /// <summary>
+    /// Whether the described game has Lua (revision 1.27, ToD): LUA_STATUS has answered OK for it.
+    /// UNSUPPORTED, the answer of every game without Lua, and UNKNOWN_OP, a module from before the
+    /// op, leave it false. Kept for the described game, so the Lua box does not come and go with
+    /// each level load; <see cref="Lua"/> is the boot's own.
+    /// </summary>
+    public bool HasLua { get; private set; }
+
+    /// <summary>The last LUA_STATUS answer for this boot, or null before one (and after the game went).</summary>
+    public LuaStatusInfo? Lua { get; private set; }
+
+    /// <summary>What the last LUA_STATUS poll was refused with, or null when it was answered.</summary>
+    public Status? LuaStatusRefusal { get; private set; }
+
+    /// <summary>True while a LUA_STATUS this client sent has not been answered, so polls never stack.</summary>
+    private bool _luaStatusInFlight;
+
+    /// <summary>
     /// MANIP_LIST for the described game (revision 1.21): its category types, the selection, the
     /// two options and the last event, all of them the console's. Null hides the manips area: not
     /// read yet, or answered UNSUPPORTED (a game with no groups) or UNKNOWN_OP (a module older than
@@ -1581,6 +1598,7 @@ public sealed class AppState : IDisposable
                         _heldBack = false;
                         RefreshAutosplitEvents();
                         RefreshSaveFileInfo();
+                        RefreshLuaStatus();
                     }
                     else if (CodePatchesUnsupported)
                     {
@@ -1588,6 +1606,7 @@ public sealed class AppState : IDisposable
                         // when this boot loaded the executable, so every boot has its own answer,
                         // and the restart the patch asks for is exactly this branch.
                         RefreshSaveFileInfo();
+                        RefreshLuaStatus();
                     }
                 }
 
@@ -1702,6 +1721,9 @@ public sealed class AppState : IDisposable
         Unlocks = UnlockList.Empty;
         UnlocksUnsupported = false;
         LevelFlagsUnsupported = false;
+        HasLua = false;
+        Lua = null;
+        LuaStatusRefusal = null;
         Manips = null;
         _sinceManipPoll = 0;
     }
@@ -1733,6 +1755,9 @@ public sealed class AppState : IDisposable
         // The categories and the slot descriptors are the table's shape, which the console
         // described for this game; only the rows came out of the process that is going away.
         Unlocks = Unlocks with { Unlocks = Array.Empty<Unlock>() };
+
+        // The Lua helper's state is the process's: a new boot has its own answer.
+        Lua = null;
         Panels.PanelState.ClearGameData();
     }
 
@@ -1876,6 +1901,7 @@ public sealed class AppState : IDisposable
         RefreshAutosplitEvents();
         RefreshSaveFileInfo();
         RefreshLevelFlagsSupport(quiet);
+        RefreshLuaStatus();
     }
 
     /// <summary>
@@ -2414,6 +2440,52 @@ public sealed class AppState : IDisposable
                                                              or Status.NotIngame)
             {
                 Post(() => SaveFile = SaveFileInfo.None);
+            }
+        });
+    }
+
+    /// <summary>
+    /// Re-reads LUA_STATUS (revision 1.27). Only a status: nothing is written into the game, so it
+    /// is asked whenever the game is described, at every boot under RPCS3, and about once a second
+    /// by the Lua box while it is on screen. UNSUPPORTED (a game with no Lua) and UNKNOWN_OP (a
+    /// module from before the op) mean there is no Lua box, and neither is worth a toast; any other
+    /// refusal is kept for the box to show, with the last answer left as it was.
+    /// </summary>
+    public void RefreshLuaStatus()
+    {
+        if (!Connected || UnknownGame || _luaStatusInFlight) return;
+        if (HoldsBackgroundWork()) return;
+
+        _luaStatusInFlight = true;
+        RunQuiet(async () =>
+        {
+            try
+            {
+                var info = await Client.LuaStatusAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    HasLua = true;
+                    Lua = info;
+                    LuaStatusRefusal = null;
+                });
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp)
+            {
+                Post(() =>
+                {
+                    HasLua = false;
+                    Lua = null;
+                    LuaStatusRefusal = null;
+                });
+            }
+            catch (QwarkStatusException ex)
+            {
+                var status = ex.Status;
+                Post(() => LuaStatusRefusal = status);
+            }
+            finally
+            {
+                Post(() => _luaStatusInFlight = false);
             }
         });
     }

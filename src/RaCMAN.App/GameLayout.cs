@@ -125,6 +125,12 @@ public static class GameLayout
     public const string ManipsSection = "Manips";
 
     /// <summary>
+    /// The Debug section, an ordinary one, except that a game with Lua (revision 1.27, ToD) always
+    /// has it: it starts with the Lua box.
+    /// </summary>
+    public const string DebugSection = "Debug";
+
+    /// <summary>
     /// The section names the client owns. A panel decides where each of these is drawn, so none of
     /// them may become a sub-page or a stacked header however the layout file is written.
     /// </summary>
@@ -132,7 +138,7 @@ public static class GameLayout
         section is QuickSection or ValuesSection or OptionsSection or UnlocksSection;
 
     /// <summary>The sub-pages of the Game page when the file says nothing about them.</summary>
-    private static readonly string[] DefaultSubPages = { ManipsSection, "Cosmetics", "Debug" };
+    private static readonly string[] DefaultSubPages = { ManipsSection, "Cosmetics", DebugSection };
 
     /// <summary>The Unlocks panel's own tabs when the file says nothing about them.</summary>
     private static readonly string[] DefaultUnlocksTabs = { "Collectables" };
@@ -214,7 +220,7 @@ public static class GameLayout
     /// </summary>
     public static IReadOnlyList<string> SectionsDrawnElsewhere => Config.Pages.Concat(Config.Tabs).ToArray();
 
-    /// <summary>The key a game is looked up under: the lower-case enum name, "rac1".."rac4".</summary>
+    /// <summary>The key a game is looked up under: the lower-case enum name, "rac1".."rac4" and "tod".</summary>
     private static string GameKey(GameId game) => game.ToString().ToLowerInvariant();
 
     private static LayoutFile Load(string path)

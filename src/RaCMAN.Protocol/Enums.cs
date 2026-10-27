@@ -217,6 +217,136 @@ public enum Opcode : ushort
     /// A refusal is BUSY, and the reason is the event MANIP_LIST reports next.
     /// </summary>
     ManipApply = 0x00D3,
+
+    // 5.15 Lua (revision 1.27): Tools of Destruction runs Lua 5.0 scripts, and qwark carries a small
+    // helper that runs a chunk of source in the game's own lua_State between two gameplay frames.
+
+    /// <summary>
+    /// <c>u16 len, u16 flags (0), char src[len]</c>, len 1..8192. Answered once the game has run the
+    /// chunk or qwark gave up on it, at most about 1.6 s later; the reply is <see cref="LuaExecResult"/>.
+    /// On a console the first one of a boot writes the helper into the game, so only a user's
+    /// action ever sends it.
+    /// </summary>
+    LuaExec = 0x00E0,
+
+    /// <summary>No request. Where the helper stands and the game's last script error: <see cref="LuaStatusInfo"/>.</summary>
+    LuaStatus = 0x00E1,
+
+    /// <summary>
+    /// The Lua helper as words for an RPCS3 patch (emulator builds only; the PS3 module answers
+    /// UNSUPPORTED). Laid out exactly as SAVEFILE_PATCH's reply, with no single bytes.
+    /// </summary>
+    LuaPatch = 0x00E2,
+}
+
+/// <summary>
+/// LUA_EXEC's <c>lua_status</c> (revision 1.27): 0..5 are Lua 5.0's own results for the chunk, and
+/// the 0x1xx and 0x2xx values are qwark's, for a chunk that never ran or never finished.
+/// </summary>
+public enum LuaExecStatus
+{
+    Ok = 0,
+    RuntimeError = 1,
+    FileError = 2,
+    SyntaxError = 3,
+    OutOfMemory = 4,
+    ErrorInErrorHandler = 5,
+    NoState = 0x100,
+    BadLength = 0x101,
+    Cancelled = 0x102,
+
+    /// <summary>Frames ran and the game did not answer; the request was withdrawn and will not run.</summary>
+    Timeout = 0x200,
+
+    /// <summary>No gameplay frame ran (paused, a menu, a load); the request was withdrawn.</summary>
+    NotRunning = 0x201,
+
+    /// <summary>The game hung inside the chunk.</summary>
+    Hung = 0x202,
+}
+
+/// <summary>Lua 5.0's <c>lua_type</c> of LUA_EXEC's first result, with 0xFF for none.</summary>
+public enum LuaType : byte
+{
+    Nil = 0,
+    Boolean = 1,
+    LightUserdata = 2,
+    Number = 3,
+    String = 4,
+    Table = 5,
+    Function = 6,
+    Userdata = 7,
+    Thread = 8,
+    None = 0xFF,
+}
+
+/// <summary>LUA_EXEC's <c>out_flags</c>.</summary>
+[Flags]
+public enum LuaOutFlags : byte
+{
+    None = 0,
+
+    /// <summary>The text was cut to fit the reply.</summary>
+    Truncated = 1 << 0,
+
+    /// <summary>The first result is a boolean, and it is true.</summary>
+    True = 1 << 1,
+}
+
+/// <summary>LUA_STATUS's <c>installed</c>.</summary>
+public enum LuaInstalled : byte
+{
+    No = 0,
+    Yes = 1,
+
+    /// <summary>qwark is still looking for the helper in the game (RPCS3).</summary>
+    Checking = 2,
+}
+
+/// <summary>LUA_STATUS's <c>phase</c>: what the helper is doing with a request.</summary>
+public enum LuaPhase : byte
+{
+    Idle = 0,
+    Waiting = 1,
+    Withdrawing = 2,
+    Hung = 3,
+}
+
+public static class LuaExtensions
+{
+    /// <summary>The name to show a human for a LUA_EXEC status, with its number for one not known here.</summary>
+    public static string DisplayName(this LuaExecStatus status) => status switch
+    {
+        LuaExecStatus.Ok => "OK",
+        LuaExecStatus.RuntimeError => "runtime error",
+        LuaExecStatus.FileError => "file error",
+        LuaExecStatus.SyntaxError => "syntax error",
+        LuaExecStatus.OutOfMemory => "out of memory",
+        LuaExecStatus.ErrorInErrorHandler => "error in error handler",
+        LuaExecStatus.NoState => "NO_STATE",
+        LuaExecStatus.BadLength => "BAD_LEN",
+        LuaExecStatus.Cancelled => "CANCELLED",
+        LuaExecStatus.Timeout => "TIMEOUT",
+        LuaExecStatus.NotRunning => "NOT_RUNNING",
+        LuaExecStatus.Hung => "HUNG",
+        _ => $"status 0x{(int)status:X}",
+    };
+
+    /// <summary>Lua's own name for a type ("nil", "number", "string"), and "none" for no result.</summary>
+    public static string DisplayName(this LuaType type) => type switch
+    {
+        LuaType.Nil => "nil",
+        LuaType.Boolean => "boolean",
+        LuaType.LightUserdata => "lightuserdata",
+        LuaType.Number => "number",
+        LuaType.String => "string",
+        LuaType.Table => "table",
+        LuaType.Function => "function",
+        LuaType.Userdata => "userdata",
+        LuaType.Thread => "thread",
+        LuaType.None => "none",
+        _ => $"type {(byte)type}",
+    };
 }
 
 /// <summary>
@@ -463,6 +593,24 @@ public enum Status : ushort
     Busy = 8,
 }
 
+public static class StatusExtensions
+{
+    /// <summary>The status as PROTOCOL.md spells it: NOT_INGAME, UNSUPPORTED, BUSY, and the number of one it does not name.</summary>
+    public static string WireName(this Status status) => status switch
+    {
+        Status.Ok => "OK",
+        Status.NotIngame => "NOT_INGAME",
+        Status.Unsupported => "UNSUPPORTED",
+        Status.BadArg => "BAD_ARG",
+        Status.IoError => "IO_ERROR",
+        Status.Full => "FULL",
+        Status.UnknownOp => "UNKNOWN_OP",
+        Status.NotFound => "NOT_FOUND",
+        Status.Busy => "BUSY",
+        _ => $"status {(ushort)status}",
+    };
+}
+
 public enum SessionState : byte
 {
     Xmb = 0,
@@ -495,6 +643,9 @@ public enum GameId : byte
     Rac2 = 2,
     Rac3 = 3,
     Rac4 = 4,
+
+    /// <summary>Tools of Destruction (revision 1.27), NPEA00452.</summary>
+    Tod = 5,
 }
 
 public static class GameIdExtensions
@@ -506,6 +657,7 @@ public static class GameIdExtensions
         GameId.Rac2 => "RaC2",
         GameId.Rac3 => "RaC3",
         GameId.Rac4 => "Deadlocked",
+        GameId.Tod => "ToD",
         _ => "no game",
     };
 }

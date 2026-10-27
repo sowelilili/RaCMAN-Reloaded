@@ -1630,6 +1630,34 @@ public sealed class QwarkClient : IDisposable
     public Task ManipApplyAsync(CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.ManipApply, null, cancellationToken);
 
+    // ---------------------------------------------------------------- 5.15 Lua
+
+    /// <summary>
+    /// LUA_EXEC, revision 1.27: runs <paramref name="source"/> (Lua 5.0, 1..8192 bytes) in the game's
+    /// lua_State between two gameplay frames, and answers when the game has, at most about 1.6 s
+    /// later. A frame status other than OK (NOT_INGAME, UNSUPPORTED, NOT_FOUND, BUSY, BAD_ARG,
+    /// IO_ERROR) is thrown as <see cref="QwarkStatusException"/>; a chunk that failed or never ran
+    /// comes back OK with its <see cref="LuaExecResult.Status"/>. On a console the first one of a
+    /// boot writes the helper into the game, so only a user's action may send it.
+    /// </summary>
+    public async Task<LuaExecResult> LuaExecAsync(string source, CancellationToken cancellationToken = default) =>
+        LuaExecResult.Parse(await RequestAsync(Opcode.LuaExec, LuaExecRequest.Encode(source), cancellationToken)
+            .ConfigureAwait(false));
+
+    /// <summary>
+    /// LUA_STATUS, revision 1.27: where the Lua helper stands and the game's last script error.
+    /// NOT_INGAME outside a game and UNSUPPORTED for a game with no Lua, both thrown.
+    /// </summary>
+    public async Task<LuaStatusInfo> LuaStatusAsync(CancellationToken cancellationToken = default) =>
+        LuaStatusInfo.Parse(await RequestAsync(Opcode.LuaStatus, null, cancellationToken).ConfigureAwait(false));
+
+    /// <summary>
+    /// LUA_PATCH, revision 1.27: the Lua helper as words for an RPCS3 patch, laid out as
+    /// SAVEFILE_PATCH's reply. Emulator builds only; the PS3 module answers UNSUPPORTED.
+    /// </summary>
+    public async Task<PatchReply> LuaPatchAsync(CancellationToken cancellationToken = default) =>
+        PatchReply.Parse(await RequestAsync(Opcode.LuaPatch, null, cancellationToken).ConfigureAwait(false), "LUA_PATCH");
+
     // ---------------------------------------------------------------- 5.11 autosplitting
 
     /// <summary>

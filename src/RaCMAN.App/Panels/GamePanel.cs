@@ -108,7 +108,7 @@ public static class GamePanel
     /// </summary>
     public static IReadOnlyList<string> SubPagesWithContent(AppState state) =>
         SubPagesWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.UnlocksUnsupported,
-            state.Manips);
+            state.Manips, state.HasLua);
 
     /// <summary>
     /// <see cref="SubPagesWithContent(AppState)"/> from a description alone, so what the nav lists
@@ -116,8 +116,8 @@ public static class GamePanel
     /// gives the Manips section something to draw however few features are in it.
     /// </summary>
     public static IReadOnlyList<string> SubPagesWithContent(
-        string title, GameId game, DescribeResult describe, bool unlocksHidden, ManipList? manips = null) =>
-        WithContent(GameLayout.SubPagesFor(unlocksHidden), title, game, describe, manips);
+        string title, GameId game, DescribeResult describe, bool unlocksHidden, ManipList? manips = null, bool lua = false) =>
+        WithContent(GameLayout.SubPagesFor(unlocksHidden), title, game, describe, manips, lua);
 
     /// <summary>
     /// The tabs the Unlocks panel draws beside its unlock categories: the sections the layout hands
@@ -126,23 +126,23 @@ public static class GamePanel
     /// so this needs no flag of its own.
     /// </summary>
     public static IReadOnlyList<string> UnlocksTabsWithContent(AppState state) =>
-        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.Manips);
+        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.Manips, state.HasLua);
 
     /// <summary><see cref="UnlocksTabsWithContent(AppState)"/> from a description alone.</summary>
     public static IReadOnlyList<string> UnlocksTabsWithContent(
-        string title, GameId game, DescribeResult describe, ManipList? manips = null) =>
-        WithContent(GameLayout.UnlocksTabs, title, game, describe, manips);
+        string title, GameId game, DescribeResult describe, ManipList? manips = null, bool lua = false) =>
+        WithContent(GameLayout.UnlocksTabs, title, game, describe, manips, lua);
 
     /// <summary>
     /// The listed sections a described game actually has something in, keeping the layout's order.
     /// A section a panel places itself is never one of them, however the file lists it.
     /// </summary>
     private static IReadOnlyList<string> WithContent(
-        IEnumerable<string> listed, string title, GameId game, DescribeResult describe, ManipList? manips)
+        IEnumerable<string> listed, string title, GameId game, DescribeResult describe, ManipList? manips, bool lua)
     {
         if (describe.Features.Length == 0) return Array.Empty<string>();
 
-        var sections = Assign(title, game, describe, manips, out _);
+        var sections = Assign(title, game, describe, manips, out _, lua);
         return listed.Where(s => !GameLayout.IsReserved(s) && sections.ContainsKey(s)).ToArray();
     }
 
@@ -156,7 +156,7 @@ public static class GamePanel
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<Feature>();
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _, state.HasLua);
         return sections.TryGetValue(section, out var features) ? features : Array.Empty<Feature>();
     }
 
@@ -211,7 +211,7 @@ public static class GamePanel
         if (describe.Features.Length == 0 || string.IsNullOrWhiteSpace(section)) return null;
         if (GameLayout.IsReserved(section)) return null;
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _, state.HasLua);
         if (!sections.ContainsKey(section)) return null;
 
         return GameLayout.IsUnlocksTab(section, state.UnlocksUnsupported) ? PanelNav.Unlocks : PanelNav.Game;
@@ -256,8 +256,8 @@ public static class GamePanel
     /// it, and holds the features MANIP_LIST lists under its headers.
     /// </summary>
     public static IReadOnlyDictionary<string, List<Feature>> SectionsFor(
-        string title, GameId game, DescribeResult describe, ManipList? manips = null) =>
-        Assign(title, game, describe, manips, out _);
+        string title, GameId game, DescribeResult describe, ManipList? manips = null, bool lua = false) =>
+        Assign(title, game, describe, manips, out _, lua);
 
     /// <summary>
     /// Puts every feature in its section (client layout first, qwark group as the default). Two
@@ -267,7 +267,7 @@ public static class GamePanel
     /// Manips section, for the area itself.
     /// </summary>
     private static Dictionary<string, List<Feature>> Assign(
-        string title, GameId game, DescribeResult describe, ManipList? manips, out List<string> firstSeen)
+        string title, GameId game, DescribeResult describe, ManipList? manips, out List<string> firstSeen, bool lua = false)
     {
         var claimed = QuickClaims(describe);
         var headed = manips?.HeaderFeatureIds ?? Array.Empty<byte>();
@@ -295,15 +295,25 @@ public static class GamePanel
             firstSeen.Add(GameLayout.ManipsSection);
         }
 
+        // Revision 1.27: a game with Lua (ToD) has a Debug section for the Lua box, whatever the
+        // layout sends there.
+        if (lua && !sections.ContainsKey(GameLayout.DebugSection))
+        {
+            sections[GameLayout.DebugSection] = new List<Feature>();
+            firstSeen.Add(GameLayout.DebugSection);
+        }
+
         return sections;
     }
 
     /// <summary>
-    /// Whether a section has anything to draw: a feature, or, for the Manips section, the manips
-    /// area of a game that has category types.
+    /// Whether a section has anything to draw: a feature, for the Manips section the manips area of
+    /// a game that has category types, and for the Debug section the Lua box of a game with Lua.
     /// </summary>
     private static bool HasContent(AppState state, string section, List<Feature> features) =>
-        features.Count > 0 || (section == GameLayout.ManipsSection && state.Manips is not null);
+        features.Count > 0
+        || (section == GameLayout.ManipsSection && state.Manips is not null)
+        || (section == GameLayout.DebugSection && state.HasLua);
 
     public static void Draw(AppState state)
     {
@@ -323,7 +333,7 @@ public static class GamePanel
         string title = state.DescribedTitle;
         var game = state.DescribedGame;
         var order = new List<string>();
-        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, state.Manips, out order) : null;
+        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, state.Manips, out order, state.HasLua) : null;
 
         if (ResolveSubPage(state, sections) is { } side)
         {
@@ -662,6 +672,16 @@ public static class GamePanel
 
             var headed = manips.HeaderFeatureIds;
             features = features.Where(f => !headed.Contains(f.Id)).ToArray();
+            if (features.Count == 0) return;
+
+            ImGui.Spacing();
+            leadingSpace = false;
+        }
+
+        // Revision 1.27: the Debug section of a game with Lua starts with the Lua box.
+        if (section == GameLayout.DebugSection && state.HasLua)
+        {
+            LuaBox.Draw(state);
             if (features.Count == 0) return;
 
             ImGui.Spacing();

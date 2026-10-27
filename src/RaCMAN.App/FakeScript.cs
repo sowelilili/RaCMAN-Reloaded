@@ -16,8 +16,8 @@ namespace RaCMAN.App;
 /// </summary>
 public static class FakeScript
 {
-    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac3, rac4, "
-                                + "unknown, drop, combos-off, combos-on, sfpatch, switchesin, switchesout, start, "
+    public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac3, rac4, tod, "
+                                + "unknown, drop, combos-off, combos-on, sfpatch, luapatch, switchesin, switchesout, start, "
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
@@ -332,6 +332,12 @@ public static class FakeScript
                 };
                 break;
 
+            // Tools of Destruction (revision 1.27): its feature table, unlocks and planets, and Lua.
+            // No savefile helper, autosplitter, manips or level flags, as qwark has none for it yet.
+            case "tod":
+                fake.UseTod();
+                break;
+
             // A title the module has no game for: INGAME, game 0, a title id, and every game op
             // answered UNSUPPORTED. The client is down to its memory tools here.
             case "unknown":
@@ -353,6 +359,12 @@ public static class FakeScript
             // of the same title, and qwark now finds its helper in the game.
             case "sfpatch":
                 fake.SaveFileHelperInstalled = true;
+                fake.Session = session with { Generation = session.Generation + 1 };
+                break;
+
+            // The same for ToD's Lua helper (revision 1.27): a new boot with its RPCS3 patch in.
+            case "luapatch":
+                fake.LuaPatchInstalled = true;
                 fake.Session = session with { Generation = session.Generation + 1 };
                 break;
 

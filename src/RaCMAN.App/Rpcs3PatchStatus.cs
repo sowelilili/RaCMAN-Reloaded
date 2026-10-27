@@ -3,8 +3,8 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App;
 
 /// <summary>
-/// qwark's own patches for a game under RPCS3. Both are the game's rather than the user's, both go
-/// into the same patch file as RPCS3 patches, and the Connection panel installs them together.
+/// qwark's own patches for a game under RPCS3. All of them are the game's rather than the user's,
+/// all go into the same patch file as RPCS3 patches, and the Connection panel installs them together.
 /// </summary>
 public enum QwarkPatchPart
 {
@@ -13,39 +13,58 @@ public enum QwarkPatchPart
 
     /// <summary>The code switches (build 50): the features that patch game code, toggled through flag bytes.</summary>
     CodeSwitches,
+
+    /// <summary>The Lua helper (revision 1.27, ToD): running Lua in the game from the Debug page.</summary>
+    LuaHelper,
 }
 
 /// <summary>What each of qwark's patches is called, where it is filed, and how to say it.</summary>
 public static class QwarkPatchParts
 {
-    public static readonly IReadOnlyList<QwarkPatchPart> All = new[] { QwarkPatchPart.SaveFileHelper, QwarkPatchPart.CodeSwitches };
+    public static readonly IReadOnlyList<QwarkPatchPart> All =
+        new[] { QwarkPatchPart.SaveFileHelper, QwarkPatchPart.CodeSwitches, QwarkPatchPart.LuaHelper };
 
     /// <summary>The description the part is filed under, in the patch file and in RPCS3's Patch Manager.</summary>
-    public static string Description(this QwarkPatchPart part) =>
-        part == QwarkPatchPart.SaveFileHelper ? Rpcs3Patches.Description : Rpcs3Patches.SwitchesDescription;
+    public static string Description(this QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => Rpcs3Patches.Description,
+        QwarkPatchPart.CodeSwitches => Rpcs3Patches.SwitchesDescription,
+        _ => Rpcs3Patches.LuaDescription,
+    };
 
     /// <summary>What the Connection panel's line about the part begins with.</summary>
-    public static string Title(this QwarkPatchPart part) =>
-        part == QwarkPatchPart.SaveFileHelper ? "Savefile helper" : "Code switches";
+    public static string Title(this QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => "Savefile helper",
+        QwarkPatchPart.CodeSwitches => "Code switches",
+        _ => "Lua helper",
+    };
 
     /// <summary>The part in the middle of a sentence.</summary>
-    public static string Noun(this QwarkPatchPart part) =>
-        part == QwarkPatchPart.SaveFileHelper ? "the savefile helper" : "the code switches";
+    public static string Noun(this QwarkPatchPart part) => "the " + Bare(part);
 
     /// <summary>What the part is for, in the confirmation's list.</summary>
-    public static string Purpose(this QwarkPatchPart part) =>
-        part == QwarkPatchPart.SaveFileHelper
-            ? "saving and loading save files from RaCMAN"
-            : "the cheats that patch game code, such as fast loads and infinite ammo";
+    public static string Purpose(this QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => "saving and loading save files from RaCMAN",
+        QwarkPatchPart.CodeSwitches => "the cheats that patch game code, such as fast loads and infinite ammo",
+        _ => "running Lua in the game from RaCMAN's Debug page",
+    };
+
+    /// <summary>The part's name with no article: "savefile helper", "code switches", "Lua helper".</summary>
+    private static string Bare(QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => "savefile helper",
+        QwarkPatchPart.CodeSwitches => "code switches",
+        _ => "Lua helper",
+    };
 
     /// <summary>"qwark's savefile helper", "qwark's code switches", or "qwark's savefile helper and code switches".</summary>
     public static string Names(IReadOnlyCollection<QwarkPatchPart> parts)
     {
-        bool helper = parts.Contains(QwarkPatchPart.SaveFileHelper);
-        bool switches = parts.Contains(QwarkPatchPart.CodeSwitches);
-        return helper && switches ? "qwark's savefile helper and code switches"
-            : switches ? "qwark's code switches"
-            : "qwark's savefile helper";
+        var names = All.Where(parts.Contains).Select(Bare).ToList();
+        if (names.Count == 0) names.Add(Bare(QwarkPatchPart.SaveFileHelper));
+        return "qwark's " + Rpcs3Patches.JoinNames(names);
     }
 }
 
@@ -86,16 +105,22 @@ public sealed record QwarkPatchStatus(QwarkPatchState State, string Message, boo
 public sealed record QwarkPatchLine(QwarkPatchState State, string Text);
 
 /// <summary>
-/// Both of qwark's patches, as the Connection panel reports them. A reason that holds for both —
+/// qwark's patches, as the Connection panel reports them. A reason that holds for all of them —
 /// no connection, no game, no RPCS3 folder — is said once; otherwise each part has a line of its
 /// own that begins with its name. A part the game does not have is left out, so a game with only
-/// one of them reports that one alone.
+/// one of them reports that one alone. <see cref="Lua"/> is the Lua helper's (revision 1.27), null
+/// where nothing was decided about it, which reads as hidden.
 /// </summary>
-public sealed record QwarkPatchesStatus(QwarkPatchStatus Helper, QwarkPatchStatus Switches)
+public sealed record QwarkPatchesStatus(QwarkPatchStatus Helper, QwarkPatchStatus Switches, QwarkPatchStatus? Lua = null)
 {
     public static readonly QwarkPatchesStatus Hidden = new(QwarkPatchStatus.Hidden, QwarkPatchStatus.Hidden);
 
-    public QwarkPatchStatus For(QwarkPatchPart part) => part == QwarkPatchPart.SaveFileHelper ? Helper : Switches;
+    public QwarkPatchStatus For(QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => Helper,
+        QwarkPatchPart.CodeSwitches => Switches,
+        _ => Lua ?? QwarkPatchStatus.Hidden,
+    };
 
     /// <summary>The parts there is something to say about: neither hidden nor absent from the game.</summary>
     public IReadOnlyList<QwarkPatchPart> Shown =>
@@ -127,7 +152,7 @@ public sealed record QwarkPatchesStatus(QwarkPatchStatus Helper, QwarkPatchStatu
     {
         get
         {
-            if (Helper.State == QwarkPatchState.Hidden && Switches.State == QwarkPatchState.Hidden) return Array.Empty<QwarkPatchLine>();
+            if (QwarkPatchParts.All.All(part => For(part).State == QwarkPatchState.Hidden)) return Array.Empty<QwarkPatchLine>();
 
             var shown = Shown;
             if (shown.Count == 0)
@@ -135,7 +160,9 @@ public sealed record QwarkPatchesStatus(QwarkPatchStatus Helper, QwarkPatchStatu
                 return new[] { new QwarkPatchLine(QwarkPatchState.Unavailable, "qwark has no patches for this game, so there is nothing to install.") };
             }
 
-            if (shown.Count == 2 && Helper == Switches) return new[] { new QwarkPatchLine(Helper.State, Helper.Message) };
+            // The same thing to say about every part is said once.
+            var first = For(shown[0]);
+            if (shown.Count >= 2 && shown.All(part => For(part) == first)) return new[] { new QwarkPatchLine(first.State, first.Message) };
 
             return shown.Select(part => new QwarkPatchLine(For(part).State, $"{part.Title()}: {For(part).Message}")).ToList();
         }
@@ -176,7 +203,7 @@ public enum QwarkPatchReplyKind
     /// <summary>UNSUPPORTED: the game has no such patch, or it is switched off.</summary>
     NotSupported,
 
-    /// <summary>UNKNOWN_OP: a qwark from before the op (SAVEFILE_PATCH in build 47, SWITCH_PATCH in build 50).</summary>
+    /// <summary>UNKNOWN_OP: a qwark from before the op (SAVEFILE_PATCH in build 47, SWITCH_PATCH in build 50, LUA_PATCH in revision 1.27).</summary>
     TooOld,
 
     /// <summary>Anything else, with the reason.</summary>
@@ -195,7 +222,9 @@ public sealed record QwarkPatchReply(QwarkPatchReplyKind Kind, PatchReply? Patch
 
 /// <summary>
 /// What the session says, as far as qwark's patches are concerned: SAVEFILE_INFO's
-/// <c>installed</c> for the helper, and flags.CODE_SWITCHES for the switches.
+/// <c>installed</c> for the helper, flags.CODE_SWITCHES for the switches, and LUA_STATUS for the
+/// Lua helper (revision 1.27): <see cref="HasLua"/> when the game has Lua at all, and
+/// <see cref="Lua"/> the boot's answer, null until there is one.
 /// </summary>
 public sealed record QwarkPatchSession(
     bool Connected,
@@ -205,10 +234,23 @@ public sealed record QwarkPatchSession(
     string TitleId,
     byte QwarkBuild,
     SaveFileInfo Info,
-    bool CodeSwitches = false)
+    bool CodeSwitches = false,
+    bool HasLua = false,
+    LuaStatusInfo? Lua = null)
 {
     /// <summary>Whether qwark finds the part in the game this session.</summary>
-    public bool IsActive(QwarkPatchPart part) => part == QwarkPatchPart.SaveFileHelper ? Info.Installed : CodeSwitches;
+    public bool IsActive(QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => Info.Installed,
+        QwarkPatchPart.CodeSwitches => CodeSwitches,
+        _ => HasLua && Lua is { IsInstalled: true },
+    };
+
+    /// <summary>
+    /// Whether the game can have the part at all, before qwark is asked for its words: only a game
+    /// whose LUA_STATUS answers has a Lua helper, and the other two parts are asked for every game.
+    /// </summary>
+    public bool CanHave(QwarkPatchPart part) => part != QwarkPatchPart.LuaHelper || HasLua;
 }
 
 /// <summary>
@@ -285,9 +327,9 @@ public sealed record Rpcs3PatchDisk(
 }
 
 /// <summary>
-/// qwark's own patches for the RPCS3 target, the savefile helper and the code switches: asks qwark
+/// qwark's own patches for the RPCS3 target, the savefile helper, the code switches and the Lua helper: asks qwark
 /// for their words, looks at RPCS3's folder, decides what the Connection panel says about each, and
-/// does the install the user confirmed, both parts in one write. No ImGui: the panel calls
+/// does the install the user confirmed, every part in one write. No ImGui: the panel calls
 /// <see cref="Update"/> once a frame and draws what comes back.
 /// <para>
 /// Nothing here runs unless the panel is drawn with the RPCS3 target, and nothing is ever written
@@ -311,6 +353,10 @@ public sealed class Rpcs3PatchController
     private readonly AppState _state;
     private readonly Ask _helper = new();
     private readonly Ask _switches = new();
+    private readonly Ask _lua = new();
+
+    /// <summary>When LUA_STATUS was last asked for by this controller, while qwark was still checking.</summary>
+    private long _luaPolledMs;
 
     private string _diskKey = string.Empty;
     private int _diskSequence;
@@ -331,9 +377,17 @@ public sealed class Rpcs3PatchController
     /// <summary>What qwark said to SWITCH_PATCH for the running game.</summary>
     public QwarkPatchReply SwitchesReply => _switches.Reply;
 
+    /// <summary>What qwark said to LUA_PATCH for the running game.</summary>
+    public QwarkPatchReply LuaReply => _lua.Reply;
+
     public QwarkPatchReply ReplyFor(QwarkPatchPart part) => AskFor(part).Reply;
 
-    private Ask AskFor(QwarkPatchPart part) => part == QwarkPatchPart.SaveFileHelper ? _helper : _switches;
+    private Ask AskFor(QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => _helper,
+        QwarkPatchPart.CodeSwitches => _switches,
+        _ => _lua,
+    };
 
     public Rpcs3PatchDisk? Disk { get; private set; }
 
@@ -365,7 +419,9 @@ public sealed class Rpcs3PatchController
             session.TitleId,
             _state.Hello?.QwarkVersion ?? session.QwarkVersion,
             _state.SaveFile,
-            session.CodeSwitches);
+            session.CodeSwitches,
+            _state.HasLua,
+            _state.Lua);
 
         bool wanted = facts.Connected && facts.CodePatchesUnsupported && facts.Ingame && facts.KnownGame && !_state.ConsoleBusy;
         if (wanted)
@@ -373,25 +429,37 @@ public sealed class Rpcs3PatchController
             bool any = false;
             foreach (var part in QwarkPatchParts.All)
             {
-                if (facts.IsActive(part)) continue;
+                if (facts.IsActive(part) || !facts.CanHave(part)) continue;
 
                 EnsureReply(part, session);
                 any = true;
             }
 
             if (any) EnsureDisk(session);
+
+            // qwark-rpcs3 looks for the Lua patch in the game after the boot, and says so; until it
+            // has finished (or before this boot's LUA_STATUS), the answer is asked for again about
+            // once a second.
+            if (facts.HasLua && facts.Lua is not { Installed: LuaInstalled.Yes or LuaInstalled.No }
+                && System.Environment.TickCount64 - _luaPolledMs >= RetryMs)
+            {
+                _luaPolledMs = System.Environment.TickCount64;
+                _state.RefreshLuaStatus();
+            }
         }
 
-        return LastStatus = Decide(facts, _helper.Reply, _switches.Reply, Disk);
+        return LastStatus = Decide(facts, _helper.Reply, _switches.Reply, _lua.Reply, Disk);
     }
 
-    /// <summary>"Check again": the words, the folder and SAVEFILE_INFO are all read afresh.</summary>
+    /// <summary>"Check again": the words, the folder, SAVEFILE_INFO and LUA_STATUS are all read afresh.</summary>
     public void Recheck()
     {
         _bump++;
         _helper.RetryAtMs = 0;
         _switches.RetryAtMs = 0;
+        _lua.RetryAtMs = 0;
         _state.RefreshSaveFileInfo();
+        _state.RefreshLuaStatus();
     }
 
     private void EnsureReply(QwarkPatchPart part, SessionInfo session)
@@ -421,10 +489,14 @@ public sealed class Rpcs3PatchController
         });
     }
 
-    private static Task<PatchReply> Fetch(QwarkClient client, QwarkPatchPart part) =>
-        part == QwarkPatchPart.SaveFileHelper ? client.SaveFilePatchAsync() : client.SwitchPatchAsync();
+    private static Task<PatchReply> Fetch(QwarkClient client, QwarkPatchPart part) => part switch
+    {
+        QwarkPatchPart.SaveFileHelper => client.SaveFilePatchAsync(),
+        QwarkPatchPart.CodeSwitches => client.SwitchPatchAsync(),
+        _ => client.LuaPatchAsync(),
+    };
 
-    /// <summary>SAVEFILE_PATCH or SWITCH_PATCH, with every answer turned into something the panel can say.</summary>
+    /// <summary>SAVEFILE_PATCH, SWITCH_PATCH or LUA_PATCH, with every answer turned into something the panel can say.</summary>
     private static async Task<(QwarkPatchReply Reply, bool Retry)> AskAsync(QwarkClient client, QwarkPatchPart part)
     {
         try
@@ -514,12 +586,17 @@ public sealed class Rpcs3PatchController
             {
                 PatchReply? helper = null;
                 PatchReply? switches = null;
+                PatchReply? lua = null;
                 foreach (var part in wanted)
                 {
                     asking = part;
                     var words = await Fetch(client, part).ConfigureAwait(false);
-                    if (part == QwarkPatchPart.SaveFileHelper) helper = words;
-                    else switches = words;
+                    switch (part)
+                    {
+                        case QwarkPatchPart.SaveFileHelper: helper = words; break;
+                        case QwarkPatchPart.CodeSwitches: switches = words; break;
+                        default: lua = words; break;
+                    }
                 }
 
                 var hash = Rpcs3Patches.FindExecutableHash(folder, title);
@@ -527,15 +604,13 @@ public sealed class Rpcs3PatchController
 
                 // Planned under the writer's lock, from the files as they are then, so a mod the
                 // Mods panel is writing at the same moment is kept rather than written away.
-                writer.Commit(() => Rpcs3Patches.PlanQwark(folder, title, game, executable, helper, switches, build));
+                writer.Commit(() => Rpcs3Patches.PlanQwark(folder, title, game, executable, helper, switches, build, lua));
             }
             catch (QwarkStatusException ex)
             {
                 error = ex.Status switch
                 {
-                    Status.Unsupported => asking == QwarkPatchPart.SaveFileHelper
-                        ? "this game has no savefile helper"
-                        : "this game has no code switches",
+                    Status.Unsupported => $"this game has no {asking.Noun()[4..]}",
                     Status.NotIngame => "the game is not running",
                     Status.UnknownOp => $"this qwark-rpcs3 cannot supply {asking.Noun()}",
                     _ => $"qwark answered {ex.Status} to {ex.Opcode}",
@@ -568,10 +643,16 @@ public sealed class Rpcs3PatchController
         });
     }
 
-    /// <summary>Both parts, from the facts alone: <see cref="Decide(QwarkPatchPart, QwarkPatchSession, QwarkPatchReply, Rpcs3PatchDisk?)"/> for each.</summary>
+    /// <summary>The savefile helper and the code switches, for a game the Lua helper was not asked about.</summary>
     public static QwarkPatchesStatus Decide(QwarkPatchSession session, QwarkPatchReply helper, QwarkPatchReply switches, Rpcs3PatchDisk? disk) =>
+        Decide(session, helper, switches, QwarkPatchReply.NotAsked, disk);
+
+    /// <summary>Every part, from the facts alone: <see cref="Decide(QwarkPatchPart, QwarkPatchSession, QwarkPatchReply, Rpcs3PatchDisk?)"/> for each.</summary>
+    public static QwarkPatchesStatus Decide(QwarkPatchSession session, QwarkPatchReply helper, QwarkPatchReply switches,
+        QwarkPatchReply lua, Rpcs3PatchDisk? disk) =>
         new(Decide(QwarkPatchPart.SaveFileHelper, session, helper, disk),
-            Decide(QwarkPatchPart.CodeSwitches, session, switches, disk));
+            Decide(QwarkPatchPart.CodeSwitches, session, switches, disk),
+            Decide(QwarkPatchPart.LuaHelper, session, lua, disk));
 
     /// <summary>
     /// The whole decision for one part, from the facts alone. The order is the order of what has
@@ -581,8 +662,6 @@ public sealed class Rpcs3PatchController
     /// </summary>
     public static QwarkPatchStatus Decide(QwarkPatchPart part, QwarkPatchSession session, QwarkPatchReply reply, Rpcs3PatchDisk? disk)
     {
-        bool helper = part == QwarkPatchPart.SaveFileHelper;
-
         if (!session.Connected)
         {
             return new(QwarkPatchState.Waiting, "Connect to see whether qwark's patches are installed.");
@@ -601,10 +680,22 @@ public sealed class Rpcs3PatchController
             return new(QwarkPatchState.Unavailable, "qwark does not know this game, so it has no patches for it.");
         }
 
+        // Only a game whose LUA_STATUS answers has a Lua helper (revision 1.27, ToD), and qwark-rpcs3
+        // says whether its patch is in the game once it has looked.
+        if (!session.CanHave(part)) return new(QwarkPatchState.Absent, "This game has no Lua helper.");
+        if (part == QwarkPatchPart.LuaHelper && session.Lua is not { Installed: LuaInstalled.Yes or LuaInstalled.No })
+        {
+            return new(QwarkPatchState.Waiting, "qwark is still checking whether the Lua helper is in the game...");
+        }
+
         if (session.IsActive(part))
         {
-            return new(QwarkPatchState.Active,
-                helper ? "Active. Saving and loading work." : "Active. The cheats that patch game code work.");
+            return new(QwarkPatchState.Active, part switch
+            {
+                QwarkPatchPart.SaveFileHelper => "Active. Saving and loading work.",
+                QwarkPatchPart.CodeSwitches => "Active. The cheats that patch game code work.",
+                _ => "Active. Lua runs from the Debug page.",
+            });
         }
 
         switch (reply.Kind)
@@ -614,7 +705,7 @@ public sealed class Rpcs3PatchController
                 return new(QwarkPatchState.Waiting, "Asking qwark for its patches...");
 
             case QwarkPatchReplyKind.NotSupported:
-                return new(QwarkPatchState.Absent, helper ? "This game has no savefile helper." : "This game has no code switches.");
+                return new(QwarkPatchState.Absent, $"This game has no {part.Noun()[4..]}.");
 
             case QwarkPatchReplyKind.TooOld:
                 return new(QwarkPatchState.Unavailable,
@@ -657,9 +748,12 @@ public sealed class Rpcs3PatchController
         if (entry is null)
         {
             return new(QwarkPatchState.Install,
-                helper
-                    ? "Not installed. Under RPCS3, saving and loading need it."
-                    : "Not installed. Under RPCS3, the cheats that patch game code need it.");
+                part switch
+                {
+                    QwarkPatchPart.SaveFileHelper => "Not installed. Under RPCS3, saving and loading need it.",
+                    QwarkPatchPart.CodeSwitches => "Not installed. Under RPCS3, the cheats that patch game code need it.",
+                    _ => "Not installed. Under RPCS3, running Lua from RaCMAN needs it.",
+                });
         }
 
         if (!entry.Holds(patch))
