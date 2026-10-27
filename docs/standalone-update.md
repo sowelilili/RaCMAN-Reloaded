@@ -16,7 +16,7 @@ It runs at most once per connection. It never installs an older module.
 ## What it does
 
 1. Uploads the `ui.pak` beside the client as `/dev_hdd0/qwark/ui.pak.new`, reads it back and compares its length and CRC32 with the file it sent. If there is no `ui.pak` beside the client, it skips this step and says that the pak was not sent.
-2. In a test build, uploads each `game-N.sprx` beside the client as `/dev_hdd0/qwark/game-N.sprx.new` and checks it the same way. A release has none, and sends none (see [test-builds.md](test-builds.md)).
+2. In a test build, uploads each game module beside the client (`rac1.sprx` to `rac4.sprx`) as `/dev_hdd0/qwark/rac1.sprx.new` and so on, and checks it the same way. A release has none, and sends none (see [test-builds.md](test-builds.md)).
 3. Reads `/dev_hdd0/boot_plugins.txt` and takes the line that names `qwark.sprx` as the boot path. If there is no such line, it uses `/dev_hdd0/plugins/qwark.sprx`.
 4. Uploads the new module beside it as `qwark.sprx.new`.
 5. Reads the upload back and compares its length and CRC32 with the file it sent.
@@ -25,7 +25,7 @@ It runs at most once per connection. It never installs an older module.
 
 The boot copy is changed only in the last two steps. Any failure before them leaves the console booting what it booted before. A failure shows one message that names the step.
 
-The client never writes `ui.pak` itself here. The running module keeps its own `ui.pak` until the restart, because the new build's pak does not fit it. The new module moves `ui.pak.new` into place when it starts. It moves each `game-N.sprx.new` into place the next time that game starts.
+The client never writes `ui.pak` itself here. The running module keeps its own `ui.pak` until the restart, because the new build's pak does not fit it. The new module moves `ui.pak.new` into place when it starts. It moves each `.new` module (`rac1.sprx.new` ..) into place the next time that game starts.
 
 ## Afterwards
 

@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Stages a full copy (the app, the controller skins, the moby layout data, the mod library, the
-    premade savefiles, qwark.sprx, ui.pak, a test build's game-*.sprx and qwark-rpcs3.exe, plus the
+    premade savefiles, qwark.sprx, ui.pak, a test build's game modules (rac1.sprx ..) and qwark-rpcs3.exe, plus the
     Windows firewall helper) into
     .\run\ exactly the way the release is built, then launches it. Everything the input display,
     mods, firewall and the RPCS3 target need is therefore beside the executable, so a run behaves

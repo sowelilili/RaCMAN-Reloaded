@@ -9,7 +9,7 @@
     premade savefiles from its premade-savefiles\ folder, ..\qwark\dist\qwark.sprx,
     ..\qwark\dist\qwark.build (which build of qwark that module is, revision 1.24),
     ..\qwark\dist\ui.pak (the console menu's file, which the module reads from the console's HDD),
-    a test build's game modules ..\qwark\dist\game-1.sprx to game-4.sprx (revision 1.26; a release
+    a test build's game modules ..\qwark\dist\rac1.sprx to rac4.sprx (revision 1.26; a release
     dist has none, and none is not an error)
     and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
     ..\build\RaCMAN-Reloaded.zip.
@@ -89,7 +89,7 @@ if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.s
 if (-not $UiPakPath)  { $UiPakPath  = Combine $repo '..' 'qwark' 'dist' 'ui.pak' }
 # qwark.build sits beside the qwark.sprx it describes, so it follows -SprxPath unless it is named.
 if (-not $BuildInfoPath) { $BuildInfoPath = Combine ([System.IO.Path]::GetDirectoryName($SprxPath)) 'qwark.build' }
-# So do a test build's game modules (revision 1.26), game-1.sprx to game-4.sprx.
+# So do a test build's game modules (revision 1.26), rac1.sprx to rac4.sprx.
 if (-not $GameModulesDir) { $GameModulesDir = [System.IO.Path]::GetDirectoryName($SprxPath) }
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 if (-not $PkgPath)    { $PkgPath    = Combine $repo '..' 'qwark' 'dist' 'qwark-installer.pkg' }

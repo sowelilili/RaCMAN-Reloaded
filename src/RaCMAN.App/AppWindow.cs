@@ -512,7 +512,7 @@ public sealed class AppWindow : GameWindow
             ImGui.SameLine();
             ImGui.TextUnformatted("|");
             ImGui.SameLine();
-            Ui.Text(Ui.Yellow, $"{AppState.PendingGameName(_state.PendingGame, session.TitleId)} is waiting for memory");
+            Ui.Text(Ui.Yellow, $"loading...");
             Ui.Tooltip(_state.GameModuleStatusText());
         }
 

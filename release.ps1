@@ -197,7 +197,7 @@ foreach ($r in $repos) {
 
 Write-Step 'checking the console payload'
 
-# No game-*.sprx (revision 1.26): a release links its games in, and the check below refuses a dist\
+# No game module (rac1.sprx .., revision 1.26): a release links its games in, and the check below refuses a dist\
 # that has any.
 foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark.build', 'qwark-installer.pkg', 'qwark-rpcs3.exe')) {
     $path = Combine $qwark 'dist' $file

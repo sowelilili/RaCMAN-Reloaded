@@ -9,7 +9,7 @@ namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
 /// Game modules (revision 1.26, qwark's PROTOCOL.md 9.11): a test build's games are SPRX files of
-/// their own, <c>/dev_hdd0/qwark/game-&lt;n&gt;.sprx</c>. SessionInfo flags2 bit5 says the running
+/// their own, <c>/dev_hdd0/qwark/rac1.sprx</c> .. <c>rac4.sprx</c>. SessionInfo flags2 bit5 says the running
 /// game's module is not to be had and bit6 that it waits for memory, GAME_MODULE (0x0008) says
 /// which game and why, and the client ships, installs and sends the modules exactly as it does
 /// ui.pak. A release links its games in, ships no module and never sets either bit.
@@ -207,15 +207,18 @@ public class GameModuleTests
     [Fact]
     public void TheFilesAreNamedByGameIdBesideUiPak()
     {
-        Assert.Equal("game-1.sprx", GameModule.FileName(GameId.Rac1));
-        Assert.Equal("game-4.sprx", GameModule.FileName(4));
-        Assert.Equal("/dev_hdd0/qwark/game-4.sprx", GameModule.ConsolePath(GameId.Rac4));
-        Assert.Equal("/dev_hdd0/qwark/game-2.sprx.new", GameModule.StagedPath(GameId.Rac2));
+        Assert.Equal("rac1.sprx", GameModule.FileName(GameId.Rac1));
+        Assert.Equal("rac3.sprx", GameModule.FileName(GameId.Rac3));
+        Assert.Equal("rac4.sprx", GameModule.FileName(4));
+        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx" }, GameModule.FileNames);
+        Assert.Equal("/dev_hdd0/qwark/rac4.sprx", GameModule.ConsolePath(GameId.Rac4));
+        Assert.Equal("/dev_hdd0/qwark/rac2.sprx.new", GameModule.StagedPath(GameId.Rac2));
+        Assert.False(GameModule.HasModule(GameId.None));
         Assert.Throws<ArgumentOutOfRangeException>(() => GameModule.FileName(GameId.None));
         Assert.Throws<ArgumentOutOfRangeException>(() => GameModule.FileName(5));
 
         string sprx = Path.Combine(TestDataFolder.Root, "somewhere", WebManLoader.SprxName);
-        Assert.Equal(Path.Combine(TestDataFolder.Root, "somewhere", "game-3.sprx"), GameModule.BesideSprx(sprx, GameId.Rac3));
+        Assert.Equal(Path.Combine(TestDataFolder.Root, "somewhere", "rac3.sprx"), GameModule.BesideSprx(sprx, GameId.Rac3));
 
         Assert.True(GameModule.LooksLikeSprx(Sprx(2)));
         Assert.False(GameModule.LooksLikeSprx(new byte[4096]));
@@ -394,8 +397,8 @@ public class GameModuleTests
         Assert.Equal(
             new[]
             {
-                "Uploading game-1.sprx to /dev_hdd0/qwark/game-1.sprx.new",
-                "Putting /dev_hdd0/qwark/game-1.sprx.new in place of /dev_hdd0/qwark/game-1.sprx",
+                "Uploading rac1.sprx to /dev_hdd0/qwark/rac1.sprx.new",
+                "Putting /dev_hdd0/qwark/rac1.sprx.new in place of /dev_hdd0/qwark/rac1.sprx",
             },
             said);
 
@@ -417,10 +420,10 @@ public class GameModuleTests
         Assert.Equal(GameModuleSendStep.Local, junk.Step);
         Assert.Contains("is not a signed SPRX", junk.Message, StringComparison.Ordinal);
 
-        string missing = Path.Combine(TestDataFolder.Root, $"absent-{Guid.NewGuid():N}", "game-1.sprx");
+        string missing = Path.Combine(TestDataFolder.Root, $"absent-{Guid.NewGuid():N}", "rac1.sprx");
         var none = await Assert.ThrowsAsync<GameModuleSendException>(() => GameModuleSend.RunAsync(client, GameId.Rac1, missing));
         Assert.Equal(GameModuleSendStep.Local, none.Step);
-        Assert.Contains("There is no game-1.sprx beside this client", none.Message, StringComparison.Ordinal);
+        Assert.Contains("There is no rac1.sprx beside this client", none.Message, StringComparison.Ordinal);
 
         await Assert.ThrowsAsync<GameModuleSendException>(() => GameModuleSend.SendAsync(client, GameId.None, Sprx(1)));
 
@@ -455,7 +458,7 @@ public class GameModuleTests
         Assert.False(server.Files.ContainsKey(GameModule.ConsolePath(GameId.Rac1)));
 
         int pak = said.FindIndex(s => s.Contains(UiPak.FileName, StringComparison.Ordinal));
-        int module = said.FindIndex(s => s.Contains("game-1.sprx", StringComparison.Ordinal));
+        int module = said.FindIndex(s => s.Contains("rac1.sprx", StringComparison.Ordinal));
         int sprx = said.FindIndex(s => s.StartsWith($"Uploading {WebManLoader.SprxName}", StringComparison.Ordinal));
         Assert.True(pak < module && module < sprx, string.Join(" | ", said));
     }
@@ -470,7 +473,7 @@ public class GameModuleTests
         var result = await SprxUpdate.RunAsync(client, Sprx(5), FakeQwarkServer.UiPakFor(Current));
 
         Assert.Equal(0, result.GameModulesStaged);
-        Assert.DoesNotContain(server.Files.Keys, k => k.Contains("/game-", StringComparison.Ordinal));
+        Assert.DoesNotContain(server.Files.Keys, IsModulePath);
     }
 
     [Fact]
@@ -488,7 +491,7 @@ public class GameModuleTests
             gameModules: new[] { new GameModuleFile(GameId.Rac2, Sprx(20)) }));
 
         Assert.Equal(SprxUpdateStep.GameModule, error.Step);
-        Assert.Contains("game-2.sprx", error.Message, StringComparison.Ordinal);
+        Assert.Contains("rac2.sprx", error.Message, StringComparison.Ordinal);
         Assert.Equal(boot, server.Files[WebManLoader.BootPath]);
     }
 
@@ -526,7 +529,7 @@ public class GameModuleTests
         Assert.True(result.UiPakSent);
         Assert.Equal(one, ftp.Stored[GameModule.ConsolePath(GameId.Rac1)]);
         Assert.Equal(three, ftp.Stored[GameModule.ConsolePath(GameId.Rac3)]);
-        Assert.Contains("Uploading game-3.sprx to /dev_hdd0/qwark/game-3.sprx", said);
+        Assert.Contains("Uploading rac3.sprx to /dev_hdd0/qwark/rac3.sprx", said);
         Assert.Contains("Sent 2 game modules with it.", ConnectionPanel.BootInstallMessage(result), StringComparison.Ordinal);
     }
 
@@ -541,8 +544,8 @@ public class GameModuleTests
             "127.0.0.1", ClientCopy(), new InlineProgress<string>(said.Add));
 
         Assert.Equal(0, result.GameModulesSent);
-        Assert.DoesNotContain(ftp.Stored.Keys, k => k.Contains("/game-", StringComparison.Ordinal));
-        Assert.DoesNotContain(said, s => s.Contains("game-", StringComparison.Ordinal));
+        Assert.DoesNotContain(ftp.Stored.Keys, IsModulePath);
+        Assert.DoesNotContain(said, s => GameModule.FileNames.Any(n => s.Contains(n, StringComparison.Ordinal)));
         Assert.DoesNotContain("game module", ConnectionPanel.BootInstallMessage(result), StringComparison.Ordinal);
     }
 
@@ -550,10 +553,10 @@ public class GameModuleTests
 
     public static IEnumerable<object?[]> Problems() => new[]
     {
-        new object?[] { GameModuleState.Missing, 0u, "Your console is missing game-4.sprx, so Deadlocked has no game features." },
-        new object?[] { GameModuleState.Failed, 0u, "game-4.sprx on your console is damaged, so Deadlocked" },
-        new object?[] { GameModuleState.Failed, 0x80010005u, "game-4.sprx on your console would not load (error 0x80010005)" },
-        new object?[] { GameModuleState.Other, 3u, "game-4.sprx on your console is from another build, so Deadlocked" },
+        new object?[] { GameModuleState.Missing, 0u, "Your console is missing rac4.sprx, so Deadlocked has no game features." },
+        new object?[] { GameModuleState.Failed, 0u, "rac4.sprx on your console is damaged, so Deadlocked" },
+        new object?[] { GameModuleState.Failed, 0x80010005u, "rac4.sprx on your console would not load (error 0x80010005)" },
+        new object?[] { GameModuleState.Other, 3u, "rac4.sprx on your console is from another build, so Deadlocked" },
     };
 
     [Theory]
@@ -575,14 +578,11 @@ public class GameModuleTests
         var info = new GameModuleInfo(GameModuleState.Waiting, GameId.Rac4, 1, GameModuleFlags.Modules,
             212, 660, 128, 128, 3000, 3010, 0, 0, 0);
 
-        Assert.Equal(
-            "Deadlocked support is waiting for memory on your console: 212 KB free, it needs 256 KB. "
-            + "It loads by itself when there is room.",
-            AppState.GameModuleWaitingText(info, "NPEA00423"));
+        Assert.Equal("Deadlocked is loading (212KB free, 256KB needed)", AppState.GameModuleWaitingText(info, "NPEA00423"));
 
-        // Before the first answer the title id stands in for the game, and there are no figures.
-        Assert.Equal("NPEA00423 support is waiting for memory on your console. It loads by itself when there is room.",
-            AppState.GameModuleWaitingText(null, "NPEA00423"));
+        // Before the first answer the title id stands in for the game, and there are no figures,
+        // and nothing trails the words.
+        Assert.Equal("NPEA00423 is loading", AppState.GameModuleWaitingText(null, "NPEA00423"));
         Assert.Equal("this game", AppState.PendingGameName(GameId.None, string.Empty));
     }
 
@@ -620,13 +620,14 @@ public class GameModuleTests
         Assert.False(state.GameModuleWaiting);
         Assert.Equal(GameId.Rac1, state.PendingGame);
         Assert.True(state.GameModuleCanSend);
-        Assert.Contains("RaC1, no game support", state.StatusLine(), StringComparison.Ordinal);
+        Assert.EndsWith(" | RaC1", state.StatusLine().Split(" | combos")[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("no game support", state.StatusLine(), StringComparison.Ordinal);
         Assert.DoesNotContain("Unknown game", state.StatusLine(), StringComparison.Ordinal);
-        Assert.Contains("Your console is missing game-1.sprx", state.GameModuleStatusText(), StringComparison.Ordinal);
+        Assert.Contains("Your console is missing rac1.sprx", state.GameModuleStatusText(), StringComparison.Ordinal);
 
         await frames.ForAsync(state, 1.5f);
         var told = Assert.Single(frames.Errors);
-        Assert.Contains("Your console is missing game-1.sprx, so RaC1 has no game features.", told.Text, StringComparison.Ordinal);
+        Assert.Contains("Your console is missing rac1.sprx, so RaC1 has no game features.", told.Text, StringComparison.Ordinal);
         Assert.Contains("Send it from the Connection panel.", told.Text, StringComparison.Ordinal);
 
         state.SendGameModule();
@@ -635,7 +636,7 @@ public class GameModuleTests
                                                        && state.Describe.Features.Length > 0));
 
         Assert.Equal(module, server.Files[GameModule.ConsolePath(GameId.Rac1)]);
-        Assert.Contains(frames.Seen, t => t.Kind == ToastKind.Success && t.Text.StartsWith("Sent game-1.sprx", StringComparison.Ordinal));
+        Assert.Contains(frames.Seen, t => t.Kind == ToastKind.Success && t.Text.StartsWith("Sent rac1.sprx", StringComparison.Ordinal));
         Assert.Null(state.GameModuleReport);
 
         await frames.ForAsync(state, AppState.GameModuleCheckSeconds + 1);
@@ -661,10 +662,9 @@ public class GameModuleTests
         Assert.True(state.GameModuleWaiting);
         Assert.False(state.GameModuleNeeded);
         Assert.False(state.GameModuleCanSend);
-        Assert.Equal(
-            "RaC1 support is waiting for memory on your console: 212 KB free, it needs 256 KB. It loads by itself when there is room.",
-            state.GameModuleStatusText());
-        Assert.Contains("RaC1, waiting for memory", state.StatusLine(), StringComparison.Ordinal);
+        Assert.Equal("RaC1 is loading (212KB free, 256KB needed)", state.GameModuleStatusText());
+        Assert.EndsWith(" | RaC1", state.StatusLine().Split(" | combos")[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("waiting for memory", state.StatusLine(), StringComparison.Ordinal);
 
         // Asked about once a second, not every frame.
         int asked = server.GameModuleCount;
@@ -775,8 +775,8 @@ public class GameModuleTests
         state.SendGameModule();
         Assert.True(await frames.UntilAsync(state, () => frames.Errors.Length > before && !state.GameModuleSending));
 
-        var error = frames.Errors.Last(t => t.Text.StartsWith("Sending game-1.sprx", StringComparison.Ordinal)).Text;
-        Assert.Contains("uploading it to /dev_hdd0/qwark/game-1.sprx.new", error, StringComparison.Ordinal);
+        var error = frames.Errors.Last(t => t.Text.StartsWith("Sending rac1.sprx", StringComparison.Ordinal)).Text;
+        Assert.Contains("uploading it to /dev_hdd0/qwark/rac1.sprx.new", error, StringComparison.Ordinal);
         Assert.Contains(nameof(Status.IoError), error, StringComparison.Ordinal);
         Assert.True(state.GameModuleNeeded);
         Assert.Empty(Writes(server).Where(op => op is Opcode.FileRename));
@@ -862,17 +862,18 @@ public class GameModuleTests
             return null;
         }
 
-        var staged = Directory.GetFiles(stage, "game-*.sprx").Select(p => Path.GetFileName(p)!).OrderBy(n => n).ToArray();
+        var staged = Directory.GetFiles(stage, "*.sprx").Select(p => Path.GetFileName(p)!).OrderBy(n => n, StringComparer.Ordinal).ToArray();
         return (run.Exit, run.Output, staged);
     }
 
     [Fact]
     public void ATestDistHasItsModulesStaged()
     {
-        if (Stage(Dist(true, 1, 2, 3, 4), "game-9.sprx") is not { } result) return;
+        // An earlier stage's rac2.sprx goes, and so does a module under the first test builds' name.
+        if (Stage(Dist(true, 1, 2, 3, 4), "rac2.sprx", "game-1.sprx") is not { } result) return;
 
         Assert.True(result.Exit == 0, result.Output);
-        Assert.Equal(new[] { "game-1.sprx", "game-2.sprx", "game-3.sprx", "game-4.sprx" }, result.Staged);
+        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx" }, result.Staged);
     }
 
     [Fact]
@@ -891,7 +892,7 @@ public class GameModuleTests
     [Fact]
     public void AReleaseDistNeverHasItsLeftoverModulesStaged()
     {
-        if (Stage(Dist(false, 1, 4), "game-4.sprx") is not { } result) return;
+        if (Stage(Dist(false, 1, 4), "rac4.sprx", "game-4.sprx") is not { } result) return;
 
         Assert.True(result.Exit == 0, result.Output);
         Assert.Empty(result.Staged);
@@ -908,11 +909,32 @@ public class GameModuleTests
         if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", dist) is not { } result) return;
 
         Assert.True(result.Exit != 0, result.Output);
-        Assert.Contains("game-3.sprx", result.Output, StringComparison.Ordinal);
+        Assert.Contains("rac3.sprx", result.Output, StringComparison.Ordinal);
+
+        // A module under the first test builds' name is a test build's too.
+        string legacy = Dist(false);
+        File.WriteAllBytes(Path.Combine(legacy, "game-2.sprx"), Sprx(2));
+        if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", legacy) is not { } old) return;
+        Assert.True(old.Exit != 0, old.Output);
+        Assert.Contains("game-2.sprx", old.Output, StringComparison.Ordinal);
 
         if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", Dist(false)) is not { } clean) return;
         Assert.True(clean.Exit == 0, clean.Output);
     }
+
+    /// <summary>The packaging scripts' list of module names is the client's, in the same order.</summary>
+    [Fact]
+    public void ThePackagingScriptsNameTheModulesAsTheClientDoes()
+    {
+        string list = File.ReadAllText(RepoFile("packaging", "game-module-names.ps1"));
+        var line = list.Split('\n').Single(l => l.TrimStart().StartsWith("$GameModuleNames", StringComparison.Ordinal));
+        var names = System.Text.RegularExpressions.Regex.Matches(line, "'([^']+)'").Select(m => m.Groups[1].Value).ToArray();
+        Assert.Equal(GameModule.FileNames, names);
+    }
+
+    private static bool IsModulePath(string path) =>
+        GameModule.FileNames.Any(n => path.EndsWith("/" + n, StringComparison.Ordinal)
+                                      || path.EndsWith("/" + n + ".new", StringComparison.Ordinal));
 
     [Fact]
     public void PublishStagesTheModulesThroughTheScript()

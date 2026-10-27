@@ -987,8 +987,8 @@ public sealed class AppState : IDisposable
     public static string GameModuleWaitingText(GameModuleInfo? info, string titleId)
     {
         string name = PendingGameName(info?.Game ?? GameId.None, titleId);
-        string figures = info is { } i ? $": {i.LowestKb} KB free, it needs {i.RequiredKb} KB" : string.Empty;
-        return $"{name} support is waiting for memory on your console{figures}. It loads by itself when there is room.";
+        string figures = info is { } i ? $"({i.LowestKb}KB free, {i.RequiredKb}KB needed)" : string.Empty;
+        return $"{name} is loading {figures}".TrimEnd();
     }
 
     /// <summary>The line the panels draw while a game's module is not in: waiting, or why not.</summary>
@@ -997,9 +997,9 @@ public sealed class AppState : IDisposable
             ? GameModuleWaitingText(GameModuleReport, Session.TitleId)
             : GameModuleProblem(GameModuleReport, Session.TitleId);
 
-    /// <summary>The status line's game while a module is not in: its name, and what it is waiting for.</summary>
+    /// <summary>The status line's game while a module is not in: its name; the yellow word beside it says the rest.</summary>
     private string PendingGameStatus() =>
-        PendingGameName(PendingGame, Session.TitleId) + (GameModuleWaiting ? ", waiting for memory" : ", no game support");
+        PendingGameName(PendingGame, Session.TitleId);
 
     private bool _gameModuleInFlight;
 

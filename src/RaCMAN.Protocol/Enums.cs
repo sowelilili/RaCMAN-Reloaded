@@ -661,7 +661,7 @@ public enum SessionFlags2 : byte
 
     /// <summary>
     /// bit5 GAME_MODULE_BAD (revision 1.26, a test build whose games are modules): the running
-    /// game's module, <c>/dev_hdd0/qwark/game-&lt;n&gt;.sprx</c>, is missing, is no module, would
+    /// game's module, <c>/dev_hdd0/qwark/rac1.sprx</c> .. <c>rac4.sprx</c>, is missing, is no module, would
     /// not load or start, or is another build's, so the session has no game features until a
     /// client writes the file or the game boots again. INGAME only, and <c>game</c> reads 0 while
     /// it is set. Never set by a module whose games are linked in (a release, qwark-rpcs3).
@@ -694,7 +694,7 @@ public enum GameModuleState : byte
     /// <summary>Loaded and started.</summary>
     Loaded = 4,
 
-    /// <summary>No <c>game-&lt;n&gt;.sprx</c> on the console (flags2 bit5).</summary>
+    /// <summary>No module file (<c>rac1.sprx</c> ..) on the console (flags2 bit5).</summary>
     Missing = 5,
 
     /// <summary>No module in the file, or lv2 would not load or start it (flags2 bit5).</summary>

@@ -24,11 +24,11 @@ When the drive has a newer version of a mod than the console, the Console column
 
 ## Game modules
 
-In a test build, each game's support is a file of its own: `game-1.sprx` (RaC1) to `game-4.sprx` (Deadlocked). They sit beside `qwark.sprx` and `ui.pak`, and the client sends them wherever it sends `ui.pak`: the webMAN load, **Install to boot_plugins.txt** and the standalone update. To copy them by hand, put them in `/dev_hdd0/qwark/` beside `ui.pak`.
+In a test build, each game's support is a file of its own, named for the game: `rac1.sprx` (RaC1), `rac2.sprx` (RaC2), `rac3.sprx` (UYA) and `rac4.sprx` (Deadlocked). They sit beside `qwark.sprx` and `ui.pak`, and the client sends them wherever it sends `ui.pak`: the webMAN load, **Install to boot_plugins.txt** and the standalone update. To copy them by hand, put them in `/dev_hdd0/qwark/` beside `ui.pak`.
 
 Your console loads a game's file when that game starts and it has the memory for it. Until then the game has no game features: the status line names the game, the Memory panel works, and the Game panel says why.
 
-- **Waiting for memory**: your console has too little free memory right now. The client shows how much it has and how much it needs. The game support loads by itself when there is room.
-- **Missing, damaged or from another build**: the status line shows it in red, and the client tells you once. Press **Send game-N.sprx** on the Connection panel, the Game panel or the status line. Your console loads it without a restart.
+- **Waiting for memory**: your console has too little free memory right now. The status line says "loading...", and its tooltip and the Game panel show how much memory your console has and how much it needs. The game support loads by itself when there is room. If it waits more than 30 seconds, your console shows a notification with the same figures.
+- **Missing, damaged or from another build**: the status line shows it in red, and the client tells you once. Press **Send rac1.sprx** (or the file for your game) on the Connection panel, the Game panel or the status line. Your console loads it without a restart.
 
-A release links the games in and has no `game-*.sprx` files, so none of this shows.
+A release links the games in and has no game module files, so none of this shows.

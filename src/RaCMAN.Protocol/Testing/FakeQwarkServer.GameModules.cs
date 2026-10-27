@@ -2,7 +2,7 @@ namespace RaCMAN.Protocol.Testing;
 
 /// <summary>
 /// Game modules (revision 1.26, qwark's PROTOCOL.md 9.11): a test build whose games are SPRX files
-/// of their own, <c>/dev_hdd0/qwark/game-&lt;n&gt;.sprx</c>, in the same in-memory filesystem the
+/// of their own, <c>/dev_hdd0/qwark/rac1.sprx</c> .. <c>rac4.sprx</c>, in the same in-memory filesystem the
 /// file ops use. With <see cref="GameModules"/> on, a session in one of the four games reports
 /// <c>game</c> 0 and flags2 bit5 or bit6 until its module is in, answers every game op UNSUPPORTED
 /// meanwhile, and answers GAME_MODULE with why. Off, the default, is a module whose games are linked
@@ -98,7 +98,7 @@ public sealed partial class FakeQwarkServer
     }
 
     /// <summary>
-    /// Under the gate, as the game boots (a new generation): a staged <c>game-&lt;n&gt;.sprx.new</c> is
+    /// Under the gate, as the game boots (a new generation): a staged <c>rac1.sprx.new</c> (..) is
     /// put in place of the game's module, as the core does.
     /// </summary>
     private void AdoptStagedGameModule()
