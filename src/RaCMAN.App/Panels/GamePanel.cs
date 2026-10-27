@@ -1309,9 +1309,8 @@ public static class GamePanel
             if (changed && !blocked) KeepForBoot(state, colours, theme, kept);
             if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
             {
-                Ui.SetTooltip(blocked ? Ui.NeedsQwarkPatches
-                    : theme.Length > 0 ? "Apply these colours and corrections again every time the game boots, also with no PC connected"
-                    : "Apply these colours again every time the game boots, also with no PC connected");
+                Ui.SetTooltip(blocked ? Ui.NeedsQwarkPatches : "Apply this theme automatically when the game starts.");
+
             }
         }
 
