@@ -6,6 +6,7 @@ using System.Text.Json;
 
 using RaCMAN.App;
 using RaCMAN.App.Panels;
+using RaCMAN.Protocol.Testing;
 
 namespace RaCMAN.Protocol.Tests;
 
@@ -2407,5 +2408,115 @@ public class AutosplitterTests
 
         Assert.Contains("Something qwark retired", back.For(GameId.Rac3).Events.Keys);
         Assert.False(back.For(GameId.Rac3).EventEnabled("Planet entered", byDefault: true));
+    }
+
+    // ---------------------------------------------------------------- Tools of Destruction
+
+    private static AutosplitEventDesc TodRow(byte code) =>
+        FakeQwarkServer.TodAutosplitDescriptors().Single(d => d.Code == code);
+
+    /// <summary>
+    /// ToD's level load is NORMALISE with no allowance (revision 1.28, pending): the whole of it
+    /// comes off game time, a reload of the same planet like any other load.
+    /// </summary>
+    [Fact]
+    public async Task ToDsLevelLoadComesOffGameTimeWhole()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        var load = TodRow(4);
+
+        h.Engine.Handle(new AutosplitEvent(1, 10_000, AutosplitKind.LoadStart, load.Code, 1));
+        h.Engine.Handle(new AutosplitEvent(2, 13_500, AutosplitKind.LoadEnd, load.Code, 1));
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
+        Assert.Equal(new[] { 3.5 }, h.Server.LoadingTimeSeconds);
+
+        h.Engine.Handle(new AutosplitEvent(3, 20_000, AutosplitKind.LoadStart, load.Code, 1));
+        h.Engine.Handle(new AutosplitEvent(4, 20_250, AutosplitKind.LoadEnd, load.Code, 1));
+        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 2));
+        Assert.Equal(new[] { 3.5, 0.25 }, h.Server.LoadingTimeSeconds);
+        Assert.Empty(h.Server.Actions.Where(a => a == LiveSplitClient.Split));
+    }
+
+    /// <summary>ToD's quit to the XMB: game time stops, and the resume puts the old script's 19.95 s on.</summary>
+    [Fact]
+    public async Task ToDsQuitPaysTheOldScriptsNineteenPointNineFiveSeconds()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        var quit = TodRow(3);
+        Assert.True(AutosplitterPanel.HasPause(h.Engine.Descriptors));
+
+        h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await h.Sent(LiveSplitClient.InitialiseGameTime));
+        Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
+        h.Server.RealTime = TimeSpan.FromSeconds(600);
+        h.Server.GameTime = TimeSpan.FromSeconds(600);
+        h.Server.ClearCommands();
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, quit.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        h.Server.RealTime = TimeSpan.FromSeconds(640);
+        h.Engine.Handle(new AutosplitEvent(3, 41_000, AutosplitKind.Resume, quit.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        Assert.True(await WaitFor(() => !h.Server.GameTimePaused));
+        Assert.Equal(TimeSpan.FromSeconds(619.95), h.Server.GameTime!.Value);
+    }
+
+    /// <summary>
+    /// ToD's planet route reads tod-planets.txt, the old todplanets.txt's system names with the
+    /// planets' own beside them: Rykan V is LEVEL_ 9.
+    /// </summary>
+    [Fact]
+    public async Task ToDsRouteSplitsOnlyOnTheUpcomingPlanet()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Fastoon", "Rykan V", "Sargasso" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+        h.Server.SplitIndex = 0;
+        await h.RefreshAsync();
+        Assert.Equal("Rykan V", h.Engine.View.UpcomingSplit);
+
+        h.Engine.Handle(Split(1, 10));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+
+        h.Engine.Handle(Split(1, 9, seq: 2));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    /// <summary>The final split is on by default; the credits and the missions wait to be ticked.</summary>
+    [Fact]
+    public async Task ToDsTachyonSplitsAndTheCreditsWaitToBeTicked()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Meridian City", "Fastoon II" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+
+        h.Engine.Handle(Split(5, 18));
+        h.Engine.Handle(Split(6, (18u << 16) | 640, seq: 2));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+
+        h.Engine.Handle(new AutosplitEvent(3, 5_000, AutosplitKind.Split, 2, 640));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.StartsWith("Tachyon defeated", h.Engine.Log()[^1].Event);
+    }
+
+    [Fact]
+    public void ToDsRouteFileNamesEveryPlanet()
+    {
+        for (int planet = 0; planet < FakeQwarkServer.TodPlanets.Length; planet++)
+        {
+            Assert.True(AutosplitRoutes.Knows(GameId.Tod, planet), $"tod-planets.txt has no names for planet {planet}");
+            Assert.True(AutosplitRoutes.Matches(GameId.Tod, planet, FakeQwarkServer.TodPlanets[planet]),
+                $"tod-planets.txt does not match qwark's own name for planet {planet}");
+        }
+
+        Assert.True(AutosplitRoutes.Matches(GameId.Tod, 0, "Kerwan"));
+        Assert.True(AutosplitRoutes.Matches(GameId.Tod, 9, "Rykan V"));
+        Assert.True(AutosplitRoutes.Matches(GameId.Tod, 12, "Viceron"));
+        Assert.True(AutosplitRoutes.Matches(GameId.Tod, 18, "Tachyon"));
+        Assert.False(AutosplitRoutes.Matches(GameId.Tod, 1, "Kortog"));
     }
 }

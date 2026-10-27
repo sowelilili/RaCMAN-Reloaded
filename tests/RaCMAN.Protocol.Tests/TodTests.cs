@@ -28,7 +28,8 @@ public class TodTests
         // The per-game files and settings are keyed by the lower-case enum name.
         Assert.Equal("tod", Settings.GameKey(GameId.Tod));
         Assert.Equal("tod", AutosplitRoutes.KeyFor(GameId.Tod));
-        Assert.Empty(AutosplitRoutes.For(GameId.Tod));
+        // Revision 1.28 (pending): ToD has a planet route, one line per LEVEL_ id.
+        Assert.Equal(19, AutosplitRoutes.For(GameId.Tod).Count);
         Assert.Empty(LegacyLibraryImport.LegacyPlanets(GameId.Tod));
         Assert.Equal(new PlanetResetOptions(false, false), PlanetResetOptions.For(GameId.Tod, QwarkClient.ExpectedQwarkBuild));
     }
@@ -230,7 +231,7 @@ public class TodTests
         Assert.Equal(GameId.Tod, state.DescribedGame);
         Assert.Equal(LuaInstalled.No, state.Lua!.Installed);
         Assert.False(state.SaveFile.Supported);
-        Assert.Empty(state.AutosplitEvents);
+        Assert.Contains(state.AutosplitEvents, d => d.Label == "Tachyon defeated");
         Assert.Null(state.Manips);
         Assert.Contains("Debug", GamePanel.SubPagesWithContent(state));
 
@@ -307,5 +308,25 @@ public class TodTests
         Assert.Contains("0x102043D0", lines[0].Text);
         Assert.Contains("hud.lua", lines[1].Text);
         Assert.Contains("bad argument", lines[1].Text);
+    }
+
+    [Fact]
+    public async Task ToDDescribesItsAutosplitter()
+    {
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Start();
+        using var client = await ConnectAsync(server);
+
+        var rows = await client.AutosplitDescribeAsync();
+        Assert.Equal(new byte[] { 1, 2, 5, 6, 4, 3 }, rows.Select(r => r.Code).ToArray());
+        Assert.True(rows[0].PlanetRoute && rows[0].EnabledByDefault);
+        Assert.Equal("Tachyon defeated", rows[1].Label);
+        Assert.True(rows[1].EnabledByDefault);
+        Assert.False(rows[2].EnabledByDefault || rows[3].EnabledByDefault);
+        Assert.Equal(AutosplitKind.LoadStart, rows[4].Kind);
+        Assert.True(rows[4].Normalise && rows[4].ParamUs == 0);
+        Assert.Equal(AutosplitKind.Pause, rows[5].Kind);
+        Assert.Equal(19_950_000u, rows[5].ParamUs);
     }
 }

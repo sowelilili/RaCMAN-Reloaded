@@ -77,12 +77,31 @@ public sealed partial class FakeQwarkServer
     private bool LuaInstalledNow =>
         NoCodePatches ? _luaPatchInstalled : _luaInstalledGeneration == _session.Generation;
 
-    /// <summary>ToD's 19 planets, the game's LEVEL_ enum.</summary>
+    /// <summary>ToD's 19 planets, the game's LEVEL_ enum, as qwark's PLANET_LIST names them.</summary>
     public static readonly string[] TodPlanets =
     {
-        "Metropolis", "Cobalia", "Stratus City", "Voron Asteroid Belt", "Nefarious Space Station", "Gryphon",
-        "Mukow", "Sargasso", "Ardolis", "Zanifar", "Viceron", "Rykan V", "Jasindu", "Kortog", "Igliak",
-        "Reepor", "Cragmite Battleship", "Meridian City", "Fastoon II",
+        "Metropolis", "Cobalia", "Stratus City", "Fastoon", "Space Combat I", "Imperial Fight Fest",
+        "Apogee Space Station", "Pirate Base", "Space Combat II", "Rykan V", "Sargasso", "Iris",
+        "Zordoom Prison", "Space Combat III", "Kerchu City", "Slag's Fleet", "Cragmite Ruins",
+        "Meridian City", "Fastoon II",
+    };
+
+    /// <summary>
+    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.28, pending): the planet split,
+    /// Tachyon's defeat, the credits and every mission, the level load taken whole off game time
+    /// (NORMALISE with no allowance) and the quit to the XMB at the old script's 19.95 s.
+    /// </summary>
+    public static AutosplitEventDesc[] TodAutosplitDescriptors() => new[]
+    {
+        new AutosplitEventDesc(1, AutosplitKind.Split,
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, 0, "Planet entered"),
+        new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Tachyon defeated"),
+        new AutosplitEventDesc(5, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Credits"),
+        new AutosplitEventDesc(6, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Mission completed"),
+        new AutosplitEventDesc(4, AutosplitKind.LoadStart,
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise, 0, "Level load"),
+        new AutosplitEventDesc(3, AutosplitKind.Pause,
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise, 19_950_000, "Quit to XMB"),
     };
 
     /// <summary>
@@ -113,8 +132,8 @@ public sealed partial class FakeQwarkServer
     /// <summary>
     /// Makes this fake a ToD console: a new boot of NPEA00452 INGAME on Metropolis, ToD's feature
     /// table, unlock categories and planets, Lua, its level flags (one 40-byte region for every
-    /// planet, with names, revision 1.28 pending), and none of the savefile helper, the
-    /// autosplitter, manips or code switches, which ToD does not have in this revision.
+    /// planet, with names, revision 1.28 pending), its autosplitter (revision 1.28 pending), and
+    /// none of the savefile helper, manips or code switches, which ToD does not have.
     /// </summary>
     public void UseTod()
     {
@@ -148,7 +167,8 @@ public sealed partial class FakeQwarkServer
 
             _hasLua = true;
             SaveFileSupported = false;
-            AutosplitSupported = false;
+            AutosplitSupported = true;
+            AutosplitDescriptors = new List<AutosplitEventDesc>(TodAutosplitDescriptors());
             ManipsSupported = false;
             CodeSwitchesSupported = false;
 
