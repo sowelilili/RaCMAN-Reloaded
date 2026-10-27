@@ -1,3 +1,4 @@
+using System.Numerics;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
@@ -181,8 +182,49 @@ public static class CombosPanel
 
     /// <summary>The line under the switch while overrides can be made.</summary>
     public static string OverrideHint(ProfileInfo profile) =>
-        $"Orange rows are {SettingsPanel.PossessiveName(profile)} own combos; the others are shared by every user. "
-        + "Override gives one combo to this user only.";
+        $"{SettingsPanel.UserName(profile)} has one or more overridden combos (orange).";
+
+    /// <summary>
+    /// How wide the buttons cell's buttons are. <see cref="First"/> is the row's first button:
+    /// Capture, Cancel while it captures, or Override on an overridden row, which captures the
+    /// override again; all three are one width, so the button after it starts at the same place on
+    /// every row. <see cref="Rest"/> is what follows it on a row with an Override button (Clear,
+    /// a space, Override), which is the width of an overridden row's Clear Override, so its right
+    /// edge meets the plain rows' Override. <see cref="Column"/> is the cell itself.
+    /// </summary>
+    public readonly record struct ButtonWidths(float First, float Rest, float Column);
+
+    /// <summary>
+    /// The buttons cell's widths, from the labels as the font draws them (<paramref name="measure"/>
+    /// is ImGui.CalcTextSize in the panel and a stand-in in the tests), the style's frame padding,
+    /// which a button adds each side of its label, and its item spacing, which goes between two
+    /// buttons on a line. <paramref name="withOverride"/> is whether any row has a third button
+    /// or a Clear Override; without one the cell is Capture and Clear, and the Combo column keeps
+    /// the rest.
+    /// </summary>
+    public static ButtonWidths ButtonWidthsFor(Func<string, float> measure, float framePadding, float spacing, bool withOverride)
+    {
+        float Button(string label) => measure(label) + (framePadding * 2f);
+
+        float first = MathF.Max(Button("Capture"), MathF.Max(Button("Cancel"), Button("Override")));
+        float clear = Button("Clear");
+        float rest = withOverride
+            ? MathF.Max(clear + spacing + Button("Override"), Button("Clear Override"))
+            : clear;
+        return new ButtonWidths(first, rest, MathF.Ceiling(first + spacing + rest));
+    }
+
+    /// <summary>
+    /// A SmallButton of a set width: the same height and padding as ImGui.SmallButton, which has
+    /// no width of its own to give.
+    /// </summary>
+    private static bool SizedSmallButton(string label, float width)
+    {
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(ImGui.GetStyle().FramePadding.X, 0f));
+        bool pressed = ImGui.Button(label, new Vector2(width, 0f));
+        ImGui.PopStyleVar();
+        return pressed;
+    }
 
     /// <summary>
     /// The row's entry from the last COMBO_LIST, or a plain one with no mask when the console
@@ -346,11 +388,18 @@ public static class CombosPanel
             ImGui.Spacing();
         }
 
+        // The buttons cell is as wide as its buttons, measured afresh every frame so it follows the
+        // font and the style; Combo stretches into whatever the two fixed columns leave.
+        var style = ImGui.GetStyle();
+        bool anyOverridden = state.Combos.Any(entry => IsOverridden(state.Session, entry));
+        var widths = ButtonWidthsFor(text => ImGui.CalcTextSize(text).X, style.FramePadding.X, style.ItemSpacing.X,
+            withOverride: overrides || anyOverridden);
+
         if (!ImGui.BeginTable("combos", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp)) return;
 
         ImGui.TableSetupColumn("Action", ImGuiTableColumnFlags.WidthFixed, 170);
         ImGui.TableSetupColumn("Combo");
-        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 180);
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, widths.Column);
         ImGui.TableHeadersRow();
 
         foreach (var action in Actions)
@@ -405,24 +454,28 @@ public static class CombosPanel
                 Ui.Text(overridden ? Ui.Orange : mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
                 if (overridden && ImGui.IsItemHovered())
                 {
-                    Ui.SetTooltip($"{SettingsPanel.PossessiveName(state.Profile)} own combo. Other users have the shared one.");
+                    Ui.SetTooltip($"Overridden: this combo is only active for {SettingsPanel.UserName(state.Profile)}.");
                 }
             }
 
             ImGui.TableNextColumn();
             if (_capturing == action)
             {
-                if (ImGui.SmallButton("Cancel")) EndCapture(state);
+                if (SizedSmallButton("Cancel", widths.First)) EndCapture(state);
             }
             else
             {
-                // An overridden row's Capture records the override again; a plain row's, the shared combo.
-                if (ImGui.SmallButton("Capture")) BeginCapture(state, action, CaptureIsOverride(state.Session, entry));
-                if (overridden && ImGui.IsItemHovered()) Ui.SetTooltip("Capture this user's own combo again.");
+                // An overridden row's first button records the override again, and says so; a plain
+                // row's Capture records the shared combo. The IDs differ from the plain rows' Override.
+                string capture = overridden ? "Override##recapture" : "Capture";
+                if (SizedSmallButton(capture, widths.First)) BeginCapture(state, action, CaptureIsOverride(state.Session, entry));
             }
 
             ImGui.SameLine();
-            if (ImGui.SmallButton("Clear"))
+            bool clear = overridden
+                ? SizedSmallButton("Clear Override##clear", widths.Rest)
+                : ImGui.SmallButton("Clear");
+            if (clear)
             {
                 var target = action;
                 var request = ClearFor(state.Session, entry);
@@ -436,8 +489,7 @@ public static class CombosPanel
 
             if (overridden && ImGui.IsItemHovered())
             {
-                Ui.SetTooltip("Removes this user's own combo, so the shared one is in force again. "
-                              + "Clear again to clear the shared combo.");
+                Ui.SetTooltip("Clear again to clear the shared combo.");
             }
 
             // Where the Default button was: a capture whose result is this user's own combo.
@@ -447,8 +499,7 @@ public static class CombosPanel
                 if (ImGui.SmallButton("Override")) BeginCapture(state, action, asOverride: true);
                 if (ImGui.IsItemHovered())
                 {
-                    Ui.SetTooltip($"Capture a combo for {SettingsPanel.UserName(state.Profile)} only. "
-                                  + "Other users keep the shared one.");
+                    Ui.SetTooltip($"Capture a combo for {SettingsPanel.UserName(state.Profile)} only.");
                 }
             }
 

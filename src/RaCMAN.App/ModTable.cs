@@ -234,7 +234,7 @@ public static class ModTable
     }
 
     /// <summary>
-    /// What a row's USB copy adds to its status (revision 1.24). The cell is 130 pixels wide, so it
+    /// What a row's USB copy adds to its status (revision 1.24). The cell is narrow, so it
     /// says as little as it can and ModsPanel.UsbTooltip says the rest (versions, port, path, what
     /// the console does): an update is "update ready" (just "update" after another word, and while
     /// the mod is loaded it waits for the next load, which the tooltip says); a copy only the drive

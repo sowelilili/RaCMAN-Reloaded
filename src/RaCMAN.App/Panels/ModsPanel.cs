@@ -157,11 +157,14 @@ public static class ModsPanel
             // between "Incremental RNG" and "Incremental R". The author had a column of its own and
             // it cost the name 90 of those pixels, so it moved to the name's tooltip and to the
             // details below, which have room for it.
+            // The buttons column is as wide as its widest button, and the Console column has the
+            // rest of what the two shared, so its longer texts ("Console only, loaded") fit.
+            float buttons = ConsoleActionsWidth();
             ImGui.TableSetupColumn("Mod");
             ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 60);
-            ImGui.TableSetupColumn("Console", ImGuiTableColumnFlags.WidthFixed, 130);
+            ImGui.TableSetupColumn("Console", ImGuiTableColumnFlags.WidthFixed, ConsoleAndActionsWidth - buttons);
             ImGui.TableSetupColumn("Auto", ImGuiTableColumnFlags.WidthFixed, 40);
-            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, 130);
+            ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, buttons);
             ImGui.TableHeadersRow();
 
             foreach (var row in rows)
@@ -214,6 +217,23 @@ public static class ModsPanel
         if (rpcs3) DrawConfirmation(state);
         DrawUninstallQuestion(state);
         DrawRenameQuestion(state, title);
+    }
+
+    /// <summary>What the console table's Console and buttons columns share between them.</summary>
+    private const float ConsoleAndActionsWidth = 260f;
+
+    /// <summary>
+    /// The console table's buttons column: Load or Unload, one at a time, so the wider of the two,
+    /// and in debug Upload beside it. A SmallButton is its label and the frame padding each side.
+    /// </summary>
+    private static float ConsoleActionsWidth()
+    {
+        var style = ImGui.GetStyle();
+        float Button(string label) => MeasureText(label) + (style.FramePadding.X * 2f);
+
+        float width = MathF.Max(Button("Load"), Button("Unload"));
+        if (Ui.Debug) width += style.ItemSpacing.X + Button("Upload");
+        return MathF.Ceiling(width);
     }
 
     private const string ConsoleOnlyTooltip =

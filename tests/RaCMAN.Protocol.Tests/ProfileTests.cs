@@ -155,7 +155,7 @@ public class ProfileTests
         payload[6] = 0x01;
         payload[7] = 0x02;
         System.Text.Encoding.ASCII.GetBytes("user-00000258").CopyTo(payload, 8);
-        System.Text.Encoding.UTF8.GetBytes("Zoë").CopyTo(payload, 32);
+        System.Text.Encoding.UTF8.GetBytes("ZoÃ«").CopyTo(payload, 32);
 
         var info = ProfileInfo.Parse(payload);
         Assert.True(info.Supported);
@@ -166,7 +166,7 @@ public class ProfileTests
         Assert.Equal(9, info.Seq);
         Assert.Equal(0x102u, info.UserId);
         Assert.Equal("user-00000258", info.Folder);
-        Assert.Equal("Zoë", info.Name);
+        Assert.Equal("ZoÃ«", info.Name);
 
         // A longer reply is a later revision's; its first 64 bytes are these.
         var longer = payload.Concat(new byte[16]).ToArray();
@@ -737,8 +737,36 @@ public class ProfileTests
         Assert.False(CombosPanel.ShowsOverrideButton(active, overridden));
         Assert.False(CombosPanel.ShowsOverrideButton(With(ProfileFlags.On), plain));
 
-        Assert.Equal("Orange rows are User 1's own combos; the others are shared by every user. "
-                     + "Override gives one combo to this user only.", CombosPanel.OverrideHint(User1));
+        Assert.Equal("User 1 has one or more overridden combos (orange).", CombosPanel.OverrideHint(User1));
+    }
+
+    /// <summary>
+    /// The combos table's buttons cell holds Capture, Clear and Override side by side, and an
+    /// overridden row's Override and Clear Override line up with them: the first button is one width
+    /// on every row and Clear Override ends where a plain row's Override does. The stand-in font is
+    /// 7 pixels a character, the default font's width, with the client's style (padding 6, spacing 8).
+    /// </summary>
+    [Fact]
+    public void ComboButtonsFitTheirCell()
+    {
+        static float Measure(string text) => text.Length * 7f;
+
+        var wide = CombosPanel.ButtonWidthsFor(Measure, framePadding: 6f, spacing: 8f, withOverride: true);
+        float capture = Measure("Capture") + 12f;
+        float clear = Measure("Clear") + 12f;
+        float overrideButton = Measure("Override") + 12f;
+
+        // The first button is as wide as the widest of Capture, Cancel and Override.
+        Assert.Equal(overrideButton, wide.First);
+        Assert.True(wide.First >= capture);
+        Assert.Equal(clear + 8f + overrideButton, wide.Rest);
+        Assert.True(wide.Rest >= Measure("Clear Override") + 12f);
+        Assert.Equal(wide.First + 8f + clear + 8f + overrideButton, wide.Column);
+
+        // With no Override anywhere the cell is the first button and Clear, and Combo has the rest.
+        var narrow = CombosPanel.ButtonWidthsFor(Measure, 6f, 8f, withOverride: false);
+        Assert.Equal(wide.First, narrow.First);
+        Assert.Equal(wide.First + 8f + clear, narrow.Column);
     }
 
     /// <summary>
