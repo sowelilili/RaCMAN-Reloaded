@@ -1420,7 +1420,8 @@ public readonly record struct SaveFileInfo(
     uint Size,
     uint Done = 0,
     uint Total = 0,
-    SaveFileError Error = SaveFileError.None)
+    SaveFileError Error = SaveFileError.None,
+    SaveFileReason Reason = SaveFileReason.None)
 {
     /// <summary>Twenty bytes since revision 1.10; the first eight are unchanged.</summary>
     public const int WireSize = 20;
@@ -1467,7 +1468,9 @@ public readonly record struct SaveFileInfo(
         uint done = r.ReadU32();
         uint total = r.ReadU32();
         var error = (SaveFileError)r.ReadU8();
-        return new SaveFileInfo(supported, installed, running, pending, size, done, total, error);
+        // Revision 1.29: the first pad byte says which check `error` came from; 0 from any older module.
+        var reason = (SaveFileReason)r.ReadU8();
+        return new SaveFileInfo(supported, installed, running, pending, size, done, total, error, reason);
     }
 
     public byte[] ToBytes()
@@ -1482,7 +1485,8 @@ public readonly record struct SaveFileInfo(
         w.WriteU32(Done);
         w.WriteU32(Total);
         w.WriteU8((byte)Error);
-        w.WriteZeros(3);
+        w.WriteU8((byte)Reason);
+        w.WriteZeros(2);
         return bytes;
     }
 }

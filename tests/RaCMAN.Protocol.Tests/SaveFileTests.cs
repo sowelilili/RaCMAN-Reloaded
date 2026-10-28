@@ -1104,6 +1104,115 @@ public class SaveFileTests : IDisposable
         }
     }
 
+    // ------------------------------------------- revision 1.29: which check refused it
+
+    [Fact]
+    public void TheReasonIsTheByteAfterTheErrorAndAnOlderModulesPadReadsAsNone()
+    {
+        var info = new SaveFileInfo(true, true, true, 0, 0x906F0, Error: SaveFileError.NotIdle,
+                                    Reason: SaveFileReason.TitleScreen);
+        var bytes = info.ToBytes();
+
+        Assert.Equal(SaveFileInfo.WireSize, bytes.Length);
+        Assert.Equal(6, bytes[16]);
+        Assert.Equal(3, bytes[17]);
+        Assert.Equal(0, bytes[18]);
+        Assert.Equal(0, bytes[19]);
+        Assert.Equal(SaveFileReason.TitleScreen, SaveFileInfo.Parse(bytes).Reason);
+
+        // Build 57 and every module before it sends zero padding there: no reason, the error's own words.
+        bytes[17] = 0;
+        var old = SaveFileInfo.Parse(bytes);
+        Assert.Equal(SaveFileReason.None, old.Reason);
+        Assert.Equal(SaveFileError.NotIdle.Describe(SaveFileRequest.Restore),
+            old.Error.Describe(SaveFileRequest.Restore, old.Reason));
+    }
+
+    [Fact]
+    public void EachReasonSaysWhatTheConsoleSaidInPlainWords()
+    {
+        Assert.Equal(1, (byte)SaveFileReason.NotInGameplay);
+        Assert.Equal(2, (byte)SaveFileReason.PlanetLoad);
+        Assert.Equal(3, (byte)SaveFileReason.TitleScreen);
+        Assert.Equal(4, (byte)SaveFileReason.GameSaving);
+        Assert.Equal(5, (byte)SaveFileReason.NoSaveSystem);
+        Assert.Equal(6, (byte)SaveFileReason.LoadNotTaken);
+        Assert.Equal(7, (byte)SaveFileReason.NotASave);
+        Assert.Equal(8, (byte)SaveFileReason.NoSlotYet);
+        Assert.Equal(9, (byte)SaveFileReason.HoldLost);
+
+        var expected = new (SaveFileReason Reason, string Words)[]
+        {
+            (SaveFileReason.NotInGameplay, "isn't in gameplay yet"),
+            (SaveFileReason.PlanetLoad, "a planet load is already under way"),
+            (SaveFileReason.TitleScreen, "still on its title screen"),
+            (SaveFileReason.GameSaving, "busy saving or loading on its own"),
+            (SaveFileReason.NoSaveSystem, "save system isn't up yet"),
+            (SaveFileReason.LoadNotTaken, "didn't take it within five seconds"),
+            (SaveFileReason.NotASave, "that file isn't a save of this game"),
+            (SaveFileReason.NoSlotYet, "hasn't saved or loaded a save since it started"),
+            (SaveFileReason.HoldLost, "started a save or load of its own"),
+        };
+        foreach (var (reason, words) in expected)
+        {
+            var error = reason is SaveFileReason.NotASave or SaveFileReason.NoSlotYet ? SaveFileError.NoSave : SaveFileError.NotIdle;
+            string text = error.Describe(SaveFileRequest.Restore, reason);
+            Assert.StartsWith("your console ", text, StringComparison.Ordinal);
+            Assert.Contains(words, text, StringComparison.Ordinal);
+
+            // Nothing about the original games' moments (space, multiplayer) where the console named the check.
+            Assert.DoesNotContain("multiplayer", text, StringComparison.Ordinal);
+        }
+
+        Assert.Contains("nothing was taken", SaveFileReason.NotASave.Describe(SaveFileRequest.Store));
+        Assert.Contains("can't take a save", SaveFileReason.TitleScreen.Describe(SaveFileRequest.Store));
+        Assert.Null(SaveFileReason.None.Describe(SaveFileRequest.Load));
+        Assert.Null(((SaveFileReason)200).Describe(SaveFileRequest.Load));
+        Assert.Equal(SaveFileError.NotIdle.Describe(SaveFileRequest.Load),
+            SaveFileError.NotIdle.Describe(SaveFileRequest.Load, (SaveFileReason)200));
+    }
+
+    [Fact]
+    public async Task ARestoreTheConsoleRefusesSaysWhichCheckRefusedIt()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var library = new SaveFileLibrary(_root);
+            await client.SaveFileCategoryAsync(SaveFileCategoryOp.Create, "any%");
+            await SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true);
+            var entry = Assert.Single(SaveFileMerge.Build(
+                await client.SaveFileListAsync("any%"), library.FilesWithCrc(Title, "any%")));
+
+            // Tools of Destruction's console, on the title screen.
+            server.SaveFileOwnSystem = true;
+            server.SaveFileRefusal = SaveFileError.NotIdle;
+            server.SaveFileRefusalReason = SaveFileReason.TitleScreen;
+            var refused = await Assert.ThrowsAsync<SaveFileTransfer.RefusedException>(
+                () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.Equal(SaveFileError.NotIdle, refused.Error);
+            Assert.Equal(SaveFileReason.TitleScreen, refused.Reason);
+            Assert.StartsWith("your console says the game is still on its title screen", refused.Message,
+                StringComparison.Ordinal);
+            Assert.Null(server.LoadedSaveFile);
+
+            // In gameplay the same load goes through.
+            server.SaveFileRefusal = SaveFileError.None;
+            server.SaveFileRefusalReason = SaveFileReason.None;
+            Assert.False(await SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.NotNull(server.LoadedSaveFile);
+
+            // A file that is no save of the game stops after the copy, and says so.
+            server.SaveFileTransferError = SaveFileError.NoSave;
+            server.SaveFileRefusalReason = SaveFileReason.NotASave;
+            var stopped = await Assert.ThrowsAsync<SaveFileTransfer.TransferFailedException>(
+                () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
+            Assert.Equal(SaveFileReason.NotASave, stopped.Reason);
+            Assert.Equal("your console says that file isn't a save of this game, so nothing was loaded", stopped.Message);
+        }
+    }
+
     [Fact]
     public async Task ARestoreWithNoUiPakOnTheConsoleIsRefusedAndWorksOnceItIsSent()
     {

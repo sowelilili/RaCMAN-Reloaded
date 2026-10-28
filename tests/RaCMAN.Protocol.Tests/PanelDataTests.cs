@@ -2273,6 +2273,23 @@ public class SaveFileRefusalToastTests
     }
 
     [Fact]
+    public void ARefusalTheConsoleNamedSaysTheReasonInYourConsoleWords()
+    {
+        // Revision 1.29: Tools of Destruction's console says which check it was.
+        var refused = new SaveFileTransfer.RefusedException(SaveFileError.NotIdle, SaveFileRequest.Restore,
+            new QwarkStatusException(Opcode.SaveFileRestore, Status.Busy), SaveFileReason.NotInGameplay);
+        Assert.Equal(
+            "The load was refused: your console says the game isn't in gameplay yet (a menu, a cutscene or a "
+            + "loading screen), so it can't load a save. Try again once you're playing",
+            SaveFilesPanel.FailureToast(load: true, refused));
+
+        var noSlot = new SaveFileTransfer.RefusedException(SaveFileError.NoSave, SaveFileRequest.Store,
+            new QwarkStatusException(Opcode.SaveFileStore, Status.Busy), SaveFileReason.NoSlotYet);
+        Assert.StartsWith("Set aside file was refused: your console says the game hasn't saved or loaded a save",
+            GamePanel.AsideRefusedToast("Set aside file", noSlot.Message), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void ACopyThatStoppedStillSaysItDidNotFinish()
     {
         Assert.Equal(

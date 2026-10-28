@@ -1868,6 +1868,13 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// </summary>
     public SaveFileError SaveFileRefusal { get; set; } = SaveFileError.None;
 
+    /// <summary>
+    /// Revision 1.29: the <c>why</c> SAVEFILE_INFO carries beside a refusal or a forced transfer
+    /// error (<see cref="SaveFileRefusal"/>, <see cref="SaveFileTransferError"/>), as a game whose
+    /// save system the console drives (Tools of Destruction) answers. None, every other game's.
+    /// </summary>
+    public SaveFileReason SaveFileRefusalReason { get; set; } = SaveFileReason.None;
+
     /// <summary>Every STORE and RESTORE the console was asked for, in order.</summary>
     public List<string> SaveFileLibraryOrder { get; } = new();
 
@@ -1879,6 +1886,7 @@ public sealed partial class FakeQwarkServer : IDisposable
     private uint _transferDone;
     private uint _transferTotal;
     private SaveFileError _transferError;
+    private SaveFileReason _transferReason;
     private Action? _transferEffect;
 
     private bool TransferRunning => _transferPolls > 0 || _setAsidePendingForTransfer;
@@ -1909,6 +1917,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         if (SaveFileTransferError != SaveFileError.None)
         {
             _transferError = SaveFileTransferError;
+            _transferReason = SaveFileRefusalReason;
             SaveFileTransferError = SaveFileError.None;
             return;
         }
@@ -1925,6 +1934,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         _transferDone = 0;
         _transferTotal = total;
         _transferError = SaveFileError.None;
+        _transferReason = SaveFileReason.None;
         _transferEffect = effect;
         _setAsidePendingForTransfer = waitForSetAside;
         if (waitForSetAside) _setAsidePending = Math.Max(1, SaveFilePendingPolls);
@@ -2553,6 +2563,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                     {
                         // Builds 43 and 53: the game is asked first, and a refusal raises nothing.
                         _transferError = SaveFileRefusal;
+                        _transferReason = SaveFileRefusalReason;
                         return (Status.Busy, null);
                     }
 
@@ -3268,7 +3279,7 @@ public sealed partial class FakeQwarkServer : IDisposable
 
                     var info = new SaveFileInfo(true, installed, installed && SaveFileRunning, pending,
                                                 (uint)SaveFileBuffer.Length,
-                                                _transferDone, _transferTotal, _transferError);
+                                                _transferDone, _transferTotal, _transferError, _transferReason);
                     return (Status.Ok, info.ToBytes());
                 }
 
@@ -3389,6 +3400,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                     if (TransferRunning || _loadPending > 0 || _setAsidePending > 0)
                     {
                         _transferError = SaveFileError.BufferBusy;
+                        _transferReason = SaveFileReason.None;
                         return (Status.Busy, null);
                     }
 
@@ -3399,6 +3411,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                         || (SaveFileRefusal == SaveFileError.NoSave && opcode == Opcode.SaveFileStore))
                     {
                         _transferError = SaveFileRefusal;
+                        _transferReason = SaveFileRefusalReason;
                         return (Status.Busy, null);
                     }
 
@@ -3426,12 +3439,14 @@ public sealed partial class FakeQwarkServer : IDisposable
                     if (!Files.TryGetValue(path, out var content))
                     {
                         _transferError = SaveFileError.FileMissing;
+                        _transferReason = SaveFileReason.None;
                         return (Status.NotFound, null);
                     }
 
                     if (content.Length != SaveFileBuffer.Length)
                     {
                         _transferError = SaveFileError.ShortFile;
+                        _transferReason = SaveFileReason.None;
                         return (Status.BadArg, null);
                     }
 

@@ -468,6 +468,44 @@ public enum SaveFileError : byte
 }
 
 /// <summary>
+/// SAVEFILE_INFO's <c>why</c> (revision 1.29, pending, section 5.12): which of the game's own checks
+/// the <see cref="SaveFileError"/> beside it came from. Only a game whose save system the console
+/// drives itself sets it, Tools of Destruction today; every other game, and every module before it,
+/// answers <see cref="None"/>, which says nothing more than the error does.
+/// </summary>
+public enum SaveFileReason : byte
+{
+    None = 0,
+
+    /// <summary>Error 6: the game is not in gameplay (another game state, or no level up).</summary>
+    NotInGameplay = 1,
+
+    /// <summary>Error 6: a planet load is queued or under way.</summary>
+    PlanetLoad = 2,
+
+    /// <summary>Error 6: the game is on its title screen.</summary>
+    TitleScreen = 3,
+
+    /// <summary>Error 6: the game's own save system is saving, loading or deleting, or an autosave is about to start.</summary>
+    GameSaving = 4,
+
+    /// <summary>Error 6: the game's save system is not up, or not the one the console knows.</summary>
+    NoSaveSystem = 5,
+
+    /// <summary>Error 6: the console raised the load, and the game did not take it within its wait.</summary>
+    LoadNotTaken = 6,
+
+    /// <summary>Error 7: the file, or what is set aside, is not a save of this game.</summary>
+    NotASave = 7,
+
+    /// <summary>Error 7: the game has not saved into a slot or loaded one since it started.</summary>
+    NoSlotYet = 8,
+
+    /// <summary>Error 6: a save or load of the game's own started while the console was copying.</summary>
+    HoldLost = 9,
+}
+
+/// <summary>
 /// Which of the savefile helper's requests an error came back from. Most errors mean the same thing
 /// for all three; "no save" (<see cref="SaveFileError.NoSave"/>) does not.
 /// </summary>
@@ -517,6 +555,51 @@ public static class SaveFileErrorExtensions
             + "Send it from the Connection panel, then try again",
         _ => $"error {(byte)error}",
     };
+
+    /// <summary>
+    /// The same, with SAVEFILE_INFO's <c>why</c> (revision 1.29): what the console said, in words,
+    /// when it said which check it was, and the error's own words
+    /// when it did not.
+    /// </summary>
+    public static string Describe(this SaveFileError error, SaveFileRequest request, SaveFileReason reason) =>
+        reason.Describe(request) ?? error.Describe(request);
+
+    /// <summary>
+    /// A reason in plain words, "your console says ...", or null for <see cref="SaveFileReason.None"/>
+    /// and a value this client does not know. <paramref name="request"/> is what was asked for.
+    /// </summary>
+    public static string? Describe(this SaveFileReason reason, SaveFileRequest request = SaveFileRequest.Store)
+    {
+        string act = request == SaveFileRequest.Store ? "take a save" : "load a save";
+        return reason switch
+        {
+            SaveFileReason.NotInGameplay =>
+                $"your console says the game isn't in gameplay yet (a menu, a cutscene or a loading screen), so it can't {act}. "
+                + "Try again once you're playing",
+            SaveFileReason.PlanetLoad =>
+                "your console says a planet load is already under way. Try again once it has finished",
+            SaveFileReason.TitleScreen =>
+                $"your console says the game is still on its title screen, so it can't {act}. "
+                + "Continue or start a game first, then try again",
+            SaveFileReason.GameSaving =>
+                "your console says the game is busy saving or loading on its own (an autosave, or its save menu). "
+                + "Try again in a moment",
+            SaveFileReason.NoSaveSystem =>
+                "your console says the game's save system isn't up yet. Try again once the game is in play",
+            SaveFileReason.LoadNotTaken =>
+                "your console asked the game to load, but the game didn't take it within five seconds, so nothing "
+                + "was loaded. Your console's qwark.log has the details",
+            SaveFileReason.NotASave => request == SaveFileRequest.Store
+                ? "your console says what the game holds isn't a save of this game, so nothing was taken"
+                : "your console says that file isn't a save of this game, so nothing was loaded",
+            SaveFileReason.NoSlotYet =>
+                "your console says the game hasn't saved or loaded a save since it started, so there's no save to take "
+                + "yet. Save from the game's menu or reach a checkpoint first (or load a file, which you can then save)",
+            SaveFileReason.HoldLost =>
+                "your console stopped copying because the game started a save or load of its own. Try again in a moment",
+            _ => null,
+        };
+    }
 
     /// <summary>
     /// The errors a BUSY answer to a set-aside, a load, a STORE or a RESTORE carries: why the

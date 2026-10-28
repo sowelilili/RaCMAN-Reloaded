@@ -693,14 +693,19 @@ public static class SaveFileTransfer
     /// </summary>
     public sealed class TransferFailedException : Exception
     {
-        public TransferFailedException(SaveFileError error, SaveFileRequest request = SaveFileRequest.Store)
-            : base(error.Describe(request))
+        public TransferFailedException(SaveFileError error, SaveFileRequest request = SaveFileRequest.Store,
+            SaveFileReason reason = SaveFileReason.None)
+            : base(error.Describe(request, reason))
         {
             Error = error;
             Request = request;
+            Reason = reason;
         }
 
         public SaveFileError Error { get; }
+
+        /// <summary>Which of the game's checks it was (revision 1.29), or None when the console did not say.</summary>
+        public SaveFileReason Reason { get; }
 
         public SaveFileRequest Request { get; }
     }
@@ -713,15 +718,20 @@ public static class SaveFileTransfer
     /// </summary>
     public sealed class RefusedException : Exception
     {
-        public RefusedException(SaveFileError error, SaveFileRequest request, QwarkStatusException status)
-            : base(error.Describe(request), status)
+        public RefusedException(SaveFileError error, SaveFileRequest request, QwarkStatusException status,
+            SaveFileReason reason = SaveFileReason.None)
+            : base(error.Describe(request, reason), status)
         {
             Error = error;
             Request = request;
             Status = status;
+            Reason = reason;
         }
 
         public SaveFileError Error { get; }
+
+        /// <summary>Which of the game's checks refused it (revision 1.29), or None when the console did not say.</summary>
+        public SaveFileReason Reason { get; }
 
         public SaveFileRequest Request { get; }
 
@@ -747,9 +757,9 @@ public static class SaveFileTransfer
         }
         catch (QwarkStatusException busy) when (busy.Status == Status.Busy)
         {
-            if (await RefusalAsync(client, cancellationToken).ConfigureAwait(false) is { } reason)
+            if (await RefusalAsync(client, cancellationToken).ConfigureAwait(false) is { } refusal)
             {
-                throw new RefusedException(reason, request, busy);
+                throw new RefusedException(refusal.Error, request, busy, refusal.Reason);
             }
 
             throw;
@@ -764,13 +774,17 @@ public static class SaveFileTransfer
         CancellationToken cancellationToken = default) =>
         RaiseAsync(client, request, token => client.FeatureTriggerAsync(actionId, token), cancellationToken);
 
-    /// <summary>SAVEFILE_INFO's error when it is a refusal's reason, or null when it is not, or the console will not say.</summary>
-    private static async Task<SaveFileError?> RefusalAsync(QwarkClient client, CancellationToken cancellationToken)
+    /// <summary>
+    /// SAVEFILE_INFO's error, with its <c>why</c> (revision 1.29), when it is a refusal's reason, or
+    /// null when it is not, or the console will not say.
+    /// </summary>
+    private static async Task<(SaveFileError Error, SaveFileReason Reason)?> RefusalAsync(
+        QwarkClient client, CancellationToken cancellationToken)
     {
         try
         {
             var info = await client.SaveFileInfoAsync(cancellationToken).ConfigureAwait(false);
-            return info.Error.IsRefusal() ? info.Error : null;
+            return info.Error.IsRefusal() ? (info.Error, info.Reason) : null;
         }
         catch (QwarkStatusException)
         {
@@ -806,7 +820,7 @@ public static class SaveFileTransfer
             {
                 // A STORE whose set-aside the helper dropped, or a RESTORE whose file turned out not
                 // to be a save, ends here too, with the same 6 or 7 a refusal carries.
-                if (info.Error != SaveFileError.None) throw new TransferFailedException(info.Error, request);
+                if (info.Error != SaveFileError.None) throw new TransferFailedException(info.Error, request, info.Reason);
                 return info;
             }
 
