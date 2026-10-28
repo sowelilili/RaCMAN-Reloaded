@@ -2601,9 +2601,9 @@ public class AutosplitterTests
     }
 
     /// <summary>
-    /// The final split, the fade to black after Tachyon's last hit, is on by default (revision
-    /// 1.29); Tachyon's last hit itself, the ending FMV, the credits and the missions wait to be
-    /// ticked.
+    /// The final split, "Tachyon defeated", code 7, the fade to black after Tachyon's last hit, is
+    /// on by default (revision 1.29); the credits and the missions wait to be ticked. Codes 2 and 8
+    /// are retired and have no row.
     /// </summary>
     [Fact]
     public async Task ToDsFadeToBlackSplitsAndTheRestWaitToBeTicked()
@@ -2613,23 +2613,49 @@ public class AutosplitterTests
 
         h.Engine.Handle(Split(5, 18));
         h.Engine.Handle(Split(6, (18u << 16) | 640, seq: 2));
-        h.Engine.Handle(new AutosplitEvent(3, 5_000, AutosplitKind.Split, 2, 0));
-        h.Engine.Handle(new AutosplitEvent(4, 40_000, AutosplitKind.Split, 8, 0));
         await Task.Delay(200);
         Assert.Empty(h.Server.Actions);
+        Assert.DoesNotContain(h.Engine.Descriptors, d => d.Code == 2 || d.Code == 8);
 
         h.Engine.Handle(new AutosplitEvent(5, 7_450, AutosplitKind.Split, 7, 0));
         Assert.True(await h.Sent(LiveSplitClient.Split));
-        Assert.StartsWith("Final fade to black", h.Engine.Log()[^1].Event);
+        Assert.StartsWith("Tachyon defeated", h.Engine.Log()[^1].Event);
+    }
+
+    /// <summary>
+    /// Saved choices are keyed by label, and revision 1.29 gave ToD's code 7 the label "Tachyon
+    /// defeated", the retired code 2's. A choice made for the old code 2 now holds for code 7; a
+    /// file with a choice only for "Final fade to black", code 7's old label, keeps it under the new
+    /// one; and the retired labels stay in the file, unused, breaking nothing.
+    /// </summary>
+    [Fact]
+    public void ToDsRenamedFinalSplitKeepsTheSavedChoices()
+    {
+        var code7 = FakeQwarkServer.TodAutosplitDescriptors().Single(d => d.Code == 7);
+
+        var ticked = new AutosplitGameSettings { Events = { ["Tachyon defeated"] = true, ["Final fade to black"] = false, ["Ending FMV"] = true } };
+        ticked.Migrate();
+        Assert.True(ticked.EventEnabled(code7.Label, code7.EnabledByDefault));
+        Assert.True(ticked.Events.ContainsKey("Ending FMV") && ticked.Events.ContainsKey("Final fade to black"));
+
+        var faded = new AutosplitGameSettings { Events = { ["final fade to black"] = false } };
+        faded.Migrate();
+        faded.Migrate();
+        Assert.False(faded.EventEnabled(code7.Label, code7.EnabledByDefault));
+
+        var fresh = new AutosplitGameSettings { Events = { ["Ending FMV"] = false } };
+        fresh.Migrate();
+        Assert.True(fresh.EventEnabled(code7.Label, code7.EnabledByDefault));
+        Assert.Single(fresh.Events);
     }
 
     /// <summary>
     /// ToD's new run (revision 1.29): the RESET as the load begins, the long load held in between,
-    /// and the START seconds later at control. The client takes each as it comes: the timer is
-    /// reset at once and starts only at the START, which is the run's first frame.
+    /// and the START seconds later, as Metropolis's fade in from black starts. The client takes each
+    /// as it comes: the timer is reset at once and starts only at the START, the run's first frame.
     /// </summary>
     [Fact]
-    public async Task ToDsResetComesAtTheLoadAndItsStartAtControl()
+    public async Task ToDsResetComesAtTheLoadAndItsStartAtTheFadeIn()
     {
         using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia" }, FakeQwarkServer.TodAutosplitDescriptors());
         await h.ReadyAsync();

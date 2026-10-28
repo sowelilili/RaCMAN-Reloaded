@@ -851,6 +851,26 @@ public sealed class AutosplitGameSettings
         if (NeverReset is true) Reset = false;
         NeverReset = null;
         NamesAreDestination = null;
+
+        // Tools of Destruction, qwark revision 1.29: code 7, "Final fade to black", took the label
+        // "Tachyon defeated" of the retired code 2. A choice saved under the old label is code 7's
+        // own, so it carries over unless the file has one for "Tachyon defeated" already, which
+        // then wins. Both old labels stay in the file, as every label this build does not know.
+        if (TryGetEvent("Final fade to black", out bool fade) && !TryGetEvent("Tachyon defeated", out _))
+            Events["Tachyon defeated"] = fade;
+    }
+
+    private bool TryGetEvent(string label, out bool value)
+    {
+        foreach (var (key, v) in Events)
+        {
+            if (!string.Equals(key, label, StringComparison.OrdinalIgnoreCase)) continue;
+            value = v;
+            return true;
+        }
+
+        value = false;
+        return false;
     }
 
     /// <summary>Whether this event is on, falling back to the console's own default for the label.</summary>
