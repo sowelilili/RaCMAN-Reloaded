@@ -99,11 +99,14 @@ public sealed record AutosplitEventDesc(
     /// <summary>Whatever this row's pair lasts beyond <see cref="ParamUs"/> comes off game time.</summary>
     public bool Normalise => (Flags & AutosplitEventFlags.Normalise) != 0;
 
+    /// <summary>Revision 1.29: game time stands still while this row's load pair is open.</summary>
+    public bool Hold => (Flags & AutosplitEventFlags.Hold) != 0;
+
     /// <summary>True for a row the panel shows as a checkbox; a timing row is never an option.</summary>
     public bool IsSplitOption => Kind == AutosplitKind.Split;
 
-    /// <summary>True when this row corrects game time at all, by either of the two rules.</summary>
-    public bool IsTiming => Flat || Normalise;
+    /// <summary>True when this row corrects game time at all, by any of the three rules.</summary>
+    public bool IsTiming => Flat || Normalise || Hold;
 
     public static AutosplitEventDesc Parse(ReadOnlySpan<byte> entry)
     {

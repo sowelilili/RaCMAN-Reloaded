@@ -155,4 +155,64 @@ public class LevelFlagsCheckAllTests
         Assert.DoesNotContain(state.Toasts, t => t.Text == LevelFlagsPanel.CheckAllToast(Planet));
         Assert.All(server.LevelFlags[Planet], b => Assert.Equal(LevelFlagsPanel.AllBits, b));
     }
+
+    // ------------------------------------- a named group's "Check all" (ToD)
+
+    /// <summary>
+    /// Tools of Destruction's named list: "Check all" beside a planet group's Reset sets every flag
+    /// of that group, one LEVELFLAGS_BIT each so the console reads and writes the byte on its tick,
+    /// and nothing of any other group, not even a bit that shares a byte with one of them.
+    /// </summary>
+    [Fact]
+    public async Task AGroupsCheckAllSetsEveryFlagOfThatPlanetAndNoOther()
+    {
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Start();
+        var client = new QwarkClient { AutoReconnect = false };
+        await client.ConnectAsync("127.0.0.1", server.Port);
+        using (client)
+        {
+            var names = await client.LevelFlagNamesAsync();
+            var cobalia = LevelFlagsPanel.GroupsInOrder(names).Single(g => g.Index == 1);
+            var others = names.Flags.Where(f => f.Group != 1).ToArray();
+            var before = await client.LevelFlagsGetAsync(0);
+            Assert.Contains(cobalia.Flags, f => !f.IsSetIn(before));
+
+            server.ClearRequestLog();
+            await LevelFlagsPanel.CheckGroupAsync(client, 0, cobalia.Flags);
+
+            Assert.Equal(cobalia.Flags.Count, server.RequestLog().Count(o => o == Opcode.LevelFlagsBit));
+            Assert.Equal(0, SetCount(server));
+            Assert.DoesNotContain(Opcode.LevelFlagsReset, server.RequestLog());
+
+            var after = await client.LevelFlagsGetAsync(0);
+            Assert.All(cobalia.Flags, f => Assert.True(f.IsSetIn(after), f.Name));
+            Assert.All(others, f => Assert.Equal(f.IsSetIn(before), f.IsSetIn(after)));
+        }
+    }
+
+    [Fact]
+    public async Task AGroupsCheckAllToastsOnceWithTheGroupsNameAndReReads()
+    {
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        var names = await state.Client.LevelFlagNamesAsync();
+        var metropolis = LevelFlagsPanel.GroupsInOrder(names).Single(g => g.Index == 0);
+        string done = LevelFlagsPanel.CheckGroupToast(names.GroupName(0));
+        Assert.Equal("Level flags all set on Metropolis", done);
+
+        int rereads = 0;
+        LevelFlagsPanel.RunCheckGroup(state, 0, metropolis.Flags, names.GroupName(0), () => rereads++);
+
+        Assert.True(await PumpAsync(state, () => rereads == 1 && state.Toasts.Any(t => t.Text == done)));
+        Assert.Equal(ToastKind.Success, Assert.Single(state.Toasts, t => t.Text == done).Kind);
+        Assert.DoesNotContain(state.Toasts, t => t.Kind == ToastKind.Error);
+
+        var region = await state.Client.LevelFlagsGetAsync(0);
+        Assert.All(metropolis.Flags, f => Assert.True(f.IsSetIn(region), f.Name));
+    }
 }

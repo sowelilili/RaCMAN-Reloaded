@@ -87,9 +87,10 @@ public sealed partial class FakeQwarkServer
     };
 
     /// <summary>
-    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.28): the planet split,
-    /// Tachyon's defeat, the credits and every mission, the level load taken whole off game time
-    /// (NORMALISE with no allowance) and the quit to the XMB at the old script's 19.95 s.
+    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.29): the planet split,
+    /// Tachyon's defeat, the credits and every mission, the old ToD autosplitter's long load held
+    /// (HOLD: game time stands still while it lasts) and the quit to the XMB at the old script's
+    /// 19.95 s.
     /// </summary>
     public static AutosplitEventDesc[] TodAutosplitDescriptors() => new[]
     {
@@ -99,7 +100,7 @@ public sealed partial class FakeQwarkServer
         new AutosplitEventDesc(5, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Credits"),
         new AutosplitEventDesc(6, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Mission completed"),
         new AutosplitEventDesc(4, AutosplitKind.LoadStart,
-            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise, 0, "Level load"),
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Hold, 0, "Long load"),
         new AutosplitEventDesc(3, AutosplitKind.Pause,
             AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise, 19_950_000, "Quit to XMB"),
     };

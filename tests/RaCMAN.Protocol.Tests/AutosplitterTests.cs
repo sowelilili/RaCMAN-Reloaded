@@ -1169,6 +1169,118 @@ public class AutosplitterTests
         Assert.Contains("then unpausegametime", h.Engine.Log()[^1].Action);
     }
 
+    // ------------------------------------------------- held loads, revision 1.29
+
+    /// <summary>Tools of Destruction's long load: game time stands still while it lasts.</summary>
+    private static readonly AutosplitEventDesc HeldLoad = new(
+        4, AutosplitKind.LoadStart, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Hold, 0, "Long load");
+
+    /// <summary>ToD's quit to the XMB: game time stops and 19.95 s goes on at the resume.</summary>
+    private static readonly AutosplitEventDesc TodQuit = new(
+        3, AutosplitKind.Pause, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise,
+        19_950_000, "Quit to XMB");
+
+    /// <summary>A ToD run on the fake timer, real time and game time together.</summary>
+    private static async Task<Harness> RunningTodAsync(double seconds)
+    {
+        var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia" }, PlanetEntered, HeldLoad, TodQuit);
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await h.Sent(LiveSplitClient.InitialiseGameTime));
+        Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
+
+        h.Server.RealTime = TimeSpan.FromSeconds(seconds);
+        h.Server.GameTime = TimeSpan.FromSeconds(seconds);
+        h.Server.ClearCommands();
+        return h;
+    }
+
+    /// <summary>
+    /// The old ToD autosplitter paused game time for a long load and unpaused it after, so the run
+    /// is charged nothing for the load and nothing else changes: no amount is ever added or taken
+    /// off, and nothing is read.
+    /// </summary>
+    [Fact]
+    public async Task AHeldLoadStopsGameTimeForExactlyAsLongAsItLasts()
+    {
+        using var h = await RunningTodAsync(600);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.LoadStart, HeldLoad.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        Assert.Equal(new[] { LiveSplitClient.InitialiseGameTime, LiveSplitClient.PauseGameTime }, h.Server.Actions);
+        Assert.True(h.Server.GameTimePaused);
+
+        // Seven seconds of long load screens: real time keeps them, game time must not.
+        h.Server.RealTime = TimeSpan.FromSeconds(607);
+        h.Engine.Handle(new AutosplitEvent(3, 8_000, AutosplitKind.LoadEnd, HeldLoad.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+
+        Assert.False(h.Server.GameTimePaused);
+        Assert.Equal(TimeSpan.FromSeconds(600), h.Server.GameTime!.Value);
+        Assert.Empty(h.Server.GameTimesSet);
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
+        Assert.DoesNotContain(LiveSplitClient.GetCurrentGameTime, h.Server.Commands);
+        Assert.DoesNotContain(LiveSplitClient.Pause, h.Server.Actions);
+        Assert.Equal("Running", h.Server.Phase);
+        Assert.Null(h.Server.Fault);
+        Assert.Contains(LiveSplitClient.UnpauseGameTime, h.Engine.Log()[^1].Action);
+    }
+
+    /// <summary>
+    /// The hold is timing, not the quit's: a category that switches pausing off for the quit still
+    /// has its long loads held, as the old splitter always did.
+    /// </summary>
+    [Fact]
+    public async Task AHeldLoadIgnoresThePauseSwitch()
+    {
+        using var h = await RunningTodAsync(600);
+        h.Options.Pause = false;
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.LoadStart, HeldLoad.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        h.Engine.Handle(new AutosplitEvent(3, 2_000, AutosplitKind.LoadEnd, HeldLoad.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        Assert.False(h.Server.GameTimePaused);
+    }
+
+    /// <summary>
+    /// The console sends a quit's RESUME and then, on the same tick, the long load the game is
+    /// already in. The resume reads the clock before it unpauses; the hold must land after that
+    /// unpause, or the resume would set game time running again under a load that is still on.
+    /// </summary>
+    [Fact]
+    public async Task AHoldRightAfterAResumeStaysHeld()
+    {
+        using var h = await RunningTodAsync(600);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.Pause, TodQuit.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        h.Server.RealTime = TimeSpan.FromSeconds(640);
+        h.Engine.Handle(new AutosplitEvent(3, 41_000, AutosplitKind.Resume, TodQuit.Code, 0));
+        h.Engine.Handle(new AutosplitEvent(4, 41_000, AutosplitKind.LoadStart, HeldLoad.Code, 0));
+
+        Assert.True(await WaitFor(() => h.Server.Actions.Count(a => a == LiveSplitClient.PauseGameTime) == 2));
+        var actions = h.Server.Actions;
+        int unpause = Array.IndexOf(actions, LiveSplitClient.UnpauseGameTime);
+        int held = Array.LastIndexOf(actions, LiveSplitClient.PauseGameTime);
+        Assert.True(unpause >= 0 && unpause < held, $"the hold has to follow the resume, got {string.Join(", ", actions)}");
+        Assert.True(h.Server.GameTimePaused);
+        Assert.Equal(TimeSpan.FromSeconds(619.95), h.Server.GameTime!.Value);
+    }
+
+    /// <summary>A load end whose start this client never saw still lets game time run.</summary>
+    [Fact]
+    public async Task AHeldLoadsEndAloneStillUnpauses()
+    {
+        using var h = await RunningTodAsync(600);
+
+        h.Engine.Handle(new AutosplitEvent(2, 1_000, AutosplitKind.LoadEnd, HeldLoad.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        Assert.Contains("not seen", h.Engine.Log()[^1].Action);
+    }
+
     /// <summary>
     /// The point of the whole thing: a long quit costs the run exactly what a short one does. The
     /// old script never measured the quit, and neither does this.
@@ -2416,25 +2528,27 @@ public class AutosplitterTests
         FakeQwarkServer.TodAutosplitDescriptors().Single(d => d.Code == code);
 
     /// <summary>
-    /// ToD's level load is NORMALISE with no allowance (revision 1.28): the whole of it
-    /// comes off game time, a reload of the same planet like any other load.
+    /// ToD's long load is a HOLD (revision 1.29): game time stands still from its LOAD_START to its
+    /// LOAD_END, as the old ToD autosplitter paused it, and nothing is taken off afterwards.
     /// </summary>
     [Fact]
-    public async Task ToDsLevelLoadComesOffGameTimeWhole()
+    public async Task ToDsLongLoadHoldsGameTimeAndTakesNothingOff()
     {
         using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia" }, FakeQwarkServer.TodAutosplitDescriptors());
         await h.ReadyAsync();
         var load = TodRow(4);
+        Assert.True(load.Hold && load.IsTiming);
+        Assert.Equal("Long load", load.Label);
 
-        h.Engine.Handle(new AutosplitEvent(1, 10_000, AutosplitKind.LoadStart, load.Code, 1));
-        h.Engine.Handle(new AutosplitEvent(2, 13_500, AutosplitKind.LoadEnd, load.Code, 1));
-        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 1));
-        Assert.Equal(new[] { 3.5 }, h.Server.LoadingTimeSeconds);
+        h.Engine.Handle(new AutosplitEvent(1, 10_000, AutosplitKind.LoadStart, load.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));
+        Assert.True(h.Server.GameTimePaused);
+        h.Engine.Handle(new AutosplitEvent(2, 13_500, AutosplitKind.LoadEnd, load.Code, 0));
+        Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
+        Assert.False(h.Server.GameTimePaused);
 
-        h.Engine.Handle(new AutosplitEvent(3, 20_000, AutosplitKind.LoadStart, load.Code, 1));
-        h.Engine.Handle(new AutosplitEvent(4, 20_250, AutosplitKind.LoadEnd, load.Code, 1));
-        Assert.True(await WaitFor(() => h.Server.LoadingTimes.Count == 2));
-        Assert.Equal(new[] { 3.5, 0.25 }, h.Server.LoadingTimeSeconds);
+        // Only the zero that gives the run a game time to stop; never the load's length.
+        Assert.Equal(new[] { 0.0 }, h.Server.LoadingTimeSeconds);
         Assert.Empty(h.Server.Actions.Where(a => a == LiveSplitClient.Split));
     }
 

@@ -269,6 +269,9 @@ public static class LevelFlagsPanel
                 byte planet = info.Planet;
                 if (ImGui.SmallButton("Reset")) ResetGroup(state, planet, names.GroupName(group.Index));
                 Ui.Tooltip("Clears every flag of this planet. The other planets' flags are left alone.");
+                ImGui.SameLine();
+                if (ImGui.SmallButton("Check all")) CheckGroup(state, group.Flags, names.GroupName(group.Index));
+                Ui.Tooltip("Sets every flag of this planet. The other planets' flags are left alone.");
             }
 
             foreach (var flag in shown)
@@ -318,6 +321,58 @@ public static class LevelFlagsPanel
             await state.Client.LevelFlagsBitAsync(planet, flag.Bit, on).ConfigureAwait(false);
             state.Post(() => Load(state, quiet: true));
         });
+    }
+
+    /// <summary>
+    /// "Check all" on one planet's group: every flag of the group set, optimistically in the local
+    /// copy, then through the console one LEVELFLAGS_BIT at a time, then a re-read. No confirmation,
+    /// as Reset beside it has none.
+    /// </summary>
+    private static void CheckGroup(AppState state, IReadOnlyList<LevelFlagName> flags, string name)
+    {
+        byte planet = (byte)_loadedPlanet;
+        foreach (var flag in flags)
+        {
+            if (flag.Offset < _flags.Length) _flags[flag.Offset] |= flag.Mask;
+        }
+
+        RunCheckGroup(state, planet, flags, name, () => Load(state, quiet: true));
+    }
+
+    /// <summary>
+    /// <see cref="CheckGroupAsync"/> from one task, with one toast when every flag is set and the
+    /// refusal's status when one is not. <paramref name="reread"/> is posted either way.
+    /// </summary>
+    public static void RunCheckGroup(AppState state, byte planet, IReadOnlyList<LevelFlagName> flags, string name, Action reread)
+    {
+        state.Run(async () =>
+        {
+            try
+            {
+                await CheckGroupAsync(state.Client, planet, flags).ConfigureAwait(false);
+            }
+            finally
+            {
+                state.Post(reread);
+            }
+        }, CheckGroupToast(name));
+    }
+
+    /// <summary>What the toast says when a group's "Check all" has set every flag.</summary>
+    public static string CheckGroupToast(string name) => $"Level flags all set on {name}";
+
+    /// <summary>
+    /// LEVELFLAGS_BIT on for every flag of a group, in the order given, each waiting for the answer to
+    /// the one before. The console reads and writes each byte on its tick, so a flag the game sets in
+    /// the same byte meanwhile is kept. A refusal is thrown as it arrives, so nothing is sent past it.
+    /// </summary>
+    public static async Task CheckGroupAsync(QwarkClient client, byte planet, IEnumerable<LevelFlagName> flags,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var flag in flags)
+        {
+            await client.LevelFlagsBitAsync(planet, flag.Bit, on: true, cancellationToken).ConfigureAwait(false);
+        }
     }
 
     /// <summary>LEVELFLAGS_RESET of one planet's group, then a re-read.</summary>

@@ -579,6 +579,14 @@ public enum AutosplitEventFlags : byte
     /// old scripts' <c>isLoading</c> blocks — RaC1's 7.56 s load timer, Deadlocked's 14.8 s quit.
     /// </summary>
     Normalise = 1 << 3,
+
+    /// <summary>
+    /// Revision 1.29: a held load pair. The row is a LOAD_START with <c>param_us</c> 0, and game
+    /// time stops at it and starts again at the LOAD_END of the same code, nothing measured and
+    /// nothing subtracted: an ASL's <c>isLoading</c> returning true for as long as the pair is
+    /// open. Tools of Destruction's long load, the old ToD autosplitter's pause.
+    /// </summary>
+    Hold = 1 << 4,
 }
 
 /// <summary>Reply status codes, section 2 of PROTOCOL.md.</summary>

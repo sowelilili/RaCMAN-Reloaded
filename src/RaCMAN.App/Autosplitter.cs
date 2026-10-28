@@ -347,6 +347,14 @@ public sealed class Autosplitter
                 logged = true;
                 return SendAdjustment(ev, what, desc.ParamUs, $"a fixed {Seconds(desc.ParamUs)} off {desc.Label}");
 
+            case AutosplitKind.LoadStart when desc.Hold:
+                logged = true;
+                return HoldGameTime(ev, desc, what);
+
+            case AutosplitKind.LoadEnd when desc.Hold:
+                logged = true;
+                return ReleaseGameTime(ev, desc, what);
+
             case AutosplitKind.LoadStart:
             case AutosplitKind.Pause:
                 if (desc.Flat)
@@ -390,6 +398,47 @@ public sealed class Autosplitter
             default:
                 return false;
         }
+    }
+
+    /// <summary>
+    /// Revision 1.29, a held load (Tools of Destruction's long load): game time stops here and
+    /// starts again at the pair's end, which is what the old ToD autosplitter's pause did through
+    /// its script's <c>isLoading</c>. The same two commands as a quit's pause, for the same reason
+    /// (a run with no game time yet has nothing to freeze), and through the same queue, so a hold
+    /// that opens right after a resume can never be undone by that resume's unpause.
+    /// </summary>
+    private bool HoldGameTime(AutosplitEvent ev, AutosplitEventDesc desc, string what)
+    {
+        OpenPair(ev, desc);
+        QueueGameTime(() =>
+        {
+            _liveSplit.Send(LiveSplitClient.InitialiseGameTime);
+            _liveSplit.Send(LiveSplitClient.PauseGameTime);
+            Record(ev, what, $"{LiveSplitClient.InitialiseGameTime} then {LiveSplitClient.PauseGameTime} "
+                             + $"(game time stands still until {desc.Label} ends)", true);
+            return Task.CompletedTask;
+        });
+        return true;
+    }
+
+    /// <summary>
+    /// The end of a held load: game time runs again from where it stopped, nothing added and
+    /// nothing taken off. Sent even when this client never saw the start (it connected in the
+    /// middle of the load), because game time must never be left frozen and an unpause with
+    /// nothing paused does nothing.
+    /// </summary>
+    private bool ReleaseGameTime(AutosplitEvent ev, AutosplitEventDesc desc, string what)
+    {
+        bool open = TakePair(ev) is not null;
+        QueueGameTime(() =>
+        {
+            _liveSplit.Send(LiveSplitClient.UnpauseGameTime);
+            Record(ev, what, open
+                ? $"{LiveSplitClient.UnpauseGameTime} ({desc.Label} is over)"
+                : $"{LiveSplitClient.UnpauseGameTime} ({desc.Label} is over, though its start was not seen)", true);
+            return Task.CompletedTask;
+        });
+        return true;
     }
 
     /// <summary>
