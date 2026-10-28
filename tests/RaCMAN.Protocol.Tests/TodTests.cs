@@ -237,7 +237,7 @@ public class TodTests
         Assert.Equal(LuaInstalled.No, state.Lua!.Installed);
         Assert.True(state.SaveFile.Supported);
         Assert.True(state.Describe.HasSaveFileHelper);
-        Assert.Contains(state.AutosplitEvents, d => d.Label == "Tachyon defeated");
+        Assert.Contains(state.AutosplitEvents, d => d.Label == "Final fade to black");
         Assert.Null(state.Manips);
         Assert.Contains("Debug", GamePanel.SubPagesWithContent(state));
 
@@ -325,17 +325,20 @@ public class TodTests
         using var client = await ConnectAsync(server);
 
         var rows = await client.AutosplitDescribeAsync();
-        Assert.Equal(new byte[] { 1, 2, 5, 6, 4, 3 }, rows.Select(r => r.Code).ToArray());
+        Assert.Equal(new byte[] { 1, 7, 2, 8, 5, 6, 4, 3 }, rows.Select(r => r.Code).ToArray());
         Assert.True(rows[0].PlanetRoute && rows[0].EnabledByDefault);
-        Assert.Equal("Tachyon defeated", rows[1].Label);
+        Assert.Equal("Final fade to black", rows[1].Label);
         Assert.True(rows[1].EnabledByDefault);
+        Assert.Equal("Tachyon defeated", rows[2].Label);
+        Assert.Equal("Ending FMV", rows[3].Label);
         Assert.False(rows[2].EnabledByDefault || rows[3].EnabledByDefault);
-        Assert.Equal(AutosplitKind.LoadStart, rows[4].Kind);
-        Assert.True(rows[4].Hold && !rows[4].Normalise && !rows[4].Flat && rows[4].ParamUs == 0);
-        Assert.True(rows[4].IsTiming);
-        Assert.Equal("Long load", rows[4].Label);
-        Assert.Equal(AutosplitKind.Pause, rows[5].Kind);
-        Assert.Equal(19_950_000u, rows[5].ParamUs);
+        Assert.False(rows[4].EnabledByDefault || rows[5].EnabledByDefault);
+        Assert.Equal(AutosplitKind.LoadStart, rows[6].Kind);
+        Assert.True(rows[6].Hold && !rows[6].Normalise && !rows[6].Flat && rows[6].ParamUs == 0);
+        Assert.True(rows[6].IsTiming);
+        Assert.Equal("Long load", rows[6].Label);
+        Assert.Equal(AutosplitKind.Pause, rows[7].Kind);
+        Assert.Equal(19_950_000u, rows[7].ParamUs);
     }
 
     // ------------------------------------------- the savefile manager, revision 1.28

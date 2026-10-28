@@ -87,16 +87,18 @@ public sealed partial class FakeQwarkServer
     };
 
     /// <summary>
-    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.29): the planet split,
-    /// Tachyon's defeat, the credits and every mission, the old ToD autosplitter's long load held
-    /// (HOLD: game time stands still while it lasts) and the quit to the XMB at the old script's
-    /// 19.95 s.
+    /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.29): the planet split, the fade to
+    /// black after Tachyon's last hit (the final split, on), Tachyon's defeat and the ending FMV
+    /// (both off), the credits and every mission, the old ToD autosplitter's long load held (HOLD:
+    /// game time stands still while it lasts) and the quit to the XMB at the old script's 19.95 s.
     /// </summary>
     public static AutosplitEventDesc[] TodAutosplitDescriptors() => new[]
     {
         new AutosplitEventDesc(1, AutosplitKind.Split,
             AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, 0, "Planet entered"),
-        new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Tachyon defeated"),
+        new AutosplitEventDesc(7, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Final fade to black"),
+        new AutosplitEventDesc(2, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Tachyon defeated"),
+        new AutosplitEventDesc(8, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Ending FMV"),
         new AutosplitEventDesc(5, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Credits"),
         new AutosplitEventDesc(6, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Mission completed"),
         new AutosplitEventDesc(4, AutosplitKind.LoadStart,

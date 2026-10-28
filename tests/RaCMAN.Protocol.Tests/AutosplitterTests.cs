@@ -2600,21 +2600,55 @@ public class AutosplitterTests
         Assert.True(await h.Sent(LiveSplitClient.Split));
     }
 
-    /// <summary>The final split is on by default; the credits and the missions wait to be ticked.</summary>
+    /// <summary>
+    /// The final split, the fade to black after Tachyon's last hit, is on by default (revision
+    /// 1.29); Tachyon's last hit itself, the ending FMV, the credits and the missions wait to be
+    /// ticked.
+    /// </summary>
     [Fact]
-    public async Task ToDsTachyonSplitsAndTheCreditsWaitToBeTicked()
+    public async Task ToDsFadeToBlackSplitsAndTheRestWaitToBeTicked()
     {
         using var h = new Harness(GameId.Tod, new[] { "Meridian City", "Fastoon II" }, FakeQwarkServer.TodAutosplitDescriptors());
         await h.ReadyAsync();
 
         h.Engine.Handle(Split(5, 18));
         h.Engine.Handle(Split(6, (18u << 16) | 640, seq: 2));
+        h.Engine.Handle(new AutosplitEvent(3, 5_000, AutosplitKind.Split, 2, 0));
+        h.Engine.Handle(new AutosplitEvent(4, 40_000, AutosplitKind.Split, 8, 0));
         await Task.Delay(200);
         Assert.Empty(h.Server.Actions);
 
-        h.Engine.Handle(new AutosplitEvent(3, 5_000, AutosplitKind.Split, 2, 640));
+        h.Engine.Handle(new AutosplitEvent(5, 7_450, AutosplitKind.Split, 7, 0));
         Assert.True(await h.Sent(LiveSplitClient.Split));
-        Assert.StartsWith("Tachyon defeated", h.Engine.Log()[^1].Event);
+        Assert.StartsWith("Final fade to black", h.Engine.Log()[^1].Event);
+    }
+
+    /// <summary>
+    /// ToD's new run (revision 1.29): the RESET as the load begins, the long load held in between,
+    /// and the START seconds later at control. The client takes each as it comes: the timer is
+    /// reset at once and starts only at the START, which is the run's first frame.
+    /// </summary>
+    [Fact]
+    public async Task ToDsResetComesAtTheLoadAndItsStartAtControl()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+
+        h.Engine.Handle(new AutosplitEvent(1, 10, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
+        h.Server.ClearCommands();
+
+        h.Engine.Handle(new AutosplitEvent(2, 60_000, AutosplitKind.Reset, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.Reset));
+        h.Engine.Handle(new AutosplitEvent(3, 61_000, AutosplitKind.LoadStart, 4, 0));
+        h.Engine.Handle(new AutosplitEvent(4, 66_000, AutosplitKind.LoadEnd, 4, 0));
+        await Task.Delay(200);
+        Assert.DoesNotContain(LiveSplitClient.StartTimer, h.Server.Actions);
+
+        h.Engine.Handle(new AutosplitEvent(5, 70_500, AutosplitKind.Start, 0, 0));
+        Assert.True(await h.Sent(LiveSplitClient.StartTimer));
+        Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
     }
 
     [Fact]
