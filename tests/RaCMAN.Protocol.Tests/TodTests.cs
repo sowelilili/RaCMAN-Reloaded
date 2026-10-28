@@ -133,6 +133,11 @@ public class TodTests
         Assert.Equal(GameId.Tod, describe.Game);
         Assert.Contains(describe.Features, f => f.Label == "God Ratchet" && f.Kind == FeatureKind.Toggle);
         Assert.Contains(describe.Features, f => f.Label == "Infinite health" && f.Kind == FeatureKind.Toggle);
+        // qwark revision 1.29: Infinite ammo and Infinite health take "on boot" (not LIVE), as the
+        // other games' do; God Ratchet stays LIVE, as RaC1's goodies menu, with no box.
+        Assert.False(describe.Features.Single(f => f.Label == "Infinite ammo").IsLive);
+        Assert.False(describe.Features.Single(f => f.Label == "Infinite health").IsLive);
+        Assert.True(describe.Features.Single(f => f.Label == "God Ratchet").IsLive);
         Assert.DoesNotContain(describe.Features, f => f.Label.Contains("RYNO"));
         Assert.Equal(new[] { "Bolts", "Raritanium", "Challenge mode" }, describe.Readouts);
         Assert.Equal(19, (await client.PlanetListAsync()).Names.Length);

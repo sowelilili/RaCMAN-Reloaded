@@ -93,7 +93,8 @@ public static class CombosPanel
 
     /// <summary>
     /// The same, knowing the running game's DESCRIBE: a game whose Fast loads toggle is a data
-    /// write (no WRITES_CODE, Tools of Destruction's) needs no patch, so its combo is never greyed.
+    /// write (no WRITES_CODE) needs no patch, so its combo is never greyed. Every game's is a code
+    /// patch today, Tools of Destruction's too since qwark revision 1.29.
     /// </summary>
     public static bool FastLoadsComboBlocked(ComboAction action, SessionInfo session, DescribeResult describe)
     {

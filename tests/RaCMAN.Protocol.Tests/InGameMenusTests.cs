@@ -190,14 +190,16 @@ public class InGameMenusTests
         Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, patched));
         Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.Die, rpcs3));
 
-        // ToD's Fast loads is a data write: under RPCS3 its combo needs no patch.
+        // ToD's Fast loads is a code patch since qwark revision 1.29: under RPCS3 its combo needs
+        // the code switches, as the other games' do. A Fast loads that were a data write would not.
         var tod = FakeQwarkServer.TodDescribe();
-        Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, tod));
-        var codeWriting = tod with
+        Assert.True(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, tod));
+        Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, patched, tod));
+        var dataWrite = tod with
         {
-            Features = tod.Features.Select(f => f.Label == "Fast loads" ? f with { Flags = FeatureFlags.WritesCode } : f).ToArray(),
+            Features = tod.Features.Select(f => f.Label == "Fast loads" ? f with { Flags = FeatureFlags.None } : f).ToArray(),
         };
-        Assert.True(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, codeWriting));
+        Assert.False(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, dataWrite));
         Assert.True(CombosPanel.FastLoadsComboBlocked(ComboAction.ToggleFastLoads, rpcs3, DescribeResult.Empty));
     }
 

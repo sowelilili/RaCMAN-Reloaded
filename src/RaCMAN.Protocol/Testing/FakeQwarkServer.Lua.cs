@@ -109,7 +109,9 @@ public sealed partial class FakeQwarkServer
     /// ToD's DESCRIBE as qwark lays it out since the first hardware test (2026-10-27): the labels
     /// and kinds qwark gives, no addresses. The RYNO plans' buttons are gone, id 9 is Infinite
     /// health, and God Ratchet (the old trainer's) and Fast loads are new. Revision 1.28:
-    /// the savefile manager's two flagged actions, 40 and 41, in a fourth group.
+    /// the savefile manager's two flagged actions, 40 and 41, in a fourth group. Revision 1.29:
+    /// Fast loads is a code patch, WRITES_CODE, with a code switch under RPCS3, and Infinite ammo
+    /// and Infinite health are no longer LIVE, so they have an "on boot" box; God Ratchet still is.
     /// </summary>
     public static DescribeResult TodDescribe() => new(
         GameId.Tod,
@@ -117,9 +119,9 @@ public sealed partial class FakeQwarkServer
         new[] { "Bolts", "Raritanium", "Challenge mode" },
         new[]
         {
-            new Feature(17, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Fast loads"),
-            new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Infinite ammo"),
-            new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "Infinite health"),
+            new Feature(17, FeatureKind.Toggle, 0, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Fast loads"),
+            new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite ammo"),
+            new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite health"),
             new Feature(16, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "God Ratchet"),
             new Feature(2, FeatureKind.Action, 1, 0, FeatureFlags.None, 0xFF, 0, 0, "Die"),
             new Feature(3, FeatureKind.Value, 1, 0, FeatureFlags.None, 0, 0, 0, "Bolts"),
