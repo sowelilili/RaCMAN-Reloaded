@@ -326,6 +326,7 @@ public static class SettingsPanel
             ("Save files", state.SaveFiles.RootPath, null),
             ("Colour presets", state.ColourPresets.Folder, null),
             ("Watchlists", state.Watchlists.Folder, null),
+            ("Lua scripts", state.LuaScripts.Folder, null),
         };
 
         float column = 0;

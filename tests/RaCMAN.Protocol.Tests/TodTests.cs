@@ -146,11 +146,11 @@ public class TodTests
         Assert.Equal(LuaInstalled.No, before.Installed);
         Assert.Equal(0u, before.Heartbeat);
 
-        var result = await client.LuaExecAsync(LuaBox.HalfSpeedSource);
+        var result = await client.LuaExecAsync(LuaBox.StarterSource);
         Assert.Equal(LuaExecStatus.Ok, result.Status);
         Assert.Equal(LuaType.String, result.OutType);
         Assert.Equal(FakeQwarkServer.LuaVersion, result.Output);
-        Assert.Equal(new[] { LuaBox.HalfSpeedSource }, server.LuaSources);
+        Assert.Equal(new[] { LuaBox.StarterSource }, server.LuaSources);
 
         var after = await client.LuaStatusAsync();
         Assert.True(after.IsInstalled);

@@ -145,6 +145,7 @@ public sealed class AppState : IDisposable
         Mods = new ModLibrary(AppPaths.InData(settings.ModsPath), AppPaths.ShippedMods,
             retired: (title, folder) => LegacyModExclusions.Shipped.Excludes(title, folder));
         Watchlists = new WatchlistStore(AppPaths.Watchlists);
+        LuaScripts = new LuaScriptStore(AppPaths.LuaScripts);
         ColourPresets = new ColourPresetStore(AppPaths.Colours);
         PositionNames = new PositionNameStore(AppPaths.Positions);
         SaveFiles = new SaveFileLibrary(AppPaths.InData(settings.SaveFilesPath));
@@ -275,6 +276,9 @@ public sealed class AppState : IDisposable
     public ModLibrary Mods { get; }
 
     public WatchlistStore Watchlists { get; }
+
+    /// <summary>The Lua console's saved scripts (2026-10-31).</summary>
+    public LuaScriptStore LuaScripts { get; }
 
     /// <summary>Named colour presets for the games' COLOR features, one file per game.</summary>
     public ColourPresetStore ColourPresets { get; }

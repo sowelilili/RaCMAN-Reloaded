@@ -1785,7 +1785,7 @@ public class Rpcs3PatchTests : IDisposable
         server.LuaPatchInstalled = true;
         server.Session = server.Session with { Generation = server.Session.Generation + 1 };
         Assert.True(await PumpAsync(state, () => patch.Update().For(QwarkPatchPart.LuaHelper).State == QwarkPatchState.Active));
-        var result = await state.Client.LuaExecAsync(LuaBox.HalfSpeedSource);
+        var result = await state.Client.LuaExecAsync(LuaBox.StarterSource);
         Assert.Equal("Lua 5.0.2", result.Output);
     }
 

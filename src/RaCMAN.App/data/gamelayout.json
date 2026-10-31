@@ -40,6 +40,11 @@
 // LOAD_ASIDE and an ACTION labelled "Die" itself, wherever they are moved to, so a section left
 // with nothing but those is not drawn at all.
 //
+// "tooltips" gives a feature (again by its exact DESCRIBE label) a line of text shown when the
+// mouse rests on its control, wherever it is drawn: what it does, or whether a run may use it.
+// A control that already has a tooltip of its own (one greyed out until qwark's patches are in)
+// keeps that one.
+//
 // Edit freely; the app reads this on start.
 {
   "subPages": ["Manips", "Cosmetics", "Debug"],
@@ -152,14 +157,19 @@
     },
 
     "tod": {
-      "tabOrder": ["Cheats", "Player", "Collectables", "Debug"],
+      "tabOrder": ["Cheats", "Player", "Manips", "Collectables", "Debug"],
       "moves": {
         "God Ratchet": "Options",
+
+        "Remove cutscenes": "Manips",
 
         "Unlock all skill points": "Collectables",
         "Reset skill points": "Collectables",
         "Unlock all gold bolts": "Collectables",
         "Reset gold bolts": "Collectables"
+      },
+      "tooltips": {
+        "Remove cutscenes": "Disables unskippable cutscenes, without deleting them from the game's files. This option is legal for speedruns."
       }
     }
   }

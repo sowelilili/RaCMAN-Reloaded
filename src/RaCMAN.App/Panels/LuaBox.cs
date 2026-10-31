@@ -1,35 +1,51 @@
+using System.Numerics;
+using System.Text;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// The Lua box (revision 1.27): the start of the Debug section for a game whose LUA_STATUS
-/// answers, which today is ToD. Two preset buttons, a one-line source box with Run, the last
-/// LUA_EXEC's status and text, and a status line from LUA_STATUS, read about once a second while
-/// the box is on screen. Every button sends one LUA_EXEC and shows what came back.
+/// The Lua console (revision 1.27, a console since 2026-10-31): the start of the Debug section for
+/// a game whose LUA_STATUS answers, which today is ToD. A status line from LUA_STATUS, read about
+/// once a second while the box is on screen; a multi-line editor with Lua's colours
+/// (<see cref="LuaEditor"/>), in a box the user can make taller; Run, or Ctrl+Enter, which sends the
+/// whole script as one LUA_EXEC and shows what came back under it; and the scripts' files, saved
+/// by name into the data folder's <c>lua</c> folder and opened from there or from anywhere.
 /// <para>
 /// On a console the first LUA_EXEC of a boot writes qwark's helper into the game, so nothing here
-/// ever sends one by itself: only a press does. LUA_STATUS is only a status, and is safe to poll.
+/// ever sends one by itself: only Run does. LUA_STATUS is only a status, and is safe to poll.
+/// A script past LUA_EXEC's 8192 bytes (PROTOCOL.md 5.15, <c>LUAMB_CHUNK_CAP</c>) is never sent:
+/// the box says how long it is and Run waits until it fits.
 /// </para>
 /// </summary>
 public static class LuaBox
 {
-    /// <summary>The first preset: half speed, and the answer is "Lua 5.0.2".</summary>
-    public const string HalfSpeedSource = "time_set_scale(0.5) return _VERSION";
-
-    /// <summary>The second preset: back to normal speed.</summary>
-    public const string NormalSpeedSource = "time_set_scale(1) return _VERSION";
+    /// <summary>What a new editor holds: a line about the console, and a chunk that answers the game's Lua version.</summary>
+    public const string StarterSource = "-- Runs in the game on your console. Ctrl+Enter or Run sends it.\nreturn _VERSION\n";
 
     /// <summary>How often the status line is read while the box is drawn.</summary>
     public const float PollSeconds = 1f;
 
-    private static string _source = string.Empty;
+    /// <summary>The editor's height before the user drags it, in lines of text.</summary>
+    private const int StartLines = 14;
+
+    private static LuaEditor? _editor;
     private static bool _running;
     private static string? _lastLine;
     private static LineKind _lastKind;
     private static string _lastOutput = string.Empty;
     private static float _sincePoll = PollSeconds;
+
+    // The files.
+    private static string _name = string.Empty;
+    private static string _savedText = StarterSource;
+    private static string _openPath = string.Empty;
+    private static string[] _scripts = Array.Empty<string>();
+    private static bool _listed;
+    private static bool _dialogOpen;
+    private static bool _overwriteArmed;
+    private static (string Path, string Name)? _pendingOpen;
 
     /// <summary>How a line is coloured.</summary>
     public enum LineKind
@@ -43,18 +59,88 @@ public static class LuaBox
     /// <summary>The last run's line, for the summary of a headless run; empty before one.</summary>
     public static string LastSummary => _lastLine ?? string.Empty;
 
-    /// <summary>Forgets the last answer: a different game, or everything read again.</summary>
+    /// <summary>
+    /// Forgets the last answer: a different game, or everything read again. The script in the
+    /// editor is the user's and stays.
+    /// </summary>
     public static void Reset()
     {
         _running = false;
         _lastLine = null;
         _lastOutput = string.Empty;
         _sincePoll = PollSeconds;
+        _listed = false;
+        _overwriteArmed = false;
+        _pendingOpen = null;
     }
+
+    private static LuaEditor Editor
+    {
+        get
+        {
+            if (_editor is null)
+            {
+                _editor = new LuaEditor();
+                _editor.SetText(StarterSource);
+            }
+
+            return _editor;
+        }
+    }
+
+    // ---------------------------------------------------------------- what Run sends
+
+    /// <summary>
+    /// What Run does with a script: the source to send, or why nothing is sent. A script with
+    /// nothing but white space in it has nothing to run, and one longer than LUA_EXEC carries
+    /// (<see cref="LuaExecRequest.MaxSourceBytes"/> bytes of UTF-8) is refused here, with its
+    /// length, rather than by the console.
+    /// </summary>
+    public static (string? Source, string? Problem) Prepare(string text)
+    {
+        text ??= string.Empty;
+        if (text.Trim().Length == 0) return (null, "There is no Lua to run.");
+
+        int bytes = Encoding.UTF8.GetByteCount(text);
+        if (bytes > LuaExecRequest.MaxSourceBytes)
+        {
+            return (null, $"This script is {bytes} bytes. Your console runs at most {LuaExecRequest.MaxSourceBytes} bytes "
+                          + "at a time: shorten it, or run it in parts.");
+        }
+
+        return (text, null);
+    }
+
+    /// <summary>
+    /// One run, as Run makes it: the script checked (<see cref="Prepare"/>), sent as one LUA_EXEC,
+    /// and the answer, a refusal or a failure turned into the line and text the box shows. A
+    /// script that is not sent comes back as an error line without a request going out.
+    /// </summary>
+    public static async Task<(LineKind Kind, string Line, string Output)> RunAsync(QwarkClient client, string text, bool rpcs3)
+    {
+        var (source, problem) = Prepare(text);
+        if (source is null) return (LineKind.Error, problem!, string.Empty);
+
+        try
+        {
+            var result = await client.LuaExecAsync(source).ConfigureAwait(false);
+            return Describe(result);
+        }
+        catch (QwarkStatusException ex)
+        {
+            return Refused(ex.Status, rpcs3);
+        }
+        catch (Exception ex)
+        {
+            return (LineKind.Error, $"LUA_EXEC failed: {ex.Message}", string.Empty);
+        }
+    }
+
+    // ---------------------------------------------------------------- drawing
 
     public static void Draw(AppState state)
     {
-        Ui.Heading("Lua");
+        Ui.Heading("Lua console");
 
         _sincePoll += ImGui.GetIO().DeltaTime;
         if (_sincePoll >= PollSeconds)
@@ -69,21 +155,51 @@ public static class LuaBox
         }
 
         ImGui.Spacing();
-        ImGui.BeginDisabled(_running || !state.Connected);
-        if (ImGui.Button("Lua test (half speed)")) Send(state, HalfSpeedSource);
-        if (ImGui.IsItemHovered()) Ui.SetTooltip(HalfSpeedSource);
+        DrawFiles(state);
+        ImGui.Spacing();
 
-        ImGui.SameLine();
-        if (ImGui.Button("Normal speed")) Send(state, NormalSpeedSource);
-        if (ImGui.IsItemHovered()) Ui.SetTooltip(NormalSpeedSource);
+        // The editor in a box of its own whose bottom edge drags it taller or shorter.
+        var editor = Editor;
+        float start = ImGui.GetTextLineHeight() * StartLines + ImGui.GetStyle().FramePadding.Y * 2;
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, Vector2.Zero);
+        ImGui.BeginChild("##lua-editor-box", new Vector2(-1, start), ImGuiChildFlags.Borders | ImGuiChildFlags.ResizeY,
+            ImGuiWindowFlags.NoScrollbar | ImGuiWindowFlags.NoScrollWithMouse);
+        ImGui.PopStyleVar();
+        if (editor.Draw(ImGui.GetContentRegionAvail()))
+        {
+            _overwriteArmed = false;
+        }
 
-        ImGui.SetNextItemWidth(Math.Max(200, ImGui.GetContentRegionAvail().X - 80));
-        bool enter = Ui.SubmitTextWithHint("##lua-source", "Lua source, e.g. return _VERSION", ref _source,
-            LuaExecRequest.MaxSourceBytes);
-        ImGui.SameLine();
+        bool ctrlEnter = editor.RunRequested;
+        ImGui.EndChild();
+
+        var (source, problem) = Prepare(editor.Text);
+        int bytes = Encoding.UTF8.GetByteCount(editor.Text);
+
+        ImGui.BeginDisabled(_running || !state.Connected || source is null);
         bool run = ImGui.Button("Run");
-        if ((run || enter) && _source.Trim().Length > 0) Send(state, _source);
         ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            Ui.SetTooltip(!state.Connected ? "Connect to your console first"
+                : problem ?? "Runs the whole script in the game (Ctrl+Enter in the editor does the same)");
+        }
+
+        ImGui.SameLine();
+        var counter = bytes > LuaExecRequest.MaxSourceBytes ? Ui.Red : Ui.Grey;
+        Ui.Text(counter, $"{bytes} / {LuaExecRequest.MaxSourceBytes} bytes    line {editor.CursorLine}, column {editor.CursorColumn}");
+
+        if ((run || ctrlEnter) && !_running && state.Connected)
+        {
+            if (source is not null) Send(state, source);
+            else if (ctrlEnter) Show(LineKind.Error, problem!, string.Empty);
+        }
+        else if (ctrlEnter && !state.Connected)
+        {
+            Show(LineKind.Warning, "Connect to your console first.", string.Empty);
+        }
+
+        if (bytes > LuaExecRequest.MaxSourceBytes) Ui.Error(problem!);
 
         if (_running)
         {
@@ -107,42 +223,233 @@ public static class LuaBox
         }
     }
 
+    private static void Show(LineKind kind, string line, string output)
+    {
+        _lastKind = kind;
+        _lastLine = line;
+        _lastOutput = output;
+    }
+
     /// <summary>One LUA_EXEC, off the render thread; the answer comes back through the queue.</summary>
     private static void Send(AppState state, string source)
     {
         _running = true;
         var client = state.Client;
+        bool rpcs3 = state.CodePatchesUnsupported;
         _ = Task.Run(async () =>
         {
-            LuaExecResult? result = null;
-            Status? refusal = null;
-            string? failure = null;
-            try
-            {
-                result = await client.LuaExecAsync(source).ConfigureAwait(false);
-            }
-            catch (QwarkStatusException ex)
-            {
-                refusal = ex.Status;
-            }
-            catch (Exception ex)
-            {
-                failure = ex.Message;
-            }
-
+            var (kind, line, output) = await RunAsync(client, source, rpcs3).ConfigureAwait(false);
             state.Post(() =>
             {
                 _running = false;
-                var (kind, line, output) = result is not null ? Describe(result)
-                    : refusal is { } status ? Refused(status, state.CodePatchesUnsupported)
-                    : (LineKind.Error, $"LUA_EXEC failed: {failure}", string.Empty);
-                _lastKind = kind;
-                _lastLine = line;
-                _lastOutput = output;
+                Show(kind, line, output);
 
                 // What the chunk did to the helper, and any error it made the game report.
                 _sincePoll = PollSeconds;
             });
+        });
+    }
+
+    // ---------------------------------------------------------------- the files
+
+    /// <summary>True while the editor holds something that is not what was last saved or opened.</summary>
+    public static bool Modified => _editor is not null && !string.Equals(_editor.Text, _savedText, StringComparison.Ordinal);
+
+    private static void DrawFiles(AppState state)
+    {
+        var store = state.LuaScripts;
+        if (!_listed) Relist(state);
+
+        // Save: a name, into the lua folder.
+        ImGui.SetNextItemWidth(180);
+        bool enter = Ui.SubmitTextWithHint("##lua-name", "Script name", ref _name, 64);
+        if (ImGui.IsItemEdited()) _overwriteArmed = false;
+        ImGui.SameLine();
+        string cleaned = LuaScriptStore.CleanName(_name);
+        if (_overwriteArmed)
+        {
+            ImGui.PushStyleColor(ImGuiCol.Button, new Vector4(0.6f, 0.2f, 0.2f, 1f));
+            if (ImGui.Button($"Replace {cleaned}.lua")) Save(state, overwrite: true);
+            ImGui.PopStyleColor();
+            ImGui.SameLine();
+            if (ImGui.Button("Cancel##lua-save")) _overwriteArmed = false;
+        }
+        else
+        {
+            ImGui.BeginDisabled(cleaned.Length == 0);
+            if (ImGui.Button("Save") || (enter && cleaned.Length > 0)) Save(state, overwrite: false);
+            ImGui.EndDisabled();
+            if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+            {
+                Ui.SetTooltip(cleaned.Length == 0 ? "Type a name for the script first" : $"Saves the editor to {store.FileFor(cleaned)}");
+            }
+        }
+
+        if (Modified)
+        {
+            ImGui.SameLine();
+            Ui.Text(Ui.Grey, "(not saved)");
+        }
+
+        // Open: a saved script, or any .lua file.
+        string preview = _scripts.Length == 0 ? "(none saved)" : "Open a saved script";
+        ImGui.SetNextItemWidth(180);
+        ImGui.BeginDisabled(_scripts.Length == 0);
+        if (ImGui.BeginCombo("##lua-saved", preview))
+        {
+            foreach (var script in _scripts)
+            {
+                if (ImGui.Selectable(script)) AskOpen(state, Path.Combine(store.Folder, script + LuaScriptStore.Extension), script);
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip("The scripts in your Lua scripts folder");
+
+        ImGui.SameLine();
+        ImGui.BeginDisabled(!FileDialog.IsSupported || _dialogOpen);
+        if (ImGui.Button("Open file...")) Browse(state);
+        ImGui.EndDisabled();
+        ImGui.SameLine();
+        Ui.OpenFolderButton(state, store.Folder);
+
+        // Where there is no dialog to show, a path box does its job.
+        if (!FileDialog.IsSupported)
+        {
+            ImGui.SetNextItemWidth(-90);
+            bool open = Ui.SubmitTextWithHint("##lua-path", "Path of a .lua file", ref _openPath, 512);
+            ImGui.SameLine();
+            if (ImGui.Button("Open##lua-path") || open)
+            {
+                string path = _openPath.Trim().Trim('"').Trim();
+                if (path.Length > 0) AskOpen(state, path, Path.GetFileNameWithoutExtension(path));
+            }
+        }
+
+        if (_pendingOpen is { } pending)
+        {
+            Ui.Warning($"The editor has changes that are not saved. Open {Path.GetFileName(pending.Path)} anyway?");
+            if (ImGui.Button("Open, and lose the changes")) Open(state, pending.Path, pending.Name);
+            ImGui.SameLine();
+            if (ImGui.Button("Keep editing")) _pendingOpen = null;
+        }
+    }
+
+    private static void Relist(AppState state)
+    {
+        _listed = true;
+        try
+        {
+            _scripts = state.LuaScripts.List().ToArray();
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _scripts = Array.Empty<string>();
+            state.AddToast($"Lua scripts: {ex.Message}", ToastKind.Error);
+        }
+    }
+
+    private static void Save(AppState state, bool overwrite)
+    {
+        var store = state.LuaScripts;
+        string cleaned = LuaScriptStore.CleanName(_name);
+        if (cleaned.Length == 0) return;
+
+        try
+        {
+            string path = store.FileFor(cleaned);
+            if (!overwrite && File.Exists(path) && !string.Equals(_savedName, cleaned, StringComparison.OrdinalIgnoreCase))
+            {
+                _overwriteArmed = true;
+                return;
+            }
+
+            string text = Editor.Text;
+            store.Save(cleaned, text);
+            _name = cleaned;
+            _savedName = cleaned;
+            _savedText = text;
+            _overwriteArmed = false;
+            state.AddToast($"Lua script saved to {path}", ToastKind.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            _overwriteArmed = false;
+            state.AddToast($"Lua script save failed: {ex.Message}", ToastKind.Error);
+        }
+
+        Relist(state);
+    }
+
+    /// <summary>The name the editor's text was last saved or opened under, for the overwrite question.</summary>
+    private static string? _savedName;
+
+    private static void AskOpen(AppState state, string path, string name)
+    {
+        if (Modified)
+        {
+            _pendingOpen = (path, name);
+            return;
+        }
+
+        Open(state, path, name);
+    }
+
+    private static void Open(AppState state, string path, string name)
+    {
+        _pendingOpen = null;
+        try
+        {
+            string text = LuaScriptStore.Read(path);
+            Editor.SetText(text);
+            _savedText = Editor.Text;
+            _name = LuaScriptStore.CleanName(name);
+
+            // A file from elsewhere is saved into the lua folder under its name, so a script in the
+            // folder already called that is a replacement worth asking about.
+            bool inFolder = string.Equals(Path.GetFullPath(Path.GetDirectoryName(path) ?? string.Empty),
+                Path.GetFullPath(state.LuaScripts.Folder), StringComparison.OrdinalIgnoreCase);
+            _savedName = inFolder ? _name : null;
+            _overwriteArmed = false;
+            int bytes = Encoding.UTF8.GetByteCount(text);
+            state.AddToast(bytes > LuaExecRequest.MaxSourceBytes
+                ? $"Opened {Path.GetFileName(path)}: {bytes} bytes, more than your console runs at a time"
+                : $"Opened {Path.GetFileName(path)}", bytes > LuaExecRequest.MaxSourceBytes ? ToastKind.Error : ToastKind.Success);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            state.AddToast($"Could not open {path}: {ex.Message}", ToastKind.Error);
+        }
+    }
+
+    /// <summary>
+    /// The platform's own open dialog, off the render thread (it is modal); the path comes back
+    /// through <see cref="AppState.Post"/>, as the Mods panel's ZIP install does it.
+    /// </summary>
+    private static void Browse(AppState state)
+    {
+        _dialogOpen = true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                string? picked = await FileDialog.OpenAsync("Open a Lua script", "Lua scripts", "lua").ConfigureAwait(false);
+                state.Post(() =>
+                {
+                    _dialogOpen = false;
+                    if (picked is not null) AskOpen(state, picked, Path.GetFileNameWithoutExtension(picked));
+                });
+            }
+            catch (Exception ex)
+            {
+                state.Post(() =>
+                {
+                    _dialogOpen = false;
+                    state.AddToast($"File dialog failed: {ex.Message}", ToastKind.Error);
+                });
+            }
         });
     }
 

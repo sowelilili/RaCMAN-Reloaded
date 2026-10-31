@@ -91,8 +91,22 @@ public static class GamePanel
         bool blocked = BeginCodeFeature(state, feature);
         bool pressed = ImGui.Button(feature.Label, size);
         EndCodeFeature(blocked);
+        if (!blocked && ImGui.IsItemHovered() && FeatureTooltip(state, feature) is { } tip) Ui.SetTooltip(tip);
         return pressed && !blocked;
     }
+
+    /// <summary>
+    /// What a feature's control says on hover when nothing more pressing does: the layout's
+    /// tooltip for it (<see cref="GameLayout.TooltipFor"/>), then "Patches game code" for a toggle
+    /// that does, else nothing.
+    /// </summary>
+    public static string? FeatureTooltip(AppState state, Feature feature) =>
+        FeatureTooltip(state.DescribedTitle, state.DescribedGame, feature);
+
+    /// <summary><see cref="FeatureTooltip(AppState, Feature)"/> from a description alone.</summary>
+    public static string? FeatureTooltip(string title, GameId game, Feature feature) =>
+        GameLayout.TooltipFor(title, game, feature.Label)
+        ?? (feature.Kind == FeatureKind.Toggle && feature.WritesCode ? "Patches game code" : null);
 
     /// <summary>The feature's current value: its readout when it names one, else what we last sent.</summary>
     private static uint CurrentValue(AppState state, Feature feature) =>
@@ -1053,7 +1067,8 @@ public static class GamePanel
             // A code-patching toggle that can be pressed says what it is. A LIVE toggle gets no
             // tooltip: that the console reads it back out of the game is how every toggle here
             // behaves as far as the user is concerned, so saying so was noise.
-            if (!blocked && feature.WritesCode && ImGui.IsItemHovered()) Ui.SetTooltip("Patches game code");
+            // 2026-10-31: or what the layout says about it (ToD's Remove cutscenes is run-legal).
+            if (!blocked && ImGui.IsItemHovered() && FeatureTooltip(state, feature) is { } tip) Ui.SetTooltip(tip);
 
             // A live toggle is a game-memory byte qwark polls: there is nothing to apply on boot
             // and FEATURE_SET_AUTO is refused for it, so the box is left out. The column offsets

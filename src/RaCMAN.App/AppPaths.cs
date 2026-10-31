@@ -117,6 +117,9 @@ public static class AppPaths
 
     public static string Watchlists => Path.Combine(Root, "watchlists");
 
+    /// <summary>The Lua console's scripts (2026-10-31), <c>.lua</c> files the user saves and loads.</summary>
+    public static string LuaScripts => Path.Combine(Root, "lua");
+
     /// <summary>What the user calls each position slot, one file per game. The console owns the slots.</summary>
     public static string Positions => Path.Combine(Root, "positions");
 

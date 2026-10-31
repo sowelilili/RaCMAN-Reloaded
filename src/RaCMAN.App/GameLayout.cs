@@ -23,6 +23,14 @@ public sealed class TitleLayout
     /// </summary>
     [JsonPropertyName("headings")]
     public Dictionary<string, Dictionary<string, string[]>> Headings { get; set; } = new();
+
+    /// <summary>
+    /// Feature label -> the tooltip its control shows, wherever it is drawn (2026-10-31: ToD's
+    /// Remove cutscenes says it is legal for speedruns). The text lives here rather than in qwark's
+    /// DESCRIBE, which carries no descriptions, so wording can change without a new module.
+    /// </summary>
+    [JsonPropertyName("tooltips")]
+    public Dictionary<string, string> Tooltips { get; set; } = new();
 }
 
 /// <summary>The whole data/gamelayout.json file.</summary>
@@ -338,6 +346,16 @@ public static class GameLayout
         }
 
         return feature.Kind == FeatureKind.Value ? ValuesSection : describe.GroupName(feature.Group);
+    }
+
+    /// <summary>
+    /// The tooltip the layout gives a feature, by its exact DESCRIBE label, or null for none. Like
+    /// <see cref="SectionFor"/>, a title-id entry is asked before the game's.
+    /// </summary>
+    public static string? TooltipFor(string? titleId, GameId game, string label)
+    {
+        if (LayoutFor(titleId, game) is not { Tooltips: { } tooltips }) return null;
+        return tooltips.TryGetValue(label, out var text) && !string.IsNullOrWhiteSpace(text) ? text : null;
     }
 
     /// <summary>

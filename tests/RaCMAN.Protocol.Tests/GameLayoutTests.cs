@@ -879,8 +879,8 @@ public class GameLayoutTests
         foreach (var label in new[] { "Fast loads", "Infinite ammo", "Infinite health" })
             Assert.Equal("Cheats", GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == label), d));
         Assert.Equal(GameLayout.ValuesSection, GameLayout.SectionFor(title, GameId.Tod, d.Features.Single(f => f.Label == "Bolts"), d));
-        Assert.Equal(new[] { "Cheats", "Player", "Collectables", "Debug" },
-            GameLayout.TabOrder(title, GameId.Tod, new[] { "Debug", "Collectables", "Player", "Cheats" }));
+        Assert.Equal(new[] { "Cheats", "Player", "Manips", "Collectables", "Debug" },
+            GameLayout.TabOrder(title, GameId.Tod, new[] { "Debug", "Collectables", "Manips", "Player", "Cheats" }));
 
         // The Progress group is gone, Die is the quick block's, and Debug is there only with Lua.
         var sections = GamePanel.SectionsFor(title, GameId.Tod, d);
@@ -890,8 +890,67 @@ public class GameLayoutTests
         Assert.True(GamePanel.SectionsFor(title, GameId.Tod, d, lua: true).ContainsKey(GameLayout.DebugSection));
 
         Assert.Equal(new[] { "Collectables" }, GamePanel.UnlocksTabsWithContent(title, GameId.Tod, d));
-        Assert.Empty(GamePanel.SubPagesWithContent(title, GameId.Tod, d, unlocksHidden: false));
-        Assert.Equal(new[] { "Debug" }, GamePanel.SubPagesWithContent(title, GameId.Tod, d, unlocksHidden: false, lua: true));
+        Assert.Equal(new[] { "Manips" }, GamePanel.SubPagesWithContent(title, GameId.Tod, d, unlocksHidden: false));
+        Assert.Equal(new[] { "Manips", "Debug" }, GamePanel.SubPagesWithContent(title, GameId.Tod, d, unlocksHidden: false, lua: true));
+    }
+
+    /// <summary>
+    /// 2026-10-31: ToD's Remove cutscenes is legal for speedruns, so it leaves Cheats for a Manips
+    /// page of ToD's own, which ToD (no MANIP_LIST) has for that row alone; its label, id and so its
+    /// config key are qwark's and unchanged. Its tooltip is the layout's, word for word.
+    /// </summary>
+    [Fact]
+    public void ToDsRemoveCutscenesIsAManipWithItsTooltip()
+    {
+        var d = RaCMAN.Protocol.Testing.FakeQwarkServer.TodDescribe();
+        string title = RaCMAN.Protocol.Testing.FakeQwarkServer.TodTitleId;
+        var cut = d.Features.Single(f => f.Label == "Remove cutscenes");
+        Assert.Equal(18, cut.Id);
+        Assert.Equal("Cheats", d.GroupName(cut.Group));
+
+        Assert.Equal(GameLayout.ManipsSection, GameLayout.SectionFor(title, GameId.Tod, cut, d));
+        var sections = GamePanel.SectionsFor(title, GameId.Tod, d);
+        Assert.Equal(new[] { "Remove cutscenes" }, sections[GameLayout.ManipsSection].Select(f => f.Label));
+        Assert.DoesNotContain(sections["Cheats"], f => f.Label == "Remove cutscenes");
+
+        const string Tip = "Disables unskippable cutscenes, without deleting them from the game's files. "
+                           + "This option is legal for speedruns.";
+        Assert.Equal(Tip, GameLayout.TooltipFor(title, GameId.Tod, "Remove cutscenes"));
+        Assert.Equal(Tip, GamePanel.FeatureTooltip(title, GameId.Tod, cut));
+
+        // Every other row says what it said before: a code-patching toggle that it patches code,
+        // the rest nothing, and no other game has the tooltip.
+        Assert.Equal("Patches game code", GamePanel.FeatureTooltip(title, GameId.Tod, d.Features.Single(f => f.Label == "Fast loads")));
+        Assert.Null(GamePanel.FeatureTooltip(title, GameId.Tod, d.Features.Single(f => f.Label == "Infinite ammo")));
+        Assert.Null(GameLayout.TooltipFor("NPEA00385", GameId.Rac1, "Remove cutscenes"));
+    }
+
+    /// <summary>A user's layout may give any row a tooltip, by title id before game, and a blank one is none.</summary>
+    [Fact]
+    public void ALayoutFilesTooltipsAreKeyedByLabel()
+    {
+        string path = LayoutFile("tooltips.json");
+        File.WriteAllText(path, """
+            {
+              "games": {
+                "rac1": { "tooltips": { "Infinite bolts": "Never runs out", "Blank": "  " } },
+                "NPEA00385": { "tooltips": { "Infinite bolts": "This disc's own" } }
+              }
+            }
+            """);
+        try
+        {
+            GameLayout.LoadFrom(path);
+            Assert.Empty(GameLayout.Problems);
+            Assert.Equal("Never runs out", GameLayout.TooltipFor("BCES01503", GameId.Rac1, "Infinite bolts"));
+            Assert.Equal("This disc's own", GameLayout.TooltipFor("NPEA00385", GameId.Rac1, "Infinite bolts"));
+            Assert.Null(GameLayout.TooltipFor("BCES01503", GameId.Rac1, "Blank"));
+            Assert.Null(GameLayout.TooltipFor("BCES01503", GameId.Rac1, "infinite bolts"));
+        }
+        finally
+        {
+            GameLayout.LoadFrom(ShippedLayoutPath());
+        }
     }
 }
 

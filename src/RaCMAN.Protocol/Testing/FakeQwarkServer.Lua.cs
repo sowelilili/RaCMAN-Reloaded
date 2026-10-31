@@ -121,6 +121,7 @@ public sealed partial class FakeQwarkServer
         new[]
         {
             new Feature(17, FeatureKind.Toggle, 0, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Fast loads"),
+            new Feature(18, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Remove cutscenes"),
             new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite ammo"),
             new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite health"),
             new Feature(16, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "God Ratchet"),
@@ -138,6 +139,9 @@ public sealed partial class FakeQwarkServer
 
     /// <summary>The size of a ToD save, the GAME.SAV image (revision 1.28).</summary>
     public const int TodSaveSize = 0x906F0;
+
+    /// <summary>Remove cutscenes' (id 18) auto bit, which qwark sets with no config.txt key for it (revision 1.29).</summary>
+    public const ulong TodRemoveCutscenesAutoBit = 1UL << 18;
 
     /// <summary>
     /// Makes this fake a ToD console: a new boot of NPEA00452 INGAME on Metropolis, ToD's feature
@@ -198,6 +202,9 @@ public sealed partial class FakeQwarkServer
             CurrentPlanet = 0,
             Generation = session.Generation + 1,
             Readout = TodReadouts(),
+
+            // qwark revision 1.29 (2026-10-31): Remove cutscenes ships auto-flagged.
+            ToggleAuto = session.ToggleAuto | TodRemoveCutscenesAutoBit,
         };
     }
 
