@@ -83,9 +83,12 @@ public class InGameMenusTests
         }
     }
 
-    /// <summary>RPCS3 has no console menu, so qwark-rpcs3 refuses the setting rather than store it.</summary>
+    /// <summary>
+    /// Qwark revision 1.29: RPCS3 has no console menu in the four games, but Tools of Destruction's
+    /// is its own pause menu and works there, so qwark-rpcs3 stores the setting as a console does.
+    /// </summary>
     [Fact]
-    public async Task MenuHelpIsUnsupportedUnderRpcs3()
+    public async Task MenuHelpIsTakenUnderRpcs3ForToD()
     {
         var (server, client) = await ConnectAsync();
         using (server)
@@ -94,10 +97,9 @@ public class InGameMenusTests
             server.Emulator = true;
             server.NoCodePatches = true;
 
-            var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => client.MenuHelpAsync(false));
+            await client.MenuHelpAsync(false);
 
-            Assert.Equal(Status.Unsupported, refused.Status);
-            Assert.True(server.MenuHelp);
+            Assert.False(server.MenuHelp);
         }
     }
 
@@ -118,6 +120,8 @@ public class InGameMenusTests
 
         Assert.False(CombosPanel.InGameMenusBlocked(console));
         Assert.True(CombosPanel.InGameMenusBlocked(rpcs3));
+        // Qwark revision 1.29: ToD's menu is its pause menu, which works under RPCS3 too.
+        Assert.False(CombosPanel.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }));
         Assert.Equal("Trainer replaces Help in the pause menu", CombosPanel.InGameMenusStatus(console));
         Assert.Equal("the game's default pause menu", CombosPanel.InGameMenusStatus(off));
         Assert.Equal("not under RPCS3", CombosPanel.InGameMenusStatus(rpcs3));
@@ -204,7 +208,7 @@ public class InGameMenusTests
     }
 
     /// <summary>
-    /// Revision 1.28: a game with no console menu (flags2 bit7 NO_MENU, ToD) has neither
+    /// Revision 1.28: a game with no console menu (flags2 bit7 NO_MENU; ToD until qwark revision 1.29) has neither
     /// the menu's combo row nor the In-game menus box; every other combo row stays.
     /// </summary>
     [Fact]
@@ -225,14 +229,15 @@ public class InGameMenusTests
         Assert.False(SessionInfo.Parse(console.ToBytes()).NoConsoleMenu);
     }
 
+    /// <summary>Qwark revision 1.29: ToD's console menu is its own pause menu, so the fake ToD has one.</summary>
     [Fact]
-    public async Task TheFakeToDConsoleSaysItHasNoConsoleMenu()
+    public async Task TheFakeToDConsoleHasAConsoleMenu()
     {
         using var server = new FakeQwarkServer();
         server.UseTod();
         server.Start();
         using var client = new QwarkClient { AutoReconnect = false };
         await client.ConnectAsync("127.0.0.1", server.Port);
-        Assert.True((await client.HelloAsync()).NoConsoleMenu);
+        Assert.False((await client.HelloAsync()).NoConsoleMenu);
     }
 }

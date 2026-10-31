@@ -154,9 +154,12 @@ public static class CombosPanel
 
     /// <summary>
     /// Whether the In-game menus box is greyed: under RPCS3 there is no console menu, and qwark
-    /// answers MENU_HELP UNSUPPORTED.
+    /// answers MENU_HELP UNSUPPORTED. Qwark revision 1.29: but Tools of Destruction's, which is the
+    /// game's own pause menu and works under RPCS3 with the Lua helper's patch, so there the box
+    /// is live.
     /// </summary>
-    public static bool InGameMenusBlocked(SessionInfo session) => session.IsEmulator || session.CodePatchesUnsupported;
+    public static bool InGameMenusBlocked(SessionInfo session) =>
+        (session.IsEmulator || session.CodePatchesUnsupported) && session.Game != GameId.Tod;
 
     /// <summary>
     /// What the row says about itself when the pointer rests on it. The console menu's combo is
@@ -363,7 +366,8 @@ public static class CombosPanel
     /// of the menu the client has. Drawn from the session flag, like the combo switch, so it always
     /// says what the console says: a click sends the request, the next packet moves the box, and
     /// the console swaps the row at once in play or as soon as the pause menu closes. Hidden
-    /// against a module without the op, greyed under RPCS3, which has no console menu.
+    /// against a module without the op, greyed under RPCS3, which has no console menu (but in
+    /// ToD, whose pause menu is its console menu there too, qwark revision 1.29).
     /// </summary>
     private static void DrawInGameMenus(AppState state)
     {

@@ -881,10 +881,8 @@ public sealed partial class FakeQwarkServer : IDisposable
             ProfileSeq = ProfilesLive ? _profileSeq : (byte)0,
             Flags2 = (UsbModsOn ? SessionFlags2.UsbMods : SessionFlags2.None)
                      | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None)
-                     | moduleBits
-                     // Revision 1.28: ToD has no console menu, as qwark says of it.
-                     | (moduleBits == SessionFlags2.None && _session.State == SessionState.Ingame
-                        && _session.Game == GameId.Tod ? SessionFlags2.NoMenu : SessionFlags2.None),
+                     | moduleBits,
+                     // Revision 1.29: ToD's console menu is its own pause menu, so no NO_MENU any more.
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };
@@ -3089,9 +3087,9 @@ public sealed partial class FakeQwarkServer : IDisposable
 
                 case Opcode.MenuHelp:
                 {
-                    // `u8 on`, 0 or 1, as COMBO_ENABLE; no console menu where code is not patched.
+                    // `u8 on`, 0 or 1, as COMBO_ENABLE. No console menu where code is not patched, but
+                    // revision 1.29's qwark-rpcs3 takes it, for ToD's pause menu, which works there.
                     if (payload.Length < 1 || payload[0] > 1) return (Status.BadArg, null);
-                    if (NoCodePatches) return (Status.Unsupported, null);
                     _session = payload[0] != 0
                         ? _session with { Flags = _session.Flags & ~SessionFlags.MenuHelpOff }
                         : _session with { Flags = _session.Flags | SessionFlags.MenuHelpOff };
