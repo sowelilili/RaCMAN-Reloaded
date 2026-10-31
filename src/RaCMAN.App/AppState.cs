@@ -1736,6 +1736,8 @@ public sealed class AppState : IDisposable
         HasLua = false;
         Lua = null;
         LuaStatusRefusal = null;
+        DebugPages = Array.Empty<DebugPage>();
+        _debugTexts.Clear();
         Manips = null;
         _sinceManipPoll = 0;
     }
@@ -1915,6 +1917,7 @@ public sealed class AppState : IDisposable
         RefreshLevelFlagsSupport(quiet);
         RefreshLevelFlagNames();
         RefreshLuaStatus();
+        RefreshDebugPages();
     }
 
     /// <summary>
@@ -1922,6 +1925,97 @@ public sealed class AppState : IDisposable
     /// UNKNOWN_OP a module from before the op; both leave the names null and the panel on its bytes,
     /// and neither is worth a toast.
     /// </summary>
+    // ---------------------------------------------------------------- debug pages, revision 1.29
+
+    /// <summary>
+    /// The described game's debug pages (DEBUG_TEXT, revision 1.29): read-only text the console makes
+    /// from the game's memory, ToD's level cache alone so far. Empty for a game with none, which
+    /// answers UNSUPPORTED, and for a module from before the op (UNKNOWN_OP).
+    /// </summary>
+    public IReadOnlyList<DebugPage> DebugPages { get; private set; } = Array.Empty<DebugPage>();
+
+    /// <summary>Whether the Debug section has a box of its own to draw: the Lua console, or debug pages.</summary>
+    public bool HasDebugBox => HasLua || DebugPages.Count > 0;
+
+    /// <summary>A page's last answer: its text, or the status it was refused with, and when.</summary>
+    public sealed record DebugPageText(string? Text, Status? Refusal, DateTime At);
+
+    private readonly Dictionary<byte, DebugPageText> _debugTexts = new();
+
+    private readonly HashSet<byte> _debugInFlight = new();
+
+    /// <summary>The last answer for <paramref name="page"/>, or null before one.</summary>
+    public DebugPageText? DebugTextOf(byte page) => _debugTexts.TryGetValue(page, out var t) ? t : null;
+
+    /// <summary>Whether a DEBUG_TEXT for <paramref name="page"/> is out and unanswered.</summary>
+    public bool DebugTextInFlight(byte page) => _debugInFlight.Contains(page);
+
+    /// <summary>Asks for the page list; a game with none, or an older module, leaves it empty without a word.</summary>
+    public void RefreshDebugPages()
+    {
+        if (UnknownGame) return;
+
+        int epoch = _describedEpoch;
+        Run(async () =>
+        {
+            try
+            {
+                var pages = await Client.DebugPagesAsync().ConfigureAwait(false);
+                Post(() =>
+                {
+                    if (epoch == _describedEpoch) DebugPages = pages;
+                });
+            }
+            catch (QwarkStatusException ex) when (ex.Status is Status.Unsupported or Status.UnknownOp)
+            {
+                Post(() =>
+                {
+                    if (epoch == _describedEpoch) DebugPages = Array.Empty<DebugPage>();
+                });
+            }
+        }, null, quiet: true);
+    }
+
+    /// <summary>
+    /// Asks for one page's text. Read only. A refusal is kept for the box to show beside the page,
+    /// so nothing is swallowed and nothing toasts on every timed refresh. One request per page at a
+    /// time: a slow page under RPCS3 takes a while, and a second click waits for the first.
+    /// </summary>
+    public void RefreshDebugText(byte page)
+    {
+        if (!Connected || UnknownGame || _debugInFlight.Contains(page)) return;
+
+        _debugInFlight.Add(page);
+        int epoch = _describedEpoch;
+        RunQuiet(async () =>
+        {
+            try
+            {
+                var text = await Client.DebugTextAsync(page).ConfigureAwait(false);
+                Post(() =>
+                {
+                    if (epoch == _describedEpoch) _debugTexts[page] = new DebugPageText(text, null, DateTime.Now);
+                });
+            }
+            catch (QwarkStatusException ex)
+            {
+                var status = ex.Status;
+                Post(() =>
+                {
+                    if (epoch == _describedEpoch)
+                    {
+                        var last = DebugTextOf(page);
+                        _debugTexts[page] = new DebugPageText(last?.Text, status, DateTime.Now);
+                    }
+                });
+            }
+            finally
+            {
+                Post(() => _debugInFlight.Remove(page));
+            }
+        });
+    }
+
     public void RefreshLevelFlagNames()
     {
         if (UnknownGame) return;

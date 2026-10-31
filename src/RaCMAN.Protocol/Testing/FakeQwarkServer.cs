@@ -2206,7 +2206,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
         or Opcode.SaveFileRestore or Opcode.SaveFileCategory or Opcode.SaveFilePatch
         or Opcode.ManipList or Opcode.ManipSelect or Opcode.ManipOptions or Opcode.ManipApply
-        or Opcode.LuaExec or Opcode.LuaStatus or Opcode.LuaPatch;
+        or Opcode.LuaExec or Opcode.LuaStatus or Opcode.LuaPatch or Opcode.DebugText;
 
     /// <summary>
     /// How many requests have been refused with BUSY because a game was starting or ending. A
@@ -3535,6 +3535,11 @@ public sealed partial class FakeQwarkServer : IDisposable
                 case Opcode.LuaStatus:
                 case Opcode.LuaPatch:
                     return HandleLua(opcode, payload);
+
+                // ------------------------------------------- 5.16 debug pages, revision 1.29
+
+                case Opcode.DebugText:
+                    return HandleDebugText(payload);
 
                 default:
                     return (Status.UnknownOp, null);

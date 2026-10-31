@@ -239,6 +239,14 @@ public enum Opcode : ushort
     /// UNSUPPORTED). Laid out exactly as SAVEFILE_PATCH's reply, with no single bytes.
     /// </summary>
     LuaPatch = 0x00E2,
+
+    /// <summary>
+    /// Revision 1.29 (pending): <c>u8 page</c>. A game's read-only debug pages, text the console makes
+    /// from the game's memory: 0xFF lists them (<see cref="DebugText.ParseList"/>), a page number
+    /// answers its text (<see cref="DebugText.ParseText"/>). Only ToD answers; every other game
+    /// UNSUPPORTED, a module from before the op UNKNOWN_OP.
+    /// </summary>
+    DebugText = 0x00E8,
 }
 
 /// <summary>

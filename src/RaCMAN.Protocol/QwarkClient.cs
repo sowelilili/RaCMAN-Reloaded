@@ -1678,6 +1678,18 @@ public sealed class QwarkClient : IDisposable
     public async Task<PatchReply> LuaPatchAsync(CancellationToken cancellationToken = default) =>
         PatchReply.Parse(await RequestAsync(Opcode.LuaPatch, null, cancellationToken).ConfigureAwait(false), "LUA_PATCH");
 
+    /// <summary>
+    /// DEBUG_TEXT's list, revision 1.29: the game's debug pages and which are SLOW. UNSUPPORTED (a game
+    /// with none, or no game) and UNKNOWN_OP (a module from before the op) are thrown.
+    /// </summary>
+    public async Task<IReadOnlyList<DebugPage>> DebugPagesAsync(CancellationToken cancellationToken = default) =>
+        DebugText.ParseList(await RequestAsync(Opcode.DebugText, new[] { DebugText.ListRequest }, cancellationToken)
+            .ConfigureAwait(false));
+
+    /// <summary>DEBUG_TEXT for one page, revision 1.29: its text as the console made it. Read only.</summary>
+    public async Task<string> DebugTextAsync(byte page, CancellationToken cancellationToken = default) =>
+        DebugText.ParseText(await RequestAsync(Opcode.DebugText, new[] { page }, cancellationToken).ConfigureAwait(false));
+
     // ---------------------------------------------------------------- 5.11 autosplitting
 
     /// <summary>

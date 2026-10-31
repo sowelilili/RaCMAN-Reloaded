@@ -122,7 +122,7 @@ public static class GamePanel
     /// </summary>
     public static IReadOnlyList<string> SubPagesWithContent(AppState state) =>
         SubPagesWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.UnlocksUnsupported,
-            state.Manips, state.HasLua);
+            state.Manips, state.HasDebugBox);
 
     /// <summary>
     /// <see cref="SubPagesWithContent(AppState)"/> from a description alone, so what the nav lists
@@ -140,7 +140,7 @@ public static class GamePanel
     /// so this needs no flag of its own.
     /// </summary>
     public static IReadOnlyList<string> UnlocksTabsWithContent(AppState state) =>
-        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.Manips, state.HasLua);
+        UnlocksTabsWithContent(state.DescribedTitle, state.DescribedGame, state.Describe, state.Manips, state.HasDebugBox);
 
     /// <summary><see cref="UnlocksTabsWithContent(AppState)"/> from a description alone.</summary>
     public static IReadOnlyList<string> UnlocksTabsWithContent(
@@ -170,7 +170,7 @@ public static class GamePanel
         var describe = state.Describe;
         if (describe.Features.Length == 0) return Array.Empty<Feature>();
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _, state.HasLua);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _, state.HasDebugBox);
         return sections.TryGetValue(section, out var features) ? features : Array.Empty<Feature>();
     }
 
@@ -225,7 +225,7 @@ public static class GamePanel
         if (describe.Features.Length == 0 || string.IsNullOrWhiteSpace(section)) return null;
         if (GameLayout.IsReserved(section)) return null;
 
-        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _, state.HasLua);
+        var sections = Assign(state.DescribedTitle, state.DescribedGame, describe, state.Manips, out _, state.HasDebugBox);
         if (!sections.ContainsKey(section)) return null;
 
         return GameLayout.IsUnlocksTab(section, state.UnlocksUnsupported) ? PanelNav.Unlocks : PanelNav.Game;
@@ -310,7 +310,7 @@ public static class GamePanel
         }
 
         // Revision 1.27: a game with Lua (ToD) has a Debug section for the Lua box, whatever the
-        // layout sends there.
+        // layout sends there; revision 1.29, so does a game with debug pages (the caller's `lua`).
         if (lua && !sections.ContainsKey(GameLayout.DebugSection))
         {
             sections[GameLayout.DebugSection] = new List<Feature>();
@@ -327,7 +327,7 @@ public static class GamePanel
     private static bool HasContent(AppState state, string section, List<Feature> features) =>
         features.Count > 0
         || (section == GameLayout.ManipsSection && state.Manips is not null)
-        || (section == GameLayout.DebugSection && state.HasLua);
+        || (section == GameLayout.DebugSection && (state.HasLua || DebugPagesBox.HasContent(state)));
 
     public static void Draw(AppState state)
     {
@@ -347,7 +347,7 @@ public static class GamePanel
         string title = state.DescribedTitle;
         var game = state.DescribedGame;
         var order = new List<string>();
-        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, state.Manips, out order, state.HasLua) : null;
+        var sections = describe.Features.Length > 0 ? Assign(title, game, describe, state.Manips, out order, state.HasDebugBox) : null;
 
         if (ResolveSubPage(state, sections) is { } side)
         {
@@ -696,6 +696,16 @@ public static class GamePanel
         if (section == GameLayout.DebugSection && state.HasLua)
         {
             LuaBox.Draw(state);
+            if (features.Count == 0 && !DebugPagesBox.HasContent(state)) return;
+
+            ImGui.Spacing();
+            leadingSpace = false;
+        }
+
+        // Revision 1.29: then the game's debug pages (ToD's level cache), read only.
+        if (section == GameLayout.DebugSection && DebugPagesBox.HasContent(state))
+        {
+            DebugPagesBox.Draw(state);
             if (features.Count == 0) return;
 
             ImGui.Spacing();
