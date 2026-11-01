@@ -139,7 +139,7 @@ public class TodTests
         Assert.False(describe.Features.Single(f => f.Label == "Infinite health").IsLive);
         Assert.True(describe.Features.Single(f => f.Label == "God Ratchet").IsLive);
         Assert.DoesNotContain(describe.Features, f => f.Label.Contains("RYNO"));
-        Assert.Equal(new[] { "Bolts", "Raritanium", "Challenge mode" }, describe.Readouts);
+        Assert.Equal(new[] { "Bolts", "Raritanium", "Challenge mode", "Cutscene cache" }, describe.Readouts);
         Assert.Equal(19, (await client.PlanetListAsync()).Names.Length);
 
         var before = await client.LuaStatusAsync();

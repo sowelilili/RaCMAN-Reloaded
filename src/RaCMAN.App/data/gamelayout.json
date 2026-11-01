@@ -162,14 +162,29 @@
         "God Ratchet": "Options",
 
         "Remove cutscenes": "Manips",
+        "Cache cutscenes": "Manips",
+        "Cache cutscenes on reset": "Manips",
+        "Disable cutscene caching": "Manips",
 
         "Unlock all skill points": "Collectables",
         "Reset skill points": "Collectables",
         "Unlock all gold bolts": "Collectables",
         "Reset gold bolts": "Collectables"
       },
+      "headings": {
+        "Manips": {
+          "Cutscene cache": [
+            "Cache cutscenes",
+            "Cache cutscenes on reset",
+            "Disable cutscene caching"
+          ]
+        }
+      },
       "tooltips": {
-        "Remove cutscenes": "Disables unskippable cutscenes, without deleting them from the game's files. This option is legal for speedruns."
+        "Remove cutscenes": "Disables unskippable cutscenes, without deleting them from the game's files. This option is legal for speedruns.",
+        "Cache cutscenes": "Loads Stratus City's and Fastoon's cutscene audio into the game's cache, so their opening cutscenes start up to about 2 s sooner on your console. Runs in the background once you are in gameplay. The cache is cleared when the game is closed, but survives a return to the title screen.",
+        "Cache cutscenes on reset": "Does Cache cutscenes by itself when you start a new run (a new file loading into Metropolis), once Metropolis has loaded.",
+        "Disable cutscene caching": "For practice: clears each planet's cutscene audio from the game's cache while the planet loads, so its opening cutscene always loads as slowly as on a first visit."
       }
     }
   }

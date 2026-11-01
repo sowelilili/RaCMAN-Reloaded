@@ -90,36 +90,95 @@ public static class ManipsArea
     };
 
     /// <summary>
-    /// The status line for <paramref name="feature"/>, when it is an ACTION that names a status
-    /// readout (UYA's Reset trophies, revision 1.21), read from <paramref name="session"/>; null for
-    /// every other feature, for a qwark that names no status readout, and for nothing to say.
+    /// The line under Tools of Destruction's Cache cutscenes for its status word (revision 1.29,
+    /// PROTOCOL.md section 5.17), or null for nothing to say: no run this boot, or a state this
+    /// client does not know.
     /// </summary>
-    public static (string Text, TrophyResetState State)? StatusLine(SessionInfo session, Feature feature)
+    public static string? CutsceneCacheLine(CutsceneCacheStatus status) => status.State switch
     {
-        if (feature.StatusReadout is not { } index || session.ReadoutAt(index) is not { } word) return null;
+        CutsceneCacheState.Waiting => status.Wait == CutsceneCacheWait.Warmer
+            ? "Cutscene cache: waiting for the game to finish caching this level..."
+            : "Cutscene cache: waiting for gameplay...",
+        CutsceneCacheState.Caching => $"Caching cutscenes: {status.Planet ?? "a planet"} {status.Percent}%",
+        CutsceneCacheState.Done => $"Cutscenes cached ({status.Seconds} s)",
+        CutsceneCacheState.Failed => $"Cutscene caching stopped: {CacheFailureText(status)}",
+        _ => null,
+    };
 
-        var status = TrophyResetStatus.Parse(word);
-        return TrophyLine(status) is { } text ? (text, status.State) : null;
+    /// <summary>Why a cutscene caching run stopped, in a few words.</summary>
+    private static string CacheFailureText(CutsceneCacheStatus status) => status.Failure switch
+    {
+        CutsceneCacheFailure.LevelChanged => "the level changed before it finished",
+        CutsceneCacheFailure.NoTable => "the game's level table could not be read",
+        CutsceneCacheFailure.Stalled => "the game stopped reading",
+        CutsceneCacheFailure.Disabled => "Disable cutscene caching is on",
+        CutsceneCacheFailure.Unreadable => "the game could not be read",
+        CutsceneCacheFailure.GameClosed => "the game closed",
+        _ => "unknown reason",
+    };
+
+    /// <summary>How a status line is drawn: grey while under way, green once done, red when it failed.</summary>
+    public enum StatusTone
+    {
+        Busy,
+        Good,
+        Bad,
     }
 
     /// <summary>
-    /// The status lines of a heading's features, drawn under its button and its toggle: grey while
-    /// a reset runs, green once the trophies are ready, red when one failed. Nothing at all before
-    /// the first reset of a boot.
+    /// The status line for <paramref name="feature"/>, when it is an ACTION that names a status
+    /// readout, read from <paramref name="session"/>; null for every other feature, for a qwark that
+    /// names no status readout, and for nothing to say. The word's layout is the action's own:
+    /// Tools of Destruction's Cache cutscenes (revision 1.29) in <paramref name="game"/> Tod, UYA's
+    /// Reset trophies (revision 1.21) for every other.
+    /// </summary>
+    public static (string Text, StatusTone Tone)? StatusLine(SessionInfo session, Feature feature, GameId game = GameId.None)
+    {
+        if (feature.StatusReadout is not { } index || session.ReadoutAt(index) is not { } word) return null;
+
+        if (game == GameId.Tod)
+        {
+            if (feature.Id != CutsceneCacheStatus.FeatureId) return null;
+            var cache = CutsceneCacheStatus.Parse(word);
+            return CutsceneCacheLine(cache) is { } line
+                ? (line, cache.State switch
+                {
+                    CutsceneCacheState.Done => StatusTone.Good,
+                    CutsceneCacheState.Failed => StatusTone.Bad,
+                    _ => StatusTone.Busy,
+                })
+                : null;
+        }
+
+        var status = TrophyResetStatus.Parse(word);
+        return TrophyLine(status) is { } text
+            ? (text, status.State switch
+            {
+                TrophyResetState.Ready => StatusTone.Good,
+                TrophyResetState.Failed => StatusTone.Bad,
+                _ => StatusTone.Busy,
+            })
+            : null;
+    }
+
+    /// <summary>
+    /// The status lines of a block's actions, drawn under its buttons: grey while one runs, green
+    /// once it is done (the trophies ready, the cutscenes cached), red when it failed. Nothing at
+    /// all before the first run of a boot.
     /// </summary>
     public static void DrawStatusLines(AppState state, IReadOnlyList<Feature> features)
     {
         foreach (var feature in features)
         {
-            if (StatusLine(state.Session, feature) is not { } line) continue;
+            if (StatusLine(state.Session, feature, state.DescribedGame) is not { } line) continue;
 
-            switch (line.State)
+            switch (line.Tone)
             {
-                case TrophyResetState.Ready:
+                case StatusTone.Good:
                     Ui.Success(line.Text);
                     break;
 
-                case TrophyResetState.Failed:
+                case StatusTone.Bad:
                     Ui.Error(line.Text);
                     break;
 
@@ -172,7 +231,7 @@ public static class ManipsArea
         string headers = string.Join(" ", blocks.Select(b =>
             $"{Name(b.Heading!)}:{string.Join(",", b.Features.Select(f => Name(f.Label)))}"));
         string? status = blocks.SelectMany(b => b.Features)
-            .Select(f => StatusLine(state.Session, f)?.Text)
+            .Select(f => StatusLine(state.Session, f, state.DescribedGame)?.Text)
             .FirstOrDefault(text => text is not null);
 
         return $"selected={Name(list.GroupName(list.Selected))} auto={(list.AutoReset ? "on" : "off")} "

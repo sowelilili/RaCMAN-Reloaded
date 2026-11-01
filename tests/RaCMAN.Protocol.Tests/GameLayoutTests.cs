@@ -910,7 +910,7 @@ public class GameLayoutTests
 
         Assert.Equal(GameLayout.ManipsSection, GameLayout.SectionFor(title, GameId.Tod, cut, d));
         var sections = GamePanel.SectionsFor(title, GameId.Tod, d);
-        Assert.Equal(new[] { "Remove cutscenes" }, sections[GameLayout.ManipsSection].Select(f => f.Label));
+        Assert.Contains("Remove cutscenes", sections[GameLayout.ManipsSection].Select(f => f.Label));
         Assert.DoesNotContain(sections["Cheats"], f => f.Label == "Remove cutscenes");
 
         const string Tip = "Disables unskippable cutscenes, without deleting them from the game's files. "

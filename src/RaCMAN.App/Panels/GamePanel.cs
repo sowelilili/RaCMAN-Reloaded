@@ -675,12 +675,10 @@ public static class GamePanel
                 ImGui.Spacing();
                 Ui.Heading(headings[i].Heading!);
                 ImGui.PushID($"manip-header-{i}");
+                // Revision 1.21: what an ACTION with a status readout is doing is drawn under its
+                // button by the block (UYA's trophy reset).
                 DrawFeatureBlock(state, describe, headings[i].Features, section, toggleColumns, leadingSpace: false,
                     heading: headings[i].Heading);
-
-                // Revision 1.21: what an ACTION with a status readout is doing, under the block
-                // (UYA's trophy reset), and nothing for one that names none.
-                ManipsArea.DrawStatusLines(state, headings[i].Features);
                 ImGui.PopID();
             }
 
@@ -786,6 +784,10 @@ public static class GamePanel
         DrawToggleGrid(state, toggles, toggleColumns);
         if (toggles.Length > 0 && (actions.Length > 0 || choices.Length > 0)) ImGui.Spacing();
         DrawActionGrid(state, actions);
+
+        // What an ACTION with a status readout is doing, under the buttons (UYA's trophy reset,
+        // revision 1.21; ToD's Cache cutscenes, revision 1.29), and nothing for one that names none.
+        ManipsArea.DrawStatusLines(state, actions);
         if (choices.Length > 0) ImGui.Spacing();
 
         // The heading's own order, where the layout gives one; a feature it does not list keeps

@@ -113,11 +113,13 @@ public sealed partial class FakeQwarkServer
     /// the savefile manager's two flagged actions, 40 and 41, in a fourth group. Revision 1.29:
     /// Fast loads is a code patch, WRITES_CODE, with a code switch under RPCS3, and Infinite ammo
     /// and Infinite health are no longer LIVE, so they have an "on boot" box; God Ratchet still is.
+    /// Revision 1.29: the cutscene cache, Cache cutscenes (19, naming readout 3 as its status
+    /// readout, with qwark's id, which the client's status line keys on) and its two toggles.
     /// </summary>
     public static DescribeResult TodDescribe() => new(
         GameId.Tod,
         new[] { "Cheats", "Player", "Progress", "Savefile" },
-        new[] { "Bolts", "Raritanium", "Challenge mode" },
+        new[] { "Bolts", "Raritanium", "Challenge mode", "Cutscene cache" },
         new[]
         {
             new Feature(17, FeatureKind.Toggle, 0, 0, FeatureFlags.WritesCode, 0xFF, 0, 0, "Fast loads"),
@@ -125,6 +127,9 @@ public sealed partial class FakeQwarkServer
             new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite ammo"),
             new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite health"),
             new Feature(16, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "God Ratchet"),
+            new Feature(19, FeatureKind.Action, 0, 0, FeatureFlags.None, 3, 0, 0, "Cache cutscenes"),
+            new Feature(20, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Cache cutscenes on reset"),
+            new Feature(21, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Disable cutscene caching"),
             new Feature(2, FeatureKind.Action, 1, 0, FeatureFlags.None, 0xFF, 0, 0, "Die"),
             new Feature(3, FeatureKind.Value, 1, 0, FeatureFlags.None, 0, 0, 0, "Bolts"),
             new Feature(4, FeatureKind.Value, 1, 0, FeatureFlags.None, 1, 0, 0, "Raritanium"),

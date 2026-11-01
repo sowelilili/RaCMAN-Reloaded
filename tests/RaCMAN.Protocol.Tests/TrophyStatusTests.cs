@@ -162,7 +162,7 @@ public class TrophyStatusLineTests
         var ready = TrophyResetStatus.Ready(13, 4).ToWord();
 
         var line = ManipsArea.StatusLine(SessionWith(12, ready), Reset);
-        Assert.Equal<(string, TrophyResetState)?>(("Trophies ready (13 s)", TrophyResetState.Ready), line);
+        Assert.Equal<(string, ManipsArea.StatusTone)?>(("Trophies ready (13 s)", ManipsArea.StatusTone.Good), line);
 
         // The row says where the word is, whatever index that is.
         Assert.Equal("Trophies ready (13 s)",
@@ -178,7 +178,7 @@ public class TrophyStatusLineTests
         Assert.Null(ManipsArea.StatusLine(SessionWith(12, ready), value));
 
         var failed = TrophyResetStatus.Failed(TrophyResetFailure.DeleteStopped).ToWord();
-        Assert.Equal(TrophyResetState.Failed, ManipsArea.StatusLine(SessionWith(12, failed), Reset)?.State);
+        Assert.Equal(ManipsArea.StatusTone.Bad, ManipsArea.StatusLine(SessionWith(12, failed), Reset)?.Tone);
     }
 
     [Fact]
