@@ -1,6 +1,6 @@
 # RaCMAN Reloaded
 
-Thin cross-platform PC client for qwark, the PS3-side trainer. Read `../DESIGN.md` (section 4) and `../qwark/docs/PROTOCOL.md` (the wire contract) before changing anything.
+Thin cross-platform PC client for qwark, the PS3-side trainer. Read `../docs/DESIGN.md` (section 4) and `../qwark/docs/PROTOCOL.md` (the wire contract) before changing anything.
 
 ## Build and run
 
