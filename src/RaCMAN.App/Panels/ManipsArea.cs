@@ -97,10 +97,13 @@ public static class ManipsArea
     public static string? CutsceneCacheLine(CutsceneCacheStatus status) => status.State switch
     {
         CutsceneCacheState.Waiting => status.Wait == CutsceneCacheWait.Warmer
-            ? "Cutscene cache: waiting for the game to finish caching this level..."
+            ? "Cutscene cache: waiting for the game's level caching to start..."
             : "Cutscene cache: waiting for gameplay...",
         CutsceneCacheState.Caching => $"Caching cutscenes: {status.Planet ?? "a planet"} {status.Percent}%",
-        CutsceneCacheState.Done => $"Cutscenes cached ({status.Seconds} s)",
+        CutsceneCacheState.Done => status.MiBPerSecond is { } rate
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"Cutscenes cached ({status.Seconds} s, {rate:0.0} MiB/s)")
+            : "Cutscenes already cached",
         CutsceneCacheState.Failed => $"Cutscene caching stopped: {CacheFailureText(status)}",
         _ => null,
     };
@@ -108,12 +111,14 @@ public static class ManipsArea
     /// <summary>Why a cutscene caching run stopped, in a few words.</summary>
     private static string CacheFailureText(CutsceneCacheStatus status) => status.Failure switch
     {
-        CutsceneCacheFailure.LevelChanged => "the level changed before it finished",
+        CutsceneCacheFailure.TitleFirst => "the title screen came before it finished",
         CutsceneCacheFailure.NoTable => "the game's level table could not be read",
         CutsceneCacheFailure.Stalled => "the game stopped reading",
         CutsceneCacheFailure.Disabled => "Disable cutscene caching is on",
         CutsceneCacheFailure.Unreadable => "the game could not be read",
         CutsceneCacheFailure.GameClosed => "the game closed",
+        CutsceneCacheFailure.TooLateStratusCity => "the run reached Stratus City first",
+        CutsceneCacheFailure.TooLateFastoon => "the run reached Fastoon first",
         _ => "unknown reason",
     };
 

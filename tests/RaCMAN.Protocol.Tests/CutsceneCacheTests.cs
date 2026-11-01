@@ -40,6 +40,15 @@ public class CutsceneCacheTests
 
         var round = new CutsceneCacheStatus(CutsceneCacheState.Done, 0, 100, 255, 9);
         Assert.Equal(round, CutsceneCacheStatus.Parse(round.ToWord()));
+
+        // Done: bits 16..23 are the read rate in tenths of a MiB/s, 0 for nothing read.
+        Assert.Equal(7.4, CutsceneCacheStatus.Parse(0x304A1001u).MiBPerSecond);
+        Assert.False(CutsceneCacheStatus.Parse(0x304A1001u).AlreadyCached);
+        Assert.Null(CutsceneCacheStatus.Parse(0x30000001u).MiBPerSecond);
+        Assert.True(CutsceneCacheStatus.Parse(0x30000001u).AlreadyCached);
+        Assert.Null(CutsceneCacheStatus.Parse(0x222A1102u).MiBPerSecond);
+        Assert.Equal(CutsceneCacheFailure.TooLateStratusCity, CutsceneCacheStatus.Parse(0x47000001u).Failure);
+        Assert.Equal(CutsceneCacheFailure.TooLateFastoon, CutsceneCacheStatus.Parse(0x48000001u).Failure);
     }
 
     [Fact]
@@ -48,12 +57,18 @@ public class CutsceneCacheTests
         Assert.Null(ManipsArea.CutsceneCacheLine(default));
         Assert.Equal("Cutscene cache: waiting for gameplay...",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x11000000u)));
-        Assert.Equal("Cutscene cache: waiting for the game to finish caching this level...",
+        Assert.Equal("Cutscene cache: waiting for the game's level caching to start...",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x12000000u)));
         Assert.Equal("Caching cutscenes: Fastoon 7%", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x21070300u)));
-        Assert.Equal("Cutscenes cached (12 s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30640C01u)));
-        Assert.Equal("Cutscene caching stopped: the level changed before it finished",
+        Assert.Equal("Cutscenes cached (12 s, 10.0 MiB/s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30640C01u)));
+        Assert.Equal("Cutscenes cached (16 s, 7.4 MiB/s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x304A1001u)));
+        Assert.Equal("Cutscenes already cached", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30000001u)));
+        Assert.Equal("Cutscene caching stopped: the title screen came before it finished",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x41000501u)));
+        Assert.Equal("Cutscene caching stopped: the run reached Stratus City first",
+            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x47000501u)));
+        Assert.Equal("Cutscene caching stopped: the run reached Fastoon first",
+            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x48000501u)));
         Assert.Equal("Cutscene caching stopped: Disable cutscene caching is on",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x44000001u)));
         Assert.Null(ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x90000000u)));
@@ -64,7 +79,7 @@ public class CutsceneCacheTests
     {
         // ToD's Cache cutscenes: the cache's line, green once done, red when it failed.
         var done = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x30640C01u), Cache, GameId.Tod);
-        Assert.Equal(("Cutscenes cached (12 s)", ManipsArea.StatusTone.Good), done);
+        Assert.Equal(("Cutscenes cached (12 s, 10.0 MiB/s)", ManipsArea.StatusTone.Good), done);
         var failed = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x43000000u), Cache, GameId.Tod);
         Assert.Equal(ManipsArea.StatusTone.Bad, failed?.Tone);
         var busy = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x21320000u), Cache, GameId.Tod);

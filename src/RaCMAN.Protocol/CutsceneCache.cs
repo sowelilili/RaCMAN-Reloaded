@@ -6,7 +6,7 @@ public enum CutsceneCacheState : byte
     /// <summary>No run this boot. A boot of the game comes back to it, as the game clears its cache.</summary>
     None = 0,
 
-    /// <summary>Asked for, waiting for gameplay or for the game's own caching of the level to finish.</summary>
+    /// <summary>Asked for, waiting for gameplay or for the game's level warmer to have a file of its own to go ahead of.</summary>
     Waiting = 1,
 
     Caching = 2,
@@ -24,7 +24,7 @@ public enum CutsceneCacheWait : byte
     /// <summary>The game is not in gameplay (the title, a load, the pause).</summary>
     Gameplay = 1,
 
-    /// <summary>The game's level warmer is still reading the level's own files.</summary>
+    /// <summary>The game's level warmer has no file of its own in hand to go ahead of yet (revision 1.29: the request goes first).</summary>
     Warmer = 2,
 }
 
@@ -33,8 +33,8 @@ public enum CutsceneCacheFailure : byte
 {
     None = 0,
 
-    /// <summary>A level load, or the title, came before it finished.</summary>
-    LevelChanged = 1,
+    /// <summary>The title came before it finished. A level load no longer stops it: what is left goes on on the next level.</summary>
+    TitleFirst = 1,
 
     /// <summary>The game's level table could not be read.</summary>
     NoTable = 2,
@@ -50,6 +50,12 @@ public enum CutsceneCacheFailure : byte
 
     /// <summary>The game closed.</summary>
     GameClosed = 6,
+
+    /// <summary>A load into Stratus City came before its cutscene sound was in.</summary>
+    TooLateStratusCity = 7,
+
+    /// <summary>A load into Fastoon came before its cutscene sound was in.</summary>
+    TooLateFastoon = 8,
 }
 
 /// <summary>
@@ -59,7 +65,8 @@ public enum CutsceneCacheFailure : byte
 /// bits 28..31  state    CutsceneCacheState
 /// bits 24..27  detail   Waiting: CutsceneCacheWait. Caching: the planet, 1 Fastoon, 2 Stratus City.
 ///                       Failed: CutsceneCacheFailure
-/// bits 16..23  percent  Caching: of that planet. Done: 100
+/// bits 16..23  percent  Caching: of that planet. Done: the read rate in tenths of a MiB/s, 0 when
+///                       everything was cached already
 /// bits 8..15   seconds  since the request, or how long it ran, at most 255
 /// bits 0..7    seq      the requests that have ended since the game started, modulo 256
 /// </code>
@@ -80,6 +87,15 @@ public readonly record struct CutsceneCacheStatus(
     /// <summary>Why a failed request stopped, or None for every other state.</summary>
     public CutsceneCacheFailure Failure =>
         State == CutsceneCacheState.Failed ? (CutsceneCacheFailure)Detail : CutsceneCacheFailure.None;
+
+    /// <summary>
+    /// How fast a done run read, in MiB/s, or null: not done, or nothing needed reading because the
+    /// cache had both planets' sound already. At most 25.5.
+    /// </summary>
+    public double? MiBPerSecond => State == CutsceneCacheState.Done && Percent != 0 ? Percent / 10.0 : null;
+
+    /// <summary>A done run that read nothing: the cache had both planets' sound already.</summary>
+    public bool AlreadyCached => State == CutsceneCacheState.Done && Percent == 0;
 
     /// <summary>The planet being cached, or null when none is.</summary>
     public string? Planet => State != CutsceneCacheState.Caching ? null : Detail switch
