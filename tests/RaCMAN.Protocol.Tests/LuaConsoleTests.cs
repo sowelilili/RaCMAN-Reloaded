@@ -160,10 +160,9 @@ public class LuaConsoleTests
     }
 
     [Fact]
-    public void TheStarterScriptFitsAndSaysYourConsole()
+    public void TheStarterScriptFits()
     {
         Assert.NotNull(LuaBox.Prepare(LuaBox.StarterSource).Source);
-        Assert.Contains("your console", LuaBox.StarterSource);
     }
 
     // ---------------------------------------------------------------- the colours

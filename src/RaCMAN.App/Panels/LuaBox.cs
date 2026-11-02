@@ -22,7 +22,7 @@ namespace RaCMAN.App.Panels;
 public static class LuaBox
 {
     /// <summary>What a new editor holds: a line about the console, and a chunk that answers the game's Lua version.</summary>
-    public const string StarterSource = "-- Runs in the game on your console. Ctrl+Enter or Run sends it.\nreturn _VERSION\n";
+    public const string StarterSource = "-- Runs on-console: CTRL+ENTER or Run to upload. \nreturn _VERSION\n";
 
     /// <summary>How often the status line is read while the box is drawn.</summary>
     public const float PollSeconds = 1f;
