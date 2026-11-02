@@ -77,13 +77,17 @@ public sealed partial class FakeQwarkServer
     private bool LuaInstalledNow =>
         NoCodePatches ? _luaPatchInstalled : _luaInstalledGeneration == _session.Generation;
 
-    /// <summary>ToD's 19 planets, the game's LEVEL_ enum, as qwark's PLANET_LIST names them.</summary>
+    /// <summary>
+    /// ToD's 19 planets in the game's LEVEL_ order, as qwark's PLANET_LIST names them since revision
+    /// 1.29: the ship's planet selector's names (Kortog for Stratus City), the return to Fastoon
+    /// "Fastoon II".
+    /// </summary>
     public static readonly string[] TodPlanets =
     {
-        "Metropolis", "Cobalia", "Stratus City", "Fastoon", "Space Combat I", "Imperial Fight Fest",
-        "Apogee Space Station", "Pirate Base", "Space Combat II", "Rykan V", "Sargasso", "Iris",
-        "Zordoom Prison", "Space Combat III", "Kerchu City", "Slag's Fleet", "Cragmite Ruins",
-        "Meridian City", "Fastoon II",
+        "Kerwan", "Cobalia", "Kortog", "Fastoon", "Voron Asteroid Belt", "Mukow",
+        "Nundac Asteroid Ring", "Ardolis", "Rakar Star Cluster", "Rykan V", "Sargasso", "Kreeli Comet",
+        "Viceron", "Verdigris Black Hole", "Jasindu", "Ublik Passage", "Reepor",
+        "Igliak", "Fastoon II",
     };
 
     /// <summary>

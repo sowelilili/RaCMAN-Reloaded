@@ -204,7 +204,7 @@ public class LevelFlagsCheckAllTests
         var names = LevelFlagNamesTests.TodNames();
         var metropolis = LevelFlagsPanel.GroupsInOrder(names).Single(g => g.Index == 0);
         string done = LevelFlagsPanel.CheckGroupToast(names.GroupName(0));
-        Assert.Equal("Level flags all set on Metropolis", done);
+        Assert.Equal("Level flags all set on Kerwan", done);
 
         int rereads = 0;
         LevelFlagsPanel.RunCheckGroup(state, 0, metropolis.Flags, names.GroupName(0), () => rereads++);

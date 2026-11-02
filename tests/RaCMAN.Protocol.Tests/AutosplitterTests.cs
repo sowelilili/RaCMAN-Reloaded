@@ -2677,14 +2677,29 @@ public class AutosplitterTests
         Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
     }
 
+    /// <summary>
+    /// tod-planets.txt matches qwark's own names, which are the ship's planet names since revision
+    /// 1.29 (Kortog for Stratus City), and still the level names qwark used before, so a route whose
+    /// splits are named either way keeps splitting.
+    /// </summary>
     [Fact]
     public void ToDsRouteFileNamesEveryPlanet()
     {
+        string[] levelNames =
+        {
+            "Metropolis", "Cobalia", "Stratus City", "Fastoon", "Space Combat I", "Imperial Fight Fest",
+            "Apogee Space Station", "Pirate Base", "Space Combat II", "Rykan V", "Sargasso", "Iris",
+            "Zordoom Prison", "Space Combat III", "Kerchu City", "Slag's Fleet", "Cragmite Ruins",
+            "Meridian City", "Fastoon II",
+        };
+        Assert.Equal(levelNames.Length, FakeQwarkServer.TodPlanets.Length);
         for (int planet = 0; planet < FakeQwarkServer.TodPlanets.Length; planet++)
         {
             Assert.True(AutosplitRoutes.Knows(GameId.Tod, planet), $"tod-planets.txt has no names for planet {planet}");
             Assert.True(AutosplitRoutes.Matches(GameId.Tod, planet, FakeQwarkServer.TodPlanets[planet]),
                 $"tod-planets.txt does not match qwark's own name for planet {planet}");
+            Assert.True(AutosplitRoutes.Matches(GameId.Tod, planet, levelNames[planet]),
+                $"tod-planets.txt no longer matches the level name a saved route may use for planet {planet}");
         }
 
         Assert.True(AutosplitRoutes.Matches(GameId.Tod, 0, "Kerwan"));

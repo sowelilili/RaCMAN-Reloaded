@@ -53,8 +53,10 @@ public class LevelFlagNamesTests
         Assert.Equal(292, names.Flags.Length);
         Assert.Equal(Enumerable.Range(0, 19).Select(i => (byte)i).Append(LevelFlagGroup.NoPlanet),
             names.Groups.Select(g => g.Planet));
-        Assert.Equal(new LevelFlagGroup(0, "Metropolis"), names.Groups[0]);
+        Assert.Equal(new LevelFlagGroup(0, "Kerwan"), names.Groups[0]);
         Assert.Equal(new LevelFlagGroup(1, "Cobalia"), names.Groups[1]);
+        // Each planet's group has the name PLANET_LIST gives that planet (the ship's names, revision 1.29).
+        Assert.Equal(FakeQwarkServer.TodPlanets, names.Groups.Take(19).Select(g => g.Name));
         Assert.Equal(new LevelFlagGroup(LevelFlagGroup.NoPlanet, "Other"), names.Groups[19]);
 
         // Flag n is bit n & 63 of big-endian word n >> 6 of LEVELFLAGS_GET's 40 bytes.
