@@ -348,18 +348,21 @@ public class TodTests
         using var client = await ConnectAsync(server);
 
         var rows = await client.AutosplitDescribeAsync();
-        Assert.Equal(new byte[] { 1, 7, 5, 6, 4, 3 }, rows.Select(r => r.Code).ToArray());
+        Assert.Equal(new byte[] { 1, 7, 6, 4, 3 }, rows.Select(r => r.Code).ToArray());
         Assert.True(rows[0].PlanetRoute && rows[0].EnabledByDefault);
         Assert.Equal("Tachyon defeated", rows[1].Label);
         Assert.True(rows[1].EnabledByDefault);
         Assert.DoesNotContain(rows, r => r.Code == 2 || r.Code == 8 || r.Label == "Ending FMV" || r.Label == "Final fade to black");
-        Assert.False(rows[2].EnabledByDefault || rows[3].EnabledByDefault);
-        Assert.Equal(AutosplitKind.LoadStart, rows[4].Kind);
-        Assert.True(rows[4].Hold && !rows[4].Normalise && !rows[4].Flat && rows[4].ParamUs == 0);
-        Assert.True(rows[4].IsTiming);
-        Assert.Equal("Long load", rows[4].Label);
-        Assert.Equal(AutosplitKind.Pause, rows[5].Kind);
-        Assert.Equal(19_950_000u, rows[5].ParamUs);
+        // Code 5, "Credits", was retired in qwark revision 1.29.
+        Assert.DoesNotContain(rows, r => r.Code == 5 || r.Label == "Credits");
+        Assert.Equal("Mission completed", rows[2].Label);
+        Assert.False(rows[2].EnabledByDefault);
+        Assert.Equal(AutosplitKind.LoadStart, rows[3].Kind);
+        Assert.True(rows[3].Hold && !rows[3].Normalise && !rows[3].Flat && rows[3].ParamUs == 0);
+        Assert.True(rows[3].IsTiming);
+        Assert.Equal("Long load", rows[3].Label);
+        Assert.Equal(AutosplitKind.Pause, rows[4].Kind);
+        Assert.Equal(19_950_000u, rows[4].ParamUs);
     }
 
     // ------------------------------------------- the savefile manager, revision 1.28

@@ -6,7 +6,7 @@ These features are in qwark's test builds, and release builds leave them out unt
 
 A PS3 can keep separate settings for each user on the console. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, and the **In-game menus** setting. The mod and savefile libraries stay shared.
 
-Turn it on with **Per-user settings** under **Console** on the Settings panel, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line under the switch says whose settings you are editing.
+Turn it on with **Per-user settings** under **Console users** at the bottom of the Combos panel, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line under the switch says whose settings you are editing.
 
 Combos are shared by everyone, and so is the **Combos enabled** switch. To give the signed-in user their own combo for one action, press **Override** on that row and press the buttons. That row then shows in orange, and its buttons read **Override**, which captures the override again, and **Clear Override**, which removes only the override, so the shared combo comes back; press **Clear** again to clear the shared combo. Overrides are kept while per-user settings are off.
 

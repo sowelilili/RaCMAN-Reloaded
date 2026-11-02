@@ -9,7 +9,7 @@ namespace RaCMAN.Protocol.Tests;
 /// <summary>
 /// Per-user settings, revision 1.24 (qwark build 56): SessionInfo bytes 29 and 30, PROFILE_INFO,
 /// PROFILE_ENABLE, COMBO_OVERRIDE and the COMBO_LIST flags byte, the fake console's per-user
-/// stores, and what the Settings and Combos panels and AppState make of them.
+/// stores, and what the Combos panel and AppState make of them.
 /// </summary>
 public class ProfileTests
 {
@@ -97,7 +97,7 @@ public class ProfileTests
         Assert.False(parsed.ProfilesSupported);
         Assert.False(parsed.ProfilesOn);
         Assert.False(parsed.ProfileActive);
-        Assert.False(SettingsPanel.ShowsProfiles(parsed));
+        Assert.False(CombosPanel.ShowsProfiles(parsed));
         Assert.False(CombosPanel.ShowsOverride(parsed));
 
         // And beside the profile bits it changes nothing about them.
@@ -690,31 +690,46 @@ public class ProfileTests
     [Fact]
     public void TheSectionShowsOnlyWithTheCapabilityBitAndNeverUnderRpcs3()
     {
-        Assert.True(SettingsPanel.ShowsProfiles(ConsoleSession));
-        Assert.False(SettingsPanel.ShowsProfiles(SessionInfo.Empty with { QwarkVersion = 56 }));
-        Assert.False(SettingsPanel.ShowsProfiles(ConsoleSession with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches }));
+        Assert.True(CombosPanel.ShowsProfiles(ConsoleSession));
+        Assert.False(CombosPanel.ShowsProfiles(SessionInfo.Empty with { QwarkVersion = 56 }));
+        Assert.False(CombosPanel.ShowsProfiles(ConsoleSession with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches }));
+    }
+
+    /// <summary>
+    /// The switch is the console's, so it is on the Combos panel, as its Console users section,
+    /// beside the overrides it brings; the Settings panel holds only this client's own settings.
+    /// </summary>
+    [Fact]
+    public void TheSwitchIsOnTheCombosPanelAndNotOnTheSettingsPanel()
+    {
+        const System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Static;
+
+        Assert.NotNull(typeof(CombosPanel).GetMethod("DrawProfiles", all));
+        Assert.Empty(typeof(SettingsPanel).GetMembers(all)
+            .Where(member => member.Name.Contains("Profile", StringComparison.Ordinal)));
     }
 
     [Fact]
     public void TheStatusLineSaysWhoseSettingsAreBeingEdited()
     {
-        Assert.Equal("Editing your console's shared settings", SettingsPanel.ProfileStatus(ConsoleSession, User1));
+        Assert.Equal("Editing your console's shared settings", CombosPanel.ProfileStatus(ConsoleSession, User1));
         Assert.Equal("Per-user settings are on; waiting for a user to sign in",
-            SettingsPanel.ProfileStatus(With(ProfileFlags.On), ProfileInfo.None));
+            CombosPanel.ProfileStatus(With(ProfileFlags.On), ProfileInfo.None));
 
         var active = With(ProfileFlags.On | ProfileFlags.Active);
-        Assert.Equal("Editing settings for User 1", SettingsPanel.ProfileStatus(active, User1));
-        Assert.Equal("Editing settings for User 2", SettingsPanel.ProfileStatus(active, User1 with { UserId = 2 }));
-        Assert.Equal("Editing the signed-in user's settings", SettingsPanel.ProfileStatus(active, ProfileInfo.None));
+        Assert.Equal("Editing settings for User 1", CombosPanel.ProfileStatus(active, User1));
+        Assert.Equal("Editing settings for User 2", CombosPanel.ProfileStatus(active, User1 with { UserId = 2 }));
+        Assert.Equal("Editing the signed-in user's settings", CombosPanel.ProfileStatus(active, ProfileInfo.None));
 
-        Assert.Equal("User 1", SettingsPanel.UserName(User1));
-        Assert.Equal("User 1's", SettingsPanel.PossessiveName(User1));
-        Assert.Equal("this user", SettingsPanel.UserName(ProfileInfo.None));
+        Assert.Equal("User 1", CombosPanel.UserName(User1));
+        Assert.Equal("User 1's", CombosPanel.PossessiveName(User1));
+        Assert.Equal("this user", CombosPanel.UserName(ProfileInfo.None));
 
         // A name comes only with named profiles, a later revision.
         var named = User1 with { Name = "Alex" };
-        Assert.Equal("Editing settings for Alex (user 1)", SettingsPanel.ProfileStatus(active, named));
-        Assert.Equal("Alex", SettingsPanel.UserName(named));
+        Assert.Equal("Editing settings for Alex (user 1)", CombosPanel.ProfileStatus(active, named));
+        Assert.Equal("Alex", CombosPanel.UserName(named));
     }
 
     [Fact]
@@ -817,7 +832,7 @@ public class ProfileTests
     [Fact]
     public void TheQuestionOffersCopyDefaultsAndCancel()
     {
-        var question = new ProfileQuestion(1, SettingsPanel.UserName(User1));
+        var question = new ProfileQuestion(1, CombosPanel.UserName(User1));
 
         Assert.Equal("Turning on per-user settings. User 1 has no settings of their own yet. Copy the "
                      + "current settings for them, or start from the defaults?", ProfileSetupModal.Body(question));
@@ -880,7 +895,7 @@ public class ProfileTests
     /// <summary>
     /// A release module of build 56 leaves the per-user settings out (PROTOCOL.md 3.1.2): no bits,
     /// and the ops UNSUPPORTED. The client shows nothing of them and sends none of the three ops,
-    /// even when the Settings panel's switch or the copy-or-defaults answer is reached for anyway.
+    /// even when the Combos panel's switch or the copy-or-defaults answer is reached for anyway.
     /// </summary>
     [Fact]
     public async Task AReleaseModuleWithoutPerUserSettingsIsNeverAskedAnything()
@@ -891,7 +906,7 @@ public class ProfileTests
 
         Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0));
         await PumpForAsync(state, 600);
-        Assert.False(SettingsPanel.ShowsProfiles(state.Session));
+        Assert.False(CombosPanel.ShowsProfiles(state.Session));
         Assert.False(CombosPanel.ShowsOverride(state.Session));
         Assert.Equal(ProfileInfo.None, state.Profile);
 

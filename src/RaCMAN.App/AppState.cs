@@ -1230,7 +1230,7 @@ public sealed class AppState : IDisposable
     /// </summary>
     private void WatchProfile(SessionInfo session)
     {
-        if (!Panels.SettingsPanel.ShowsProfiles(session))
+        if (!Panels.CombosPanel.ShowsProfiles(session))
         {
             if (_profileSeqSeen is not null || ProfileQuestion is not null) ForgetProfile();
             return;
@@ -1311,14 +1311,14 @@ public sealed class AppState : IDisposable
     }
 
     /// <summary>
-    /// The Settings panel's checkbox, ticked. PROFILE_INFO first, for whether the signed-in user
+    /// The Combos panel's Per-user settings box, ticked. PROFILE_INFO first, for whether the signed-in user
     /// has been set up before: if not, the copy-or-defaults question; if so, the switch goes on
     /// and that user's saved settings are back.
     /// </summary>
     public void TurnProfilesOn()
     {
         // Never to a module without per-user settings (a release of build 56, or under RPCS3).
-        if (!Panels.SettingsPanel.ShowsProfiles(Session)) return;
+        if (!Panels.CombosPanel.ShowsProfiles(Session)) return;
 
         int connection = _connection;
         Run(() => Client.ProfileInfoAsync(), info =>
@@ -1326,7 +1326,7 @@ public sealed class AppState : IDisposable
             if (connection != _connection) return;
             Profile = info;
 
-            string who = Panels.SettingsPanel.UserName(info);
+            string who = Panels.CombosPanel.UserName(info);
             if (info.SignedIn && !info.HasProfile)
             {
                 ProfileQuestion = new ProfileQuestion(info.UserId, who);
@@ -1335,15 +1335,15 @@ public sealed class AppState : IDisposable
 
             Run(() => Client.ProfileEnableAsync(true, ProfileSetup.None),
                 info.SignedIn
-                    ? $"Per-user settings on. {Panels.SettingsPanel.Possessive(who)} saved settings are back."
+                    ? $"Per-user settings on. {Panels.CombosPanel.Possessive(who)} saved settings are back."
                     : "Per-user settings on. Nobody is signed in on your console yet.");
         });
     }
 
-    /// <summary>The Settings panel's checkbox, unticked: everyone back on the console's shared settings.</summary>
+    /// <summary>The Combos panel's Per-user settings box, unticked: everyone back on the console's shared settings.</summary>
     public void TurnProfilesOff()
     {
-        if (!Panels.SettingsPanel.ShowsProfiles(Session)) return;
+        if (!Panels.CombosPanel.ShowsProfiles(Session)) return;
 
         Run(() => Client.ProfileEnableAsync(false, ProfileSetup.None),
             "Per-user settings off. Your console's shared settings are in use.");
@@ -1359,7 +1359,7 @@ public sealed class AppState : IDisposable
         var question = ProfileQuestion;
         ProfileQuestion = null;
         if (question is null || setup is not { } chosen || chosen == ProfileSetup.None) return;
-        if (!Panels.SettingsPanel.ShowsProfiles(Session)) return;
+        if (!Panels.CombosPanel.ShowsProfiles(Session)) return;
 
         Run(() => Client.ProfileEnableAsync(true, chosen),
             chosen == ProfileSetup.Copy

@@ -8,7 +8,7 @@ namespace RaCMAN.App.Panels;
 /// The copy-or-defaults question per-user settings ask before a console user's profile is set
 /// up (revision 1.24). The question itself, and when it is asked, is <see cref="AppState"/>'s
 /// (<see cref="AppState.ProfileQuestion"/>); this only draws it and hands the answer back.
-/// It comes up only when the Settings panel's Per-user settings box is ticked on.
+/// It comes up only when the Combos panel's Per-user settings box is ticked on.
 /// </summary>
 public static class ProfileSetupModal
 {

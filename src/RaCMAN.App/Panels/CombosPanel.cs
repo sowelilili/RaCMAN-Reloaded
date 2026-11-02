@@ -179,7 +179,7 @@ public static class CombosPanel
     /// active. Without an active profile COMBO_OVERRIDE can only answer NOT_FOUND.
     /// </summary>
     public static bool ShowsOverride(SessionInfo session) =>
-        SettingsPanel.ShowsProfiles(session) && session.ProfilesOn && session.ProfileActive;
+        ShowsProfiles(session) && session.ProfilesOn && session.ProfileActive;
 
     /// <summary>The Override button is on the rows that have none yet; an overridden row's Capture re-captures it.</summary>
     public static bool ShowsOverrideButton(SessionInfo session, ComboEntry entry) =>
@@ -192,7 +192,7 @@ public static class CombosPanel
     /// nothing here sends COMBO_OVERRIDE to it.
     /// </summary>
     public static bool IsOverridden(SessionInfo session, ComboEntry entry) =>
-        SettingsPanel.ShowsProfiles(session) && entry.Overridden;
+        ShowsProfiles(session) && entry.Overridden;
 
     /// <summary>What one press of Clear sends, by row.</summary>
     public enum ClearRequest
@@ -217,7 +217,7 @@ public static class CombosPanel
 
     /// <summary>The line under the switch while overrides can be made.</summary>
     public static string OverrideHint(ProfileInfo profile) =>
-        $"{SettingsPanel.UserName(profile)} has one or more overridden combos (orange).";
+        $"{UserName(profile)} has one or more overridden combos (orange).";
 
     /// <summary>
     /// How wide the buttons cell's buttons are. <see cref="First"/> is the row's first button:
@@ -494,7 +494,7 @@ public static class CombosPanel
                 Ui.Text(overridden ? Ui.Orange : mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
                 if (overridden && ImGui.IsItemHovered())
                 {
-                    Ui.SetTooltip($"Overridden: this combo is only active for {SettingsPanel.UserName(state.Profile)}.");
+                    Ui.SetTooltip($"Overridden: this combo is only active for {UserName(state.Profile)}.");
                 }
             }
 
@@ -539,7 +539,7 @@ public static class CombosPanel
                 if (ImGui.SmallButton("Override")) BeginCapture(state, action, asOverride: true);
                 if (ImGui.IsItemHovered())
                 {
-                    Ui.SetTooltip($"Capture a combo for {SettingsPanel.UserName(state.Profile)} only.");
+                    Ui.SetTooltip($"Capture a combo for {UserName(state.Profile)} only.");
                 }
             }
 
@@ -560,5 +560,85 @@ public static class CombosPanel
             ImGui.Spacing();
             Ui.DebugHint($"Live pad mask: 0x{state.Session.PadMask:X4}  {PadButtons.Describe(state.Session.PadMask)}");
         }
+
+        // The console's per-user settings (revision 1.24), and only while there is a console that
+        // has them: the switch that gives each console user their own combos, In-game menus
+        // setting and the rest, which is why it lives here and not among this client's settings.
+        if (ShowsProfiles(state.Session))
+        {
+            ImGui.Spacing();
+            ImGui.Separator();
+            Ui.Heading("Console users");
+            DrawProfiles(state);
+        }
+    }
+
+    // ---------------------------------------------------------------- per-user settings
+
+    /// <summary>What the Per-user settings box says when the pointer rests on it.</summary>
+    public const string ProfilesTooltip =
+        "Each console user gets their own position slots, mods and cheats that load automatically, "
+        + "manip and planet choices, and In-game menus setting. Everyone shares the mod and savefile "
+        + "libraries and the combos, except combos a user overrides on the Combos panel. "
+        + "Switch users at the PS3 home screen.";
+
+    /// <summary>
+    /// Whether anything about per-user settings is drawn: SessionInfo byte 29 bit1, the capability
+    /// bit, and never under RPCS3, which has one user. Not the build number: the bit is the contract.
+    /// </summary>
+    public static bool ShowsProfiles(SessionInfo session) => session.ProfilesSupported && !session.IsEmulator;
+
+    /// <summary>
+    /// A console user as the panels name them: "User n". The module leaves PROFILE_INFO's name
+    /// empty for a console user; a name is used only if one comes (named profiles, a later revision).
+    /// "this user" before PROFILE_INFO has said who is signed in.
+    /// </summary>
+    public static string UserName(ProfileInfo profile) =>
+        profile.Name.Length > 0 ? profile.Name
+        : profile.SignedIn ? $"User {profile.UserId}"
+        : "this user";
+
+    /// <summary>"User 1's", for the lines that say whose something is.</summary>
+    public static string Possessive(string name) => $"{name}'s";
+
+    /// <inheritdoc cref="Possessive(string)"/>
+    public static string PossessiveName(ProfileInfo profile) => Possessive(UserName(profile));
+
+    /// <summary>
+    /// The line under the box: whose settings the panels are editing, from the session's bits
+    /// and the last PROFILE_INFO.
+    /// </summary>
+    public static string ProfileStatus(SessionInfo session, ProfileInfo profile)
+    {
+        if (!session.ProfilesOn) return "Editing your console's shared settings";
+        if (!session.ProfileActive) return "Per-user settings are on; waiting for a user to sign in";
+        if (!profile.SignedIn) return "Editing the signed-in user's settings";
+
+        string who = profile.Name.Length > 0 ? $"{profile.Name} (user {profile.UserId})" : $"User {profile.UserId}";
+        return $"Editing settings for {who}";
+    }
+
+    /// <summary>
+    /// The console-wide switch, the panel's Console users section, drawn from SessionInfo byte 29
+    /// bit2 so it always says what the console says. Ticking it reads PROFILE_INFO and either asks
+    /// the copy-or-defaults question or turns the switch on (<see cref="AppState.TurnProfilesOn"/>);
+    /// unticking sends PROFILE_ENABLE(0, 0).
+    /// </summary>
+    private static void DrawProfiles(AppState state)
+    {
+        var session = state.Session;
+        bool on = session.ProfilesOn;
+
+        ImGui.BeginDisabled(state.ProfileQuestion is not null);
+        if (ImGui.Checkbox("Per-user settings", ref on))
+        {
+            if (on) state.TurnProfilesOn();
+            else state.TurnProfilesOff();
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(ProfilesTooltip);
+
+        Ui.Hint(ProfileStatus(session, state.Profile));
     }
 }

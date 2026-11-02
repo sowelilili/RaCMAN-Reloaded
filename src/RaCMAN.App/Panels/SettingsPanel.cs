@@ -4,11 +4,11 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// Mostly local PC preferences: how this client looks and where it keeps its files. Anything the
-/// console owns (auto-reconnect aside, which is a client habit) stays on the Connection panel.
-/// Two exceptions: the import from the old RaCMAN, which pushes combos and mod flags to the
-/// console because that is where they live now, and the Console section, the console-wide
-/// per-user settings switch (revision 1.24), drawn only while connected to a module that has it.
+/// This client's own settings: how it looks and where it keeps its files. Anything the console
+/// owns (auto-reconnect aside, which is a client habit) stays on the Connection panel, and the
+/// console-wide per-user settings switch is on the Combos panel. One exception: the import from
+/// the old RaCMAN, which pushes combos and mod flags to the console because that is where they
+/// live now.
 /// </summary>
 public static class SettingsPanel
 {
@@ -68,15 +68,6 @@ public static class SettingsPanel
         ImGui.Separator();
         Ui.Heading("Import from RaCMAN");
         DrawImport(state);
-
-        // The console's own setting, and only while there is a console that has it.
-        if (state.Connected && ShowsProfiles(state.Session))
-        {
-            ImGui.Spacing();
-            ImGui.Separator();
-            Ui.Heading("Console");
-            DrawProfiles(state);
-        }
 
         ImGui.Spacing();
         ImGui.Separator();
@@ -139,74 +130,6 @@ public static class SettingsPanel
 
         Ui.Hint("Shows debug information: qwark and protocol versions, reboot and tick "
                 + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
-    }
-
-    // ---------------------------------------------------------------- per-user settings
-
-    /// <summary>What the Per-user settings box says when the pointer rests on it.</summary>
-    public const string ProfilesTooltip =
-        "Each console user gets their own position slots, mods and cheats that load automatically, "
-        + "manip and planet choices, and In-game menus setting. Everyone shares the mod and savefile "
-        + "libraries and the combos, except combos a user overrides on the Combos panel. "
-        + "Switch users at the PS3 home screen.";
-
-    /// <summary>
-    /// Whether anything about per-user settings is drawn: SessionInfo byte 29 bit1, the capability
-    /// bit, and never under RPCS3, which has one user. Not the build number: the bit is the contract.
-    /// </summary>
-    public static bool ShowsProfiles(SessionInfo session) => session.ProfilesSupported && !session.IsEmulator;
-
-    /// <summary>
-    /// A console user as the panels name them: "User n". The module leaves PROFILE_INFO's name
-    /// empty for a console user; a name is used only if one comes (named profiles, a later revision).
-    /// "this user" before PROFILE_INFO has said who is signed in.
-    /// </summary>
-    public static string UserName(ProfileInfo profile) =>
-        profile.Name.Length > 0 ? profile.Name
-        : profile.SignedIn ? $"User {profile.UserId}"
-        : "this user";
-
-    /// <summary>"User 1's", for the lines that say whose something is.</summary>
-    public static string Possessive(string name) => $"{name}'s";
-
-    /// <inheritdoc cref="Possessive(string)"/>
-    public static string PossessiveName(ProfileInfo profile) => Possessive(UserName(profile));
-
-    /// <summary>
-    /// The line under the box: whose settings the panels are editing, from the session's bits
-    /// and the last PROFILE_INFO.
-    /// </summary>
-    public static string ProfileStatus(SessionInfo session, ProfileInfo profile)
-    {
-        if (!session.ProfilesOn) return "Editing your console's shared settings";
-        if (!session.ProfileActive) return "Per-user settings are on; waiting for a user to sign in";
-        if (!profile.SignedIn) return "Editing the signed-in user's settings";
-
-        string who = profile.Name.Length > 0 ? $"{profile.Name} (user {profile.UserId})" : $"User {profile.UserId}";
-        return $"Editing settings for {who}";
-    }
-
-    /// <summary>
-    /// The console-wide switch, drawn from SessionInfo byte 29 bit2 so it always says what the console
-    /// says. Ticking it reads PROFILE_INFO and either asks the copy-or-defaults question or turns
-    /// the switch on (<see cref="AppState.TurnProfilesOn"/>); unticking sends PROFILE_ENABLE(0, 0).
-    /// </summary>
-    private static void DrawProfiles(AppState state)
-    {
-        var session = state.Session;
-        bool on = session.ProfilesOn;
-
-        ImGui.BeginDisabled(state.ProfileQuestion is not null);
-        if (ImGui.Checkbox("Per-user settings", ref on))
-        {
-            if (on) state.TurnProfilesOn();
-            else state.TurnProfilesOff();
-        }
-
-        ImGui.EndDisabled();
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(ProfilesTooltip);
-
-        Ui.Hint(ProfileStatus(session, state.Profile));
     }
 
     // ---------------------------------------------------------------- connection

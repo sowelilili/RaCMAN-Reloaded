@@ -2602,7 +2602,7 @@ public class AutosplitterTests
 
     /// <summary>
     /// The final split, "Tachyon defeated", code 7, the fade to black after Tachyon's last hit, is
-    /// on by default (revision 1.29); the credits and the missions wait to be ticked. Codes 2 and 8
+    /// on by default (revision 1.29); the missions wait to be ticked. Codes 2, 5 (the credits) and 8
     /// are retired and have no row.
     /// </summary>
     [Fact]
@@ -2611,11 +2611,11 @@ public class AutosplitterTests
         using var h = new Harness(GameId.Tod, new[] { "Meridian City", "Fastoon II" }, FakeQwarkServer.TodAutosplitDescriptors());
         await h.ReadyAsync();
 
-        h.Engine.Handle(Split(5, 18));
         h.Engine.Handle(Split(6, (18u << 16) | 640, seq: 2));
         await Task.Delay(200);
         Assert.Empty(h.Server.Actions);
-        Assert.DoesNotContain(h.Engine.Descriptors, d => d.Code == 2 || d.Code == 8);
+        Assert.DoesNotContain(h.Engine.Descriptors, d => d.Code == 2 || d.Code == 5 || d.Code == 8);
+        Assert.DoesNotContain(h.Engine.Descriptors, d => d.Label == "Credits");
 
         h.Engine.Handle(new AutosplitEvent(5, 7_450, AutosplitKind.Split, 7, 0));
         Assert.True(await h.Sent(LiveSplitClient.Split));
@@ -2647,6 +2647,40 @@ public class AutosplitterTests
         fresh.Migrate();
         Assert.True(fresh.EventEnabled(code7.Label, code7.EnabledByDefault));
         Assert.Single(fresh.Events);
+    }
+
+    /// <summary>
+    /// Qwark revision 1.29 retired ToD's "Credits" row, code 5. Saved choices are keyed by label, so
+    /// a file that ticked "Credits" keeps the entry, unused, and every row the console still lists
+    /// is on or off exactly as it would be without it; ticking Mission completed or switching the
+    /// final split off works as before.
+    /// </summary>
+    [Fact]
+    public async Task ToDsRetiredCreditsChoiceIsIgnored()
+    {
+        var rows = FakeQwarkServer.TodAutosplitDescriptors();
+        var plain = new AutosplitGameSettings();
+        var credits = new AutosplitGameSettings { Events = { ["Credits"] = true } };
+        credits.Migrate();
+
+        Assert.True(credits.Events.ContainsKey("Credits"));
+        foreach (var row in rows)
+        {
+            Assert.Equal(plain.EventEnabled(row.Label, row.EnabledByDefault),
+                credits.EventEnabled(row.Label, row.EnabledByDefault));
+        }
+
+        using var h = new Harness(GameId.Tod, new[] { "Meridian City", "Fastoon II" }, rows);
+        h.Settings.Autosplit.For(GameId.Tod).Events["Credits"] = true;
+        await h.ReadyAsync();
+
+        h.Engine.Handle(Split(6, (18u << 16) | 640, seq: 2));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+
+        h.Engine.Handle(new AutosplitEvent(3, 7_450, AutosplitKind.Split, 7, 0));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.StartsWith("Tachyon defeated", h.Engine.Log()[^1].Event);
     }
 
     /// <summary>
