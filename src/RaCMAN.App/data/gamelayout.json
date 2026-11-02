@@ -182,9 +182,9 @@
       },
       "tooltips": {
         "Remove cutscenes": "Disables unskippable cutscenes, without deleting them from the game's files. This option is legal for speedruns.",
-        "Cache cutscenes": "Loads Cobalia's, Stratus City's and Fastoon's cutscene audio into the game's cache, in that order, so their opening cutscenes start up to about 2 s sooner on your console. Runs in the background once you are in gameplay. Reaching a planet before its audio is in is too late for that cutscene, but the rest goes on. The cache is cleared when the game is closed, but survives a return to the title screen.",
-        "Cache cutscenes on reset": "Does Cache cutscenes by itself when you start a new run (a new file loading into Metropolis), once Metropolis has loaded. Cobalia is normally done before you leave Metropolis.",
-        "Disable cutscene caching": "For practice: clears each planet's cutscene audio from the game's cache while the planet loads, so its opening cutscene always loads as slowly as on a first visit."
+        "Cache cutscenes": "Sets up cutscene caching: loads the first few planets' cutscene audio into the game's cache, so their opening cutscenes play sooner.",
+        "Cache cutscenes on reset": "Automatically set up cutscene caching on a new run.",
+        "Disable cutscene caching": "Practice tool: disables cutscene caching when loading a planet, simulating a run."
       }
     }
   }

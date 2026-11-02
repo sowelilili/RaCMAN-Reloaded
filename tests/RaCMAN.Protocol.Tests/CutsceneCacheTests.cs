@@ -133,7 +133,6 @@ public class CutsceneCacheTests
 
         foreach (var label in new[] { "Cache cutscenes", "Cache cutscenes on reset", "Disable cutscene caching" })
             Assert.False(string.IsNullOrWhiteSpace(GameLayout.TooltipFor(title, GameId.Tod, label)));
-        Assert.Contains("your console", GameLayout.TooltipFor(title, GameId.Tod, "Cache cutscenes"));
 
         // The action names its status readout; the two toggles are not LIVE, so they have "on boot".
         var row = d.Features.Single(f => f.Label == "Cache cutscenes");
