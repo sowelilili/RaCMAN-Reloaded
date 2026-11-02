@@ -42,6 +42,5 @@ public static class PanelState
         CombosPanel.Reset(state);
         SaveFilesPanel.Reset();
         LuaBox.Reset();
-        DebugPagesBox.Reset();
     }
 }

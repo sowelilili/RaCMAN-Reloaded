@@ -123,6 +123,10 @@ public class InGameMenusTests
         // Qwark revision 1.29: ToD's menu is its pause menu, which works under RPCS3 too.
         Assert.False(CombosPanel.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }));
         Assert.Equal("Trainer replaces Help in the pause menu", CombosPanel.InGameMenusStatus(console));
+        // Qwark revision 1.29: in ToD the Trainer takes the pause list's Inventory row instead.
+        Assert.Equal("Trainer replaces Inventory in the pause menu",
+            CombosPanel.InGameMenusStatus(console with { Game = GameId.Tod }));
+        Assert.Equal("the game's default pause menu", CombosPanel.InGameMenusStatus(off with { Game = GameId.Tod }));
         Assert.Equal("the game's default pause menu", CombosPanel.InGameMenusStatus(off));
         Assert.Equal("not under RPCS3", CombosPanel.InGameMenusStatus(rpcs3));
 

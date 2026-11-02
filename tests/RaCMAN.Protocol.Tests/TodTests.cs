@@ -300,20 +300,43 @@ public class TodTests
     [Fact]
     public void TheLuaBoxStatusLineSaysWhereTheHelperIs()
     {
-        Assert.Contains("Asking", LuaBox.StatusLines(null, null, false).Single().Text);
-        Assert.Contains("NOT_INGAME", LuaBox.StatusLines(null, Status.NotIngame, false).Single().Text);
+        Assert.Contains("Asking", LuaBox.StatusLines(null, null, false, debug: true).Single().Text);
+        Assert.Contains("NOT_INGAME", LuaBox.StatusLines(null, Status.NotIngame, false, debug: true).Single().Text);
 
         var none = new LuaStatusInfo(LuaInstalled.No, LuaPhase.Idle, 0, 0, 0, 0, "", "");
-        Assert.Contains("first Run", LuaBox.StatusLines(none, null, rpcs3: false).Single().Text);
-        Assert.Contains("RPCS3 patch", LuaBox.StatusLines(none, null, rpcs3: true).Single().Text);
-        Assert.Contains("still checking", LuaBox.StatusLines(none with { Installed = LuaInstalled.Checking }, null, true).Single().Text);
+        Assert.Contains("first Run", LuaBox.StatusLines(none, null, rpcs3: false, debug: true).Single().Text);
+        Assert.Contains("RPCS3 patch", LuaBox.StatusLines(none, null, rpcs3: true, debug: true).Single().Text);
+        Assert.Contains("still checking",
+            LuaBox.StatusLines(none with { Installed = LuaInstalled.Checking }, null, true, debug: true).Single().Text);
 
         var running = new LuaStatusInfo(LuaInstalled.Yes, LuaPhase.Idle, 4321, 0x102043D0, 2, 0, "hud.lua", "bad argument");
-        var lines = LuaBox.StatusLines(running, null, false);
+        var lines = LuaBox.StatusLines(running, null, false, debug: true);
         Assert.Contains("Heartbeat 4321", lines[0].Text);
         Assert.Contains("0x102043D0", lines[0].Text);
         Assert.Contains("hud.lua", lines[1].Text);
         Assert.Contains("bad argument", lines[1].Text);
+    }
+
+    [Fact]
+    public void TheHelperStatusShowsInDebugModeOnly()
+    {
+        // Out of debug mode the helper's own state says nothing: no heartbeat, no lua_State, no "asking".
+        var running = new LuaStatusInfo(LuaInstalled.Yes, LuaPhase.Idle, 4321, 0x102043D0, 0, 0, "", "");
+        Assert.Empty(LuaBox.StatusLines(running, null, false, debug: false));
+        Assert.Empty(LuaBox.StatusLines(null, null, false, debug: false));
+        Assert.Empty(LuaBox.StatusLines(running with { Installed = LuaInstalled.Checking }, null, true, debug: false));
+
+        // What a user needs still shows: a refusal, a helper not in the game, a hung chunk, script errors.
+        Assert.Contains("NOT_INGAME", LuaBox.StatusLines(null, Status.NotIngame, false, debug: false).Single().Text);
+        var none = running with { Installed = LuaInstalled.No };
+        Assert.Contains("first Run", LuaBox.StatusLines(none, null, rpcs3: false, debug: false).Single().Text);
+        Assert.Contains("RPCS3 patch", LuaBox.StatusLines(none, null, rpcs3: true, debug: false).Single().Text);
+        var hung = LuaBox.StatusLines(running with { Phase = LuaPhase.Hung }, null, false, debug: false).Single();
+        Assert.Equal(LuaBox.LineKind.Error, hung.Kind);
+        Assert.DoesNotContain("Heartbeat", hung.Text);
+        var errors = LuaBox.StatusLines(running with { ErrorSeq = 2, ErrorScript = "hud.lua", Error = "bad argument" },
+            null, false, debug: false);
+        Assert.Contains("bad argument", errors.Single().Text);
     }
 
     [Fact]

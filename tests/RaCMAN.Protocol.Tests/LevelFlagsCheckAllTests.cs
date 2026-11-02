@@ -159,7 +159,7 @@ public class LevelFlagsCheckAllTests
     // ------------------------------------- a named group's "Check all" (ToD)
 
     /// <summary>
-    /// Tools of Destruction's named list: "Check all" beside a planet group's Reset sets every flag
+    /// Tools of Destruction's named list, from the client's data file: "Check all" beside a planet group's Reset sets every flag
     /// of that group, one LEVELFLAGS_BIT each so the console reads and writes the byte on its tick,
     /// and nothing of any other group, not even a bit that shares a byte with one of them.
     /// </summary>
@@ -173,7 +173,8 @@ public class LevelFlagsCheckAllTests
         await client.ConnectAsync("127.0.0.1", server.Port);
         using (client)
         {
-            var names = await client.LevelFlagNamesAsync();
+            // The names are the client's own (data/levelflags/tod.json), the values the console's.
+            var names = LevelFlagNamesTests.TodNames();
             var cobalia = LevelFlagsPanel.GroupsInOrder(names).Single(g => g.Index == 1);
             var others = names.Flags.Where(f => f.Group != 1).ToArray();
             var before = await client.LevelFlagsGetAsync(0);
@@ -200,7 +201,7 @@ public class LevelFlagsCheckAllTests
         server.Start();
         using var state = await ConnectedStateAsync(server);
 
-        var names = await state.Client.LevelFlagNamesAsync();
+        var names = LevelFlagNamesTests.TodNames();
         var metropolis = LevelFlagsPanel.GroupsInOrder(names).Single(g => g.Index == 0);
         string done = LevelFlagsPanel.CheckGroupToast(names.GroupName(0));
         Assert.Equal("Level flags all set on Metropolis", done);

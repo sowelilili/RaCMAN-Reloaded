@@ -7,7 +7,8 @@ namespace RaCMAN.Protocol.Tests;
 /// <summary>
 /// Tools of Destruction's cutscene cache (qwark revision 1.29, PROTOCOL.md section 5.17): Cache
 /// cutscenes' status word read field by field, the one line under its button for each state, the
-/// word told apart from UYA's trophy word by the game, and the three rows on ToD's Manips page.
+/// word told apart from UYA's trophy word by the game, and the three rows on ToD's Manips page. qwark
+/// caches three planets' sound, Cobalia first, then Stratus City, then Fastoon.
 /// </summary>
 public class CutsceneCacheTests
 {
@@ -49,6 +50,12 @@ public class CutsceneCacheTests
         Assert.Null(CutsceneCacheStatus.Parse(0x222A1102u).MiBPerSecond);
         Assert.Equal(CutsceneCacheFailure.TooLateStratusCity, CutsceneCacheStatus.Parse(0x47000001u).Failure);
         Assert.Equal(CutsceneCacheFailure.TooLateFastoon, CutsceneCacheStatus.Parse(0x48000001u).Failure);
+        Assert.Equal(CutsceneCacheFailure.TooLateCobalia, CutsceneCacheStatus.Parse(0x49000001u).Failure);
+
+        // Caching detail 3 is Cobalia, the first of the three; 1 Fastoon, 2 Stratus City.
+        Assert.Equal("Cobalia", CutsceneCacheStatus.Parse(0x23140500u).Planet);
+        Assert.Equal("Fastoon", CutsceneCacheStatus.Parse(0x21140500u).Planet);
+        Assert.Null(CutsceneCacheStatus.Parse(0x24140500u).Planet);
     }
 
     [Fact]
@@ -62,13 +69,21 @@ public class CutsceneCacheTests
         Assert.Equal("Caching cutscenes: Fastoon 7%", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x21070300u)));
         Assert.Equal("Cutscenes cached (12 s, 10.0 MiB/s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30640C01u)));
         Assert.Equal("Cutscenes cached (16 s, 7.4 MiB/s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x304A1001u)));
-        Assert.Equal("Cutscenes already cached", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30000001u)));
+        // Done with rate 0: all three planets were cached already, nothing was read.
+        Assert.Equal("Cutscenes already cached (all three planets)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30000001u)));
         Assert.Equal("Cutscene caching stopped: the title screen came before it finished",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x41000501u)));
-        Assert.Equal("Cutscene caching stopped: the run reached Stratus City first",
+        Assert.Equal("Caching cutscenes: Cobalia 64%", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x23400200u)));
+
+        // The too-late reasons did not stop the run: that planet was dropped and the rest cached.
+        Assert.Equal("Cutscene cache: too late for Cobalia, the run got there first",
+            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x49000501u)));
+        Assert.Equal("Cutscene cache: too late for Stratus City, the run got there first",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x47000501u)));
-        Assert.Equal("Cutscene caching stopped: the run reached Fastoon first",
+        Assert.Equal("Cutscene cache: too late for Fastoon, the run got there first",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x48000501u)));
+        Assert.Equal("Cutscene caching stopped: unknown reason",
+            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x4A000501u)));
         Assert.Equal("Cutscene caching stopped: Disable cutscene caching is on",
             ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x44000001u)));
         Assert.Null(ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x90000000u)));
@@ -82,6 +97,8 @@ public class CutsceneCacheTests
         Assert.Equal(("Cutscenes cached (12 s, 10.0 MiB/s)", ManipsArea.StatusTone.Good), done);
         var failed = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x43000000u), Cache, GameId.Tod);
         Assert.Equal(ManipsArea.StatusTone.Bad, failed?.Tone);
+        var late = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x49002001u), Cache, GameId.Tod);
+        Assert.Equal(("Cutscene cache: too late for Cobalia, the run got there first", ManipsArea.StatusTone.Bad), late);
         var busy = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x21320000u), Cache, GameId.Tod);
         Assert.Equal(("Caching cutscenes: Fastoon 50%", ManipsArea.StatusTone.Busy), busy);
         Assert.Null(ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0), Cache, GameId.Tod));

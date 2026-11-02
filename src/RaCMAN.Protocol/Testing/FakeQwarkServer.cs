@@ -220,11 +220,11 @@ public sealed partial class FakeQwarkServer : IDisposable
     public int LevelFlagsResetCount { get; private set; }
 
     /// <summary>
-    /// What LEVELFLAGS_NAMES answers (revision 1.28), or null for a game whose flags have
-    /// no names, which answers UNSUPPORTED. With names, LEVELFLAGS_RESET clears the bits of the
-    /// planet's group alone, as ToD's does.
+    /// For a game whose flags are one region for every planet (ToD): the bits LEVELFLAGS_RESET clears
+    /// for each planet, in LEVELFLAGS_BIT's numbering, as qwark's own table does; a planet missing from
+    /// it clears nothing. Null, every other game, clears the planet's whole region.
     /// </summary>
-    public LevelFlagNames? LevelFlagNames { get; set; }
+    public Dictionary<byte, ushort[]>? LevelFlagResetBits { get; set; }
 
     public DescribeResult Describe { get; set; }
 
@@ -2195,7 +2195,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.PlanetList or Opcode.PlanetSelect or Opcode.PlanetLoad or Opcode.Die or Opcode.MobyTable
         or Opcode.UnlockList or Opcode.UnlockSet
         or Opcode.LevelFlagsGet or Opcode.LevelFlagsSet or Opcode.LevelFlagsReset
-        or Opcode.LevelFlagsBit or Opcode.LevelFlagsNames
+        or Opcode.LevelFlagsBit
         or Opcode.ModList or Opcode.ModLoad or Opcode.ModUnload or Opcode.ModSetAuto
         or Opcode.ModRescan or Opcode.ModInfo or Opcode.ModPatch or Opcode.ModUsbList
         or Opcode.ComboSet or Opcode.ComboList or Opcode.ComboSuspend or Opcode.ComboEnable
@@ -2204,7 +2204,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         or Opcode.SaveFileCategories or Opcode.SaveFileList or Opcode.SaveFileStore
         or Opcode.SaveFileRestore or Opcode.SaveFileCategory or Opcode.SaveFilePatch
         or Opcode.ManipList or Opcode.ManipSelect or Opcode.ManipOptions or Opcode.ManipApply
-        or Opcode.LuaExec or Opcode.LuaStatus or Opcode.LuaPatch or Opcode.DebugText;
+        or Opcode.LuaExec or Opcode.LuaStatus or Opcode.LuaPatch;
 
     /// <summary>
     /// How many requests have been refused with BUSY because a game was starting or ending. A
@@ -2850,15 +2850,11 @@ public sealed partial class FakeQwarkServer : IDisposable
                 {
                     if (payload.Length < 1) return (Status.BadArg, null);
                     if (!LevelFlags.TryGetValue(payload[0], out var flags)) return (Status.Unsupported, null);
-                    if (LevelFlagNames is { } named)
+                    if (LevelFlagResetBits is { } table)
                     {
-                        foreach (var f in named.Flags)
+                        foreach (ushort bit in table.GetValueOrDefault(payload[0], Array.Empty<ushort>()))
                         {
-                            if (f.Group < named.Groups.Length && named.Groups[f.Group].Planet == payload[0]
-                                && f.Offset < flags.Length)
-                            {
-                                flags[f.Offset] &= (byte)~f.Mask;
-                            }
+                            if ((bit >> 3) < flags.Length) flags[bit >> 3] &= (byte)~(1 << (bit & 7));
                         }
                     }
                     else
@@ -2882,9 +2878,6 @@ public sealed partial class FakeQwarkServer : IDisposable
                     flags[bit >> 3] = on ? (byte)(flags[bit >> 3] | mask) : (byte)(flags[bit >> 3] & ~mask);
                     return (Status.Ok, null);
                 }
-
-                case Opcode.LevelFlagsNames:
-                    return LevelFlagNames is { } names ? (Status.Ok, names.ToBytes()) : (Status.Unsupported, null);
 
                 case Opcode.PlanetList:
                 {
@@ -3533,11 +3526,6 @@ public sealed partial class FakeQwarkServer : IDisposable
                 case Opcode.LuaStatus:
                 case Opcode.LuaPatch:
                     return HandleLua(opcode, payload);
-
-                // ------------------------------------------- 5.16 debug pages, revision 1.29
-
-                case Opcode.DebugText:
-                    return HandleDebugText(payload);
 
                 default:
                     return (Status.UnknownOp, null);

@@ -16,8 +16,8 @@ namespace RaCMAN.App.Panels;
 /// LEVELFLAGS_GET reported, one request per byte, the way the Unlocks panel's bulk buttons loop
 /// UNLOCK_SET. The client knows nothing about which bits the game uses, so it sets them all.
 ///
-/// A game that names its flags (LEVELFLAGS_NAMES, revision 1.28: Tools of Destruction, whose
-/// flags are one table for the whole save) gets a list instead: every flag by name, grouped by
+/// A game whose flags have names in the client's data/levelflags folder (Tools of Destruction, whose
+/// flags are one table for the whole save; see <see cref="LevelFlagNameFiles"/>) gets a list instead: every flag by name, grouped by
 /// planet as the old RaCMAN grouped them, each a checkbox read from the same LEVELFLAGS_GET and
 /// written with LEVELFLAGS_BIT, so the console changes that one bit and nothing beside it. A
 /// planet's group has a Reset, LEVELFLAGS_RESET of that planet, which clears its flags alone.

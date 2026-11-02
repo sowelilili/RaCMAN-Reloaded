@@ -1076,13 +1076,6 @@ public sealed class QwarkClient : IDisposable
             w.WriteU16(bit);
         }), cancellationToken);
 
-    /// <summary>
-    /// LEVELFLAGS_NAMES (revision 1.28): the names of the flag bits, for a game that names
-    /// them (ToD). UNSUPPORTED for every other game, UNKNOWN_OP from a module before the op.
-    /// </summary>
-    public async Task<LevelFlagNames> LevelFlagNamesAsync(CancellationToken cancellationToken = default) =>
-        LevelFlagNames.Parse(await RequestAsync(Opcode.LevelFlagsNames, null, cancellationToken).ConfigureAwait(false));
-
     // ---------------------------------------------------------------- 5.7 mods
 
     public async Task<ModEntry[]> ModListAsync(CancellationToken cancellationToken = default) =>
@@ -1677,18 +1670,6 @@ public sealed class QwarkClient : IDisposable
     /// </summary>
     public async Task<PatchReply> LuaPatchAsync(CancellationToken cancellationToken = default) =>
         PatchReply.Parse(await RequestAsync(Opcode.LuaPatch, null, cancellationToken).ConfigureAwait(false), "LUA_PATCH");
-
-    /// <summary>
-    /// DEBUG_TEXT's list, revision 1.29: the game's debug pages and which are SLOW. UNSUPPORTED (a game
-    /// with none, or no game) and UNKNOWN_OP (a module from before the op) are thrown.
-    /// </summary>
-    public async Task<IReadOnlyList<DebugPage>> DebugPagesAsync(CancellationToken cancellationToken = default) =>
-        DebugText.ParseList(await RequestAsync(Opcode.DebugText, new[] { DebugText.ListRequest }, cancellationToken)
-            .ConfigureAwait(false));
-
-    /// <summary>DEBUG_TEXT for one page, revision 1.29: its text as the console made it. Read only.</summary>
-    public async Task<string> DebugTextAsync(byte page, CancellationToken cancellationToken = default) =>
-        DebugText.ParseText(await RequestAsync(Opcode.DebugText, new[] { page }, cancellationToken).ConfigureAwait(false));
 
     // ---------------------------------------------------------------- 5.11 autosplitting
 

@@ -149,7 +149,7 @@ public static class LuaBox
             state.RefreshLuaStatus();
         }
 
-        foreach (var (kind, text) in StatusLines(state.Lua, state.LuaStatusRefusal, state.CodePatchesUnsupported))
+        foreach (var (kind, text) in StatusLines(state.Lua, state.LuaStatusRefusal, state.CodePatchesUnsupported, Ui.Debug))
         {
             DrawLine(kind, text);
         }
@@ -502,8 +502,13 @@ public static class LuaBox
         return (kind, $"Last run: LUA_EXEC answered {status.WireName()}.{why}", string.Empty);
     }
 
-    /// <summary>The status line from LUA_STATUS: the helper, the heartbeat, and the game's last script error.</summary>
-    public static IReadOnlyList<(LineKind Kind, string Text)> StatusLines(LuaStatusInfo? info, Status? refusal, bool rpcs3)
+    /// <summary>
+    /// The status lines from LUA_STATUS: the helper, the heartbeat, and the game's last script error.
+    /// Where the helper is (installed, its heartbeat and lua_State, still being looked for) shows in
+    /// debug mode only; a refusal, a helper that is not in the game, a hung chunk and the game's script
+    /// errors always show.
+    /// </summary>
+    public static IReadOnlyList<(LineKind Kind, string Text)> StatusLines(LuaStatusInfo? info, Status? refusal, bool rpcs3, bool debug)
     {
         var lines = new List<(LineKind, string)>();
         if (refusal is { } status)
@@ -513,7 +518,7 @@ public static class LuaBox
 
         if (info is null)
         {
-            if (refusal is null) lines.Add((LineKind.Hint, "Asking qwark about the Lua helper..."));
+            if (refusal is null && debug) lines.Add((LineKind.Hint, "Asking qwark about the Lua helper..."));
             return lines;
         }
 
@@ -528,12 +533,20 @@ public static class LuaBox
                     LuaPhase.Hung => ", the game hung inside a chunk",
                     _ => string.Empty,
                 };
-                lines.Add((info.Phase == LuaPhase.Hung ? LineKind.Error : LineKind.Ok,
-                    $"Helper installed. Heartbeat {info.Heartbeat}, {lua}{phase}."));
+                if (debug)
+                {
+                    lines.Add((info.Phase == LuaPhase.Hung ? LineKind.Error : LineKind.Ok,
+                        $"Helper installed. Heartbeat {info.Heartbeat}, {lua}{phase}."));
+                }
+                else if (info.Phase == LuaPhase.Hung)
+                {
+                    lines.Add((LineKind.Error, "The game hung inside a Lua chunk."));
+                }
+
                 break;
 
             case LuaInstalled.Checking:
-                lines.Add((LineKind.Hint, "qwark is still checking whether the Lua helper is in the game..."));
+                if (debug) lines.Add((LineKind.Hint, "qwark is still checking whether the Lua helper is in the game..."));
                 break;
 
             default:

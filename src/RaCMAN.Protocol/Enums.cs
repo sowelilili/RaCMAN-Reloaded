@@ -86,7 +86,9 @@ public enum Opcode : ushort
     LevelFlagsReset = 0x0054,
     LevelFlagsSet = 0x0055,
     LevelFlagsBit = 0x0056,     // revision 1.28
-    LevelFlagsNames = 0x0057,   // revision 1.28
+
+    // 0x0057 LEVELFLAGS_NAMES, retired in revision 1.29, never reused: qwark answers UNSUPPORTED
+    // for every game. Level-flag names come from the client's data/levelflags files.
 
     // 5.7 Mods
     ModList = 0x0060,
@@ -240,13 +242,7 @@ public enum Opcode : ushort
     /// </summary>
     LuaPatch = 0x00E2,
 
-    /// <summary>
-    /// Revision 1.29 (pending): <c>u8 page</c>. A game's read-only debug pages, text the console makes
-    /// from the game's memory: 0xFF lists them (<see cref="DebugText.ParseList"/>), a page number
-    /// answers its text (<see cref="DebugText.ParseText"/>). Only ToD answers; every other game
-    /// UNSUPPORTED, a module from before the op UNKNOWN_OP.
-    /// </summary>
-    DebugText = 0x00E8,
+    // 0x00E8 DEBUG_TEXT, retired in revision 1.29, never reused.
 }
 
 /// <summary>

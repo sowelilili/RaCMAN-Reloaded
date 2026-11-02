@@ -151,7 +151,7 @@ public sealed partial class FakeQwarkServer
     /// <summary>
     /// Makes this fake a ToD console: a new boot of NPEA00452 INGAME on Metropolis, ToD's feature
     /// table, unlock categories and planets, Lua, its level flags (one 40-byte region for every
-    /// planet, with names, revision 1.28), its autosplitter (revision 1.28), its
+    /// planet, a planet's reset clearing that planet's flags alone, revision 1.28), its autosplitter (revision 1.28), its
     /// savefile manager (revision 1.28: the game's own save system, so installed on every
     /// platform and no patch to hand out), and none of the manips or code switches, which ToD does
     /// not have.
@@ -167,7 +167,7 @@ public sealed partial class FakeQwarkServer
             var todFlags = new byte[40];
             todFlags[3] = 0x80;   // flag 39, LVL_COBALIA_BRIDGE_EXTENDED
             for (byte planet = 0; planet < TodPlanets.Length; planet++) LevelFlags[planet] = todFlags;
-            LevelFlagNames = TodLevelFlagNames();
+            LevelFlagResetBits = TodLevelFlagResetBits();
             UnlockCategories = new[] { "Weapons", "Devices", "Gadgets", "Items" };
             UnlockFields = new[]
             {
@@ -213,27 +213,22 @@ public sealed partial class FakeQwarkServer
         };
     }
 
-    /// <summary>A few of ToD's flags, as LEVELFLAGS_NAMES names them: flag n is byte (n >> 6) * 8 + 7 - ((n &amp; 63) >> 3), bit n &amp; 7.</summary>
-    public static LevelFlagNames TodLevelFlagNames()
-    {
-        static LevelFlagName Flag(int n, byte group, string name) =>
-            new((ushort)((((n >> 6) * 8) + 7 - ((n & 63) >> 3)) * 8 + (n & 7)), (ushort)n, group, name);
+    /// <summary>
+    /// The bit ToD's flag <paramref name="n"/> is in LEVELFLAGS_GET's region, LEVELFLAGS_BIT's numbering:
+    /// byte (n >> 6) * 8 + 7 - ((n &amp; 63) >> 3), bit n &amp; 7.
+    /// </summary>
+    public static ushort TodFlagBit(int n) => (ushort)((((n >> 6) * 8) + 7 - ((n & 63) >> 3)) * 8 + (n & 7));
 
-        var groups = TodPlanets.Select((name, i) => new LevelFlagGroup((byte)i, name))
-            .Append(new LevelFlagGroup(LevelFlagGroup.NoPlanet, "Other")).ToArray();
-        return new LevelFlagNames(groups, new[]
-        {
-            Flag(38, 0, "LVL_METROPOLIS_GRINDRAIL_USED"),
-            Flag(183, 0, "MOVIE_METROPOLIS_INTRO"),
-            Flag(39, 1, "LVL_COBALIA_BRIDGE_EXTENDED"),
-            Flag(40, 1, "LVL_COBALIA_GEL_FACTORY_ACTIVE"),
-            Flag(186, 1, "MOVIE_COBALIA_INTRO"),
-            Flag(104, 2, "LVL_STRATUS_CITY_LEFT_LEVEL"),
-            Flag(0, (byte)TodPlanets.Length, "GLOBAL_FLAG_TEST"),
-            Flag(33, (byte)TodPlanets.Length, "RYNO_HAS1"),
-            Flag(287, (byte)TodPlanets.Length, string.Empty),
-        });
-    }
+    /// <summary>
+    /// A few of ToD's flags by planet, the ones LEVELFLAGS_RESET of that planet clears in this fake:
+    /// Metropolis 38 and 183, Cobalia 39, 40 and 186, Stratus City 104. qwark's own table has all 292.
+    /// </summary>
+    public static Dictionary<byte, ushort[]> TodLevelFlagResetBits() => new()
+    {
+        [0] = new[] { TodFlagBit(38), TodFlagBit(183) },
+        [1] = new[] { TodFlagBit(39), TodFlagBit(40), TodFlagBit(186) },
+        [2] = new[] { TodFlagBit(104) },
+    };
 
     private static uint[] TodReadouts()
     {

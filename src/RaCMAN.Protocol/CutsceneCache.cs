@@ -28,7 +28,11 @@ public enum CutsceneCacheWait : byte
     Warmer = 2,
 }
 
-/// <summary>Why a request stopped.</summary>
+/// <summary>
+/// Why a request failed. The "too late" reasons (7, 8, 9) do not stop it: a planet reached before
+/// its sound was in is dropped, the rest goes on, and the request ends failed with the reason of the
+/// first planet that was late (Cobalia before Stratus City before Fastoon).
+/// </summary>
 public enum CutsceneCacheFailure : byte
 {
     None = 0,
@@ -51,22 +55,27 @@ public enum CutsceneCacheFailure : byte
     /// <summary>The game closed.</summary>
     GameClosed = 6,
 
-    /// <summary>A load into Stratus City came before its cutscene sound was in.</summary>
+    /// <summary>Finished, but a load into Stratus City came before its cutscene sound was in.</summary>
     TooLateStratusCity = 7,
 
-    /// <summary>A load into Fastoon came before its cutscene sound was in.</summary>
+    /// <summary>Finished, but a load into Fastoon came before its cutscene sound was in.</summary>
     TooLateFastoon = 8,
+
+    /// <summary>Finished, but a load into Cobalia came before its cutscene sound was in.</summary>
+    TooLateCobalia = 9,
 }
 
 /// <summary>
 /// Tools of Destruction's Cache cutscenes status, the word its row names as its status readout
-/// (revision 1.29, PROTOCOL.md section 5.17):
+/// (revision 1.29, PROTOCOL.md section 5.17). qwark caches three planets' opening-cutscene sound,
+/// in the order the run needs them: Cobalia, then Stratus City, then Fastoon.
 /// <code>
 /// bits 28..31  state    CutsceneCacheState
-/// bits 24..27  detail   Waiting: CutsceneCacheWait. Caching: the planet, 1 Fastoon, 2 Stratus City.
+/// bits 24..27  detail   Waiting: CutsceneCacheWait. Caching: the planet, 1 Fastoon, 2 Stratus City,
+///                       3 Cobalia.
 ///                       Failed: CutsceneCacheFailure
 /// bits 16..23  percent  Caching: of that planet. Done: the read rate in tenths of a MiB/s, 0 when
-///                       everything was cached already
+///                       all three planets were cached already
 /// bits 8..15   seconds  since the request, or how long it ran, at most 255
 /// bits 0..7    seq      the requests that have ended since the game started, modulo 256
 /// </code>
@@ -84,17 +93,17 @@ public readonly record struct CutsceneCacheStatus(
     /// <summary>What a waiting request waits for, or None for every other state.</summary>
     public CutsceneCacheWait Wait => State == CutsceneCacheState.Waiting ? (CutsceneCacheWait)Detail : CutsceneCacheWait.None;
 
-    /// <summary>Why a failed request stopped, or None for every other state.</summary>
+    /// <summary>Why a request failed, or None for every other state.</summary>
     public CutsceneCacheFailure Failure =>
         State == CutsceneCacheState.Failed ? (CutsceneCacheFailure)Detail : CutsceneCacheFailure.None;
 
     /// <summary>
     /// How fast a done run read, in MiB/s, or null: not done, or nothing needed reading because the
-    /// cache had both planets' sound already. At most 25.5.
+    /// cache had all three planets' sound already. At most 25.5.
     /// </summary>
     public double? MiBPerSecond => State == CutsceneCacheState.Done && Percent != 0 ? Percent / 10.0 : null;
 
-    /// <summary>A done run that read nothing: the cache had both planets' sound already.</summary>
+    /// <summary>A done run that read nothing: the cache had all three planets' sound already.</summary>
     public bool AlreadyCached => State == CutsceneCacheState.Done && Percent == 0;
 
     /// <summary>The planet being cached, or null when none is.</summary>
@@ -102,6 +111,7 @@ public readonly record struct CutsceneCacheStatus(
     {
         1 => "Fastoon",
         2 => "Stratus City",
+        3 => "Cobalia",
         _ => null,
     };
 

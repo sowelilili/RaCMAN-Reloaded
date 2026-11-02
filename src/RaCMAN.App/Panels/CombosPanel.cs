@@ -397,10 +397,14 @@ public static class CombosPanel
         Ui.Text(Ui.Grey, InGameMenusStatus(state.Session));
     }
 
-    /// <summary>What the In-game menus box says beside itself, from the session flags alone.</summary>
+    /// <summary>
+    /// What the In-game menus box says beside itself, from the session alone. In Tools of Destruction
+    /// the Trainer takes the pause list's Inventory row (qwark revision 1.29), elsewhere Help's.
+    /// </summary>
     public static string InGameMenusStatus(SessionInfo session) =>
         InGameMenusBlocked(session) ? "not under RPCS3"
         : session.MenuHelpOff ? "the game's default pause menu"
+        : session.Game == GameId.Tod ? "Trainer replaces Inventory in the pause menu"
         : "Trainer replaces Help in the pause menu";
 
     public static void Draw(AppState state)

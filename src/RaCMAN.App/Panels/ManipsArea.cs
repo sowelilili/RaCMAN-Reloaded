@@ -103,8 +103,22 @@ public static class ManipsArea
         CutsceneCacheState.Done => status.MiBPerSecond is { } rate
             ? string.Create(System.Globalization.CultureInfo.InvariantCulture,
                 $"Cutscenes cached ({status.Seconds} s, {rate:0.0} MiB/s)")
-            : "Cutscenes already cached",
-        CutsceneCacheState.Failed => $"Cutscene caching stopped: {CacheFailureText(status)}",
+            : "Cutscenes already cached (all three planets)",
+        CutsceneCacheState.Failed => TooLateFor(status.Failure) is { } planet
+            ? $"Cutscene cache: too late for {planet}, the run got there first"
+            : $"Cutscene caching stopped: {CacheFailureText(status)}",
+        _ => null,
+    };
+
+    /// <summary>
+    /// The planet a "too late" reason names, or null for every other reason. Those runs did not stop:
+    /// that planet was dropped and the rest was cached.
+    /// </summary>
+    private static string? TooLateFor(CutsceneCacheFailure failure) => failure switch
+    {
+        CutsceneCacheFailure.TooLateCobalia => "Cobalia",
+        CutsceneCacheFailure.TooLateStratusCity => "Stratus City",
+        CutsceneCacheFailure.TooLateFastoon => "Fastoon",
         _ => null,
     };
 
@@ -117,8 +131,6 @@ public static class ManipsArea
         CutsceneCacheFailure.Disabled => "Disable cutscene caching is on",
         CutsceneCacheFailure.Unreadable => "the game could not be read",
         CutsceneCacheFailure.GameClosed => "the game closed",
-        CutsceneCacheFailure.TooLateStratusCity => "the run reached Stratus City first",
-        CutsceneCacheFailure.TooLateFastoon => "the run reached Fastoon first",
         _ => "unknown reason",
     };
 
