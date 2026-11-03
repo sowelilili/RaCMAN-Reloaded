@@ -566,9 +566,6 @@ public static class CombosPanel
         // setting and the rest, which is why it lives here and not among this client's settings.
         if (ShowsProfiles(state.Session))
         {
-            ImGui.Spacing();
-            ImGui.Separator();
-            Ui.Heading("Console users");
             DrawProfiles(state);
         }
     }
