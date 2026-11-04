@@ -336,7 +336,7 @@ public static class CombosPanel
             // back here cannot fire the one just stored: qwark waits for the next press.
             await state.Client.ComboSuspendAsync(false);
             state.Post(() => state.RefreshCombos());
-        }, $"{Label(action)} = {PadButtons.Describe(value)}{(asOverride ? " (this user's own)" : "")}");
+        }, $"{Label(action)} = {PadButtons.Describe(value)}{(asOverride ? " (override)" : "")}");
     }
 
     /// <summary>
