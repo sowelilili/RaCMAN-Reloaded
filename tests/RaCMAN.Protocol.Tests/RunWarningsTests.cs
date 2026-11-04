@@ -7,9 +7,9 @@ using RaCMAN.Protocol.Testing;
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// Qwark revision 1.30: the run-start warnings. The Combos panel's Run warnings box (RUN_WARN and
-/// SessionInfo flags3), a mod's <c>#- legal:</c> line as the library and MOD_LIST carry it, and the
-/// Mods table's Legal column.
+/// Qwark revision 1.30: the run-start warnings. RUN_WARN and SessionInfo flags3 (the Combos panel's
+/// Run warnings box, hidden since build 57), a mod's <c>#- legal:</c> line as the library and
+/// MOD_LIST carry it, and the green line a run-legal mod's details end with.
 /// </summary>
 public class RunWarningsTests
 {
@@ -48,7 +48,9 @@ public class RunWarningsTests
             var session = (await client.GetStateAsync()).Session;
             Assert.True(session.HasRunWarnings);
             Assert.False(session.RunWarningsOff);
-            Assert.True(CombosPanel.ShowsRunWarnings(session));
+            // After build 57 the box is hidden, though the module has the switch.
+            Assert.False(CombosPanel.RunWarningsSwitchShown);
+            Assert.False(CombosPanel.ShowsRunWarnings(session));
             Assert.Equal("warns about cheats and mods as a run starts", CombosPanel.RunWarningsStatus(session));
 
             await client.RunWarnAsync(false);
@@ -177,7 +179,7 @@ public class RunWarningsTests
         Assert.Equal(want, entry.Legality);
     }
 
-    // ------------------------------------------------------------------ the Legal column
+    // ------------------------------------------------------------------ the legal line
 
     private static LocalMod Local(ModLegality legality) => new()
     {
@@ -190,16 +192,22 @@ public class RunWarningsTests
     private static ModEntry ConsoleRow(ModFlags flags) => new(0, flags, 0, "console-mod", "Console mod", "1", "me");
 
     [Fact]
-    public void TheLegalColumnSaysYesNoOrQuestionMark()
+    public void OnlyALegalModGetsTheLegalLine()
     {
-        var yes = ModTable.LegalityCell(new ModRow(Local(ModLegality.Legal), null, null, true));
-        Assert.Equal(("yes", ModTone.Good), (yes.Text, yes.Tone));
-        var no = ModTable.LegalityCell(new ModRow(Local(ModLegality.Illegal), null, null, true));
-        Assert.Equal(("no", ModTone.Bad), (no.Text, no.Tone));
-        Assert.Contains("warns", no.Tooltip);
-        var unknown = ModTable.LegalityCell(new ModRow(Local(ModLegality.Unknown), null, null, true));
-        Assert.Equal(("?", ModTone.Quiet), (unknown.Text, unknown.Tone));
-        Assert.Contains("once", unknown.Tooltip);
+        Assert.Equal("This mod is legal for speedruns.", ModTable.LegalLine);
+        Assert.Equal(ModTable.LegalLine, ModTable.LegalityLine(new ModRow(Local(ModLegality.Legal), null, null, true)));
+        Assert.Null(ModTable.LegalityLine(new ModRow(Local(ModLegality.Illegal), null, null, true)));
+        Assert.Null(ModTable.LegalityLine(new ModRow(Local(ModLegality.Unknown), null, null, true)));
+    }
+
+    /// <summary>The Mods tables have no Legal column any more; the details say it instead.</summary>
+    [Fact]
+    public void TheModsTablesHaveNoLegalColumn()
+    {
+        const System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
+            | System.Reflection.BindingFlags.Static;
+        Assert.Null(typeof(ModTable).GetMethod("LegalityCell", all));
+        Assert.Null(typeof(ModsPanel).GetMethod("LegalWidth", all));
     }
 
     [Fact]
@@ -208,10 +216,15 @@ public class RunWarningsTests
         var both = new ModRow(Local(ModLegality.Legal), ConsoleRow(ModFlags.Illegal), null, true);
         Assert.Equal(ModLegality.Legal, both.Legality);
 
+        Assert.Equal(ModTable.LegalLine, ModTable.LegalityLine(both));
+
         var consoleOnly = new ModRow(null, ConsoleRow(ModFlags.Illegal | ModFlags.Loaded), "console-mod", true);
-        Assert.Equal("no", ModTable.LegalityCell(consoleOnly).Text);
+        Assert.Null(ModTable.LegalityLine(consoleOnly));
+
+        var consoleLegal = new ModRow(null, ConsoleRow(ModFlags.Legal | ModFlags.Loaded), "console-mod", true);
+        Assert.Equal(ModTable.LegalLine, ModTable.LegalityLine(consoleLegal));
 
         var olderModule = new ModRow(null, ConsoleRow(ModFlags.Loaded), "console-mod", true);
-        Assert.Equal("?", ModTable.LegalityCell(olderModule).Text);
+        Assert.Null(ModTable.LegalityLine(olderModule));
     }
 }

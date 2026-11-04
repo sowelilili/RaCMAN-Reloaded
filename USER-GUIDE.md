@@ -80,9 +80,8 @@ The Save files panel has premade saves in its last category, **(premade savefile
 
 When a run starts with a cheat or a mod on that the run should not have, your console shows a notification such as **Warning: 2 cheats enabled**. A run starts where the autosplitter starts its timer. A death or a reload does not count.
 
-- **Cheats** are the cheats of the game's Cheats page, fast loads included, and a few more such as RaC1's goodies menu and RaC2's resets on death. ToD's **Remove cutscenes** and the manips do not count.
-- **Mods**: the Mods panel's **Legal** column says what each mod's author says. **no** mods are counted at every run start. **?** mods (the author has not said) are mentioned once, until you load another one.
-- Untick **Run warnings** under **Qwark settings** on the Combos panel to turn the warnings off.
+- **Cheats** are the cheats of the game's Cheats page, fast loads included, and a few more such as RaC1's goodies menu and RaC2's resets on death. UYA's **Quick-select pause**, ToD's **Remove cutscenes** and the manips do not count.
+- **Mods**: a mod whose author says it is allowed in speedruns says **This mod is legal for speedruns.** under its description on the Mods panel. Mods whose author says they are not allowed are counted at every run start. Unknown mods (the author has not said) are mentioned once, until you load another one.
 
 Under RPCS3 the warnings go to qwark-rpcs3's log.
 

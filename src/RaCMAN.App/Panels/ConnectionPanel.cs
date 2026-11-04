@@ -963,15 +963,9 @@ public static class ConnectionPanel
 
         if (!state.QwarkStale) return;
 
-        // The RPCS3 helper is a program on this PC that the client's own update replaces; the mode
-        // setting is about consoles and says nothing about it.
         string sprx = Ps3Connect.ResolveSprx(state.Settings.Ps3.SprxPath);
-        string fix = !state.Settings.Ps3.StandaloneConnection || state.Settings.Rpcs3Target
-            ? "Re-upload qwark.sprx with the button below and your console will reload it."
-            : File.Exists(sprx)
-                ? "The client is putting the new qwark.sprx on your console by itself; it will say here when "
-                  + "the console has to be restarted to load it."
-                : $"There is no qwark.sprx beside this client to send ({sprx}).";
+        var fix = StaleFixFor(state);
+        string text = StaleFixText(fix, sprx);
 
         ImGui.Spacing();
         var hello = state.Hello!;
@@ -981,12 +975,101 @@ public static class ConnectionPanel
             string console = hello.DevBuild ? $"test build 0x{hello.BuildId:X8}" : "the release";
             string ours = state.ShippedModule is { } shipped ? shipped.Describe() : $"build {QwarkClient.ExpectedQwarkBuild}";
             Ui.Warning($"Your console is running {console} of qwark build {hello.QwarkVersion}; this client shipped with "
-                       + $"{ours}. " + fix);
-            return;
+                       + $"{ours}. " + text);
+        }
+        else
+        {
+            Ui.Warning($"Your console is running qwark build {hello.QwarkVersion}; this client shipped with build "
+                       + $"{QwarkClient.ExpectedQwarkBuild}. " + text);
         }
 
-        Ui.Warning($"Your console is running qwark build {hello.QwarkVersion}; this client shipped with build "
-                   + $"{QwarkClient.ExpectedQwarkBuild}. " + fix);
+        // The button the webMAN text promises, for an older build and another test build alike. It
+        // used to be only the "Load qwark through webMAN" section's, which is debug information, so
+        // with that off the text pointed at nothing.
+        if (fix == StaleBuildFix.WebManLoad) DrawStaleLoadButton(state, sprx);
+    }
+
+    /// <summary>What puts a stale module right, by mode (<see cref="StaleFixFor(bool, bool, bool)"/>).</summary>
+    public enum StaleBuildFix
+    {
+        /// <summary>webMAN mode: the Load button under the warning sends the module and loads it.</summary>
+        WebManLoad,
+
+        /// <summary>Standalone mode: the client writes the module to the boot path by itself.</summary>
+        Standalone,
+
+        /// <summary>A console mode with no qwark.sprx beside this client: there is nothing to send.</summary>
+        NoSprx,
+
+        /// <summary>RPCS3: qwark-rpcs3 is a program on this PC, and no button sends it anywhere.</summary>
+        Rpcs3,
+    }
+
+    /// <summary>
+    /// Which fix the stale-build warning offers. The RPCS3 helper is a program on this PC that the
+    /// client's own update replaces, so the console mode says nothing about it; a console mode
+    /// with no module beside the client has nothing to send in either mode.
+    /// </summary>
+    public static StaleBuildFix StaleFixFor(bool rpcs3Target, bool standalone, bool sprxExists) =>
+        rpcs3Target ? StaleBuildFix.Rpcs3
+        : !sprxExists ? StaleBuildFix.NoSprx
+        : standalone ? StaleBuildFix.Standalone
+        : StaleBuildFix.WebManLoad;
+
+    /// <summary><see cref="StaleFixFor(bool, bool, bool)"/> for the client's settings and the module beside it.</summary>
+    public static StaleBuildFix StaleFixFor(AppState state) =>
+        StaleFixFor(state.Settings.Rpcs3Target, state.Settings.Ps3.StandaloneConnection,
+            File.Exists(Ps3Connect.ResolveSprx(state.Settings.Ps3.SprxPath)));
+
+    /// <summary>The sentence after "your console is running ...": what to do about it.</summary>
+    public static string StaleFixText(StaleBuildFix fix, string sprx) => fix switch
+    {
+        StaleBuildFix.WebManLoad => "Re-upload qwark.sprx with the button below and your console will reload it.",
+        StaleBuildFix.Standalone => "The client is putting the new qwark.sprx on your console by itself; it will say here when "
+                                    + "the console has to be restarted to load it.",
+        StaleBuildFix.NoSprx => $"There is no qwark.sprx beside this client to send ({sprx}).",
+        _ => $"Close {Rpcs3Host.ExeName} and connect again, and this client starts the one it shipped with.",
+    };
+
+    /// <summary>The label of the stale-build warning's button, the debug section's Load button's.</summary>
+    public const string StaleLoadButton = "Load qwark via webMAN";
+
+    /// <summary>Set while the warning's Load is under way, so a second press does not send it twice.</summary>
+    private static bool _staleLoading;
+
+    /// <summary>
+    /// The stale-build warning's Load button: what the debug section's "Load qwark via webMAN" does,
+    /// with the module beside this client and the VSH slot from the settings, to the console this
+    /// client is connected to. The old module goes as the new one loads, the connection with it,
+    /// and the reconnect finds the new build.
+    /// </summary>
+    private static void DrawStaleLoadButton(AppState state, string sprx)
+    {
+        ImGui.BeginDisabled(_staleLoading || state.ConsoleBusy);
+        if (ImGui.Button($"{StaleLoadButton}##stale"))
+        {
+            string ip = state.Client.Host ?? _host.Trim();
+            int slot = state.Settings.Ps3.WebManSlot;
+            _staleLoading = true;
+            state.Run(async () =>
+            {
+                try
+                {
+                    await state.WebMan.LoadAsync(ip, sprx, slot,
+                        new Progress<string>(message => state.Post(() => state.AddToast(message))));
+                }
+                finally
+                {
+                    state.Post(() => _staleLoading = false);
+                }
+            }, $"qwark.sprx loaded into slot {slot}");
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
+        {
+            Ui.SetTooltip($"Uploads {sprx} to your console and asks webMAN to load it into VSH slot {state.Settings.Ps3.WebManSlot}.");
+        }
     }
 
     /// <summary>

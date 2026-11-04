@@ -150,7 +150,7 @@ public static class ModsPanel
         {
             DrawRpcs3Table(state, title, rows, busy);
         }
-        else if (ImGui.BeginTable("mods", 6, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
+        else if (ImGui.BeginTable("mods", 5, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
         {
             // Mod is the only stretching column, so every pixel the fixed ones do not need is a
             // pixel of mod name that survives; at the default window width they are the difference
@@ -162,7 +162,6 @@ public static class ModsPanel
             float buttons = ConsoleActionsWidth();
             ImGui.TableSetupColumn("Mod");
             ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, 60);
-            ImGui.TableSetupColumn("Legal", ImGuiTableColumnFlags.WidthFixed, LegalWidth());
             ImGui.TableSetupColumn("Console", ImGuiTableColumnFlags.WidthFixed, ConsoleAndActionsWidth - buttons);
             ImGui.TableSetupColumn("Auto", ImGuiTableColumnFlags.WidthFixed, 40);
             ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, buttons);
@@ -319,16 +318,7 @@ public static class ModsPanel
         string version = string.IsNullOrEmpty(row.Version) ? "-" : row.Version;
         if (row.ConsoleOnly || row.UsbOnly) Ui.Text(Ui.Grey, version);
         else ImGui.TextUnformatted(version);
-
-        // Qwark revision 1.30: the mod's #- legal: line, a word and a tooltip.
-        ImGui.TableNextColumn();
-        var legal = ModTable.LegalityCell(row);
-        Ui.Text(ColourOf(legal.Tone), legal.Text);
-        Ui.Tooltip(legal.Tooltip);
     }
-
-    /// <summary>The Legal column, in both tables: as wide as its heading, which is wider than any of its words.</summary>
-    private static float LegalWidth() => MathF.Ceiling(MeasureText("Legal"));
 
     /// <summary>
     /// A row's right-click menu: Uninstall, which removes the mod from the console and from this
@@ -570,7 +560,7 @@ public static class ModsPanel
     /// <summary>What a row's Status cell says while its write is under way.</summary>
     private const string WritingText = "Writing...";
 
-    private const int Rpcs3Columns = 6;
+    private const int Rpcs3Columns = 5;
 
     /// <summary>
     /// The RPCS3 table: Status in place of the console column, Enabled in place of Auto, and no
@@ -621,8 +611,7 @@ public static class ModsPanel
         // What Mod and Status share: the table's width, less the fixed columns and what the table
         // puts around every column (cell padding each side, a border between two, one down each edge).
         float overhead = (style.CellPadding.X * 2f * Rpcs3Columns) + (Rpcs3Columns - 1) + 2f;
-        float legalWidth = LegalWidth();
-        float room = ImGui.GetContentRegionAvail().X - overhead - version - legalWidth - enabled - actions;
+        float room = ImGui.GetContentRegionAvail().X - overhead - version - enabled - actions;
         float name = Rpcs3ModColumnWidth(rows.Select(row => row.Name), room, statusNeeds, MeasureText);
 
         if (!ImGui.BeginTable("mods-rpcs3", Rpcs3Columns, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp))
@@ -634,7 +623,6 @@ public static class ModsPanel
         // column follows a new mod, a new font size and a resized window.
         ImGui.TableSetupColumn("Mod", ImGuiTableColumnFlags.WidthFixed, name);
         ImGui.TableSetupColumn("Version", ImGuiTableColumnFlags.WidthFixed, version);
-        ImGui.TableSetupColumn("Legal", ImGuiTableColumnFlags.WidthFixed, legalWidth);
         ImGui.TableSetupColumn("Status", ImGuiTableColumnFlags.WidthStretch);
         ImGui.TableSetupColumn("Enabled", ImGuiTableColumnFlags.WidthFixed, enabled);
         ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, actions);
@@ -1035,10 +1023,15 @@ public static class ModsPanel
         }
         if (!string.IsNullOrEmpty(mod.Link)) Ui.Hint(mod.Link);
 
-        if (!string.IsNullOrEmpty(mod.Description))
+        // Qwark revision 1.30: a mod whose patch.txt says #- legal: true ends its description
+        // with a green line saying so. False or no line says nothing here; the console warns
+        // about those as a run starts.
+        string? legal = ModTable.LegalityLine(row);
+        if (!string.IsNullOrEmpty(mod.Description) || legal is not null)
         {
             ImGui.Spacing();
-            Ui.TextWrapped(mod.Description);
+            if (!string.IsNullOrEmpty(mod.Description)) Ui.TextWrapped(mod.Description);
+            if (legal is not null) Ui.Success(legal);
         }
 
         // Every mod in this table is installed on this PC, so its description is the one already
@@ -1089,6 +1082,9 @@ public static class ModsPanel
             ? $"Folder: {ModLibrary.ConsoleFolder(title, folder)}  (only on {where})"
             : $"qwark lists it as {row.ListedName}, and its folder is not in {where}'s mod folder any more.");
         ImGui.TextUnformatted($"Version: {(string.IsNullOrEmpty(row.Version) ? "-" : row.Version)}    Author: {(string.IsNullOrEmpty(row.Author) ? "-" : row.Author)}");
+
+        // No description here, but MOD_LIST's LEGAL bit is the same #- legal: true line.
+        if (ModTable.LegalityLine(row) is { } legal) Ui.Success(legal);
 
         if (row.FolderNameTooLong)
         {

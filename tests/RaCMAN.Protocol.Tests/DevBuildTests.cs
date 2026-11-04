@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 
 using RaCMAN.App;
+using RaCMAN.App.Panels;
 using RaCMAN.Protocol.Testing;
 
 namespace RaCMAN.Protocol.Tests;
@@ -327,6 +328,37 @@ public class DevBuildTests
         Assert.True(state.QwarkStale);
         Assert.Equal(0, state.QwarkUpdateStaged);
         Assert.Equal(onConsole, server.Files[WebManLoader.BootPath]);
+
+        // Build 57 on hardware: the warning promised a button that only debug information drew.
+        // Now the warning draws it, whatever the debug switch says.
+        Assert.True(state.QwarkOtherTestBuild);
+        Assert.Equal(ConnectionPanel.StaleBuildFix.WebManLoad, ConnectionPanel.StaleFixFor(state));
+        Assert.Contains("button below", ConnectionPanel.StaleFixText(ConnectionPanel.StaleFixFor(state), "x"), StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// The stale-build warning names a button only where it draws one: webMAN mode with a module
+    /// beside the client. Standalone sends the module by itself, a client with no module has
+    /// nothing to send, and RPCS3's helper is a program on this PC.
+    /// </summary>
+    [Fact]
+    public void TheStaleWarningPromisesAButtonOnlyWhereThereIsOne()
+    {
+        Assert.Equal(ConnectionPanel.StaleBuildFix.WebManLoad, ConnectionPanel.StaleFixFor(rpcs3Target: false, standalone: false, sprxExists: true));
+        Assert.Equal(ConnectionPanel.StaleBuildFix.Standalone, ConnectionPanel.StaleFixFor(rpcs3Target: false, standalone: true, sprxExists: true));
+        Assert.Equal(ConnectionPanel.StaleBuildFix.NoSprx, ConnectionPanel.StaleFixFor(rpcs3Target: false, standalone: false, sprxExists: false));
+        Assert.Equal(ConnectionPanel.StaleBuildFix.NoSprx, ConnectionPanel.StaleFixFor(rpcs3Target: false, standalone: true, sprxExists: false));
+        Assert.Equal(ConnectionPanel.StaleBuildFix.Rpcs3, ConnectionPanel.StaleFixFor(rpcs3Target: true, standalone: false, sprxExists: true));
+        Assert.Equal(ConnectionPanel.StaleBuildFix.Rpcs3, ConnectionPanel.StaleFixFor(rpcs3Target: true, standalone: true, sprxExists: false));
+
+        foreach (var fix in Enum.GetValues<ConnectionPanel.StaleBuildFix>())
+        {
+            string text = ConnectionPanel.StaleFixText(fix, "C:\\x\\qwark.sprx");
+            Assert.Equal(fix == ConnectionPanel.StaleBuildFix.WebManLoad, text.Contains("button", StringComparison.Ordinal));
+        }
+
+        Assert.Contains("C:\\x\\qwark.sprx", ConnectionPanel.StaleFixText(ConnectionPanel.StaleBuildFix.NoSprx, "C:\\x\\qwark.sprx"), StringComparison.Ordinal);
+        Assert.Equal("Load qwark via webMAN", ConnectionPanel.StaleLoadButton);
     }
 
     [Fact]

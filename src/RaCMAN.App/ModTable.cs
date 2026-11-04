@@ -326,21 +326,16 @@ public static class ModTable
         return parts;
     }
 
+    /// <summary>The green line a run-legal mod's details end with (qwark revision 1.30).</summary>
+    public const string LegalLine = "This mod is legal for speedruns.";
+
     /// <summary>
-    /// The Legal column (qwark revision 1.30): "yes", "no" or "?" for a mod whose patch.txt says
-    /// <c>#- legal: true</c>, <c>false</c> or neither, and "-" for one nobody here has read. The
-    /// tooltip says what the console does about it as a run starts.
+    /// What the details say about a mod's legality: <see cref="LegalLine"/> when its patch.txt says
+    /// <c>#- legal: true</c> (the library's copy, or MOD_LIST's LEGAL bit for a mod only the console
+    /// has), and nothing for <c>false</c> or no line at all: the console warns about those as a run
+    /// starts, so the table no longer has a column for it.
     /// </summary>
-    public static (string Text, ModTone Tone, string Tooltip) LegalityCell(ModRow row) => row.Legality switch
-    {
-        ModLegality.Legal => ("yes", ModTone.Good,
-            "Run-legal: its author says it is allowed in speedruns."),
-        ModLegality.Illegal => ("no", ModTone.Bad,
-            "Not run-legal: its author says it is not allowed in speedruns. Your console warns about it when a run starts with it loaded."),
-        ModLegality.Unknown => ("?", ModTone.Quiet,
-            "Legality unknown: its author hasn't said whether it is allowed in speedruns. Your console mentions it once when a run starts with it loaded."),
-        _ => ("-", ModTone.Quiet, "Only on your console's USB drive, so its legality isn't known here."),
-    };
+    public static string? LegalityLine(ModRow row) => row.Legality == ModLegality.Legal ? LegalLine : null;
 
     /// <summary>
     /// What a row offers. On a console: Load while it is not loaded, and only for a folder name qwark

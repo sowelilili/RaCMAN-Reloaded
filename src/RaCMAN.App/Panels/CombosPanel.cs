@@ -215,7 +215,16 @@ public static class CombosPanel
     /// <summary>Whether Capture on a row commits as the override (COMBO_OVERRIDE) rather than the shared combo (COMBO_SET).</summary>
     public static bool CaptureIsOverride(SessionInfo session, ComboEntry entry) => IsOverridden(session, entry);
 
-    /// <summary>The line under the switch while overrides can be made.</summary>
+    /// <summary>
+    /// Whether the line under the switch is drawn: only while overrides can be made and at least
+    /// one row the table draws is this user's own (orange). Overrides being possible is not
+    /// enough; with none made, every row is green and the line would say something untrue.
+    /// </summary>
+    public static bool ShowsOverrideHint(SessionInfo session, IEnumerable<ComboEntry> combos) =>
+        ShowsOverride(session)
+        && combos.Any(entry => IsOverridden(session, entry) && ShowsRow(entry.Action, session));
+
+    /// <summary>The line under the switch while this user has an overridden combo.</summary>
     public static string OverrideHint(ProfileInfo profile) =>
         $"{UserName(profile)} has one or more overridden combos (orange).";
 
@@ -389,7 +398,7 @@ public static class CombosPanel
             Ui.SetTooltip(blocked
                 ? "The console menu is not available under RPCS3."
                 : "When enabled, shows the in-game Trainer menu in place of the Help menu. "
-                  + "When disabled, the Trainer menu is only accessible with its button combo");
+                  + "When disabled, the Trainer menu is only accessible with its button combo.");
         }
 
         ImGui.SameLine();
@@ -407,16 +416,24 @@ public static class CombosPanel
         : "Trainer replaces Help in the pause menu";
 
     /// <summary>
-    /// Whether the Run warnings box is drawn: SessionInfo <c>flags3</c> bit0 (qwark revision 1.30),
-    /// the module's capability bit, and not the build number, so a test build of the same number
-    /// without it shows nothing. RPCS3 has the warnings too: they go to qwark-rpcs3's log there.
+    /// Whether the Run warnings box is shown at all. After build 57 (the user's call) it is not:
+    /// the console's switch, RUN_WARN and SessionInfo <c>flags3</c> stay as they are, and the box
+    /// stays here, so showing it again is this one word.
     /// </summary>
-    public static bool ShowsRunWarnings(SessionInfo session) => session.HasRunWarnings;
+    public const bool RunWarningsSwitchShown = false;
+
+    /// <summary>
+    /// Whether the Run warnings box is drawn: <see cref="RunWarningsSwitchShown"/>, and SessionInfo
+    /// <c>flags3</c> bit0 (qwark revision 1.30), the module's capability bit, and not the build
+    /// number, so a test build of the same number without it shows nothing. RPCS3 has the warnings
+    /// too: they go to qwark-rpcs3's log there.
+    /// </summary>
+    public static bool ShowsRunWarnings(SessionInfo session) => RunWarningsSwitchShown && session.HasRunWarnings;
 
     /// <summary>What the Run warnings box says when the pointer rests on it.</summary>
     public const string RunWarningsTooltip =
         "When enabled, your console shows a notification as a speedrun starts if cheats are on, or mods "
-        + "that are not allowed in runs or whose authors haven't said. Mods of unknown legality are "
+        + "that are not allowed in runs or whose authors haven't said. Unknown mods are "
         + "mentioned once.";
 
     /// <summary>What the Run warnings box says beside itself, from the session alone.</summary>
@@ -458,9 +475,10 @@ public static class CombosPanel
         DrawSwitch(state);
 
         // Per-user settings on and a user's profile active (revision 1.24): each row can carry
-        // this user's own combo, drawn in orange, over the shared one.
+        // this user's own combo, drawn in orange, over the shared one. The line saying so is
+        // only there while one of the rows is.
         bool overrides = ShowsOverride(state.Session);
-        if (overrides)
+        if (ShowsOverrideHint(state.Session, state.Combos))
         {
             Ui.Hint(OverrideHint(state.Profile));
             ImGui.Spacing();
@@ -616,10 +634,9 @@ public static class CombosPanel
 
     /// <summary>What the Per-user settings box says when the pointer rests on it.</summary>
     public const string ProfilesTooltip =
-        "Each console user gets their own position slots, mods and cheats that load automatically, "
-        + "manip and planet choices, and In-game menus and run warnings settings. Everyone shares the mod and savefile "
-        + "libraries and the combos, except combos a user overrides on the Combos panel. "
-        + "Switch users at the PS3 home screen.";
+        "When enabled, each console user keeps its own saved positions and settings. " +
+        "Combos are shared by default, but can be overridden manually. " +  
+        "When disabled, positions and settings are shared between all users.";
 
     /// <summary>
     /// Whether anything about per-user settings is drawn: SessionInfo byte 29 bit1, the capability

@@ -756,6 +756,40 @@ public class ProfileTests
     }
 
     /// <summary>
+    /// Build 57 on hardware: the line saying the user has overridden combos showed whenever a
+    /// user's profile was active, with every row green. It shows only while a drawn row is orange.
+    /// </summary>
+    [Fact]
+    public void TheOverriddenCombosLineShowsOnlyWithAnOverride()
+    {
+        var active = With(ProfileFlags.On | ProfileFlags.Active);
+        var plain = new[]
+        {
+            new ComboEntry(ComboAction.Die, Shared),
+            new ComboEntry(ComboAction.SavePosition, 0),
+        };
+        var oneOverridden = new[]
+        {
+            new ComboEntry(ComboAction.Die, Own, ComboEntryFlags.Overridden),
+            new ComboEntry(ComboAction.SavePosition, 0),
+        };
+
+        Assert.False(CombosPanel.ShowsOverrideHint(active, plain));
+        Assert.False(CombosPanel.ShowsOverrideHint(active, Array.Empty<ComboEntry>()));
+        Assert.True(CombosPanel.ShowsOverrideHint(active, oneOverridden));
+
+        // No active user, no line, whatever COMBO_LIST says.
+        Assert.False(CombosPanel.ShowsOverrideHint(With(ProfileFlags.On), oneOverridden));
+        Assert.False(CombosPanel.ShowsOverrideHint(ConsoleSession, oneOverridden));
+
+        // An override on a row the table does not draw (the console menu's, without a console menu) is no orange row.
+        var noMenu = active with { Flags2 = active.Flags2 | SessionFlags2.NoMenu };
+        var menuOnly = new[] { new ComboEntry(ComboAction.OpenConsoleMenu, Own, ComboEntryFlags.Overridden) };
+        Assert.False(CombosPanel.ShowsOverrideHint(noMenu with { QwarkVersion = CombosPanel.ConsoleMenuBuild }, menuOnly));
+        Assert.True(CombosPanel.ShowsOverrideHint(active with { QwarkVersion = CombosPanel.ConsoleMenuBuild }, menuOnly));
+    }
+
+    /// <summary>
     /// The combos table's buttons cell holds Capture, Clear and Override side by side, and an
     /// overridden row's Override and Clear Override line up with them: the first button is one width
     /// on every row and Clear Override ends where a plain row's Override does. The stand-in font is
