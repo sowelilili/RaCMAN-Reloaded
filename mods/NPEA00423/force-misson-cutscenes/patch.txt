@@ -2,6 +2,7 @@
 #- version: 4.0
 #- author: robo
 #- description: Plays a mission's intro cutscene every time the mission starts, not only the first time.
+#- legal: false
 
 # Deadlocked records "this mission has been started" as bit 2 (0x4) of the mission's
 # status byte in the level save data, at 0xb27ff8 + (level - 1) % 20 * 0x304 + mission * 0xc.

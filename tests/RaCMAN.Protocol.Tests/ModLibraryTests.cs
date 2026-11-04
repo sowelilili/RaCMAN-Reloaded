@@ -390,7 +390,8 @@ public class ShippedModLibraryTests
         while (directory is not null)
         {
             string candidate = Path.Combine(directory.FullName, "mods");
-            if (Directory.Exists(Path.Combine(candidate, "NPEA00385"))) return candidate;
+            // RaC2's: the library has shipped no RaC1 mod since 2026-11-04, and git keeps no empty folder.
+            if (Directory.Exists(Path.Combine(candidate, "NPEA00386"))) return candidate;
             directory = directory.Parent;
         }
 
@@ -413,6 +414,38 @@ public class ShippedModLibraryTests
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Qwark revision 1.30: the user's call on each shipped mod's legality (2026-11-04), and RaC1's
+    /// four old mods gone from the library.
+    /// </summary>
+    [Theory]
+    [InlineData("NPEA00386", "barlow_joba_trainer", ModLegality.Illegal)]
+    [InlineData("NPEA00386", "bl-mod", ModLegality.Legal)]
+    [InlineData("NPEA00386", "spiderbot-fix", ModLegality.Legal)]
+    [InlineData("NPEA00423", "bot-display", ModLegality.Illegal)]
+    [InlineData("NPEA00423", "dl-cs", ModLegality.Legal)]
+    [InlineData("NPEA00423", "force-misson-cutscenes", ModLegality.Illegal)]
+    [InlineData("NPEA00423", "il-display", ModLegality.Illegal)]
+    [InlineData("NPEA00423", "il-ghost", ModLegality.Illegal)]
+    [InlineData("NPEA00423", "il-igt", ModLegality.Legal)]
+    public void EveryShippedModSaysWhetherItIsRunLegal(string title, string folder, ModLegality want)
+    {
+        var mod = ModLibrary.Read(Path.Combine(LibraryPath(), title, folder), shipped: true);
+        Assert.NotNull(mod);
+        Assert.Equal(want, mod!.Legality);
+    }
+
+    [Fact]
+    public void TheLibraryShipsNoRac1Mod()
+    {
+        Assert.False(Directory.Exists(Path.Combine(LibraryPath(), "NPEA00385")));
+        int mods = Directory.EnumerateDirectories(LibraryPath())
+            .Where(title => Path.GetFileName(title) != "libs")
+            .SelectMany(Directory.EnumerateDirectories)
+            .Count(folder => File.Exists(Path.Combine(folder, "patch.txt")));
+        Assert.Equal(9, mods);
     }
 
     [Fact]

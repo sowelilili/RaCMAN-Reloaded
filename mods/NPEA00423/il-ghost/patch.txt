@@ -4,6 +4,7 @@
 #- version: 1.0
 #- description: Tracks your IL PBs and provides a ghost for comparison.
 #- depends: IL Decimal Timer
+#- legal: false
 0x676b9c: rack.bin
 
 #### ASM Patches ####

@@ -3,6 +3,7 @@
 #- href: https://github.com/MichaelRelaxen/racman
 #- version: 1.0
 #- description: Patches out flashing lights during spiderbot stacking
+#- legal: true
 
 0xc90fe0: 0x428002b8
 0xc90edc: 0x60000000

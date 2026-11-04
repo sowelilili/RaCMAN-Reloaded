@@ -82,6 +82,13 @@ public sealed record ModRow(LocalMod? Local, ModEntry? Console, string? ConsoleF
         : UsbOnly ? Usb!.Author : string.Empty);
 
     public bool Loaded => Console?.Loaded ?? false;
+
+    /// <summary>
+    /// Qwark revision 1.30: what the mod's <c>#- legal:</c> line says. The library's copy when this
+    /// PC has one (it is what Load uploads), else what MOD_LIST says of the console's; null for a mod
+    /// only a USB drive has, whose patch.txt nobody here has read.
+    /// </summary>
+    public ModLegality? Legality => Local?.Legality ?? Console?.Legality;
 }
 
 /// <summary>What a row offers, and why an offer is greyed out.</summary>
@@ -318,6 +325,22 @@ public static class ModTable
         if (remote.ParseError) parts.Add("parse error");
         return parts;
     }
+
+    /// <summary>
+    /// The Legal column (qwark revision 1.30): "yes", "no" or "?" for a mod whose patch.txt says
+    /// <c>#- legal: true</c>, <c>false</c> or neither, and "-" for one nobody here has read. The
+    /// tooltip says what the console does about it as a run starts.
+    /// </summary>
+    public static (string Text, ModTone Tone, string Tooltip) LegalityCell(ModRow row) => row.Legality switch
+    {
+        ModLegality.Legal => ("yes", ModTone.Good,
+            "Run-legal: its author says it is allowed in speedruns."),
+        ModLegality.Illegal => ("no", ModTone.Bad,
+            "Not run-legal: its author says it is not allowed in speedruns. Your console warns about it when a run starts with it loaded."),
+        ModLegality.Unknown => ("?", ModTone.Quiet,
+            "Legality unknown: its author hasn't said whether it is allowed in speedruns. Your console mentions it once when a run starts with it loaded."),
+        _ => ("-", ModTone.Quiet, "Only on your console's USB drive, so its legality isn't known here."),
+    };
 
     /// <summary>
     /// What a row offers. On a console: Load while it is not loaded, and only for a folder name qwark

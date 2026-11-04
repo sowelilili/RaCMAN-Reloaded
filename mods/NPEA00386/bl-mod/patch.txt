@@ -1,6 +1,7 @@
 #- name: Black Label movement re-patch
 #- author: isaka & robo
 #- version: 1.6
+#- legal: true
 
 ### BOUNCER FIX
 0x10cd794: 0x3D200148 

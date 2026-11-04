@@ -97,8 +97,11 @@ if (-not $PkgPath)    { $PkgPath    = Combine $repo '..' 'qwark' 'dist' 'qwark-i
 # The mod library the client ships with: one folder per title plus the shared Lua helpers. It
 # lives in this repo now, so a release carries whatever is committed and nothing else. UYA
 # (NPEA00387) is not listed: its one shipped mod, SUCKMAN, sat on the savefile helper and was
-# retired, and git keeps no empty folder to copy.
-$ExpectedMods = @('NPEA00385', 'NPEA00386', 'NPEA00423', 'libs')
+# retired, and git keeps no empty folder to copy. Nor is RaC1 (NPEA00385) since 2026-11-04: its
+# four mods (Hardcore Mode, Incremental RNG, Lock RNG, the quartu arena patch) were old RaCMAN's,
+# of no use to a speedrunner, and were dropped. A copy a user has on the console, or in their own
+# mods folder, is theirs and stays; the release just no longer carries or updates them.
+$ExpectedMods = @('NPEA00386', 'NPEA00423', 'libs')
 
 # What the client reads to tell a shipped mod from one the user added, when it moves an older
 # installation's files into the data folder. See DataFolderMigration.

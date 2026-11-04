@@ -65,6 +65,16 @@ Open **Game**, then **Manips**, and pick the category type of your run. Hover a 
 
 The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
 
+## Run warnings
+
+When a run starts with a cheat or a mod on that the run should not have, your console shows a notification such as **Warning: 2 cheats enabled**. A run starts where the autosplitter starts its timer. A death or a reload does not count.
+
+- **Cheats** are the cheats of the game's Cheats page, fast loads included, and a few more such as RaC1's goodies menu and RaC2's resets on death. ToD's **Remove cutscenes** and the manips do not count.
+- **Mods**: the Mods panel's **Legal** column says what each mod's author says. **no** mods are counted at every run start. **?** mods (the author has not said) are mentioned once, until you load another one.
+- Untick **Run warnings** under **Qwark settings** on the Combos panel to turn the warnings off.
+
+Under RPCS3 the warnings go to qwark-rpcs3's log.
+
 ## Console menu
 
 On a console, all four games and ToD have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was (in ToD, where **Inventory** was, in the pause menu's first list), or press L1, R1, L2, R2, L3 and R3 together in play. ToD's Trainer menu uses the pause menu's own list and its Game Options screen, scrolls a page at a time like the game's lists (Down on a page's last row shows the next page, Up on the first page's top row goes round to the last), and works under RPCS3 too once RaCMAN has written its RPCS3 patch and the game has been restarted. The Combos panel can change that combo. Untick **In-game menus** there to keep the game's own Help (in ToD, Inventory) in the pause menu; the combo still opens the Trainer menu.

@@ -1565,6 +1565,18 @@ public sealed class QwarkClient : IDisposable
         }), cancellationToken);
 
     /// <summary>
+    /// RUN_WARN, qwark revision 1.30: whether the console warns as a run starts with cheats on or
+    /// mods that are not run-legal. Kept in the console's config (<c>run.warnings</c>, per user like
+    /// MENU_HELP's) and read back from <see cref="SessionInfo.RunWarningsOff"/>. Send it only while
+    /// <see cref="SessionInfo.HasRunWarnings"/> is set: an older module answers UNKNOWN_OP.
+    /// </summary>
+    public Task RunWarnAsync(bool on, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.RunWarn, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)(on ? 1 : 0));
+        }), cancellationToken);
+
+    /// <summary>
     /// PROFILE_INFO, revision 1.24 (build 56): who is signed in on the console and whose per-user
     /// settings are in use. Answered in every session state. Send it only while
     /// <see cref="SessionInfo.ProfilesSupported"/> is set: a module before the revision answers

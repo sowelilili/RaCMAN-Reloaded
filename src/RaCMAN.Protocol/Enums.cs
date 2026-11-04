@@ -178,6 +178,15 @@ public enum Opcode : ushort
     /// </summary>
     ComboOverride = 0x0095,
 
+    /// <summary>
+    /// Revision 1.30 (pending): <c>u8 on</c>, no reply. Writes the console's <c>run.warnings</c>: 1 (the
+    /// default) the console warns as a run starts with cheats or mods that are not run-legal, 0 it
+    /// says nothing. Anything else is BAD_ARG. <see cref="SessionFlags3.RunWarningsOff"/> is where the
+    /// setting comes back. Sent only while <see cref="SessionFlags3.RunWarnings"/> is set: an older
+    /// module answers UNKNOWN_OP.
+    /// </summary>
+    RunWarn = 0x0096,
+
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
@@ -889,6 +898,22 @@ public enum SessionFlags : byte
     UiPakBad = 1 << 7,
 }
 
+/// <summary>SessionInfo byte 31, <c>flags3</c> (revision 1.30, pending): a pad byte, always 0, before it.</summary>
+[Flags]
+public enum SessionFlags3 : byte
+{
+    None = 0,
+
+    /// <summary>
+    /// bit0 RUN_WARN: the module has the run-start warnings and answers RUN_WARN. The capability bit:
+    /// the client offers the switch only while it is set.
+    /// </summary>
+    RunWarnings = 1 << 0,
+
+    /// <summary>bit1 RUN_WARN_OFF: the console's <c>run.warnings</c> is 0, so a run start says nothing.</summary>
+    RunWarningsOff = 1 << 1,
+}
+
 /// <summary>SessionInfo byte 29, <c>flags2</c> (revision 1.24): a pad byte, always 0, before it.</summary>
 [Flags]
 public enum SessionFlags2 : byte
@@ -1149,6 +1174,12 @@ public enum ModFlags : byte
 
     /// <summary>Revision 1.16, only where code cannot be patched: whether the mod is in the game is not known yet this session.</summary>
     Checking = 1 << 5,
+
+    /// <summary>Revision 1.30 (pending): the mod's patch.txt says <c>#- legal: true</c>, allowed in a speedrun.</summary>
+    Legal = 1 << 6,
+
+    /// <summary>Revision 1.30 (pending): the mod's patch.txt says <c>#- legal: false</c>. Neither bit: legality unknown.</summary>
+    Illegal = 1 << 7,
 }
 
 [Flags]

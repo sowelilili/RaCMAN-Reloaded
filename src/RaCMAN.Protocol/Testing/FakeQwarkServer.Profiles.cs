@@ -25,6 +25,7 @@ public sealed partial class FakeQwarkServer
     private sealed class PerUserSettings
     {
         public bool MenuHelp = true;
+        public bool RunWarnings = true;
         public byte SelectedSlot;
         public ulong ToggleAuto;
         public HashSet<string> ModAuto = new(StringComparer.Ordinal);
@@ -36,6 +37,7 @@ public sealed partial class FakeQwarkServer
         public PerUserSettings Clone() => new()
         {
             MenuHelp = MenuHelp,
+            RunWarnings = RunWarnings,
             SelectedSlot = SelectedSlot,
             ToggleAuto = ToggleAuto,
             ModAuto = new HashSet<string>(ModAuto, StringComparer.Ordinal),
@@ -322,7 +324,7 @@ public sealed partial class FakeQwarkServer
 
     /// <summary>The ops that write a per-user key: any of them sets a new profile up from the defaults first.</summary>
     private static bool WritesPerUserKey(Opcode opcode) => opcode is
-        Opcode.MenuHelp or Opcode.FeatureSetAuto or Opcode.ModSetAuto or Opcode.PlanetSelect
+        Opcode.MenuHelp or Opcode.RunWarn or Opcode.FeatureSetAuto or Opcode.ModSetAuto or Opcode.PlanetSelect
         or Opcode.PosSelect or Opcode.PosSave or Opcode.PosClear or Opcode.PosEdit or Opcode.PosStore
         or Opcode.ManipSelect or Opcode.ManipOptions;
 
@@ -385,6 +387,7 @@ public sealed partial class FakeQwarkServer
     private PerUserSettings CaptureLive() => new()
     {
         MenuHelp = (_session.Flags & SessionFlags.MenuHelpOff) == 0,
+        RunWarnings = _runWarnings,
         SelectedSlot = _session.SelectedSlot,
         ToggleAuto = _session.ToggleAuto,
         ModAuto = Mods.Where(m => m.Auto).Select(m => m.DirName).ToHashSet(StringComparer.Ordinal),
@@ -402,6 +405,7 @@ public sealed partial class FakeQwarkServer
             SelectedSlot = settings.SelectedSlot,
             ToggleAuto = settings.ToggleAuto,
         };
+        _runWarnings = settings.RunWarnings;
 
         for (int i = 0; i < Mods.Count; i++)
         {

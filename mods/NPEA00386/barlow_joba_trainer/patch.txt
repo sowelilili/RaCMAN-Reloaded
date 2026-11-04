@@ -1,6 +1,7 @@
 #- name: Barlow/Joba Trainer
 #- author: robo
 #- version: 2.0
+#- legal: false
 
 0x10c955c: rack.bin
 

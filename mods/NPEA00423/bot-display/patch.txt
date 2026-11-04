@@ -3,6 +3,7 @@
 #- href: 
 #- version: 1.1
 #- description: Displays bot health & other information. 
+#- legal: false
 0x216960: rack.bin
 
 #### ASM Patches ####

@@ -29,6 +29,12 @@ public sealed class LocalMod
     public bool NeedsLua { get; init; }
 
     /// <summary>
+    /// Qwark revision 1.30: what the mod's <c>#- legal:</c> line says, read the way qwark reads it
+    /// (<see cref="ModLegalityText.Parse"/>).
+    /// </summary>
+    public ModLegality Legality { get; init; }
+
+    /// <summary>
     /// True when this mod came out of the library the release ships rather than out of the user's
     /// own folder. A shipped mod is replaced whole when the client updates itself, so it is not
     /// somewhere to keep an edit; a user mod of the same folder name is used instead of it.
@@ -54,6 +60,44 @@ public sealed class LocalMod
     public bool FolderNameTooLong => !ModFolderName.Fits(DirName);
 
     public override string ToString() => $"{Name} {Version}".TrimEnd();
+}
+
+/// <summary>
+/// Qwark revision 1.30: whether a mod's author says it is allowed in a speedrun, its patch.txt's
+/// <c>#- legal: true</c> or <c>#- legal: false</c>. Anything else, or no line, is
+/// <see cref="Unknown"/>. The console warns at a run start about the illegal mods and, once, about
+/// the unknown ones.
+/// </summary>
+public enum ModLegality
+{
+    Unknown,
+    Legal,
+    Illegal,
+}
+
+/// <summary>How a <c>#- legal:</c> value reads, and what the Mods table says of each kind.</summary>
+public static class ModLegalityText
+{
+    /// <summary>
+    /// <c>true</c> or <c>false</c>, trimmed, in any case; anything else (empty, <c>yes</c>, <c>1</c>)
+    /// is unknown, as qwark has it. Null is no line at all.
+    /// </summary>
+    public static ModLegality Parse(string? value)
+    {
+        string v = (value ?? string.Empty).Trim();
+        if (v.Equals("true", StringComparison.OrdinalIgnoreCase)) return ModLegality.Legal;
+        if (v.Equals("false", StringComparison.OrdinalIgnoreCase)) return ModLegality.Illegal;
+        return ModLegality.Unknown;
+    }
+
+    /// <summary>MOD_LIST's bit6 LEGAL and bit7 ILLEGAL; neither (every module before revision 1.30) is unknown.</summary>
+    public static ModLegality FromFlags(ModFlags flags) =>
+        (flags & (ModFlags.Legal | ModFlags.Illegal)) switch
+        {
+            ModFlags.Legal => ModLegality.Legal,
+            ModFlags.Illegal => ModLegality.Illegal,
+            _ => ModLegality.Unknown,
+        };
 }
 
 public enum ZipInstallKind
@@ -330,6 +374,7 @@ public sealed class ModLibrary
             Link = variables.TryGetValue("href", out var href) ? href : string.Empty,
             Visible = !variables.TryGetValue("visible", out var visible) || !visible.Equals("false", StringComparison.OrdinalIgnoreCase),
             NeedsLua = needsLua,
+            Legality = variables.TryGetValue("legal", out var legal) ? ModLegalityText.Parse(legal) : ModLegality.Unknown,
             Shipped = shipped,
             PatchWordCount = words,
             BinFiles = bins,

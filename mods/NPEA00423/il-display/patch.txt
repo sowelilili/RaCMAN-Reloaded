@@ -3,6 +3,7 @@
 #- href: 
 #- version: 1.1
 #- description: Displays individual level timer on the HUD
+#- legal: false
 0x216f60: rack.bin
 
 #### ASM Patches ####

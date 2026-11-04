@@ -883,6 +883,8 @@ public sealed partial class FakeQwarkServer : IDisposable
                      | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None)
                      | moduleBits,
                      // Revision 1.29: ToD's console menu is its own pause menu, so no NO_MENU any more.
+            Flags3 = !_reportsRunWarnings ? SessionFlags3.None
+                : SessionFlags3.RunWarnings | (_runWarnings ? SessionFlags3.None : SessionFlags3.RunWarningsOff),
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };
@@ -1519,6 +1521,28 @@ public sealed partial class FakeQwarkServer : IDisposable
         get => (Session.Flags & SessionFlags.MenuHelpOff) == 0;
         set => SetSessionFlag(SessionFlags.MenuHelpOff, !value);
     }
+
+    /// <summary>
+    /// Revision 1.30: whether this fake has the run-start warnings (SessionInfo flags3 bit0, RUN_WARN
+    /// answered). On by default, as every module from the revision; off is an older module, whose
+    /// byte 31 is a pad byte and which answers RUN_WARN UNKNOWN_OP.
+    /// </summary>
+    public bool ReportsRunWarnings
+    {
+        get { lock (_gate) return _reportsRunWarnings; }
+        set { lock (_gate) _reportsRunWarnings = value; }
+    }
+
+    private bool _reportsRunWarnings = true;
+
+    /// <summary>The console's <c>run.warnings</c> (RUN_WARN): on by default, as a fresh config is; off sets flags3 bit1.</summary>
+    public bool RunWarnings
+    {
+        get { lock (_gate) return _runWarnings; }
+        set { lock (_gate) _runWarnings = value; }
+    }
+
+    private bool _runWarnings = true;
 
     /// <summary>The console's filesystem, as far as the file ops are concerned.</summary>
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
@@ -3086,6 +3110,15 @@ public sealed partial class FakeQwarkServer : IDisposable
                     _session = payload[0] != 0
                         ? _session with { Flags = _session.Flags & ~SessionFlags.MenuHelpOff }
                         : _session with { Flags = _session.Flags | SessionFlags.MenuHelpOff };
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.RunWarn:
+                {
+                    // Revision 1.30: `u8 on`, 0 or 1, as MENU_HELP, on every platform and in a release too.
+                    if (!_reportsRunWarnings) return (Status.UnknownOp, null);
+                    if (payload.Length < 1 || payload[0] > 1) return (Status.BadArg, null);
+                    _runWarnings = payload[0] != 0;
                     return (Status.Ok, null);
                 }
 

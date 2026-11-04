@@ -120,6 +120,15 @@ public sealed record SessionInfo(
     /// <summary>Byte 29, <c>flags2</c> (revision 1.24); 0 from every earlier module.</summary>
     public SessionFlags2 Flags2 { get; init; }
 
+    /// <summary>Byte 31, <c>flags3</c> (revision 1.30, pending); 0 from every earlier module.</summary>
+    public SessionFlags3 Flags3 { get; init; }
+
+    /// <summary>The module has the run-start warnings and answers RUN_WARN (flags3 bit0).</summary>
+    public bool HasRunWarnings => (Flags3 & SessionFlags3.RunWarnings) != 0;
+
+    /// <summary>The console's <c>run.warnings</c> is 0 (flags3 bit1): a run start says nothing.</summary>
+    public bool RunWarningsOff => (Flags3 & SessionFlags3.RunWarningsOff) != 0;
+
     /// <summary>
     /// The module reads mods off the console's USB drives (revision 1.24): MOD_USB_LIST answers,
     /// and a mod only a drive has loads with MOD_LOAD, which copies it in first.
@@ -227,7 +236,7 @@ public sealed record SessionInfo(
         var profileFlags = (ProfileFlags)flags2Byte & ProfileBits;
         var flags2 = (SessionFlags2)flags2Byte & Flags2Bits;
         byte profileSeq = r.ReadU8();
-        r.Skip(1);
+        var flags3 = (SessionFlags3)r.ReadU8() & (SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff);
         float x = r.ReadF32();
         float y = r.ReadF32();
         float z = r.ReadF32();
@@ -250,6 +259,7 @@ public sealed record SessionInfo(
             ProfileFlags = profileFlags,
             ProfileSeq = profileSeq,
             Flags2 = flags2,
+            Flags3 = flags3,
         };
     }
 
@@ -299,7 +309,7 @@ public sealed record SessionInfo(
         w.WriteU8(CurrentPlanet);
         w.WriteU8((byte)((byte)(ProfileFlags & ProfileBits) | (byte)(Flags2 & Flags2Bits)));
         w.WriteU8(ProfileSeq);
-        w.WriteZeros(1);
+        w.WriteU8((byte)Flags3);
         w.WriteF32(PosX);
         w.WriteF32(PosY);
         w.WriteF32(PosZ);
@@ -942,6 +952,9 @@ public sealed record ModEntry(
     /// game memory this session, so <see cref="Loaded"/> says nothing yet.
     /// </summary>
     public bool Checking => (Flags & ModFlags.Checking) != 0;
+
+    /// <summary>Revision 1.30 (pending): what the mod's <c>#- legal:</c> line says, as the console parsed it.</summary>
+    public ModLegality Legality => ModLegalityText.FromFlags(Flags);
 
     public static ModEntry Parse(ReadOnlySpan<byte> entry)
     {

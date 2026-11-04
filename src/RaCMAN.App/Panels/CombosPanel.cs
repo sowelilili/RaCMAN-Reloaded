@@ -406,6 +406,45 @@ public static class CombosPanel
         : session.Game == GameId.Tod ? "Trainer replaces Inventory in the pause menu"
         : "Trainer replaces Help in the pause menu";
 
+    /// <summary>
+    /// Whether the Run warnings box is drawn: SessionInfo <c>flags3</c> bit0 (qwark revision 1.30),
+    /// the module's capability bit, and not the build number, so a test build of the same number
+    /// without it shows nothing. RPCS3 has the warnings too: they go to qwark-rpcs3's log there.
+    /// </summary>
+    public static bool ShowsRunWarnings(SessionInfo session) => session.HasRunWarnings;
+
+    /// <summary>What the Run warnings box says when the pointer rests on it.</summary>
+    public const string RunWarningsTooltip =
+        "When enabled, your console shows a notification as a speedrun starts if cheats are on, or mods "
+        + "that are not allowed in runs or whose authors haven't said. Mods of unknown legality are "
+        + "mentioned once.";
+
+    /// <summary>What the Run warnings box says beside itself, from the session alone.</summary>
+    public static string RunWarningsStatus(SessionInfo session) =>
+        session.RunWarningsOff ? "no warnings" : "warns about cheats and mods as a run starts";
+
+    /// <summary>
+    /// The console's run-start warnings switch, RUN_WARN of qwark revision 1.30, under In-game menus
+    /// and wired the same way: drawn from the session flag, a click sends the request and the next
+    /// packet moves the box. Hidden against a module without the warnings.
+    /// </summary>
+    private static void DrawRunWarnings(AppState state)
+    {
+        if (!ShowsRunWarnings(state.Session)) return;
+
+        bool on = !state.Session.RunWarningsOff;
+        if (ImGui.Checkbox("Run warnings", ref on))
+        {
+            bool want = on;
+            state.Run(() => state.Client.RunWarnAsync(want));
+        }
+
+        if (ImGui.IsItemHovered()) Ui.SetTooltip(RunWarningsTooltip);
+
+        ImGui.SameLine();
+        Ui.Text(Ui.Grey, RunWarningsStatus(state.Session));
+    }
+
     public static void Draw(AppState state)
     {
         Ui.Heading("Controller combos");
@@ -562,6 +601,7 @@ public static class CombosPanel
         Ui.Heading("Qwark settings");
 
         DrawInGameMenus(state);
+        DrawRunWarnings(state);
 
         // The console's per-user settings (revision 1.24), and only while there is a console that
         // has them: the switch that gives each console user their own combos, In-game menus
@@ -577,7 +617,7 @@ public static class CombosPanel
     /// <summary>What the Per-user settings box says when the pointer rests on it.</summary>
     public const string ProfilesTooltip =
         "Each console user gets their own position slots, mods and cheats that load automatically, "
-        + "manip and planet choices, and In-game menus setting. Everyone shares the mod and savefile "
+        + "manip and planet choices, and In-game menus and run warnings settings. Everyone shares the mod and savefile "
         + "libraries and the combos, except combos a user overrides on the Combos panel. "
         + "Switch users at the PS3 home screen.";
 
