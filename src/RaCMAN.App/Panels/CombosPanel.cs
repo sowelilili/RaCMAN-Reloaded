@@ -376,7 +376,6 @@ public static class CombosPanel
         bool blocked = InGameMenusBlocked(state.Session);
         bool on = !state.Session.MenuHelpOff;
 
-        ImGui.Spacing();
         ImGui.BeginDisabled(blocked);
         if (ImGui.Checkbox("In-game menus", ref on))
         {
@@ -475,8 +474,7 @@ public static class CombosPanel
             }
             else
             {
-                if (overridden) Ui.Text(Ui.Orange, Label(action));
-                else ImGui.TextUnformatted(Label(action));
+                ImGui.TextUnformatted(Label(action));
                 if (Tooltip(action) is { } tip && ImGui.IsItemHovered()) Ui.SetTooltip(tip);
             }
 
@@ -548,7 +546,6 @@ public static class CombosPanel
 
         ImGui.EndTable();
 
-        DrawInGameMenus(state);
 
         ImGui.Spacing();
         if (ImGui.SmallButton("Refresh")) state.RefreshCombos();
@@ -560,6 +557,11 @@ public static class CombosPanel
             ImGui.Spacing();
             Ui.DebugHint($"Live pad mask: 0x{state.Session.PadMask:X4}  {PadButtons.Describe(state.Session.PadMask)}");
         }
+
+        ImGui.Spacing();
+        Ui.Heading("Qwark settings");
+
+        DrawInGameMenus(state);
 
         // The console's per-user settings (revision 1.24), and only while there is a console that
         // has them: the switch that gives each console user their own combos, In-game menus
@@ -636,6 +638,7 @@ public static class CombosPanel
         ImGui.EndDisabled();
         if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(ProfilesTooltip);
 
-        Ui.Hint(ProfileStatus(session, state.Profile));
+        ImGui.SameLine();
+        Ui.Text(Ui.Grey, ProfileStatus(session, state.Profile));
     }
 }
