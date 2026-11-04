@@ -21,8 +21,8 @@ public enum BootInstallOutcome
 /// What an install did and how many lines the list holds afterwards, which is the other thing the
 /// user has to be told: see <see cref="BeyondHenLimit"/>. <see cref="UiPakSent"/> says whether the
 /// console menu's ui.pak went with the module; it is false when the client had none beside it.
-/// <see cref="GameModulesSent"/> counts the game modules that went too (revision 1.26): a test
-/// build's, and none for a release, which ships none.
+/// <see cref="GameModulesSent"/> counts the game modules that went too (revision 1.26): none
+/// when there are none beside the module.
 /// </summary>
 public readonly record struct BootInstallResult(
     BootInstallOutcome Outcome, int Lines, bool UiPakSent = false, int GameModulesSent = 0)
@@ -39,7 +39,7 @@ public readonly record struct BootInstallResult(
 /// Gets qwark.sprx onto the console the way racman-official does it: FTP the file into
 /// /dev_hdd0/tmp/ and load it through webMAN's vshplugin.ps3mapi endpoint. The console menu's
 /// ui.pak travels in the same FTP session, to /dev_hdd0/qwark/ (see <see cref="UiPak"/>), and so do
-/// the game modules a test build ships beside it (see <see cref="GameModule"/>).
+/// the game modules shipped beside it (see <see cref="GameModule"/>).
 ///
 /// The console side of this cannot be tested here: it needs a console running webMAN MOD with its
 /// FTP server up. The FTP client below is checked against RFC 959 rather than against hardware, and
@@ -197,8 +197,7 @@ public sealed class WebManLoader
 
     /// <summary>
     /// Puts each game module beside the pak, where the module reads it as its game boots. Called
-    /// after <see cref="StoreUiPakAsync"/>, which has made the folder. None is nothing to say: a
-    /// release ships none. A refusal is said and the rest go on, as a refused pak is: the
+    /// after <see cref="StoreUiPakAsync"/>, which has made the folder. None is nothing to say. A refusal is said and the rest go on, as a refused pak is: the
     /// Connection panel offers a missing module again once the console says so. Answers how many
     /// went across.
     /// </summary>

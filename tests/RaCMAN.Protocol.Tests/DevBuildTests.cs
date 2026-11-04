@@ -442,6 +442,8 @@ public class DevBuildTests
         var proto = Path.Combine(root, "src", "core", "proto.h");
         File.WriteAllText(proto, $"#define QWARK_PROTOCOL_VERSION  1\n#define QWARK_BUILD             {protoBuild}\n");
         if (buildFile is not null) File.WriteAllText(Path.Combine(dist, QwarkBuildInfo.FileName), buildFile);
+        // Since build 57 a release carries its game modules and ToD's Lua helper in ui.pak (ReleaseDist).
+        ReleaseDist.Write(dist, (byte)protoBuild);
         return (dist, proto);
     }
 
@@ -452,7 +454,8 @@ public class DevBuildTests
         if (RunCheck(dist, proto) is not { } result) return;
 
         Assert.True(result.Exit == 0, result.Output);
-        Assert.Contains("release module", result.Output, StringComparison.Ordinal);
+        Assert.Contains("holds a release", result.Output, StringComparison.Ordinal);
+        Assert.Contains("5 game modules", result.Output, StringComparison.Ordinal);
     }
 
     [Fact]

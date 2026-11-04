@@ -23,8 +23,9 @@ public enum Opcode : ushort
     /// <summary>
     /// Revision 1.26 (build 57): the running game's module and the memory gate in front of it, 40
     /// bytes (<see cref="GameModuleInfo"/>). No payload. A control op, answered in every session
-    /// state. A test build whose games are modules (qwark's PROTOCOL.md 9.11) is the only module
-    /// worth asking: a release answers state LINKED, and a module from before the op UNKNOWN_OP,
+    /// state. A module whose games are modules (qwark's PROTOCOL.md 9.11; a test build, and a release
+    /// from build 57) is the only module worth asking: a linked one (build 56's release, qwark-rpcs3)
+    /// answers state LINKED, and a module from before the op UNKNOWN_OP,
     /// which is why the client asks only while <see cref="SessionFlags2.GameModuleBad"/> or
     /// <see cref="SessionFlags2.GameWaiting"/> is set.
     /// </summary>
@@ -179,7 +180,7 @@ public enum Opcode : ushort
     ComboOverride = 0x0095,
 
     /// <summary>
-    /// Revision 1.30 (pending): <c>u8 on</c>, no reply. Writes the console's <c>run.warnings</c>: 1 (the
+    /// Revision 1.30: <c>u8 on</c>, no reply. Writes the console's <c>run.warnings</c>: 1 (the
     /// default) the console warns as a run starts with cheats or mods that are not run-legal, 0 it
     /// says nothing. Anything else is BAD_ARG. <see cref="SessionFlags3.RunWarningsOff"/> is where the
     /// setting comes back. Sent only while <see cref="SessionFlags3.RunWarnings"/> is set: an older
@@ -481,7 +482,7 @@ public enum SaveFileError : byte
 }
 
 /// <summary>
-/// SAVEFILE_INFO's <c>why</c> (revision 1.29, pending, section 5.12): which of the game's own checks
+/// SAVEFILE_INFO's <c>why</c> (revision 1.29, section 5.12): which of the game's own checks
 /// the <see cref="SaveFileError"/> beside it came from. Only a game whose save system the console
 /// drives itself sets it, Tools of Destruction today; every other game, and every module before it,
 /// answers <see cref="None"/>, which says nothing more than the error does.
@@ -898,7 +899,7 @@ public enum SessionFlags : byte
     UiPakBad = 1 << 7,
 }
 
-/// <summary>SessionInfo byte 31, <c>flags3</c> (revision 1.30, pending): a pad byte, always 0, before it.</summary>
+/// <summary>SessionInfo byte 31, <c>flags3</c> (revision 1.30): a pad byte, always 0, before it.</summary>
 [Flags]
 public enum SessionFlags3 : byte
 {
@@ -934,11 +935,11 @@ public enum SessionFlags2 : byte
     Dev = 1 << 4,
 
     /// <summary>
-    /// bit5 GAME_MODULE_BAD (revision 1.26, a test build whose games are modules): the running
+    /// bit5 GAME_MODULE_BAD (revision 1.26, a module whose games are modules): the running
     /// game's module, <c>/dev_hdd0/qwark/rac1.sprx</c> .. <c>rac4.sprx</c>, is missing, is no module, would
     /// not load or start, or is another build's, so the session has no game features until a
     /// client writes the file or the game boots again. INGAME only, and <c>game</c> reads 0 while
-    /// it is set. Never set by a module whose games are linked in (a release, qwark-rpcs3).
+    /// it is set. Never set by a module whose games are linked in (build 56's release, qwark-rpcs3).
     /// </summary>
     GameModuleBad = 1 << 5,
 
@@ -963,7 +964,7 @@ public enum GameModuleState : byte
     /// <summary>No game: the XMB, BOOTING, a title no game claims.</summary>
     None = 0,
 
-    /// <summary>The game is linked into the module (a release, qwark-rpcs3).</summary>
+    /// <summary>The game is linked into the module (build 56's release, qwark-rpcs3).</summary>
     Linked = 1,
 
     /// <summary>A module is wanted and its file not yet read (a tick at most).</summary>
@@ -997,7 +998,7 @@ public enum GameModuleFlags : byte
     /// <summary>This wait's 30-second notification has gone to the TV.</summary>
     Notified = 1 << 1,
 
-    /// <summary>This module's games are modules (0 for a release).</summary>
+    /// <summary>This module's games are modules (a test build, and a release from build 57).</summary>
     Modules = 1 << 2,
 
     /// <summary>A module is loaded now, a kept one included.</summary>
@@ -1175,10 +1176,10 @@ public enum ModFlags : byte
     /// <summary>Revision 1.16, only where code cannot be patched: whether the mod is in the game is not known yet this session.</summary>
     Checking = 1 << 5,
 
-    /// <summary>Revision 1.30 (pending): the mod's patch.txt says <c>#- legal: true</c>, allowed in a speedrun.</summary>
+    /// <summary>Revision 1.30: the mod's patch.txt says <c>#- legal: true</c>, allowed in a speedrun.</summary>
     Legal = 1 << 6,
 
-    /// <summary>Revision 1.30 (pending): the mod's patch.txt says <c>#- legal: false</c>. Neither bit: legality unknown.</summary>
+    /// <summary>Revision 1.30: the mod's patch.txt says <c>#- legal: false</c>. Neither bit: legality unknown.</summary>
     Illegal = 1 << 7,
 }
 

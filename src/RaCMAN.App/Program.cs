@@ -80,7 +80,7 @@ for (int i = 0; i < args.Length; i++)
             Console.WriteLine("  --fake-rpcs3           as --fake-server, with the emulator and no-code-patches flags set");
             Console.WriteLine("  --fake-uipak <state>   as --fake-server, on this client's qwark build, with the console's");
             Console.WriteLine("                         ui.pak missing, stale (another build's) or good");
-            Console.WriteLine("  --fake-gamemodule <s>  as --fake-server, a test build whose games are modules, with the");
+            Console.WriteLine("  --fake-gamemodule <s>  as --fake-server, a module whose games are modules, with the");
             Console.WriteLine("                         running game's module missing, damaged, other (another build's),");
             Console.WriteLine("                         waiting (for memory) or good");
             Console.WriteLine("  --fake-script <steps>  drive the fake console's session: " + FakeScript.Usage);
@@ -175,7 +175,7 @@ if (fakeServer)
         }
     }
 
-    // A test build whose games are modules (revision 1.26), on this client's build, with a good
+    // A module whose games are modules (revision 1.26; a test build or, from build 57, a release), on this client's build, with a good
     // ui.pak so the only thing to see is the running game's module.
     if (fakeGameModule is not null)
     {

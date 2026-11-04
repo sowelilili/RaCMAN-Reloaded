@@ -12,6 +12,8 @@ dotnet run --project src/RaCMAN.App
 
 .NET 8. `src/RaCMAN.Protocol` is the framing, opcode and telemetry library with no UI dependency; `src/RaCMAN.App` is the Dear ImGui application on ImGui.NET 1.91.6 + OpenTK 4.9.4 (GLFW window, OpenGL 3.3 backend written in-repo); `tests/RaCMAN.Protocol.Tests` is xUnit.
 
+The release carries qwark's committed `dist/` (BUILD.md). Since qwark build 57 a qwark release ships everything its test builds had (the game modules `rac1.sprx` .. `rac4.sprx` and `tod.sprx`, `ui.pak` with Tools of Destruction's Lua helper, per-user settings, USB mods); the DEV bit is the only difference, so gate nothing in the client on it or on test-ness: panels follow the module's capability bits and op answers. `packaging/check-qwark-build.ps1` refuses a release dist without every module or with a pak lacking ToD's entries, and `packaging/stage-game-modules.ps1` stages the modules for a release as for a test build.
+
 For end-to-end runs use the simulator from the sibling repo: build `../qwark` with `make host`, run `qwark-host.exe`, type `boot NPEA00385` on its stdin, and connect the client to 127.0.0.1.
 
 ## Rules

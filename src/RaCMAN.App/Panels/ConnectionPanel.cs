@@ -327,7 +327,7 @@ public static class ConnectionPanel
 
     /// <summary>
     /// What the boot install did, in the one toast it gets: where qwark is on the list, whether
-    /// ui.pak went with it (and, from a test build, how many game modules did), and the restart a
+    /// ui.pak went with it (and how many game modules did), and the restart a
     /// boot plugin needs. A missing pak has already been
     /// named, with what it costs, as the install went.
     /// </summary>
@@ -342,7 +342,7 @@ public static class ConnectionPanel
         + GameModulesSentNote(result.GameModulesSent)
         + " Restart your console; the module only loads at boot.";
 
-    /// <summary>The boot install's word on the game modules: nothing for a release, which ships none.</summary>
+    /// <summary>The boot install's word on the game modules: nothing when none went (none beside the module).</summary>
     private static string GameModulesSentNote(int sent) =>
         sent switch
         {
@@ -1004,7 +1004,7 @@ public static class ConnectionPanel
 
     /// <summary>
     /// The waiting line, or the problem and the Send button. A module this client cannot send (none
-    /// beside it, as in a release, or a console whose qwark is out of date, whose update carries the
+    /// beside it, or a console whose qwark is out of date, whose update carries the
     /// modules) gets the line and no button.
     /// </summary>
     public static void DrawGameModuleStatus(AppState state)

@@ -12,7 +12,8 @@ namespace RaCMAN.Protocol.Tests;
 /// their own, <c>/dev_hdd0/qwark/rac1.sprx</c> .. <c>rac4.sprx</c>. SessionInfo flags2 bit5 says the running
 /// game's module is not to be had and bit6 that it waits for memory, GAME_MODULE (0x0008) says
 /// which game and why, and the client ships, installs and sends the modules exactly as it does
-/// ui.pak. A release links its games in, ships no module and never sets either bit.
+/// ui.pak. Since qwark build 57 a release ships them too, and its packaging refuses a release dist
+/// that lacks any of them or a ui.pak with Tools of Destruction's Lua helper.
 /// </summary>
 public class GameModuleTests
 {
@@ -880,54 +881,114 @@ public class GameModuleTests
     }
 
     [Fact]
-    public void ADistWithNoModulesStagesNoneAndDoesNotFail()
+    public void ATestDistWithNoModulesStagesNoneAndDoesNotFail()
     {
         if (Stage(Dist(true)) is not { } test) return;
         Assert.True(test.Exit == 0, test.Output);
         Assert.Empty(test.Staged);
+        Assert.Contains("none in", test.Output, StringComparison.Ordinal);
 
-        if (Stage(Dist(false)) is not { } release) return;
-        Assert.True(release.Exit == 0, release.Output);
-        Assert.Empty(release.Staged);
+        // A test build short of some stages what it has, and says which games go without.
+        if (Stage(Dist(true, 1, 4)) is not { } some) return;
+        Assert.True(some.Exit == 0, some.Output);
+        Assert.Equal(new[] { "rac1.sprx", "rac4.sprx" }, some.Staged);
+        Assert.Contains("only 2 of 5", some.Output, StringComparison.Ordinal);
     }
 
-    /// <summary>A release's dist with modules a test build left behind: none goes out, and it says so.</summary>
+    /// <summary>Since qwark build 57 a release's dist has its modules staged, all five, as a test build's are.</summary>
     [Fact]
-    public void AReleaseDistNeverHasItsLeftoverModulesStaged()
+    public void AReleaseDistHasItsModulesStaged()
     {
-        if (Stage(Dist(false, 1, 4), "rac4.sprx", "game-4.sprx") is not { } result) return;
+        if (Stage(Dist(false, 1, 2, 3, 4, 5), "rac4.sprx", "game-4.sprx") is not { } result) return;
 
         Assert.True(result.Exit == 0, result.Output);
-        Assert.Empty(result.Staged);
-        Assert.Contains("not a test build", result.Output, StringComparison.Ordinal);
+        Assert.Equal(new[] { "rac1.sprx", "rac2.sprx", "rac3.sprx", "rac4.sprx", "tod.sprx" }, result.Staged);
 
+        // A dist with no qwark.build stages what it has, as a test build's.
         if (Stage(Dist(dev: null, 2)) is not { } unknown) return;
-        Assert.Empty(unknown.Staged);
+        Assert.True(unknown.Exit == 0, unknown.Output);
+        Assert.Equal(new[] { "rac2.sprx" }, unknown.Staged);
+    }
+
+    /// <summary>A release dist without every module stops the stage: a release must ship all five.</summary>
+    [Fact]
+    public void AReleaseDistShortOfAModuleIsNotStaged()
+    {
+        if (Stage(Dist(false, 1, 2, 3, 4), "rac4.sprx") is not { } result) return;
+
+        Assert.True(result.Exit != 0, result.Output);
+        Assert.Contains("tod.sprx", result.Output, StringComparison.Ordinal);
+
+        if (Stage(Dist(false)) is not { } none) return;
+        Assert.True(none.Exit != 0, none.Output);
+    }
+
+    /// <summary>A release dist with every module and ui.pak with ToD's Lua helper (check-qwark-build.ps1).</summary>
+    private static string ReleaseDistFull()
+    {
+        string dist = Dist(false);
+        ReleaseDist.Write(dist, Current);
+        return dist;
+    }
+
+    private static (int Exit, string Output)? Check(string dist) =>
+        RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", dist);
+
+    [Fact]
+    public void TheReleaseCheckTakesAReleaseDistWithEveryModuleAndToDsPak()
+    {
+        if (Check(ReleaseDistFull()) is not { } clean) return;
+        Assert.True(clean.Exit == 0, clean.Output);
+        Assert.Contains("5 game modules", clean.Output, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void TheReleaseCheckRefusesAReleaseDistWithModules()
+    public void TheReleaseCheckRefusesAReleaseDistShortOfAModule()
     {
-        string dist = Dist(false, 3);
-        if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", dist) is not { } result) return;
+        foreach (var game in GameModule.Games)
+        {
+            string dist = ReleaseDistFull();
+            File.Delete(Path.Combine(dist, GameModule.FileName(game)));
+            if (Check(dist) is not { } result) return;
+            Assert.True(result.Exit != 0, result.Output);
+            Assert.Contains(GameModule.FileName(game), result.Output, StringComparison.Ordinal);
+        }
 
-        Assert.True(result.Exit != 0, result.Output);
-        Assert.Contains("rac3.sprx", result.Output, StringComparison.Ordinal);
+        // A file in a module's place that is no signed module.
+        string junk = ReleaseDistFull();
+        File.WriteAllText(Path.Combine(junk, "rac3.sprx"), "not a module");
+        if (Check(junk) is not { } notSelf) return;
+        Assert.True(notSelf.Exit != 0, notSelf.Output);
+        Assert.Contains("rac3.sprx", notSelf.Output, StringComparison.Ordinal);
 
-        // ToD's module is a test build's too (revision 1.27).
-        if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", Dist(false, 5)) is not { } tod) return;
-        Assert.True(tod.Exit != 0, tod.Output);
-        Assert.Contains("tod.sprx", tod.Output, StringComparison.Ordinal);
-
-        // A module under the first test builds' name is a test build's too.
-        string legacy = Dist(false);
+        // A module under the first test builds' name, which no module reads.
+        string legacy = ReleaseDistFull();
         File.WriteAllBytes(Path.Combine(legacy, "game-2.sprx"), Sprx(2));
-        if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", legacy) is not { } old) return;
+        if (Check(legacy) is not { } old) return;
         Assert.True(old.Exit != 0, old.Output);
         Assert.Contains("game-2.sprx", old.Output, StringComparison.Ordinal);
+    }
 
-        if (RunScript(RepoFile("packaging", "check-qwark-build.ps1"), "-Dist", Dist(false)) is not { } clean) return;
-        Assert.True(clean.Exit == 0, clean.Output);
+    [Fact]
+    public void TheReleaseCheckRefusesAUiPakWithoutToDsLuaHelper()
+    {
+        string noTod = ReleaseDistFull();
+        File.WriteAllBytes(Path.Combine(noTod, UiPak.FileName), ReleaseDist.Pak(Current, tod: false));
+        if (Check(noTod) is not { } result) return;
+        Assert.True(result.Exit != 0, result.Output);
+        Assert.Contains("Tools of Destruction", result.Output, StringComparison.Ordinal);
+
+        string other = ReleaseDistFull();
+        File.WriteAllBytes(Path.Combine(other, UiPak.FileName), ReleaseDist.Pak((byte)(Current - 1)));
+        if (Check(other) is not { } stale) return;
+        Assert.True(stale.Exit != 0, stale.Output);
+        Assert.Contains($"build {Current - 1}", stale.Output, StringComparison.Ordinal);
+
+        string none = ReleaseDistFull();
+        File.Delete(Path.Combine(none, UiPak.FileName));
+        if (Check(none) is not { } missing) return;
+        Assert.True(missing.Exit != 0, missing.Output);
+        Assert.Contains("ui.pak", missing.Output, StringComparison.Ordinal);
     }
 
     /// <summary>The packaging scripts' list of module names is the client's, in the same order.</summary>

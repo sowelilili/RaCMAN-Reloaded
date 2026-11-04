@@ -725,9 +725,9 @@ public sealed class AppState : IDisposable
     /// the ui.pak beside it to where the new module adopts it at its start. The automatic path
     /// above and the Connection panel's debug button both come here, and a failure at any step is
     /// one error toast that names the step and leaves the boot copy as it was. No ui.pak beside the
-    /// SPRX still updates the module, and says the pak was not sent. The game modules beside it (a
-    /// test build's, revision 1.26) are staged too, each where the new module takes it as its game
-    /// boots; a release client has none and stages none.
+    /// SPRX still updates the module, and says the pak was not sent. The game modules beside it
+    /// (revision 1.26; a release's since qwark build 57, as a test build's) are staged too, each where
+    /// the new module takes it as its game boots; a client with none beside its module stages none.
     /// </summary>
     public void UpdateConsoleModule(string sprxPath)
     {
@@ -749,7 +749,7 @@ public sealed class AppState : IDisposable
                 reading = pakPath;
                 if (File.Exists(pakPath)) pak = await File.ReadAllBytesAsync(pakPath).ConfigureAwait(false);
 
-                // A test build's game modules (revision 1.26), staged beside the pak; a release has none.
+                // The game modules (revision 1.26), a release's as well as a test build's, staged beside the pak.
                 modules = await GameModule.ReadBesideAsync(sprxPath).ConfigureAwait(false);
             }
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
@@ -923,8 +923,8 @@ public sealed class AppState : IDisposable
 
     /// <summary>
     /// The console runs one of the four games and its module is not in (revision 1.26): waiting for
-    /// memory, or with none to be had. A test build whose games are modules is the only module that
-    /// says so; a release never does. The session is <see cref="UnknownGame"/> meanwhile, game ops
+    /// memory, or with none to be had. A module whose games are modules (a test build, and a release
+    /// from qwark build 57) is the only module that says so; build 56's release never does. The session is <see cref="UnknownGame"/> meanwhile, game ops
     /// and all, but it is a game this client can name, so the unknown-title wording is not used.
     /// </summary>
     public bool GameModulePending => UnknownGame && Session.GameModulePending;
@@ -940,8 +940,8 @@ public sealed class AppState : IDisposable
     /// missing, broken or another build's (flags2 bit5), so sending this client's copy puts the
     /// game's features back without a restart. The conditions are <see cref="UiPakNeeded"/>'s: never
     /// under RPCS3, which links its games in, and never for an older or another test build's module,
-    /// whose update carries the modules and whose warning already covers it. A release module never
-    /// sets the bit, so a release client against its own module never sees this.
+    /// whose update carries the modules and whose warning already covers it. A module whose games are
+    /// linked in (build 56's release) never sets the bit.
     /// </summary>
     public bool GameModuleNeeded =>
         Connected
@@ -962,7 +962,7 @@ public sealed class AppState : IDisposable
 
     /// <summary>
     /// The send is worth offering: the module is needed, the game is known, and this client has a
-    /// copy of its module. A release client ships none, so it never offers a file it does not have.
+    /// copy of its module. A client with none beside its module never offers a file it does not have.
     /// </summary>
     public bool GameModuleCanSend => GameModuleNeeded && GameModuleLocalPath is { } path && File.Exists(path);
 

@@ -12,7 +12,7 @@ public enum SprxUpdateStep
     UiPak,
 
     /// <summary>
-    /// Writing the new build's game modules (revision 1.26, a test build's) beside the console's
+    /// Writing the new build's game modules (revision 1.26) beside the console's
     /// own as <see cref="GameModule.StagedPath"/> and reading each back. Before the module is
     /// touched, so a failure here leaves it alone too.
     /// </summary>
@@ -49,8 +49,8 @@ public sealed class SprxUpdateException : Exception
 /// <summary>
 /// What the update did, for the message and for a test to read. <see cref="UiPakStaged"/> is false
 /// when the client had no ui.pak to send, and the console then keeps whatever pak it has.
-/// <see cref="GameModulesStaged"/> counts the game modules staged with it: none for a release
-/// client, which ships none.
+/// <see cref="GameModulesStaged"/> counts the game modules staged with it: none for a client
+/// with none beside its module.
 /// </summary>
 public readonly record struct SprxUpdateResult(
     string BootPath, string BackupPath, bool ReplacedACopy, int Bytes, bool UiPakStaged = false, int GameModulesStaged = 0);
@@ -74,10 +74,10 @@ public readonly record struct SprxUpdateResult(
 /// A failure there stops the update before the module is touched.
 /// </para>
 /// <para>
-/// The game modules a test build ships (revision 1.26) go the same way, each as
+/// The game modules a release ships (revision 1.26; since qwark build 57, as a test build always did) go the same way, each as
 /// <see cref="GameModule.StagedPath"/>, after the pak: the running module keeps the modules it has,
-/// and the new one puts each staged module in place the next time its game boots. A release
-/// client has none to send, and a module that links its games in never looks at them.
+/// and the new one puts each staged module in place the next time its game boots. A module that
+/// links its games in (build 56's release) never looks at them.
 /// </para>
 /// <para>
 /// Nothing here decides <em>whether</em> to update. The caller compares the build HELLO reported

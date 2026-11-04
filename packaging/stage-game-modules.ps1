@@ -1,22 +1,22 @@
 <#
 .SYNOPSIS
-    Copies a qwark test build's game modules beside the staged qwark.sprx, and nothing for a release.
+    Copies a qwark dist's game modules beside the staged qwark.sprx, a release's and a test build's.
 
 .DESCRIPTION
-    Since revision 1.26 a qwark test build carries no game: each is an SPRX of its own, named for
-    its game, rac1.sprx (RaC1) to rac4.sprx (Deadlocked) and tod.sprx (ToD; the list is game-module-names.ps1), which
-    `make dist` puts in dist\ beside
-    qwark.sprx, ui.pak and qwark.build (qwark's docs/PROTOCOL.md 9.11). A release links its games
-    in, so its dist\ has none. The client sends the modules it finds beside its own qwark.sprx,
+    Since revision 1.26 qwark's core carries no game: each is an SPRX of its own, named for its
+    game, rac1.sprx (RaC1) to rac4.sprx (Deadlocked) and tod.sprx (ToD; the list is
+    game-module-names.ps1), which `make dist` puts in dist\ beside qwark.sprx, ui.pak and
+    qwark.build (qwark's docs/PROTOCOL.md 9.11). Since qwark build 57 a release ships them too, as
+    its test builds always did. The client sends the modules it finds beside its own qwark.sprx,
     exactly as it sends ui.pak.
 
     This script removes any module already in -Destination, and any game-*.sprx the first test
-    builds of revision 1.26 named them, then copies each one game-module-names.ps1 lists from -Source when
-    -BuildInfo (the qwark.build beside the module) says `dev 1`. A
-    source with none of them copies none and is not an error. A release (`dev 0`), or a dist\ with
-    no qwark.build, copies none even when some are there, and warns: those are a test build's,
-    left behind, and a release must never put them on a console. publish.ps1 calls it for every
-    runtime it stages.
+    builds of revision 1.26 named them, then copies each one game-module-names.ps1 lists from
+    -Source. A release (-BuildInfo, the qwark.build beside the module, says `dev 0`) must have all
+    of them, and the script stops when one is missing, as check-qwark-build.ps1 does: a release
+    without one would leave that game with no features. A test build, or a dist\ with no
+    qwark.build, copies whichever there are and warns about the rest. publish.ps1 calls it for
+    every runtime it stages.
 
 .PARAMETER Source
     The folder the modules are in: qwark's dist\, beside qwark.sprx.
@@ -50,23 +50,18 @@ Get-ChildItem -Path $Destination -Filter $LegacyGameModulePattern -File -ErrorAc
     Remove-Item -Force
 
 $modules = @($GameModuleNames | ForEach-Object { [System.IO.Path]::Combine($Source, $_) } | Where-Object { Test-Path $_ })
+$missing = @($GameModuleNames | Where-Object { -not (Test-Path ([System.IO.Path]::Combine($Source, $_))) })
 
-$dev = (Test-Path $BuildInfo) -and (Select-String -Path $BuildInfo -Pattern '^dev 1' -Quiet)
+$known = Test-Path $BuildInfo
+$release = $known -and (Select-String -Path $BuildInfo -Pattern '^dev 0' -Quiet)
 
-if (-not $dev) {
-    if ($modules.Count -gt 0) {
-        $names = ($modules | ForEach-Object { [System.IO.Path]::GetFileName($_) }) -join ', '
-        Write-Warning ("game modules: $Source holds $names, but its module is not a test build; a release links " +
-                       'its games in, so they were not staged')
-    }
-    else {
-        Write-Host '  game modules: none (a release links its games in)'
-    }
-    return
+if ($release -and $missing.Count -gt 0) {
+    throw ("game modules: $Source holds a release module without $($missing -join ', '); a release ships all " +
+           "$($GameModuleNames.Count) since qwark build 57. Build one in qwark with ``make release``.")
 }
 
 if ($modules.Count -eq 0) {
-    Write-Host "  game modules: none in $Source"
+    Write-Warning "game modules: none in $Source; every game will have no game features"
     return
 }
 
@@ -75,7 +70,7 @@ foreach ($module in $modules) {
     Write-Host "  $([System.IO.Path]::GetFileName($module)): $([System.IO.Path]::GetFullPath($module))"
 }
 
-if ($modules.Count -lt $GameModuleNames.Count) {
+if ($missing.Count -gt 0) {
     Write-Warning ("game modules: only $($modules.Count) of $($GameModuleNames.Count) in $Source; the games without " +
                    'one will have no game features')
 }

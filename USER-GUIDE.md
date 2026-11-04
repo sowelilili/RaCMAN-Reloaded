@@ -4,7 +4,7 @@ The [README](README.md) is the quickstart. This guide has the details.
 
 ## Downloads
 
-Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, `ui.pak` (the file the console menu and save files need), the RPCS3 helper and a console installer.
+Download the newest release from the [releases page](https://github.com/sowelilili/RaCMAN-Reloaded/releases). Each release contains the client, the console module `qwark.sprx`, `ui.pak` (the file the console menu and save files need), the game files `rac1.sprx` to `rac4.sprx` and `tod.sprx` (see [Game modules](#game-modules)), the RPCS3 helper and a console installer.
 
 - **Windows, installer**: run `RaCMANReloaded-win-Setup.exe`. It installs for your user account only. It does not need administrator rights.
 - **Windows, portable**: unzip `RaCMANReloaded-win-Portable.zip` and run `RaCMAN.App.exe`.
@@ -17,7 +17,7 @@ Download the newest release from the [releases page](https://github.com/sowelili
 1. Start the console and make sure webMAN runs on it.
 2. Type the console's IP address into the client.
 3. Press **Connect**.
-4. Start one of the four games.
+4. Start one of the games: the four original games or Tools of Destruction.
 
 The client finds the module on the console, sends it if no plugin slot holds it, and connects. Each step shows a message. If a step fails, the message tells you which step failed.
 
@@ -37,9 +37,20 @@ The mode is on the Settings panel, in the **Connection** section.
 
 Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. The install puts qwark first on the list, so HEN loads it before webMAN. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
 
-The client sends `qwark.sprx` and `ui.pak` by itself. To copy them by hand, put `qwark.sprx` in `/dev_hdd0/plugins/` and make `/dev_hdd0/plugins/qwark.sprx` the first line of `/dev_hdd0/boot_plugins.txt`. Put `ui.pak` in `/dev_hdd0/qwark/`.
+The client sends `qwark.sprx`, `ui.pak` and the game files by itself. To copy them by hand, put `qwark.sprx` in `/dev_hdd0/plugins/` and make `/dev_hdd0/plugins/qwark.sprx` the first line of `/dev_hdd0/boot_plugins.txt`. Put `ui.pak` and the game files (`rac1.sprx` to `rac4.sprx` and `tod.sprx`) in `/dev_hdd0/qwark/`.
 
 In standalone mode the client also keeps that copy current. If the console runs an older module than the client ships, the client sends the new one to the console and asks you to restart it. See [docs/standalone-update.md](docs/standalone-update.md).
+
+## Game modules
+
+Each game's support is a file of its own, named for the game: `rac1.sprx` (RaC1), `rac2.sprx` (RaC2), `rac3.sprx` (UYA), `rac4.sprx` (Deadlocked) and `tod.sprx` (Tools of Destruction). This keeps the module small at the home screen: your console only loads the file for the game that runs. The files sit beside `qwark.sprx` and `ui.pak`, and the client sends them wherever it sends `ui.pak`: the webMAN load, **Install to boot_plugins.txt**, the standalone update and the console installer. To copy them by hand, put them in `/dev_hdd0/qwark/` beside `ui.pak`.
+
+Your console loads a game's file when that game starts and it has the memory for it. Until then the game has no game features: the status line names the game, the Memory panel works, and the Game panel says why.
+
+- **Waiting for memory**: your console has too little free memory right now. The status line says "loading...", and its tooltip and the Game panel show how much memory your console has and how much it needs. The game support loads by itself when there is room. If it waits more than 30 seconds, your console shows a notification with the same figures.
+- **Missing, damaged or from another build**: the status line shows it in red, and the client tells you once. Press **Send rac1.sprx** (or the file for your game) on the Connection panel, the Game panel or the status line. Your console loads it without a restart.
+
+Under RPCS3 there are no game files: `qwark-rpcs3.exe` has every game in it.
 
 ## Connect to RPCS3
 
@@ -83,6 +94,28 @@ The Combos panel also has a **Toggle fast loads** combo. It has no buttons until
 
 If you change or clear the console menu combo, hover its row to see the default buttons, and capture them again to put it back.
 
+The Trainer menu has a **Mods** page, after **Unlocks**, with a row for each mod of the running game: the mods on your console, then the ones only a USB drive has (see [Mods on a USB drive](#mods-on-a-usb-drive)). Each row is **Off**, **On** (loaded) or **On boot** (loaded, and loaded again at every boot). Changing a row loads or unloads the mod at once, and the Mods panel shows the change.
+
+## Per-user settings
+
+Your console can keep separate settings for each user on it. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, the **In-game menus** setting, and the chargeboot and HUD colours set for the boot. The mod and savefile libraries stay shared.
+
+Turn it on with **Per-user settings** at the bottom of the Combos panel, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line under the switch says whose settings you are editing.
+
+Combos are shared by everyone, and so is the **Combos enabled** switch. To give the signed-in user their own combo for one action, press **Override** on that row and press the buttons. That row then shows in orange, and its buttons read **Override**, which captures the override again, and **Clear Override**, which removes only the override, so the shared combo comes back; press **Clear** again to clear the shared combo. Overrides are kept while per-user settings are off.
+
+RPCS3 has a single user, so this setting does not show there.
+
+## Mods on a USB drive
+
+Your console can load mods from a USB drive. Put each mod folder in `qwark/mods/<TITLEID>/` or in `mods/<TITLEID>/` on the drive, for example `mods/NPEA00423/il-ghost/`. Any USB port works.
+
+The Mods panel lists these mods as **On USB000** (or the port they are on). Nothing is installed until you press **Load** or tick **Auto**: then your console copies the mod from the drive and keeps it.
+
+When the drive has a newer version of a mod than your console, the Console column says **update ready**, and your console takes it the next time the mod loads. Hover over the cell to see the USB version, your console's version and the path on the drive. A mod that is loaded right now keeps its files until it loads again. Your console compares the `#- version` line in each `patch.txt`, so give each new release a higher number. An older copy, or one with the same version, never replaces your console's copy. If the same mod is on more than one drive or folder, your console uses the newest. A copy with your console's version but different contents is not flagged in the column: the mod just says **ready**, and its tooltip warns that your console uses its own copy.
+
+**Load** also uses your console's copy when it is newer than the one in your mods folder, and does not upload yours over it. Under RPCS3 there are no USB mods: use the mods folder on your PC.
+
 ## Chargeboot colours
 
 In Going Commando and Up Your Arsenal, **Game**, then **Cosmetics**, has three chargeboot colour pickers: **primary front**, **primary back** and **tint**. They work on a console and under RPCS3.
@@ -118,7 +151,7 @@ The colours and the boxes stay until the game restarts. Tick **on boot** beside 
 
 ToD (NPEA00452, the PSN EU version 1.00) has a first set of features: **Fast loads**, **Remove cutscenes**, **Infinite ammo**, **Infinite health**, **God Ratchet**, Die, bolts, raritanium and challenge mode, the unlock table, and buttons for skill points and gold bolts on the **Collectables** tab. Position slots, the planet list and the input display work as in the other games. The planet list, the Trainer's Planets page and the Level flags panel name ToD's planets as the ship's planet selector does: Kerwan (Metropolis), Cobalia, Kortog (Stratus City), Fastoon, Voron Asteroid Belt (the first space battle), Mukow (the Imperial Fight Festival), Nundac Asteroid Ring (Apogee Space Station), Ardolis (the Pirate Base), Rakar Star Cluster (the second space battle), Rykan V, Sargasso, Kreeli Comet (IRIS), Viceron (Zordoom Prison), Verdigris Black Hole (the third space battle), Jasindu (Kerchu City), Ublik Passage (Slag's Fleet), Reepor (the Cragmite Ruins), Igliak (Meridian City), and Fastoon II for the return to Fastoon. ToD has no manip categories yet, so its **Manips** page holds **Remove cutscenes** and the cutscene cache (below). Its Trainer menu takes the place of **Inventory** in the pause menu (see Console menu above). Its **Autosplitter** times a run as the community does. A new game (or a challenge mode, or a Metropolis save from before the end of Metropolis) is a load into Metropolis on a file that has not beaten Metropolis yet: the timer resets as that load begins, and starts 0.45 seconds into Metropolis's fade in from black, as Ratchet starts to show, not at the load. That works the same from the title or from Metropolis itself, with Fast loads on or off. A death or a checkpoint never resets or starts the timer and never splits, even on a new file. On a file that has beaten Metropolis, Metropolis is just another planet. It splits on each new planet (the planet route reads `tod-planets.txt`, which knows each planet by its planet name and its level name, so splits named either way work), and takes its last split, **Tachyon defeated**, when the screen has faded to black after the hit that defeats Tachyon, before the ending cutscene. **Mission completed** is there to tick if your route wants it. Game time stops during the long loading screens exactly where the old ToD autosplitter stopped it (on the way into Metropolis), a planet reloaded is never a second split, and a quit to the XMB pauses game time until the game is back at its title, then adds 19.95 s, as the old ToD autosplitter did. Under RPCS3, stopping the game is the quit, and pausing the emulator is not.
 
-The **Save files** panel works in ToD as in the other games, on your console and under RPCS3, and ToD needs no RPCS3 patch for it. A save is the game's last save: its last autosave, a save from its menu, or the last save it loaded. Loads go through the game's own loading screen and work during gameplay only, whichever way you got there (Continue on the title screen, a load from the game's menu, or a new game that has never saved). When a load or a save is refused, the message says what your console said: the game isn't in gameplay yet, it's still on the title screen, a planet load is under way, the game is saving on its own, or the file isn't a Tools of Destruction save. **Set aside file** keeps the set-aside save on your console, so the game's autosaves do not replace it. RPCS3 keeps ToD's saves in `dev_hdd0/home/<user>/savedata/BCES00052_SAVE_<n>/`, and a `GAME.SAV` there that RPCS3 wrote itself is a ToD `.sav` file as it is: copy it into the library folder to load it from the panel. One copied over from a console is still encrypted and will not load.
+The **Save files** panel works in ToD as in the other games, on your console and under RPCS3, and ToD needs no RPCS3 patch for it. A save is the game's last save: its last autosave, a save from its menu, or the last save it loaded. Loads go through the game's own loading screen and work during gameplay only, whichever way you got there (Continue on the title screen, a load from the game's menu, or a new game that has never saved). When a load or a save is refused, the message says what your console said: the game isn't in gameplay yet, it's still on the title screen, a planet load is under way, the game is saving on its own, or the file isn't a Tools of Destruction save. **Set aside file** keeps the set-aside save on your console, so the game's autosaves do not replace it. As in RaC1, RaC2 and UYA, **Load set-aside** loads with fast loads on, even when **Fast loads** is off; a file loaded from the library loads at the game's own pace. RPCS3 keeps ToD's saves in `dev_hdd0/home/<user>/savedata/BCES00052_SAVE_<n>/`, and a `GAME.SAV` there that RPCS3 wrote itself is a ToD `.sav` file as it is: copy it into the library folder to load it from the panel. One copied over from a console is still encrypted and will not load.
 
 - **Fast loads** ends a planet load as soon as the level's data is in. Without it the game plays its flight scenes to the end: the take-off, the "long load" scenes while the level loads, and the landing. With it the screen goes black once the level is loaded and the planet starts, with no landing scene. On your console it is a code patch, like the other games' Fast loads; under RPCS3 it needs qwark's RPCS3 patches, as theirs do. **Toggle fast loads** flips it. The first loads into Metropolis and Cobalia on a new file play a story video instead of the flight, and Fast loads does not cut those.
 - **Remove cutscenes**, on **Game**, then **Manips**, skips the eight unskippable videos that runners delete from their game's files, without deleting anything: your console's game files stay as they are. It is legal for speedruns, so its **on boot** box starts ticked and it applies itself every time the game boots. Untick **on boot** to keep it off. Loads that RaCMAN starts into a new file's Metropolis or Cobalia, which play a story video instead of the flight, fade out over a few frames rather than one, so the screen does not flash when the video is skipped.
@@ -130,7 +163,7 @@ The **Save files** panel works in ToD as in the other games, on your console and
 - **God Ratchet** is the old RaCMAN's god ratchet, the one speedrunners use: it also makes enemies ignore Ratchet. It sits beside the values table, where RaC1's goodies menu is.
 - The Unlocks panel lists weapons, devices, gadgets and items. Use the Collectables buttons for skill points and gold bolts, and the RYNO's own row for the RYNO.
 
-For now ToD needs a test build of qwark with its `tod.sprx` (see [docs/test-builds.md](docs/test-builds.md)). With a release build, your console treats ToD as a game it does not know.
+ToD's support is its game file, `tod.sprx`, which every release carries (see [Game modules](#game-modules)).
 
 **Game**, then **Debug**, has a **Lua console**: a script editor that runs Lua in the game on your console. Type a script, then press **Run** or Ctrl+Enter. The whole script runs at once, in the game's own Lua (version 5.0.2), and its first return value, or its error, shows under the editor, with the game's last script error above it. For example `time_set_scale(0.5)` runs the game at half speed and `time_set_scale(1)` puts it back. The editor colours Lua's keywords, strings, numbers and comments, and you can drag its bottom edge to make it taller. A script can be at most 8192 bytes: the counter under the editor turns red, and **Run** waits, until it fits. To keep a script, type a name and press **Save**: it goes into the `lua` folder of your data folder, as a `.lua` file. **Open a saved script** opens one from there, **Open file...** opens any `.lua` file, and **Open folder** shows the folder. The editor asks before it opens a script over changes you have not saved. On a console, the first run after the game starts puts qwark's Lua helper into the game. Under RPCS3 the Lua helper is an RPCS3 patch: press **Install qwark patches...** on the Connection panel, then restart the game in RPCS3.
 

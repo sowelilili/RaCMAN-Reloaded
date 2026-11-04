@@ -17,7 +17,8 @@
       4. Refuses a tag that already exists, locally or on the remote.
       5. Refuses a qwark dist\ folder committed before the last change to qwark's sources,
          missing a file, or holding a test build (packaging\check-qwark-build.ps1: its
-         qwark.build says dev 1; a release dist\ is made with `make release` in qwark).
+         qwark.build says dev 1; a release dist\ is made with `make release` in qwark), a
+         game module short or a ui.pak without Tools of Destruction's Lua helper.
       6. Refuses a client that expects a newer qwark build than qwark carries.
       7. Runs both test suites.
       8. Shows what it is about to do and asks, then tags and pushes qwark and then this repository.
@@ -197,9 +198,10 @@ foreach ($r in $repos) {
 
 Write-Step 'checking the console payload'
 
-# No game module (rac1.sprx .., revision 1.26): a release links its games in, and the check below refuses a dist\
-# that has any.
-foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark.build', 'qwark-installer.pkg', 'qwark-rpcs3.exe')) {
+# Since qwark build 57 a release ships its game modules (revision 1.26), rac1.sprx to rac4.sprx and tod.sprx, and the
+# check below refuses a dist\ without all of them, or with a ui.pak without Tools of Destruction's Lua helper.
+. (Combine $repo 'packaging' 'game-module-names.ps1')
+foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark.build', 'qwark-installer.pkg', 'qwark-rpcs3.exe') + $GameModuleNames) {
     $path = Combine $qwark 'dist' $file
     if (-not (Test-Path $path)) {
         throw "qwark has no dist\$file. Build it in qwark (make release) and commit it."
@@ -208,7 +210,7 @@ foreach ($file in @('qwark.sprx', 'ui.pak', 'qwark.build', 'qwark-installer.pkg'
 
 # A plain `make` builds a test module (revision 1.24), which every client replaces with its own
 # whenever the IDs differ, so a release must not carry one. `make release` builds the module
-# without the DEV bit and fills dist\ from it.
+# without the DEV bit, its game modules and the full ui.pak, and fills dist\ from them.
 & (Combine $repo 'packaging' 'check-qwark-build.ps1') -Dist (Combine $qwark 'dist') -ProtoH (Combine $qwark 'src' 'core' 'proto.h')
 
 # The release takes the committed binaries, so a source committed after the module in dist\ means
@@ -253,43 +255,63 @@ if (-not $SkipTests -and (Test-Path $makeBat)) {
     # Two builds of one source are not the same file: scetool writes a fresh nonce into 42 bytes
     # of the SELF header every time, so their hashes never agree, and a size is too coarse to
     # trust. The module inside is the same, though, and scetool can unpack it back out, so the
-    # two unpacked modules are what have to match.
-    $fresh = Combine $qwark 'qwark.sprx'
-    $committed = Combine $qwark 'dist' 'qwark.sprx'
-    $freshElf = Combine $env:TEMP 'qwark-release-fresh.elf'
-    $committedElf = Combine $env:TEMP 'qwark-release-committed.elf'
-    Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue -WhatIf:$false
-
-    if (Test-Path $scetool) {
-        Push-Location $qwark
-        try {
-            Invoke-Native { & $scetool -d $fresh $freshElf } | Out-Null
-            Invoke-Native { & $scetool -d $committed $committedElf } | Out-Null
-        }
-        finally { Pop-Location }
-
-        if (-not (Test-Path $freshElf) -or -not (Test-Path $committedElf)) {
-            throw 'scetool could not unpack the SPRX, so the committed module cannot be checked against the build.'
-        }
-
-        $same = (Get-FileHash $freshElf -Algorithm SHA256).Hash -eq (Get-FileHash $committedElf -Algorithm SHA256).Hash
+    # two unpacked modules are what have to match. Since qwark build 57 the same goes for each game
+    # module the build makes beside it, and ui.pak, which pak.py packs the same every time, has to
+    # match byte for byte.
+    foreach ($name in @('qwark.sprx') + $GameModuleNames) {
+        $fresh = Combine $qwark $name
+        $committed = Combine $qwark 'dist' $name
+        $freshElf = Combine $env:TEMP 'qwark-release-fresh.elf'
+        $committedElf = Combine $env:TEMP 'qwark-release-committed.elf'
         Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue -WhatIf:$false
 
-        if (-not $same) {
-            throw ('qwark builds a different module from the one in dist\qwark.sprx. Run `make release` in ' +
-                   'qwark and commit it: the release takes dist\.')
+        if (-not (Test-Path $fresh)) {
+            throw "qwark's build made no $name. Run ``make release`` in qwark and commit dist\."
         }
 
-        Write-Good 'the SPRX builds, and dist\ holds the same module'
+        if (Test-Path $scetool) {
+            Push-Location $qwark
+            try {
+                Invoke-Native { & $scetool -d $fresh $freshElf } | Out-Null
+                Invoke-Native { & $scetool -d $committed $committedElf } | Out-Null
+            }
+            finally { Pop-Location }
+
+            if (-not (Test-Path $freshElf) -or -not (Test-Path $committedElf)) {
+                throw "scetool could not unpack $name, so the committed one cannot be checked against the build."
+            }
+
+            $same = (Get-FileHash $freshElf -Algorithm SHA256).Hash -eq (Get-FileHash $committedElf -Algorithm SHA256).Hash
+            Remove-Item $freshElf, $committedElf -ErrorAction SilentlyContinue -WhatIf:$false
+
+            if (-not $same) {
+                throw ("qwark builds a different $name from the one in dist\. Run ``make release`` in " +
+                       'qwark and commit it: the release takes dist\.')
+            }
+        }
+        else {
+            $rebuilt = Get-Item $committed
+            $built = Get-Item $fresh
+            if ($built.Length -ne $rebuilt.Length) {
+                throw ("qwark builds a $name of $($built.Length) bytes and dist\$name is " +
+                       "$($rebuilt.Length). Run ``make release`` in qwark and commit it: the release takes dist\.")
+            }
+        }
+    }
+
+    $freshPak = Combine $qwark 'ui.pak'
+    $committedPak = Combine $qwark 'dist' 'ui.pak'
+    if (-not (Test-Path $freshPak) -or
+        (Get-FileHash $freshPak -Algorithm SHA256).Hash -ne (Get-FileHash $committedPak -Algorithm SHA256).Hash) {
+        throw ('qwark packs a different ui.pak from the one in dist\. Run `make release` in qwark and commit it: ' +
+               'the release takes dist\.')
+    }
+
+    if (Test-Path $scetool) {
+        Write-Good "the SPRX and its $($GameModuleNames.Count) game modules build, and dist\ holds the same modules and ui.pak"
     }
     else {
-        $rebuilt = Get-Item $committed
-        $built = Get-Item $fresh
-        if ($built.Length -ne $rebuilt.Length) {
-            throw ("qwark builds an SPRX of $($built.Length) bytes and dist\qwark.sprx is " +
-                   "$($rebuilt.Length). Run `make dist` in qwark and commit it: the release takes dist\.")
-        }
-        Write-Warning "no $scetool, so only the size of the built SPRX was compared with dist\."
+        Write-Warning "no $scetool, so only the sizes of the built SPRX and game modules were compared with dist\."
     }
 }
 elseif (-not $SkipTests) {

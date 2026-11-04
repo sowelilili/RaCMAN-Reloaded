@@ -1,13 +1,13 @@
 namespace RaCMAN.Protocol;
 
 /// <summary>
-/// A game's own module (revision 1.26, qwark's PROTOCOL.md 9.11). A qwark test build carries no
-/// game: each one is an SPRX of its own in <c>/dev_hdd0/qwark/</c>, named for its game,
+/// A game's own module (revision 1.26, qwark's PROTOCOL.md 9.11). Since then qwark's core carries no
+/// game (a test build's, and a release's from build 57): each one is an SPRX of its own in <c>/dev_hdd0/qwark/</c>, named for its game,
 /// <c>rac1.sprx</c> (RaC1) to <c>rac4.sprx</c> (Deadlocked), which the module loads while that game
 /// runs once the VSH has the memory for it. The name comes from <see cref="FileName(GameId)"/>'s
 /// table, the same as qwark's title index, never from the game id formatted into a name, so a later
-/// game takes a name of its own (Tools of Destruction's is <c>tod.sprx</c>, revision 1.27). A release links the games in, ships no module files
-/// and never asks for one. The files are handled exactly as <see cref="UiPak"/> is: they sit beside
+/// game takes a name of its own (Tools of Destruction's is <c>tod.sprx</c>, revision 1.27). Build 56's release linked the games in, shipped no
+/// module files and never asked for one. The files are handled exactly as <see cref="UiPak"/> is: they sit beside
 /// qwark.sprx in qwark's dist\ and in the client's folder, every way this client puts the module on
 /// a console puts them beside the pak, and the standalone update stages each as <c>.new</c>, which
 /// the module puts in place the next time that game boots.
@@ -78,8 +78,7 @@ public static class GameModule
 
     /// <summary>
     /// The modules beside <paramref name="sprxPath"/>, read, in game order: the ones a release of
-    /// this client sends with the module. A release has none, and none is an empty list, never an
-    /// error; a file that cannot be read is left out as if it were not there.
+    /// this client sends with the module. None is an empty list, never an error; a file that cannot be read is left out as if it were not there.
     /// </summary>
     public static async Task<IReadOnlyList<GameModuleFile>> ReadBesideAsync(
         string sprxPath, CancellationToken cancellationToken = default)

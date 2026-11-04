@@ -1,16 +1,16 @@
 namespace RaCMAN.Protocol.Testing;
 
 /// <summary>
-/// Game modules (revision 1.26, qwark's PROTOCOL.md 9.11): a test build whose games are SPRX files
+/// Game modules (revision 1.26, qwark's PROTOCOL.md 9.11): a module whose games are SPRX files
 /// of their own, <c>/dev_hdd0/qwark/rac1.sprx</c> .. <c>rac4.sprx</c>, in the same in-memory filesystem the
 /// file ops use. With <see cref="GameModules"/> on, a session in one of the four games reports
 /// <c>game</c> 0 and flags2 bit5 or bit6 until its module is in, answers every game op UNSUPPORTED
 /// meanwhile, and answers GAME_MODULE with why. Off, the default, is a module whose games are linked
-/// in: no bit is ever set and GAME_MODULE answers LINKED, as a release does.
+/// in: no bit is ever set and GAME_MODULE answers LINKED, as build 56's release and qwark-rpcs3 do.
 /// </summary>
 public sealed partial class FakeQwarkServer
 {
-    /// <summary>The module's games are modules of their own (a test build of revision 1.26).</summary>
+    /// <summary>The module's games are modules of their own (a test build, and a release from build 57).</summary>
     public bool GameModules
     {
         get { lock (_gate) return _gameModules; }

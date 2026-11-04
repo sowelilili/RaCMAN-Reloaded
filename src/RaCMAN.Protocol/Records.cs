@@ -120,7 +120,7 @@ public sealed record SessionInfo(
     /// <summary>Byte 29, <c>flags2</c> (revision 1.24); 0 from every earlier module.</summary>
     public SessionFlags2 Flags2 { get; init; }
 
-    /// <summary>Byte 31, <c>flags3</c> (revision 1.30, pending); 0 from every earlier module.</summary>
+    /// <summary>Byte 31, <c>flags3</c> (revision 1.30); 0 from every earlier module.</summary>
     public SessionFlags3 Flags3 { get; init; }
 
     /// <summary>The module has the run-start warnings and answers RUN_WARN (flags3 bit0).</summary>
@@ -157,7 +157,7 @@ public sealed record SessionInfo(
 
     /// <summary>
     /// The running game's module is missing, broken, would not load or is another build's
-    /// (revision 1.26, <c>flags2</c> bit5). Only a test build whose games are modules sets it, only
+    /// (revision 1.26, <c>flags2</c> bit5). Only a module whose games are modules sets it, only
     /// while INGAME, and <see cref="Game"/> reads <see cref="GameId.None"/> while it does.
     /// GAME_MODULE says which game and why.
     /// </summary>
@@ -953,7 +953,7 @@ public sealed record ModEntry(
     /// </summary>
     public bool Checking => (Flags & ModFlags.Checking) != 0;
 
-    /// <summary>Revision 1.30 (pending): what the mod's <c>#- legal:</c> line says, as the console parsed it.</summary>
+    /// <summary>Revision 1.30: what the mod's <c>#- legal:</c> line says, as the console parsed it.</summary>
     public ModLegality Legality => ModLegalityText.FromFlags(Flags);
 
     public static ModEntry Parse(ReadOnlySpan<byte> entry)
@@ -1178,7 +1178,7 @@ public sealed record VshMemoryInfo(
 
 /// <summary>
 /// The GAME_MODULE reply, section 5.1.2 of PROTOCOL.md (revision 1.26, build 57): the running
-/// game's module and the memory gate in front of it, for a test build whose games are modules.
+/// game's module and the memory gate in front of it, for a module whose games are modules (a test build, and a release from build 57).
 /// <code>
 /// u8 state, u8 game, u8 pages, u8 flags,
 /// u32 lowest_kb, u32 now_kb, u32 need_kb, u32 floor_kb, u32 window_ms, u32 waited_ms,

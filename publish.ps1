@@ -9,9 +9,9 @@
     premade savefiles from its premade-savefiles\ folder, ..\qwark\dist\qwark.sprx,
     ..\qwark\dist\qwark.build (which build of qwark that module is, revision 1.24),
     ..\qwark\dist\ui.pak (the console menu's file, which the module reads from the console's HDD),
-    a test build's game modules ..\qwark\dist\rac1.sprx to rac4.sprx (revision 1.26; a release
-    dist has none, and none is not an error)
-    and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
+    the game modules ..\qwark\dist\rac1.sprx to rac4.sprx and tod.sprx (revision 1.26; a
+    release's as well as a test build's since qwark build 57, and a release dist without all five
+    stops the stage) and ..\qwark\dist\qwark-rpcs3.exe (the RPCS3 helper, win-* only), and zips it to
     ..\build\RaCMAN-Reloaded.zip.
 
     ..\qwark\dist\qwark-installer.pkg, the installer for a console with no PC, goes beside the
@@ -89,7 +89,8 @@ if (-not $SprxPath)   { $SprxPath   = Combine $repo '..' 'qwark' 'dist' 'qwark.s
 if (-not $UiPakPath)  { $UiPakPath  = Combine $repo '..' 'qwark' 'dist' 'ui.pak' }
 # qwark.build sits beside the qwark.sprx it describes, so it follows -SprxPath unless it is named.
 if (-not $BuildInfoPath) { $BuildInfoPath = Combine ([System.IO.Path]::GetDirectoryName($SprxPath)) 'qwark.build' }
-# So do a test build's game modules (revision 1.26), rac1.sprx to rac4.sprx and tod.sprx.
+# So do the game modules (revision 1.26), rac1.sprx to rac4.sprx and tod.sprx: a test build's, and a release's
+# since qwark build 57.
 if (-not $GameModulesDir) { $GameModulesDir = [System.IO.Path]::GetDirectoryName($SprxPath) }
 if (-not $Rpcs3Path)  { $Rpcs3Path  = Combine $repo '..' 'qwark' 'dist' 'qwark-rpcs3.exe' }
 if (-not $PkgPath)    { $PkgPath    = Combine $repo '..' 'qwark' 'dist' 'qwark-installer.pkg' }
@@ -211,9 +212,9 @@ function New-Stage([string]$rid, [string]$publishDir, [string]$stageDir) {
         Write-Warning "ui.pak not found at $UiPakPath; the release will not carry the console menu's file"
     }
 
-    # A test build's games are modules of their own (revision 1.26), which the client sends beside
-    # ui.pak; a release links them in and its dist has none. Only a dist whose qwark.build says
-    # dev 1 has its modules staged, so a release never carries ones a test build left behind.
+    # The games are modules of their own (revision 1.26), which the client sends beside ui.pak: a
+    # test build's, and since qwark build 57 a release's too. A release dist must have all five, and
+    # the stage stops without them, as check-qwark-build.ps1 does.
     & (Combine $repo 'packaging' 'stage-game-modules.ps1') -Source $GameModulesDir -BuildInfo $BuildInfoPath -Destination $stageDir
 
     # The RPCS3 helper: qwark's core built for the PC, which the client starts beside itself when
