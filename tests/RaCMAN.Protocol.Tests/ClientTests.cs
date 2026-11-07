@@ -1517,12 +1517,13 @@ public class ClientTests
     [InlineData(53, true)]
     [InlineData(54, true)]
     [InlineData(55, true)]
-    [InlineData(56, true)]     // the build before the one this client ships with: client 1.4.2's
-    [InlineData(57, false)]    // exactly the expected build: revision 1.25, the savefile helpers in ui.pak
-    [InlineData(58, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(56, true)]
+    [InlineData(57, true)]     // the build before the one this client ships with: client 1.5.0's
+    [InlineData(58, false)]    // exactly the expected build: revision 1.31, the mod pool fix
+    [InlineData(59, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(57, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(58, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 
