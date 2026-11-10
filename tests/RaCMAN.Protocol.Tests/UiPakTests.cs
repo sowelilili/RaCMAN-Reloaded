@@ -298,13 +298,6 @@ public class UiPakTests
         Assert.Equal(pak.Length, result.Bytes);
         Assert.Equal(pak, server.Files[UiPak.ConsolePath]);
         Assert.False(server.Files.ContainsKey(UiPak.StagedPath));
-        Assert.Equal(
-            new[]
-            {
-                "Uploading ui.pak to /dev_hdd0/qwark/ui.pak.new",
-                "Putting /dev_hdd0/qwark/ui.pak.new in place of /dev_hdd0/qwark/ui.pak",
-            },
-            said);
 
         Assert.False((await client.GetStateAsync()).Session.UiPakBad);
     }

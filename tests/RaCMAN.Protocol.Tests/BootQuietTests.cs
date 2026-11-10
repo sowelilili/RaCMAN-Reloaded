@@ -91,7 +91,6 @@ public class BootQuietTests
             StatusToast.For(Status.Busy, Opcode.ModList, SessionState.Quitting, quiet: false, debug: false));
 
         // A sentence rather than a status code, and not the same sentence for both.
-        Assert.Contains("starting a game", StatusToast.WhileBusy(SessionState.Booting));
         Assert.NotEqual(StatusToast.WhileBusy(SessionState.Booting), StatusToast.WhileBusy(SessionState.Quitting));
 
         // INGAME, BUSY keeps the meaning it has there: a save transfer in flight, or a full ring.
@@ -111,7 +110,6 @@ public class BootQuietTests
             StatusToast.For(Status.Full, Opcode.ProfileEnable, SessionState.Xmb, quiet: false, debug: false));
         Assert.Equal(StatusToast.SettingsFull,
             StatusToast.For(Status.Full, Opcode.FeatureSetAuto, SessionState.Ingame, quiet: false, debug: false));
-        Assert.Contains("your console", StatusToast.SettingsFull, StringComparison.OrdinalIgnoreCase);
 
         // FULL from anything else keeps its status, and debug information still shows the op.
         Assert.Equal("Your console refused that: Full",

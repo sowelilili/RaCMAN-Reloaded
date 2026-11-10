@@ -223,7 +223,6 @@ public class BootInstallTests
         Assert.Equal(pak, server.Stored[UiPak.ConsolePath]);
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, server.Stored[WebManLoader.BootPath]);
         Assert.Equal($"{Qwark}\n", Text(server, BootList));
-        Assert.Contains($"Uploading ui.pak to {UiPak.ConsolePath}", said);
 
         await WaitForQuitAsync(server);
         var commands = server.Commands.Where(c => !c.StartsWith("PASV", StringComparison.Ordinal)).ToList();

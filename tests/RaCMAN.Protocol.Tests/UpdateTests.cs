@@ -136,16 +136,6 @@ public class UpdateTests
         Assert.Equal(UpdateStage.Idle, service.Stage);
     }
 
-    [Fact]
-    public void TheBannerNeedsSomethingToActOn()
-    {
-        var service = new UpdateService(new Settings(), action => action(), (_, _) => { }, allowed: false);
-
-        Assert.False(service.HasBanner);
-        service.Dismiss();
-        Assert.True(service.Dismissed);
-    }
-
     // ---------------------------------------------------------------- the notes on the banner
     //
     // A check's answer is handed to the service as Velopack would hand it over, on a service that

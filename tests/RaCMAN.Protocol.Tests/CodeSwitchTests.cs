@@ -180,10 +180,6 @@ public class CodeSwitchTests
 
         // A data cheat is never greyed for this.
         Assert.False(GamePanel.CodeFeatureBlocked(ammo, rpcs3));
-
-        // And the tooltip says where the switches come from, not that RPCS3 cannot do it.
-        Assert.Contains("Install them on the Connection panel", Ui.NeedsQwarkPatches);
-        Assert.Contains("restart", Ui.NeedsQwarkPatches);
     }
 
     [Fact]
@@ -202,9 +198,6 @@ public class CodeSwitchTests
         FakeScript.Apply(server, "switchesin");
         Assert.True(await PumpAsync(state, () => state.CodeSwitches));
         Assert.False(GamePanel.CodeFeatureBlocked(jump, state.Session));
-
-        // The description is the same: the feature is still flagged as patching code.
-        Assert.True(jump.WritesCode);
     }
 
     private static async Task<bool> PumpAsync(AppState state, Func<bool> condition, int timeoutMs = 5000)

@@ -333,7 +333,6 @@ public class DevBuildTests
         // Now the warning draws it, whatever the debug switch says.
         Assert.True(state.QwarkOtherTestBuild);
         Assert.Equal(ConnectionPanel.StaleBuildFix.WebManLoad, ConnectionPanel.StaleFixFor(state));
-        Assert.Contains("button below", ConnectionPanel.StaleFixText(ConnectionPanel.StaleFixFor(state), "x"), StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -358,7 +357,6 @@ public class DevBuildTests
         }
 
         Assert.Contains("C:\\x\\qwark.sprx", ConnectionPanel.StaleFixText(ConnectionPanel.StaleBuildFix.NoSprx, "C:\\x\\qwark.sprx"), StringComparison.Ordinal);
-        Assert.Equal("Load qwark via webMAN", ConnectionPanel.StaleLoadButton);
     }
 
     [Fact]

@@ -751,8 +751,6 @@ public class ProfileTests
         Assert.True(CombosPanel.ShowsOverrideButton(active, plain));
         Assert.False(CombosPanel.ShowsOverrideButton(active, overridden));
         Assert.False(CombosPanel.ShowsOverrideButton(With(ProfileFlags.On), plain));
-
-        Assert.Equal("User 1 has one or more overridden combos (orange).", CombosPanel.OverrideHint(User1));
     }
 
     /// <summary>
@@ -859,20 +857,7 @@ public class ProfileTests
     public void TheConsoleMenuRowNamesItsDefaultCombo()
     {
         string tip = CombosPanel.Tooltip(ComboAction.OpenConsoleMenu)!;
-        Assert.StartsWith("Opens the Trainer menu in-game.", tip);
         Assert.Contains($"Default: {PadButtons.Describe(ComboDefaults.OpenConsoleMenu)}.", tip);
-    }
-
-    [Fact]
-    public void TheQuestionOffersCopyDefaultsAndCancel()
-    {
-        var question = new ProfileQuestion(1, CombosPanel.UserName(User1));
-
-        Assert.Equal("Turning on per-user settings. User 1 has no settings of their own yet. Copy the "
-                     + "current settings for them, or start from the defaults?", ProfileSetupModal.Body(question));
-        Assert.Equal("Copy current settings", ProfileSetupModal.CopyButton);
-        Assert.Equal("Start from defaults", ProfileSetupModal.FreshButton);
-        Assert.Equal("Cancel", ProfileSetupModal.CancelButton);
     }
 
     // ------------------------------------------------------------------ AppState

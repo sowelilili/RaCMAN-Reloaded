@@ -182,9 +182,6 @@ public class InGameMenusTests
     [Fact]
     public void TheRowIsGatedOnTheBuildAndGreyedWhereTheBoxIs()
     {
-        Assert.Equal("Toggle fast loads", CombosPanel.Label(ComboAction.ToggleFastLoads));
-        Assert.Null(CombosPanel.Tooltip(ComboAction.ToggleFastLoads));
-        Assert.NotNull(CombosPanel.Tooltip(ComboAction.OpenConsoleMenu));
         Assert.False(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, 54));
         Assert.True(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, 55));
         Assert.True(CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, 54));

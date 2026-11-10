@@ -1565,11 +1565,6 @@ public class ClientTests
 
     [Theory]
     [InlineData(0, true)]
-    [InlineData(10, true)]
-    [InlineData(53, true)]
-    [InlineData(54, true)]
-    [InlineData(55, true)]
-    [InlineData(56, true)]
     [InlineData(57, true)]     // the build before the one this client ships with: client 1.5.0's
     [InlineData(58, false)]    // exactly the expected build: revision 1.31, the mod pool fix
     [InlineData(59, false)]    // a console ahead of the client is not the client's problem

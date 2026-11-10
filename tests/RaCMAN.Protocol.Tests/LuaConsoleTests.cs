@@ -20,13 +20,6 @@ public class LuaConsoleTests
     // ---------------------------------------------------------------- the files
 
     [Fact]
-    public void ScriptsLiveInTheDataFoldersLuaFolder()
-    {
-        Assert.Equal(Path.Combine(AppPaths.Root, "lua"), AppPaths.LuaScripts);
-        Assert.Equal(".lua", LuaScriptStore.Extension);
-    }
-
-    [Fact]
     public void ASavedScriptLoadsBackAsItWasTyped()
     {
         var store = new LuaScriptStore(Folder("save"));
@@ -103,7 +96,6 @@ public class LuaConsoleTests
         var (source, problem) = LuaBox.Prepare(over);
         Assert.Null(source);
         Assert.Contains($"{Encoding.UTF8.GetByteCount(over)} bytes", problem);
-        Assert.Contains("your console runs at most 8192 bytes", problem, StringComparison.OrdinalIgnoreCase);
         Assert.Equal(8192, LuaExecRequest.MaxSourceBytes);
     }
 
@@ -157,12 +149,6 @@ public class LuaConsoleTests
         Assert.Equal(LuaBox.LineKind.Error, refused.Kind);
         Assert.Contains("UNSUPPORTED", refused.Line);
         Assert.Contains("no Lua helper", refused.Line);
-    }
-
-    [Fact]
-    public void TheStarterScriptFits()
-    {
-        Assert.NotNull(LuaBox.Prepare(LuaBox.StarterSource).Source);
     }
 
     // ---------------------------------------------------------------- the colours

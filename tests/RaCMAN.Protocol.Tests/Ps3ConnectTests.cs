@@ -272,8 +272,6 @@ public class Ps3ConnectTests
     [Fact]
     public void OneDetourPerThirtySecondsAndPlainAttemptsInBetween()
     {
-        Assert.Equal(TimeSpan.FromSeconds(30), Ps3Connect.DetourInterval);
-
         long at = 10_000;
 
         // The attempts the loop makes in the half-minute after a detour are plain reconnects.

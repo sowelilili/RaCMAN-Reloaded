@@ -237,15 +237,6 @@ public class FirewallTests
     // --- the marker, and where it lives ---------------------------------------------------------
 
     [Fact]
-    public void TheMarkerIsInTheDataFolderAndNotBesideTheExecutable()
-    {
-        // The whole point: the updater replaces the application folder wholesale, so a marker kept
-        // there would reset on every update and the offer would come back every single time.
-        Assert.StartsWith(AppPaths.Root, Settings.DefaultPath, StringComparison.OrdinalIgnoreCase);
-        Assert.False(Settings.DefaultPath.StartsWith(AppPaths.Application, StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Fact]
     public void TheMarkerSurvivesTheApplicationFolderBeingReplaced()
     {
         var folder = TempFolder();

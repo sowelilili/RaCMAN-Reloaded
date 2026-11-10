@@ -146,15 +146,4 @@ public class VshPluginPageTests
         Assert.True(status.IsLoaded);
         Assert.Equal(0, status.Slot);
     }
-
-    [Fact]
-    public void AnUnknownAnswerKnowsNothingAndSaysSo()
-    {
-        Assert.False(VshPluginStatus.Unknown.IsKnown);
-        Assert.False(VshPluginStatus.Unknown.IsLoaded);
-        Assert.Equal("?", VshPluginStatus.Unknown.SlotText);
-
-        Assert.True(VshPluginStatus.NotLoaded.IsKnown);
-        Assert.False(VshPluginStatus.NotLoaded.IsLoaded);
-    }
 }

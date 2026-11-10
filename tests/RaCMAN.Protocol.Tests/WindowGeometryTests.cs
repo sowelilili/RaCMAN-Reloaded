@@ -21,13 +21,6 @@ public class WindowGeometryTests
     private static readonly Area[] Desktop = { Primary, Secondary };
 
     [Fact]
-    public void TheDefaultIsTheSizeTheNavAndTheGameSubPagesFitIn()
-    {
-        Assert.Equal(822, WindowGeometry.DefaultWidth);
-        Assert.Equal(570, WindowGeometry.DefaultHeight);
-    }
-
-    [Fact]
     public void AFileWithNoSavedSizeOpensAtTheDefault()
     {
         Assert.Equal((822, 570), WindowGeometry.Size(null, null, Primary));

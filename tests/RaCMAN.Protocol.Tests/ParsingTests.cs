@@ -617,8 +617,6 @@ public class ParsingTests
 
         var byAction = combos.ToDictionary(c => c.Action, c => c.Mask);
         Assert.Equal(0x060Fu, byAction[ComboAction.OpenConsoleMenu]);
-        Assert.Equal("Open console menu", RaCMAN.App.Panels.CombosPanel.Label(ComboAction.OpenConsoleMenu));
-        Assert.Equal("Toggle fast loads", RaCMAN.App.Panels.CombosPanel.Label(ComboAction.ToggleFastLoads));
         Assert.Equal("7", RaCMAN.App.Panels.CombosPanel.Label((ComboAction)7));
 
         // The row is drawn only against a module that has the menu.

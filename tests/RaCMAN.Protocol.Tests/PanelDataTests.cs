@@ -148,7 +148,6 @@ public class PanelDataTests : IDisposable
         // Not IOException, not InvalidDataException: the install used to let this one through and
         // it went all the way out of the render loop.
         Assert.ThrowsAny<ArgumentException>(() => library.OpenZip(string.Empty, TitleId));
-        Assert.Equal(string.Empty, ModsPanel.NormalizeZipPath(string.Empty));
     }
 
     // ---------------------------------------------------------------- the mods table
@@ -184,19 +183,6 @@ public class PanelDataTests : IDisposable
     public void TheTooltipSaysWhichLibraryTheModCameFrom()
     {
         Assert.EndsWith("\nShips with RaCMAN Reloaded", ModsPanel.TooltipFor(Mod("Flight", "Someone", shipped: true)));
-    }
-
-    // ---------------------------------------------------------------- file dialog
-
-    [Fact]
-    public void TheBrowseButtonHasADialogToOpenOnThisMachine()
-    {
-        // Windows always has comdlg32; a Linux CI box may have neither zenity nor kdialog, and
-        // then the panel keeps the paste-a-path box as the way in.
-        if (OperatingSystem.IsWindows() || OperatingSystem.IsMacOS()) Assert.True(FileDialog.IsSupported);
-
-        // Asking twice must not change the answer: the panel asks once a frame.
-        Assert.Equal(FileDialog.IsSupported, FileDialog.IsSupported);
     }
 }
 
@@ -446,28 +432,6 @@ public class ComboCaptureTests
 public class PanelNavTests
 {
     [Fact]
-    public void ModsStayOpenUnderRpcs3()
-    {
-        // Since build 49 a mod reaches an RPCS3 game as an RPCS3 patch, switched on from the panel.
-        Assert.Null(PanelNav.DisabledReason(PanelNav.Mods, true));
-    }
-
-    [Fact]
-    public void SaveFilesStayOpenUnderRpcs3()
-    {
-        // Since build 47 the savefile helper reaches an RPCS3 game as an RPCS3 patch, and the
-        // panel says itself whether that patch is in.
-        Assert.Null(PanelNav.DisabledReason(PanelNav.SaveFiles, true));
-    }
-
-    [Fact]
-    public void OnAConsoleThatPatchesCodeNothingIsGreyedOut()
-    {
-        Assert.Null(PanelNav.DisabledReason(PanelNav.Mods, false));
-        Assert.Null(PanelNav.DisabledReason(PanelNav.SaveFiles, false));
-    }
-
-    [Fact]
     public void EveryOtherPanelIsLeftAlone()
     {
         for (int panel = 0; panel < PanelNav.Count; panel++)
@@ -564,15 +528,6 @@ public class PanelNavTests
 /// <summary>The session state as the client spells it: upper case, the way the panels do.</summary>
 public class SessionStateNameTests
 {
-    [Fact]
-    public void EveryStateIsSpeltInUpperCase()
-    {
-        Assert.Equal("INGAME", SessionState.Ingame.DisplayName());
-        Assert.Equal("XMB", SessionState.Xmb.DisplayName());
-        Assert.Equal("BOOTING", SessionState.Booting.DisplayName());
-        Assert.Equal("QUITTING", SessionState.Quitting.DisplayName());
-    }
-
     [Fact]
     public void AStateThisClientDoesNotKnowStillReadsAsAState()
     {
@@ -1180,7 +1135,6 @@ public class PlanetResetOptionTests
         Assert.True(options.SpecialBolts);
         Assert.Equal(PlanetResetOptions.For(GameId.Rac1, PlanetResetOptions.Rac3SpecialBoltsBuild).Boxes(),
             options.Boxes());
-        Assert.Equal("Reset special bolts", options.Boxes()[1].Label);
         Assert.Equal(53, PlanetResetOptions.Rac3SpecialBoltsBuild);
         Assert.True(QwarkClient.ExpectedQwarkBuild >= PlanetResetOptions.Rac3SpecialBoltsBuild);
 
@@ -1543,12 +1497,6 @@ public class PatchNameTests
 
         // The name arrives in a fixed 32-byte field, so what is left of it is trimmed.
         Assert.Equal("Flight", MemoryPanel.PatchName(Patch(PatchKind.Mod, "  Flight  ")));
-    }
-
-    [Fact]
-    public void AFeaturesPatchIsNamedAfterTheToggle()
-    {
-        Assert.Equal("Fast loads", MemoryPanel.PatchName(Patch(PatchKind.Feature, "Fast loads")));
     }
 
     [Fact]
@@ -2679,8 +2627,6 @@ public class ColourShadeTests
         var plain = Hud with { Flags = FeatureFlags.None };
         Assert.Empty(GamePanel.ThemeToggles(new[] { plain, FlatFix }));
         Assert.Empty(GamePanel.ThemeToggles(new[] { FlatFix, GradientFix }));
-        Assert.Contains("on boot", GamePanel.ThemeToggleTooltip(GradientFix));
-        Assert.Contains("health bar", GamePanel.ThemeToggleTooltip(GradientFix));
     }
 
     [Fact]

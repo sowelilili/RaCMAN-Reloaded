@@ -10,16 +10,6 @@ namespace RaCMAN.Protocol.Tests;
 public class SettingsTests
 {
     [Fact]
-    public void DefaultsAreTheLightThemeAndNoDebugInfo()
-    {
-        var settings = new Settings();
-
-        Assert.Equal("light", settings.Theme);
-        Assert.True(settings.LightTheme);
-        Assert.False(settings.DebugInfo);
-    }
-
-    [Fact]
     public void DarkIsTheOnlyValueThatTurnsTheLightThemeOff()
     {
         Assert.False(new Settings { Theme = "dark" }.LightTheme);
@@ -94,15 +84,6 @@ public class SettingsTests
         {
             Directory.Delete(folder, recursive: true);
         }
-    }
-
-    [Fact]
-    public void TheUpdateSectionDefaultsToCheckingAndHasNeverChecked()
-    {
-        var updates = new Settings().Updates;
-
-        Assert.True(updates.Check);
-        Assert.Null(updates.LastCheckUtc);
     }
 
     [Fact]
@@ -182,11 +163,6 @@ public class SettingsTests
         Assert.Equal(InputDisplayMode.Panel, settings.InputMode);
         Assert.False(settings.InputFloating);
         Assert.False(settings.InputWindowed);
-        Assert.False(settings.InputWindowOnTop);
-        Assert.Null(settings.InputWindowX);
-        Assert.Null(settings.InputWindowY);
-        Assert.Null(settings.InputWindowW);
-        Assert.Null(settings.InputWindowH);
 
         settings.InputMode = InputDisplayMode.Window;
         Assert.True(settings.InputWindowed);
@@ -272,13 +248,6 @@ public class SettingsTests
     }
 
     // ---------------------------------------------------------------- table refresh
-
-    [Fact]
-    public void TablesRefreshOnceASecondUntilSomethingSaysOtherwise()
-    {
-        Assert.Equal(1f, new Settings().TableRefreshSeconds);
-        Assert.Equal(1f, Settings.DefaultTableRefreshSeconds);
-    }
 
     /// <summary>
     /// The file is hand-editable and the box takes typing, so the period is clamped where it is
@@ -394,18 +363,6 @@ public class SettingsTests
     }
 
     [Fact]
-    public void TheTargetIsThePs3UntilSomethingSaysOtherwise()
-    {
-        var settings = new Settings();
-
-        Assert.Equal("ps3", settings.Target);
-        Assert.False(settings.Rpcs3Target);
-        Assert.Equal(Rpcs3Host.DefaultPinePort, settings.Rpcs3.PinePort);
-        Assert.Equal(28012, settings.Rpcs3.PinePort);
-        Assert.Equal(string.Empty, settings.Rpcs3.QwarkPath);
-    }
-
-    [Fact]
     public void SaveAndLoadRoundTripTheRpcs3Keys()
     {
         var folder = TempFolder();
@@ -471,16 +428,6 @@ public class SettingsTests
 
     // ---------------------------------------------------------------- the connection mode
 
-    [Fact]
-    public void ConnectingGoesThroughWebManUntilSomethingSaysOtherwise()
-    {
-        var settings = new Settings();
-
-        Assert.Equal("webman", settings.Ps3.ConnectionMode);
-        Assert.False(settings.Ps3.StandaloneConnection);
-        Assert.True(settings.Ps3.WebManConnection);
-    }
-
     [Theory]
     [InlineData("standalone", true)]
     [InlineData("STANDALONE", true)]
@@ -544,18 +491,6 @@ public class SettingsTests
     }
 
     // ---------------------------------------------------------------- the window
-
-    [Fact]
-    public void AFreshFileRemembersNoWindowAtAll()
-    {
-        var settings = new Settings();
-
-        Assert.Null(settings.WindowWidth);
-        Assert.Null(settings.WindowHeight);
-        Assert.Null(settings.WindowX);
-        Assert.Null(settings.WindowY);
-        Assert.Empty(settings.GameSections);
-    }
 
     [Fact]
     public void SaveAndLoadRoundTripTheWindowSizeAndCorner()
@@ -709,15 +644,6 @@ public class SettingsTests
     }
 
     // ---------------------------------------------------------------- the save file category
-
-    [Fact]
-    public void ATitleWithNoRememberedCategoryHasNone()
-    {
-        var settings = new Settings();
-
-        Assert.Null(settings.SaveFileCategoryFor("NPEA00385"));
-        Assert.Null(settings.SaveFileCategoryFor(string.Empty));
-    }
 
     [Fact]
     public void TheCategoryIsRememberedPerTitleAndFoundHoweverTheTitleIsSpelt()

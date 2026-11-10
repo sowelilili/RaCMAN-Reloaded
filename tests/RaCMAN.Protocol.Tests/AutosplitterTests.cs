@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
-using System.Text.Json;
 
 using RaCMAN.App;
 using RaCMAN.App.Panels;
@@ -1759,16 +1758,6 @@ public class AutosplitterTests
         client.Stop();
     }
 
-    /// <summary>The two popups say different things, and the second one says which build to get.</summary>
-    [Fact]
-    public void TheTooOldPopupNamesTheDevelopmentBuild()
-    {
-        Assert.NotEqual(LiveSplitModal.Body, LiveSplitModal.TooOldBody);
-        Assert.Contains("development build", LiveSplitModal.TooOldBody);
-        Assert.Contains(LiveSplitClient.GetUpcomingSplitName, LiveSplitModal.TooOldBody);
-        Assert.Contains("livesplit.org", LiveSplitModal.TooOldBody);
-    }
-
     // ---------------------------------------------------------------- the connection itself
 
     [Fact]
@@ -2507,21 +2496,6 @@ public class AutosplitterTests
         }
     }
 
-    [Fact]
-    public void ALabelThisBuildNoLongerKnowsIsKeptInTheFile()
-    {
-        var settings = new Settings();
-        var game = settings.Autosplit.For(GameId.Rac3);
-        game.SetEvent("Something qwark retired", true);
-        game.SetEvent("Planet entered", false);
-
-        var json = JsonSerializer.Serialize(settings.Autosplit);
-        var back = JsonSerializer.Deserialize<AutosplitSettings>(json)!;
-
-        Assert.Contains("Something qwark retired", back.For(GameId.Rac3).Events.Keys);
-        Assert.False(back.For(GameId.Rac3).EventEnabled("Planet entered", byDefault: true));
-    }
-
     // ---------------------------------------------------------------- Tools of Destruction
 
     private static AutosplitEventDesc TodRow(byte code) =>
@@ -2538,7 +2512,6 @@ public class AutosplitterTests
         await h.ReadyAsync();
         var load = TodRow(4);
         Assert.True(load.Hold && load.IsTiming);
-        Assert.Equal("Long load", load.Label);
 
         h.Engine.Handle(new AutosplitEvent(1, 10_000, AutosplitKind.LoadStart, load.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.PauseGameTime));

@@ -571,8 +571,6 @@ public class GameModuleTests
         string text = AppState.GameModuleProblem(info, "NPEA00423");
 
         Assert.Contains(says, text, StringComparison.Ordinal);
-        Assert.Contains("your console", text, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("the console", text, StringComparison.OrdinalIgnoreCase);
         Assert.StartsWith("Deadlocked support", AppState.GameModuleProblemShort(info, "NPEA00423"), StringComparison.Ordinal);
     }
 

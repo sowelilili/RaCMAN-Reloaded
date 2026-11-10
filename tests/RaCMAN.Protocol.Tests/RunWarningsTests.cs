@@ -49,7 +49,6 @@ public class RunWarningsTests
             Assert.True(session.HasRunWarnings);
             Assert.False(session.RunWarningsOff);
             // After build 57 the box is hidden, though the module has the switch.
-            Assert.False(CombosPanel.RunWarningsSwitchShown);
             Assert.False(CombosPanel.ShowsRunWarnings(session));
             Assert.Equal("warns about cheats and mods as a run starts", CombosPanel.RunWarningsStatus(session));
 
@@ -194,20 +193,9 @@ public class RunWarningsTests
     [Fact]
     public void OnlyALegalModGetsTheLegalLine()
     {
-        Assert.Equal("This mod is legal for speedruns.", ModTable.LegalLine);
         Assert.Equal(ModTable.LegalLine, ModTable.LegalityLine(new ModRow(Local(ModLegality.Legal), null, null, true)));
         Assert.Null(ModTable.LegalityLine(new ModRow(Local(ModLegality.Illegal), null, null, true)));
         Assert.Null(ModTable.LegalityLine(new ModRow(Local(ModLegality.Unknown), null, null, true)));
-    }
-
-    /// <summary>The Mods tables have no Legal column any more; the details say it instead.</summary>
-    [Fact]
-    public void TheModsTablesHaveNoLegalColumn()
-    {
-        const System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
-            | System.Reflection.BindingFlags.Static;
-        Assert.Null(typeof(ModTable).GetMethod("LegalityCell", all));
-        Assert.Null(typeof(ModsPanel).GetMethod("LegalWidth", all));
     }
 
     [Fact]

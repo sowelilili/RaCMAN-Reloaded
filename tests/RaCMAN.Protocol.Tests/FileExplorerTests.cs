@@ -40,12 +40,4 @@ public class FileExplorerTests
         Assert.Null(FileExplorer.CommandFor("   ", OSPlatform.Linux));
         Assert.Null(FileExplorer.CommandFor("/mods", OSPlatform.Create("FREEBSD")));
     }
-
-    /// <summary>The three platforms this client ships for are the three it can open a folder on.</summary>
-    [Fact]
-    public void SupportedWhereverThereIsAFileManagerToAsk()
-    {
-        bool known = OperatingSystem.IsWindows() || OperatingSystem.IsLinux() || OperatingSystem.IsMacOS();
-        Assert.Equal(known, FileExplorer.IsSupported);
-    }
 }

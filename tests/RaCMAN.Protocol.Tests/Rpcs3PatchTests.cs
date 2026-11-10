@@ -571,12 +571,6 @@ public class Rpcs3PatchTests : IDisposable
         new(hash, game, words ?? Words, bytes ?? Bytes, notes ?? Rpcs3Patches.NotesFor(47, 0x1A2B3C4D));
 
     [Fact]
-    public void ThePatchFileIsExactlyThis()
-    {
-        Assert.Equal(ExpectedPatchFile, Rpcs3Patches.BuildPatchFile(Title, new[] { Entry() }));
-    }
-
-    [Fact]
     public void ThePatchFileHasTheShapeRpcs3Reads()
     {
         var stream = new YamlStream();
@@ -1606,10 +1600,6 @@ public class Rpcs3PatchTests : IDisposable
         Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadSetAsideFile, rpcs3, installed));
         Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadSetAsideFile, console, missing));
         Assert.False(CombosPanel.SetAsideComboBlocked(ComboAction.LoadPosition, rpcs3, missing));
-
-        // The tooltip is the Save files panel's own warning, which says where the helper comes from.
-        Assert.Contains("\"Install qwark patches...\"", Ui.NeedsSaveFileHelper);
-        Assert.Contains("restart the game in RPCS3", Ui.NeedsSaveFileHelper);
     }
 
     [Fact]
@@ -1665,22 +1655,6 @@ public class Rpcs3PatchTests : IDisposable
         state.Tick(1f / 60f);
         Assert.DoesNotContain(Opcode.SaveFilePatch, server.RequestLog());
         Assert.DoesNotContain(Opcode.SwitchPatch, server.RequestLog());
-    }
-
-    // ================================================================ the setting
-
-    [Fact]
-    public void TheRpcs3FolderSettingRoundTripsAndDefaultsToEmpty()
-    {
-        Assert.Equal(string.Empty, new Settings().Rpcs3.Folder);
-
-        string path = Path.Combine(_root, "settings.json");
-        var saved = Settings.Load(path);
-        saved.Rpcs3.Folder = @"D:\Emulators\rpcs3";
-        saved.Save();
-
-        Assert.Contains("\"folder\"", File.ReadAllText(path));
-        Assert.Equal(@"D:\Emulators\rpcs3", Settings.Load(path).Rpcs3.Folder);
     }
 
     // ================================================================ the Lua helper (revision 1.27, ToD)

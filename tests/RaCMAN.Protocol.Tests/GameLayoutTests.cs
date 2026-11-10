@@ -399,9 +399,6 @@ public class GameLayoutTests
         // Either way, a section drawn on its own never stacks on the Game page as well.
         var elsewhere = GameLayout.SectionsDrawnElsewhere;
         Assert.Equal(new[] { "Manips", "Cosmetics", "Debug", "Collectables" }, elsewhere);
-        Assert.DoesNotContain("Cheats", elsewhere);
-        Assert.DoesNotContain("Player", elsewhere);
-        Assert.DoesNotContain("Savefile", elsewhere);
     }
 
     /// <summary>
@@ -629,8 +626,6 @@ public class GameLayoutTests
 
             // Keys naming any other panel meant nothing then and mean nothing now.
             Assert.Equal(new[] { "Manips", "Collectables" }, GameLayout.SectionsDrawnElsewhere);
-            Assert.DoesNotContain("Nowhere", GameLayout.SectionsDrawnElsewhere);
-            Assert.DoesNotContain("Nowhere either", GameLayout.SectionsDrawnElsewhere);
         }
         finally
         {

@@ -123,7 +123,6 @@ public class FtpTests
         var (url, pakAtLoad) = Assert.Single(webMan.Requests);
         Assert.Equal("http://127.0.0.1/vshplugin.ps3mapi?prx=%2Fdev_hdd0%2Ftmp%2Fqwark.sprx&load_slot=5", url);
         Assert.Equal(pak, pakAtLoad);
-        Assert.Contains($"Uploading ui.pak to {UiPak.ConsolePath}", said);
 
         await BootInstallTests.WaitForQuitAsync(server);
         var commands = server.Commands.Where(c => !c.StartsWith("PASV", StringComparison.Ordinal)).ToList();

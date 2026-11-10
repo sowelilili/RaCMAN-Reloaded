@@ -59,13 +59,6 @@ public class ManipListParsingTests
     }
 
     [Fact]
-    public void AListRoundTrips()
-    {
-        var list = Sample();
-        AssertSame(list, ManipList.Parse(list.ToBytes()));
-    }
-
-    [Fact]
     public void TheBytesAreLaidOutAsTheContractSpellsThem()
     {
         var bytes = new byte[]

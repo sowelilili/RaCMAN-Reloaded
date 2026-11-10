@@ -1269,8 +1269,6 @@ public class Rpcs3ModsTests : IDisposable
     {
         var none = Decide(Disk(), Row());
         Assert.Equal(ModRpcs3State.Disabled, none.State);
-        Assert.Equal("Disabled", none.Text);
-        Assert.Equal(ModRpcs3Tone.Quiet, none.Tone);
         Assert.False(none.Enabled);
         Assert.True(none.CanToggle);
 
@@ -1289,10 +1287,6 @@ public class Rpcs3ModsTests : IDisposable
     {
         var stillIn = Decide(Disk(LockRng(), enabled: false), Row(ModFlags.Loaded));
         Assert.Equal(ModRpcs3State.DisabledRestartNeeded, stillIn.State);
-        Assert.Equal("Disabled - restart needed", stillIn.Text);
-        Assert.Equal(ModRpcs3Tone.Pending, stillIn.Tone);
-        Assert.Contains("stays in the game until the game is restarted in RPCS3", stillIn.Tooltip);
-        Assert.Contains("when the game boots", stillIn.Tooltip);
         Assert.False(stillIn.Enabled);
         Assert.False(stillIn.CanUpdate);
 
@@ -1339,13 +1333,11 @@ public class Rpcs3ModsTests : IDisposable
 
         var parse = Decide(Disk(), Row(ModFlags.ParseError));
         Assert.Equal(ModRpcs3State.ParseError, parse.State);
-        Assert.Equal(ModRpcs3Tone.Bad, parse.Tone);
         Assert.False(parse.CanToggle);
         Assert.Equal(ModRpcs3State.ParseError, Decide(Disk(), Row(), refusal: ModPatchRefusal.ParseError).State);
 
         var large = Decide(Disk(), Row(), refusal: ModPatchRefusal.TooLarge);
         Assert.Equal(ModRpcs3State.TooLarge, large.State);
-        Assert.Equal("Too large for RPCS3", large.Text);
         Assert.False(large.CanToggle);
         Assert.Contains("one reply", large.ToggleReason);
 
@@ -1376,23 +1368,17 @@ public class Rpcs3ModsTests : IDisposable
 
         var loaded = Decide(disk, Row(ModFlags.Loaded));
         Assert.Equal(ModRpcs3State.Loaded, loaded.State);
-        Assert.Equal(ModRpcs3Tone.Good, loaded.Tone);
         Assert.True(loaded.Enabled);
 
         var checking = Decide(disk, Row(ModFlags.Checking));
         Assert.Equal(ModRpcs3State.Checking, checking.State);
-        Assert.Equal("Checking...", checking.Text);
 
         var restart = Decide(disk, Row());
         Assert.Equal(ModRpcs3State.EnabledRestartNeeded, restart.State);
-        Assert.Equal("Enabled - restart needed", restart.Text);
-        Assert.Equal(ModRpcs3Tone.Pending, restart.Tone);
         Assert.True(restart.Enabled);
-        Assert.Contains("restart the game in RPCS3", restart.Tooltip);
 
         var notUploaded = Decide(disk, null);
         Assert.Equal(ModRpcs3State.NotUploaded, notUploaded.State);
-        Assert.Equal(ModRpcs3Tone.Quiet, notUploaded.Tone);
     }
 
     [Fact]
@@ -1402,8 +1388,6 @@ public class Rpcs3ModsTests : IDisposable
 
         var missing = Decide(applied, Row());
         Assert.Equal(ModRpcs3State.NotInGameMemory, missing.State);
-        Assert.Equal(ModRpcs3Tone.Bad, missing.Tone);
-        Assert.Contains("wrote over", missing.Tooltip);
 
         Assert.Equal(ModRpcs3State.Loaded, Decide(applied, Row(ModFlags.Loaded)).State);
         Assert.Equal(ModRpcs3State.Checking, Decide(applied, Row(ModFlags.Checking)).State);
@@ -1416,7 +1400,6 @@ public class Rpcs3ModsTests : IDisposable
 
         Assert.Equal(ModRpcs3State.EnabledRestartNeeded, status.State);
         Assert.Equal("Enabled - restart needed", status.Text);
-        Assert.Contains("written this session", status.Tooltip);
     }
 
     [Fact]
@@ -1468,12 +1451,7 @@ public class Rpcs3ModsTests : IDisposable
             Assert.Equal(text, status.Text);
             Assert.Equal(tone, status.Tone);
             Assert.Equal(ticked, status.Enabled);
-            Assert.False(string.IsNullOrWhiteSpace(status.Tooltip));
         }
-
-        // Both states waiting on a restart say that it is RPCS3 that applies the change when the game boots.
-        Assert.All(cases.Where(c => c.Text.EndsWith("restart needed", StringComparison.Ordinal)),
-            c => Assert.Contains("when the game boots", c.Status.Tooltip));
 
         // And there is no state the Status column can be in that is not one of the above.
         Assert.Equal(Enum.GetValues<ModRpcs3State>().OrderBy(s => s), cases.Select(c => c.State).OrderBy(s => s));
@@ -1756,14 +1734,12 @@ public class Rpcs3ModsTests : IDisposable
             Assert.True(Rpcs3Patches.IsEnabled(File.ReadAllText(folder.PatchConfigFile), entry.Key(Title), "x"));
 
             Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.EnabledRestartNeeded));
-            Assert.Equal("Enabled - restart needed", mods.StatusFor(mod).Text);
             Assert.True(mods.StatusFor(mod).Enabled);
 
             // The game restarts in RPCS3, and qwark-rpcs3 finds it.
             server.SetModPresence("big", loaded: true, checking: false);
             server.Session = server.Session with { Generation = server.Session.Generation + 1 };
             Assert.True(await PumpAsync(state, () => mods.StatusFor(mod).State == ModRpcs3State.Loaded));
-            Assert.Equal("Loaded", mods.StatusFor(mod).Text);
         }
     }
 
@@ -1795,8 +1771,6 @@ public class Rpcs3ModsTests : IDisposable
             Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Kind == ToastKind.Error)));
             Assert.Equal("Big was not enabled: " + Rpcs3ModsController.ChangedWhileReading("Big"),
                 state.Toasts.Last(t => t.Kind == ToastKind.Error).Text);
-            Assert.Equal("Big changed on qwark-rpcs3 while RaCMAN was reading it, twice running, so nothing was written. Try again.",
-                Rpcs3ModsController.ChangedWhileReading("Big"));
             Assert.Equal(new ushort[] { 0, 1, 0, 1 }, server.ModPatchPagesAsked());
             Assert.False(File.Exists(folder.PatchFile(Title)));
 

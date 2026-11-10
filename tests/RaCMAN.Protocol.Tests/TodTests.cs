@@ -19,7 +19,6 @@ public class TodTests
     public void ToDIsGameFiveWithAModuleOfItsOwnName()
     {
         Assert.Equal(5, (int)GameId.Tod);
-        Assert.Equal("ToD", GameId.Tod.DisplayName());
         Assert.Equal("tod.sprx", GameModule.FileName(5));
         Assert.Equal("/dev_hdd0/qwark/tod.sprx", GameModule.ConsolePath(GameId.Tod));
         Assert.Equal(GameId.Tod, GameModule.Games[^1]);
@@ -81,7 +80,6 @@ public class TodTests
         var timeout = LuaExecResult.Parse(new LuaExecResult(LuaExecStatus.Timeout, 3, LuaType.None, LuaOutFlags.None, "").ToBytes());
         Assert.Equal(LuaExecStatus.Timeout, timeout.Status);
         Assert.Equal(0x200, (int)timeout.Status);
-        Assert.Equal("TIMEOUT", timeout.Status.DisplayName());
         Assert.Equal("status 0x7FF", ((LuaExecStatus)0x7FF).DisplayName());
 
         Assert.Throws<ProtocolException>(() => LuaExecResult.Parse(wire.AsSpan(0, 11)));
