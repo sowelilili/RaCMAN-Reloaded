@@ -5,6 +5,17 @@ using System.Text;
 
 namespace RaCMAN.Protocol.Testing;
 
+/// <summary>What the fake does with one request in place of answering it. See <see cref="FakeQwarkServer.Fault"/>.</summary>
+public enum RequestFault
+{
+    /// <summary>Answer as usual.</summary>
+    None,
+    /// <summary>Read the request and say nothing: a console that has stalled.</summary>
+    NoReply,
+    /// <summary>Read the request and close the connection: a console that dropped the link mid-request.</summary>
+    CloseConnection,
+}
+
 /// <summary>
 /// Enough of PROTOCOL.md to drive QwarkClient end to end in-process: HELLO, HEARTBEAT,
 /// SUBSCRIBE with real UDP telemetry, GET_STATE, DESCRIBE, FEATURE_SET, the watch, freeze and
@@ -451,6 +462,13 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// else: how a test makes one step of a longer job fail and watches the job stop there.
     /// </summary>
     public Dictionary<Opcode, Status> RefusedOps { get; } = new();
+
+    /// <summary>
+    /// Asked once for every request that arrives, before anything else looks at it: how a test
+    /// makes the console go quiet on one request, or drop the link on it. Called on the
+    /// connection's own task, so a test that counts in it uses Interlocked.
+    /// </summary>
+    public Func<Opcode, RequestFault>? Fault { get; set; }
 
     /// <summary>
     /// MOD_LOAD and MOD_UNLOAD on a console, where LOADED is qwark's own (revision 1.16 has it mean
@@ -2397,6 +2415,10 @@ public sealed partial class FakeQwarkServer : IDisposable
 
                     var payload = new byte[length];
                     if (length > 0) await stream.ReadExactlyAsync(payload, _cts.Token);
+
+                    var fault = Fault?.Invoke((Opcode)code) ?? RequestFault.None;
+                    if (fault == RequestFault.CloseConnection) break;
+                    if (fault == RequestFault.NoReply) continue;
 
                     var remote = (IPEndPoint)client.Client.RemoteEndPoint!;
                     var (status, reply) = Handle((Opcode)code, payload, remote);

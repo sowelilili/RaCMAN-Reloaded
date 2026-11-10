@@ -939,6 +939,58 @@ public class ClientTests
         await client.DisconnectAsync();
     }
 
+    [Fact]
+    public async Task ALinkLostDuringAReconnectsAutosplitPrimeIsTriedAgain()
+    {
+        var (server, client) = await ConnectAsync(autoReconnect: true);
+        using (server)
+        using (client)
+        {
+            int established = 1;
+            client.SessionEstablished += _ => Interlocked.Increment(ref established);
+
+            // From here on the first AUTOSPLIT_EVENTS is the prime of the reconnect below, the
+            // last request of its handshake, and the console drops the link on it, once.
+            int primes = 0;
+            server.Fault = op => op == Opcode.AutosplitEvents && Interlocked.Increment(ref primes) == 1
+                ? RequestFault.CloseConnection
+                : RequestFault.None;
+
+            server.DropClients();
+
+            // HELLO 1 was the first connection, HELLO 2 the attempt that lost its link, and
+            // HELLO 3 is the attempt after it, which only exists if the loop kept going.
+            Assert.True(await WaitFor(() => server.HelloCount >= 3, 20000));
+            Assert.True(await WaitFor(() => client.IsConnected && Volatile.Read(ref established) >= 2));
+
+            // The attempt that lost its link never said it was established.
+            Assert.Equal(2, Volatile.Read(ref established));
+            Assert.True(Volatile.Read(ref primes) >= 2);
+        }
+    }
+
+    [Fact]
+    public async Task AHeartbeatThatIsNotAnsweredIsNotTheLastOne()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            client.RequestTimeout = TimeSpan.FromSeconds(1);
+
+            // The console reads the first heartbeat and says nothing; every later one it answers.
+            int heartbeats = 0;
+            server.Fault = op => op == Opcode.Heartbeat && Interlocked.Increment(ref heartbeats) == 1
+                ? RequestFault.NoReply
+                : RequestFault.None;
+
+            // Idle for 2 s, a heartbeat that times out after 1 s, and then one every 2 s.
+            Assert.True(await WaitFor(() => Volatile.Read(ref heartbeats) >= 3, 12000));
+            Assert.True(client.IsConnected);
+            Assert.True(server.HeartbeatCount >= 2);
+        }
+    }
+
     /// <summary>
     /// A loss reported for a connection that has already been replaced. Every request a teardown
     /// fails, and the receive loop of a connection that Disconnect or a change of target closed,

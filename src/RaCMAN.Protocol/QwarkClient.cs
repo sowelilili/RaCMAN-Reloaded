@@ -256,6 +256,16 @@ public sealed class QwarkClient : IDisposable
             var info = await HelloAsync(cancellationToken).ConfigureAwait(false);
             await SubscribeAsync((ushort)TelemetryPort, cancellationToken).ConfigureAwait(false);
             await PrimeAutosplitAsync(cancellationToken).ConfigureAwait(false);
+
+            // The prime keeps a lost link to itself, for the poll loop's sake. Here it is the
+            // last step of a handshake, and a handshake that ends without its connection has
+            // failed: said so, the reconnect loop that may be running this attempt keeps going,
+            // where returning let it leave with nothing connected and nothing trying.
+            lock (_gate)
+            {
+                if (!ReferenceEquals(_stream, stream)) throw new IOException("connection closed during the handshake");
+            }
+
             _ = Task.Run(() => AutosplitPollLoopAsync(cts.Token));
 
             Interlocked.Exchange(ref _reconnectAtTicks, 0);
@@ -458,7 +468,12 @@ public sealed class QwarkClient : IDisposable
             {
                 await EstablishAsync(token).ConfigureAwait(false);
                 Interlocked.Exchange(ref _reconnectAtTicks, 0);
-                return;
+
+                // Back to the loop's own question rather than straight out: a link lost again
+                // already finds this task still running, which is what keeps a second one from
+                // starting, so this one has to be the one that tries again.
+                attempt = 0;
+                continue;
             }
             catch (OperationCanceledException)
             {
@@ -578,6 +593,14 @@ public sealed class QwarkClient : IDisposable
                 catch (OperationCanceledException)
                 {
                     return;
+                }
+                catch (Exception ex) when (ex is TimeoutException or QwarkStatusException)
+                {
+                    // Not answered in time, or refused: the link is still up as far as anyone
+                    // knows, and the console stops sending telemetry to a client that has gone
+                    // quiet, so this must not be the last heartbeat. The next one is due an
+                    // interval after this one was sent.
+                    continue;
                 }
                 catch
                 {
