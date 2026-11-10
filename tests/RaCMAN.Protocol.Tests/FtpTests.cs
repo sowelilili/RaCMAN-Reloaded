@@ -215,6 +215,61 @@ public class FtpTests
         var ex = await Assert.ThrowsAsync<IOException>(() => ftp.StoreAsync("/dev_hdd0/tmp/x", new byte[] { 1 }));
         Assert.Contains("553", ex.Message);
     }
+
+    [Fact]
+    public async Task AConsoleThatAcceptsAndSaysNothingTimesOut()
+    {
+        using var server = new FakeFtpServer { Greeting = Array.Empty<string>() };
+        server.Start();
+
+        using var ftp = new FtpSession("127.0.0.1", server.Port) { Timeout = TimeSpan.FromMilliseconds(300) };
+
+        var ex = await Assert.ThrowsAsync<IOException>(() => Within10Seconds(Wrap(ftp.ConnectAsync())));
+        Assert.Contains("timed out", ex.Message);
+    }
+
+    [Fact]
+    public async Task AConsoleThatStallsAfterAnUploadTimesOut()
+    {
+        using var server = new FakeFtpServer { SilentAfterStor = true };
+        server.Start();
+
+        using var ftp = new FtpSession("127.0.0.1", server.Port) { Timeout = TimeSpan.FromMilliseconds(300) };
+        await ftp.ConnectAsync();
+
+        var ex = await Assert.ThrowsAsync<IOException>(() => Within10Seconds(Wrap(ftp.StoreAsync("/dev_hdd0/tmp/x", new byte[] { 1, 2, 3 }))));
+        Assert.Contains("timed out", ex.Message);
+
+        // The bytes did arrive; only the completion reply was missing.
+        Assert.Equal(new byte[] { 1, 2, 3 }, server.Stored["/dev_hdd0/tmp/x"]);
+    }
+
+    [Fact]
+    public async Task ACallersCancellationStaysACancellation()
+    {
+        using var server = new FakeFtpServer { Greeting = Array.Empty<string>() };
+        server.Start();
+
+        using var ftp = new FtpSession("127.0.0.1", server.Port);
+        using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(200));
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => ftp.ConnectAsync(cts.Token));
+    }
+
+    /// <summary>The task's own outcome, or a failed test if it is still running after ten seconds.</summary>
+    private static async Task<T> Within10Seconds<T>(Task<T> task)
+    {
+        var first = await Task.WhenAny(task, Task.Delay(10000));
+        Assert.True(ReferenceEquals(first, task), "still waiting after 10 s: the FTP timeout did not apply");
+        return await task;
+    }
+
+    /// <summary>A task with no result as one with a result, so <see cref="Within10Seconds{T}"/> can take it.</summary>
+    private static async Task<bool> Wrap(Task task)
+    {
+        await task;
+        return true;
+    }
 }
 
 /// <summary>
@@ -242,6 +297,9 @@ internal sealed class FakeFtpServer : IDisposable
     public string StorReply { get; init; } = "150 Opening data connection";
 
     public string MkdReply { get; init; } = "257 Created";
+
+    /// <summary>Takes a STOR's bytes and then never sends the completion reply: a console that stalled mid-upload.</summary>
+    public bool SilentAfterStor { get; init; }
 
     public Dictionary<string, byte[]> Stored { get; } = new(StringComparer.Ordinal);
 
@@ -299,7 +357,7 @@ internal sealed class FakeFtpServer : IDisposable
                     using var buffer = new MemoryStream();
                     await data.GetStream().CopyToAsync(buffer, _cts.Token);
                     Stored[command[5..]] = buffer.ToArray();
-                    await writer.WriteLineAsync("226 Transfer complete");
+                    if (!SilentAfterStor) await writer.WriteLineAsync("226 Transfer complete");
                 }
                 else if (command.StartsWith("RETR ", StringComparison.Ordinal))
                 {

@@ -502,33 +502,77 @@ public sealed class Settings
     [JsonIgnore]
     public string Path { get; private set; } = string.Empty;
 
+    /// <summary>
+    /// Where the file this was meant to be loaded from was copied because it did not parse, or
+    /// null. The client starts on defaults all the same; the copy is there to recover from.
+    /// </summary>
+    [JsonIgnore]
+    public string? BrokenCopy { get; private set; }
+
     /// <summary>In the data folder, which is the user's rather than the release's; see <see cref="AppPaths"/>.</summary>
     public static string DefaultPath => AppPaths.SettingsFile;
 
     public static Settings Load(string? path = null)
     {
         path ??= DefaultPath;
+
+        // A broken settings file must never stop the client from starting. One that cannot be read
+        // at all starts the client on defaults; one that was read but does not parse is kept as
+        // "<name>.broken" first, because the next save would otherwise write over all that was left.
+        string text;
         try
         {
-            if (File.Exists(path))
-            {
-                var loaded = JsonSerializer.Deserialize<Settings>(File.ReadAllText(path));
-                if (loaded is not null)
-                {
-                    loaded.Path = path;
-                    loaded.BringTargetsForward();
-                    loaded.Autosplit.Migrate();
-                    loaded.Firewall.MigrateFrom(loaded.FirewallOffered);
-                    return loaded;
-                }
-            }
+            if (!File.Exists(path)) return new Settings { Path = path };
+            text = File.ReadAllText(path);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // A broken settings file must never stop the client from starting.
+            return new Settings { Path = path };
         }
 
-        return new Settings { Path = path };
+        Settings? loaded;
+        try
+        {
+            loaded = JsonSerializer.Deserialize<Settings>(text);
+        }
+        catch (JsonException)
+        {
+            loaded = null;
+        }
+
+        if (loaded is null) return new Settings { Path = path, BrokenCopy = KeepAside(path) };
+
+        // A section the file sets to null (a hand edit) comes back null whatever its initializer
+        // says, and everything after this, the panels included, takes the sections to be there.
+        loaded.GameSections ??= new();
+        loaded.Firewall ??= new();
+        loaded.Autosplit ??= new();
+        loaded.Updates ??= new();
+
+        loaded.Path = path;
+        loaded.BringTargetsForward();
+        loaded.Autosplit.Migrate();
+        loaded.Firewall.MigrateFrom(loaded.FirewallOffered);
+        return loaded;
+    }
+
+    /// <summary>
+    /// Copies a settings file that did not parse to "<paramref name="path"/>.broken", replacing an
+    /// older copy, and says where it went; null when even the copy could not be made.
+    /// </summary>
+    private static string? KeepAside(string path)
+    {
+        string copy = path + ".broken";
+        try
+        {
+            File.Copy(path, copy, overwrite: true);
+            return copy;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // The client still starts on defaults; there is just nothing to recover from.
+            return null;
+        }
     }
 
     public void Save()
@@ -544,7 +588,7 @@ public sealed class Settings
 
             // The data folder may not exist yet: this is the first thing written into it.
             if (System.IO.Path.GetDirectoryName(Path) is { Length: > 0 } folder) Directory.CreateDirectory(folder);
-            File.WriteAllText(Path, JsonSerializer.Serialize(this, SerializerOptions));
+            AtomicFile.WriteAllText(Path, JsonSerializer.Serialize(this, SerializerOptions));
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1011,7 +1055,10 @@ public sealed class AutosplitSettings
     public void Migrate()
     {
         AutoConnect ??= false;
-        foreach (var settings in Games.Values) settings.Migrate();
+
+        // A hand-edited file can say "games": null, or null for one game; neither may stop a load.
+        Games ??= new();
+        foreach (var settings in Games.Values) settings?.Migrate();
     }
 
     /// <summary>
@@ -1076,7 +1123,7 @@ public sealed class WatchlistStore
     public void Save(string titleId, IEnumerable<SavedWatch> watches, string? name = null)
     {
         Directory.CreateDirectory(Folder);
-        File.WriteAllText(FileFor(titleId, name), JsonSerializer.Serialize(watches.ToList(), SerializerOptions));
+        AtomicFile.WriteAllText(FileFor(titleId, name), JsonSerializer.Serialize(watches.ToList(), SerializerOptions));
     }
 
     public IEnumerable<string> ListFor(string titleId)
@@ -1212,7 +1259,7 @@ public sealed class PositionNameStore
 
         Sort(names);
         Directory.CreateDirectory(Folder);
-        File.WriteAllText(FileFor(game), JsonSerializer.Serialize(names, SerializerOptions));
+        AtomicFile.WriteAllText(FileFor(game), JsonSerializer.Serialize(names, SerializerOptions));
     }
 
     /// <summary>Drops what has been read, so the next question goes back to the files.</summary>
@@ -1472,7 +1519,7 @@ public sealed class ColourPresetStore
     {
         Sort(presets);
         Directory.CreateDirectory(Folder);
-        File.WriteAllText(FileFor(game), JsonSerializer.Serialize(presets, SerializerOptions));
+        AtomicFile.WriteAllText(FileFor(game), JsonSerializer.Serialize(presets, SerializerOptions));
     }
 
     private static void Sort(List<ColourPreset> presets) =>

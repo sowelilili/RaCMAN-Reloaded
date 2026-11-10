@@ -783,6 +783,124 @@ public class SettingsTests
         }
     }
 
+    [Fact]
+    public void ATruncatedFileIsKeptAsideAndTheClientStartsOnDefaults()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "settings.json");
+            const string cut = """{ "theme": "dar""";
+            File.WriteAllText(path, cut);
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal("light", loaded.Theme);
+            Assert.Equal(path, loaded.Path);
+            Assert.True(File.Exists(path + ".broken"));
+            Assert.Equal(cut, File.ReadAllText(path + ".broken"));
+            Assert.Equal(path + ".broken", loaded.BrokenCopy);
+
+            // The next save writes a whole file and leaves the copy alone.
+            loaded.Save();
+
+            Assert.Equal(cut, File.ReadAllText(path + ".broken"));
+            Assert.Equal("light", Settings.Load(path).Theme);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void AnEmptyFileIsKeptAsideToo()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "settings.json");
+            File.WriteAllText(path, string.Empty);
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal("light", loaded.Theme);
+            Assert.True(File.Exists(path + ".broken"));
+            Assert.Equal(string.Empty, File.ReadAllText(path + ".broken"));
+            Assert.Equal(path + ".broken", loaded.BrokenCopy);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ANullSectionLoadsWithThatSectionAtItsDefaults()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "settings.json");
+            File.WriteAllText(path, """{ "theme": "dark", "autosplit": null, "firewall": null, "updates": null, "gameSections": null }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.Equal("dark", loaded.Theme);
+            Assert.NotNull(loaded.Autosplit);
+            Assert.NotNull(loaded.Firewall);
+            Assert.NotNull(loaded.Updates);
+            Assert.NotNull(loaded.GameSections);
+            Assert.Null(loaded.BrokenCopy);
+            Assert.False(File.Exists(path + ".broken"));
+
+            loaded.Save();
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ANullGamesTableInTheAutosplitSectionLoads()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "settings.json");
+            File.WriteAllText(path, """{ "autosplit": { "games": null } }""");
+
+            var loaded = Settings.Load(path);
+
+            Assert.NotNull(loaded.Autosplit.Games);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void ASaveLeavesNoTemporaryFileBehind()
+    {
+        var folder = TempFolder();
+        try
+        {
+            string path = Path.Combine(folder, "settings.json");
+            var settings = Settings.Load(path);
+            settings.Theme = "dark";
+            settings.Save();
+
+            Assert.True(File.Exists(path));
+            Assert.DoesNotContain(Directory.GetFiles(folder), file => file.EndsWith(".racman-tmp", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     private static string TempFolder()
     {
         var folder = Path.Combine(Path.GetTempPath(), "racman-settings-" + Guid.NewGuid().ToString("N"));

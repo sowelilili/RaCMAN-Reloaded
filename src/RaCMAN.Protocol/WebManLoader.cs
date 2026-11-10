@@ -372,8 +372,16 @@ public sealed class FtpSession : IDisposable
         _password = password;
     }
 
-    /// <summary>Applied to both the control and the data socket, so a wedged console cannot hang a request forever.</summary>
+    /// <summary>
+    /// How long each step of the session may take (a connect, one line of a reply, one chunk of a
+    /// transfer) before it fails with an <see cref="IOException"/>, so a wedged console cannot hang
+    /// a request forever. It bounds steps, not whole operations: a slow link that keeps moving is
+    /// not a wedged console.
+    /// </summary>
     public TimeSpan Timeout { get; set; } = TimeSpan.FromSeconds(30);
+
+    /// <summary>The most a transfer moves under one <see cref="Timeout"/>.</summary>
+    private const int TransferChunk = 16384;
 
     public async Task ConnectAsync(CancellationToken cancellationToken = default)
     {
@@ -383,7 +391,12 @@ public sealed class FtpSession : IDisposable
             ReceiveTimeout = (int)Timeout.TotalMilliseconds,
         };
 
-        await _control.ConnectAsync(_host, _port, cancellationToken).ConfigureAwait(false);
+        var control = _control;
+        await TimedAsync("connecting", async token =>
+        {
+            await control.ConnectAsync(_host, _port, token).ConfigureAwait(false);
+            return true;
+        }, cancellationToken).ConfigureAwait(false);
         var stream = _control.GetStream();
         _reader = new StreamReader(stream, Encoding.ASCII, false, 1024, leaveOpen: true);
         _writer = new StreamWriter(stream, Encoding.ASCII, 1024, leaveOpen: true) { AutoFlush = true, NewLine = "\r\n" };
@@ -406,8 +419,24 @@ public sealed class FtpSession : IDisposable
 
         await using (var dataStream = dataClient.GetStream())
         {
-            await dataStream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
-            await dataStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            // A chunk at a time, each under its own deadline, so a big file on a slow link is not
+            // cut off while its bytes are still moving.
+            for (int offset = 0; offset < data.Length; offset += TransferChunk)
+            {
+                int start = offset;
+                int count = Math.Min(TransferChunk, data.Length - offset);
+                await TimedAsync("sending the file", async token =>
+                {
+                    await dataStream.WriteAsync(data.AsMemory(start, count), token).ConfigureAwait(false);
+                    return true;
+                }, cancellationToken).ConfigureAwait(false);
+            }
+
+            await TimedAsync("sending the file", async token =>
+            {
+                await dataStream.FlushAsync(token).ConfigureAwait(false);
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
         }
 
         var done = await ReadReplyAsync(cancellationToken).ConfigureAwait(false);
@@ -426,7 +455,17 @@ public sealed class FtpSession : IDisposable
         using var buffer = new MemoryStream();
         await using (var dataStream = dataClient.GetStream())
         {
-            await dataStream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
+            // Read by read rather than one copy, for the same reason as the chunks of an upload.
+            var chunk = new byte[TransferChunk];
+            while (true)
+            {
+                int read = await TimedAsync(
+                    "receiving the file",
+                    token => dataStream.ReadAsync(chunk, token).AsTask(),
+                    cancellationToken).ConfigureAwait(false);
+                if (read == 0) break;
+                buffer.Write(chunk, 0, read);
+            }
         }
 
         var done = await ReadReplyAsync(cancellationToken).ConfigureAwait(false);
@@ -457,7 +496,11 @@ public sealed class FtpSession : IDisposable
 
         try
         {
-            await client.ConnectAsync(advertised, port, cancellationToken).ConfigureAwait(false);
+            await TimedAsync("opening the data connection", async token =>
+            {
+                await client.ConnectAsync(advertised, port, token).ConfigureAwait(false);
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
             return client;
         }
         catch (SocketException) when (!string.Equals(advertised, _host, StringComparison.Ordinal))
@@ -471,7 +514,11 @@ public sealed class FtpSession : IDisposable
                 ReceiveTimeout = (int)Timeout.TotalMilliseconds,
             };
 
-            await retry.ConnectAsync(_host, port, cancellationToken).ConfigureAwait(false);
+            await TimedAsync("opening the data connection", async token =>
+            {
+                await retry.ConnectAsync(_host, port, token).ConfigureAwait(false);
+                return true;
+            }, cancellationToken).ConfigureAwait(false);
             return retry;
         }
     }
@@ -512,7 +559,11 @@ public sealed class FtpSession : IDisposable
     private async Task<(int Code, string Text)> CommandAsync(string command, CancellationToken cancellationToken)
     {
         var writer = _writer ?? throw new InvalidOperationException("FTP session is not connected");
-        await writer.WriteLineAsync(command.AsMemory(), cancellationToken).ConfigureAwait(false);
+        await TimedAsync("sending a command", async token =>
+        {
+            await writer.WriteLineAsync(command.AsMemory(), token).ConfigureAwait(false);
+            return true;
+        }, cancellationToken).ConfigureAwait(false);
         return await ReadReplyAsync(cancellationToken).ConfigureAwait(false);
     }
 
@@ -527,7 +578,9 @@ public sealed class FtpSession : IDisposable
 
         while (true)
         {
-            var line = await ReadLineAsync(reader, cancellationToken).ConfigureAwait(false);
+            // The deadline is per line, not per reply: a long multi-line reply that keeps coming is
+            // a console that is answering.
+            var line = await TimedAsync("waiting for a reply", token => ReadLineAsync(reader, token), cancellationToken).ConfigureAwait(false);
             if (line.Length < 4 || !int.TryParse(line.AsSpan(0, 3), NumberStyles.Integer, CultureInfo.InvariantCulture, out int code))
             {
                 continue;
@@ -538,7 +591,7 @@ public sealed class FtpSession : IDisposable
             string terminator = line[..3] + " ";
             while (true)
             {
-                var next = await ReadLineAsync(reader, cancellationToken).ConfigureAwait(false);
+                var next = await TimedAsync("waiting for a reply", token => ReadLineAsync(reader, token), cancellationToken).ConfigureAwait(false);
                 if (next.StartsWith(terminator, StringComparison.Ordinal)) return (code, next);
             }
         }
@@ -548,6 +601,26 @@ public sealed class FtpSession : IDisposable
     {
         var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
         return line ?? throw new IOException("FTP connection closed");
+    }
+
+    /// <summary>
+    /// One step of FTP I/O under <see cref="Timeout"/>. The socket timeouts set on each TcpClient
+    /// apply to synchronous reads and writes only, and nothing here is synchronous, so this is
+    /// what keeps a console that accepted the connection and then stopped answering from being
+    /// waited on for ever. The caller's own cancellation stays a cancellation.
+    /// </summary>
+    private async Task<T> TimedAsync<T>(string doing, Func<CancellationToken, Task<T>> step, CancellationToken cancellationToken)
+    {
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(Timeout);
+        try
+        {
+            return await step(deadline.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            throw new IOException($"FTP timed out after {Timeout.TotalSeconds:0.#} s {doing}");
+        }
     }
 
     public void Dispose()
