@@ -12,6 +12,8 @@ Download the newest release from the [releases page](https://github.com/sowelili
 
 **Install without a PC**: download `qwark-installer.pkg` and install it on the console with Package Manager. Run **qwark installer** once. It installs the module and restarts the console.
 
+The console installer also adds the mods and premade savefiles that come with the client, so your console has them without a PC: the mods appear on the Trainer menu's **Mods** page and the premade saves in the save files menu's **(premade savefiles)** category. It only adds what your console does not have yet. A mod or save file that is already on your console, whether the client sent it or you changed it, is skipped and stays as it is, and the installer tells you how many it skipped. To get a fresh copy of one, delete yours first.
+
 ## Connect to a PS3
 
 1. Start the console and make sure webMAN runs on it.
