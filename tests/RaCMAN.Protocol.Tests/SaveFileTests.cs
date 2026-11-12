@@ -1619,18 +1619,52 @@ public class SaveFileTests : IDisposable
     }
 
     [Fact]
-    public void AFileWithASuffixOfItsOwnIsNobodysBusiness()
+    public void AFileWithASuffixOfItsOwnIsNobodysBusinessAndNotASave()
     {
         var library = new SaveFileLibrary(_root);
-        WriteRaw(library, "misc", "veldin.sav.sum", 1);
-        WriteRaw(library, "misc", "notes.txt", 2);
-        WriteRaw(library, "misc", "veldin.bak", 3);
-        WriteRaw(library, "misc", "veldin.sav" + SaveFileLibrary.PartialExtension, 4);
+        library.Write(Title, "misc", "veldin.sav", new byte[] { 9 });
+        var others = new[] { "notes.txt", "veldin.bak", "veldin.sav" + SaveFileLibrary.PartialExtension };
+        for (int i = 0; i < others.Length; i++) WriteRaw(library, "misc", others[i], (byte)i);
 
+        // Not renamed, not deleted, and not listed: only a .sav is a save, as on the console.
         Assert.Empty(library.EnsureExtensions(Title, "misc"));
-        Assert.Equal(
-            new[] { "notes.txt", "veldin.bak", "veldin.sav.part", "veldin.sav.sum" },
-            library.Files(Title, "misc"));
+        Assert.Equal(new[] { "veldin.sav" }, library.Files(Title, "misc"));
+        Assert.Equal(new[] { "veldin.sav" }, library.FilesWithCrc(Title, "misc").Select(f => f.Name).ToArray());
+        for (int i = 0; i < others.Length; i++)
+        {
+            Assert.Equal(new[] { (byte)i }, File.ReadAllBytes(Path.Combine(library.CategoryFolder(Title, "misc"), others[i])));
+        }
+    }
+
+    [Theory]
+    [InlineData("veldin.sav", true)]
+    [InlineData("veldin.SAV", true)]
+    [InlineData("veldin.100.sav", true)]
+    [InlineData(".sav", false)]
+    [InlineData("veldin", false)]
+    [InlineData("veldin.sav.sum", false)]
+    [InlineData("veldin.sav.part", false)]
+    [InlineData("veldin.savx", false)]
+    [InlineData(null, false)]
+    public void OnlyANameEndingInSavIsASave(string? name, bool save)
+    {
+        Assert.Equal(save, SaveFileLibrary.IsSaveName(name));
+    }
+
+    [Theory]
+    [InlineData("veldin.sav.sum", true)]
+    [InlineData("veldin.SAV.SUM", true)]
+    [InlineData("a.sav.sum", true)]
+    [InlineData(".sav.sum", false)]
+    [InlineData("qwark.sum", false)]
+    [InlineData("veldin.sum", false)]
+    [InlineData("veldin.sav", false)]
+    [InlineData("veldin.sav.sum.txt", false)]
+    [InlineData("veldinsav.sum", false)]
+    [InlineData(null, false)]
+    public void OnlyAWholeSavSumIsTheConsolesSidecar(string? name, bool sidecar)
+    {
+        Assert.Equal(sidecar, SaveFileLibrary.IsSumSidecarName(name));
     }
 
     [Fact]
@@ -1643,7 +1677,8 @@ public class SaveFileTests : IDisposable
         try
         {
             Assert.Empty(library.EnsureExtensions(Title, "misc"));
-            Assert.Equal(new[] { "housekeeping" }, library.Files(Title, "misc"));
+            Assert.Empty(library.Files(Title, "misc"));
+            Assert.True(File.Exists(path));
         }
         finally
         {

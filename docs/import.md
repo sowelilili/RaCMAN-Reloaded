@@ -12,7 +12,7 @@ The save files and the mods are files on this PC, so they are imported whether o
 
 The old folder is never changed and nothing already in your data folder is overwritten.
 
-**Save files.** Every file under `savefiles/<TITLEID>/<category>/` is copied into the same category here. The old client let a save have any name at all, and this one needs `.sav`, so a name without a suffix gets one. A save whose bytes are already in that category is not copied again, whatever either copy is called. If the name is taken by a different save, the new one arrives as `<name> (2).sav`.
+**Save files.** Every file under `savefiles/<TITLEID>/<category>/` is copied into the same category here, except the `<name>.sav.sum` files a folder copied straight off a console has beside each save: those are the console's own checksums, and the client has no use for them. The old client let a save have any name at all, and this one needs `.sav`, so a name without a suffix gets one. A save whose bytes are already in that category is not copied again, whatever either copy is called. If the name is taken by a different save, the new one arrives as `<name> (2).sav`.
 
 **Mods.** A mod is its whole folder, so whole folders are compared. One that ships with this client already, byte for byte, is not copied. Neither is one you already have, whatever folder name you have it under. If you have a folder of that name holding something else, the old mod arrives beside it as `<modfolder> (imported)`, because the folder name is the name the console loads a mod by and only one mod can have it. Both are then in your mod list and you can see which you want.
 
@@ -38,4 +38,4 @@ The list is a plain text file, `data/legacy-mod-exclusions.txt` beside the clien
 
 ## Save files copied by hand
 
-You do not have to use the import. If you copy an old `savefiles` folder into the data folder yourself, the client puts the suffix on the files the first time it opens that game's save file list, and says how many it renamed. A file that already has a suffix of its own — a `.txt`, a `.bak` — is left alone, because it is not a save.
+You do not have to use the import. If you copy an old `savefiles` folder into the data folder yourself, the client puts the suffix on the files the first time it opens that game's save file list, and says how many it renamed. A file that already has a suffix of its own — a `.txt`, a `.bak` — is left alone, because it is not a save, and the list only shows files ending in `.sav`. The one exception is a console's `<name>.sav.sum` checksum file, which the client deletes when it opens the list.

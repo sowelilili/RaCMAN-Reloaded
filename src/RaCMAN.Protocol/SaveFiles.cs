@@ -57,6 +57,34 @@ public sealed class SaveFileLibrary : ISaveFileSource
             : trimmed;
     }
 
+    /// <summary>
+    /// Whether a file in a category is a save: its name ends in <see cref="Extension"/> and has
+    /// something in front of it. This is qwark's own rule (has_sav_ext in src/core/savefile.c), so
+    /// the PC lists exactly what the console would, and nothing else in the folder - a
+    /// <c>.sav.sum</c>, a <c>.part</c>, a <c>.txt</c> - is ever a row. The suffix is matched without
+    /// regard to case, as <see cref="EnsureExtension"/> and <see cref="DisplayName"/> match it.
+    /// </summary>
+    public static bool IsSaveName(string? fileName) =>
+        fileName is not null
+        && fileName.Length > Extension.Length
+        && fileName.EndsWith(Extension, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What the console calls the CRC sidecar it keeps beside a save: <c>&lt;name&gt;.sav.sum</c>
+    /// (PROTOCOL.md section 5.13).
+    /// </summary>
+    public const string SumSidecarExtension = Extension + QwarkClient.SaveFileSumExtension;
+
+    /// <summary>
+    /// Whether a file is one of the console's <c>&lt;name&gt;.sav.sum</c> sidecars, and nothing
+    /// else: the whole <c>.sav.sum</c> at the end, with a name in front of it. A plain <c>.sum</c>,
+    /// a mod's <c>qwark.sum</c>, a <c>.sav.sum.txt</c> are not.
+    /// </summary>
+    public static bool IsSumSidecarName(string? fileName) =>
+        fileName is not null
+        && fileName.Length > SumSidecarExtension.Length
+        && fileName.EndsWith(SumSidecarExtension, StringComparison.OrdinalIgnoreCase);
+
     public SaveFileLibrary(string rootPath)
     {
         RootPath = rootPath;
@@ -102,9 +130,9 @@ public sealed class SaveFileLibrary : ISaveFileSource
     /// both this listing and the console's loader want the suffix. Every scan of a category does
     /// this first, so a save copied in by hand loads rather than sitting there doing nothing.
     /// <para>
-    /// Only a file with no suffix of its own is touched: a <c>.sum</c>, a <c>.bak</c>, a
-    /// <c>.txt</c> beside a save is somebody else's file and is left exactly as it is, and so is
-    /// anything hidden. Where <c>&lt;name&gt;.sav</c> is already there the two are compared — the
+    /// Only a file with no suffix of its own is touched: a <c>.bak</c>, a <c>.txt</c> beside a save
+    /// is somebody else's file and is left exactly as it is (and not listed), and so is anything
+    /// hidden. The console's <c>.sav.sum</c> sidecars are <see cref="DropSumSidecars"/>'s. Where <c>&lt;name&gt;.sav</c> is already there the two are compared — the
     /// same bytes twice is one save and the extension-less copy goes, different bytes are two saves
     /// and the copy lands as <c>&lt;name&gt; (2).sav</c>. Nothing is ever overwritten, and a second
     /// run finds nothing left to do.
@@ -206,16 +234,54 @@ public sealed class SaveFileLibrary : ISaveFileSource
         }
     }
 
+    /// <summary>
+    /// Deletes the console's <c>&lt;name&gt;.sav.sum</c> sidecars from a category of the PC's
+    /// library, and nothing else. The PC has no use for one: the client sums its own copy of every
+    /// save to compare against SAVEFILE_LIST, and writes the console's sidecar from the bytes it
+    /// uploads. One only gets here in a bundle somebody copied straight off a console's
+    /// <c>/dev_hdd0/qwark/savefiles/</c>, and it would sit beside the save it sums forever. Every
+    /// scan of a category does this first. Returns how many went.
+    /// </summary>
+    public int DropSumSidecars(string titleId, string category)
+    {
+        var folder = CategoryFolder(titleId, category);
+        if (!Directory.Exists(folder)) return 0;
+
+        int dropped = 0;
+        foreach (var path in Directory.GetFiles(folder))
+        {
+            if (!IsSumSidecarName(Path.GetFileName(path))) continue;
+
+            try
+            {
+                File.Delete(path);
+                dropped++;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                // One something else has open, or a read-only one, stays; it is never listed, and
+                // the next scan tries again.
+            }
+        }
+
+        return dropped;
+    }
+
+    /// <summary>
+    /// The saves in a category, sorted: only <see cref="IsSaveName"/> files, after the scan has
+    /// dropped the console's sidecars and put the suffix on any extension-less file.
+    /// </summary>
     public string[] Files(string titleId, string category)
     {
         var folder = CategoryFolder(titleId, category);
         if (!Directory.Exists(folder)) return Array.Empty<string>();
 
+        DropSumSidecars(titleId, category);
         EnsureExtensions(titleId, category);
 
         return Directory.EnumerateFiles(folder)
             .Select(Path.GetFileName)
-            .Where(n => !string.IsNullOrEmpty(n))
+            .Where(IsSaveName)
             .Select(n => n!)
             .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -225,8 +291,8 @@ public sealed class SaveFileLibrary : ISaveFileSource
         File.ReadAllBytes(FilePath(titleId, category, name));
 
     /// <summary>
-    /// Every file in a category with its size and its CRC32, which is what the merge view compares
-    /// against the console's listing.
+    /// Every save in a category (<see cref="Files"/>) with its size and its CRC32, which is what the
+    /// merge view compares against the console's listing.
     /// <para>
     /// The CRC is cached per path against the file's length and last-write time, so a rescan of a
     /// category holding twenty 2 MB saves reads them once rather than on every keystroke that
@@ -238,13 +304,14 @@ public sealed class SaveFileLibrary : ISaveFileSource
         var folder = CategoryFolder(titleId, category);
         if (!Directory.Exists(folder)) return Array.Empty<LocalSaveFile>();
 
+        DropSumSidecars(titleId, category);
         EnsureExtensions(titleId, category);
 
         var files = new List<LocalSaveFile>();
         foreach (var path in Directory.EnumerateFiles(folder))
         {
             var name = Path.GetFileName(path);
-            if (string.IsNullOrEmpty(name)) continue;
+            if (!IsSaveName(name)) continue;
 
             var info = new FileInfo(path);
             files.Add(new LocalSaveFile(name, info.Length, CachedCrc(path, info)));
@@ -500,11 +567,10 @@ public static class SaveFileMerge
 
         foreach (var file in pc ?? Enumerable.Empty<LocalSaveFile>())
         {
-            if (string.IsNullOrEmpty(file.Name)) continue;
-
-            // The PC keeps .part files while a mirror is being written and nothing else; they are
-            // not saves and must never show up as one.
-            if (file.Name.EndsWith(SaveFileLibrary.PartialExtension, StringComparison.OrdinalIgnoreCase)) continue;
+            // Only a .sav is a save, which is all the console ever lists too: a .part a mirror is
+            // being written through, a .sav.sum copied off a console, anything else in the folder
+            // must never show up as one.
+            if (!SaveFileLibrary.IsSaveName(file.Name)) continue;
 
             rows[file.Name] = rows.TryGetValue(file.Name, out var existing)
                 ? existing with { OnPc = true, PcCrc = file.Crc, PcSize = file.Size }

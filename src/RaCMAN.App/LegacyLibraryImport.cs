@@ -204,7 +204,7 @@ public static class LegacyLibraryImport
                 {
                     foreach (var category in title.GetDirectories())
                     {
-                        int files = category.GetFiles().Length;
+                        int files = category.GetFiles().Count(IsImportable);
                         if (files == 0) continue;
 
                         saves += files;
@@ -283,8 +283,9 @@ public static class LegacyLibraryImport
     // ---------------------------------------------------------------- save files
 
     /// <summary>
-    /// Every file under <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c>, into the same category
-    /// of this client's library. A save is its bytes and not its name, so a file already here under
+    /// Every file under <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c> but the console's
+    /// <c>.sav.sum</c> sidecars (<see cref="IsImportable"/>), into the same category of this
+    /// client's library. A save is its bytes and not its name, so a file already here under
     /// any name at all is not imported a second time.
     /// </summary>
     private static void CopySaves(string source, string root, Tally tally)
@@ -297,7 +298,7 @@ public static class LegacyLibraryImport
         {
             foreach (var category in title.GetDirectories())
             {
-                var files = category.GetFiles();
+                var files = category.GetFiles().Where(IsImportable).ToArray();
                 if (files.Length == 0) continue;
 
                 string folder;
@@ -319,10 +320,20 @@ public static class LegacyLibraryImport
         }
     }
 
+    /// <summary>
+    /// Whether a file in an old category is one the import brings over. Hidden and system files
+    /// are not, and neither is the console's <c>&lt;name&gt;.sav.sum</c> CRC sidecar, which a folder
+    /// copied straight off a console's <c>/dev_hdd0/qwark/savefiles/</c> has beside every save: this
+    /// client sums its own copies and writes the console's sidecar from the bytes it uploads, so one
+    /// on the PC is never read and never listed. Everything else is a save to the old client, which
+    /// listed every file in the folder.
+    /// </summary>
+    private static bool IsImportable(FileInfo file) =>
+        (file.Attributes & (FileAttributes.Hidden | FileAttributes.System)) == 0
+        && !SaveFileLibrary.IsSumSidecarName(file.Name);
+
     private static void CopySave(FileInfo file, string folder, Dictionary<(long, uint), List<string>> here, Tally tally)
     {
-        if ((file.Attributes & (FileAttributes.Hidden | FileAttributes.System)) != 0) return;
-
         try
         {
             var data = File.ReadAllBytes(file.FullName);
