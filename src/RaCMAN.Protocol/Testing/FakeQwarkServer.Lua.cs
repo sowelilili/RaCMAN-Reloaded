@@ -118,6 +118,7 @@ public sealed partial class FakeQwarkServer
     /// and Infinite health are no longer LIVE, so they have an "on boot" box; God Ratchet still is.
     /// Revision 1.29: the cutscene cache, Cache cutscenes (19, naming readout 3 as its status
     /// readout, with qwark's id, which the client's status line keys on) and its two toggles.
+    /// 2026-11-12: Remove black screens (24), a cheat in Cheats, after God Ratchet.
     /// </summary>
     public static DescribeResult TodDescribe() => new(
         GameId.Tod,
@@ -130,6 +131,7 @@ public sealed partial class FakeQwarkServer
             new Feature(0, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite ammo"),
             new Feature(1, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Infinite health"),
             new Feature(16, FeatureKind.Toggle, 0, 0, FeatureFlags.Live, 0xFF, 0, 0, "God Ratchet"),
+            new Feature(24, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Remove black screens"),
             new Feature(19, FeatureKind.Action, 0, 0, FeatureFlags.None, 3, 0, 0, "Cache cutscenes"),
             new Feature(20, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Cache cutscenes on reset"),
             new Feature(21, FeatureKind.Toggle, 0, 0, FeatureFlags.None, 0xFF, 0, 0, "Disable cutscene caching"),

@@ -182,6 +182,7 @@
       },
       "tooltips": {
         "Remove cutscenes": "Disables unskippable cutscenes, without deleting them from the game's files. This option is legal for speedruns.",
+        "Remove black screens": "Practice tool: removes the black screen before a planet's opening cutscene, while Ratchet can already move, so you can see your setups. Not legal for speedruns.",
         "Cache cutscenes": "Sets up cutscene caching: loads the first few planets' cutscene audio into the game's cache, so their opening cutscenes play sooner.",
         "Cache cutscenes on reset": "Automatically set up cutscene caching on a new run.",
         "Disable cutscene caching": "Practice tool: disables cutscene caching when loading a planet, simulating a run."
