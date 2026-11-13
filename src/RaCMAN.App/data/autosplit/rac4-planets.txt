@@ -1,8 +1,8 @@
 null
 qual,containment,dreadzone,interior,marauder,avenger,crusader,vindicator,liberator,liberal,interior,control
-cata,4,four
+cata,4,four,catacrom
 null
-sara
+sara,sarathos
 kronos
 shaar
 valix
@@ -11,6 +11,6 @@ null
 torval
 stygia
 null
-mara
+mara,maraxus
 ghost,station
 interior,control

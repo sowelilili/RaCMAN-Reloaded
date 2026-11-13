@@ -331,22 +331,39 @@ public sealed class SaveFileLibrary : ISaveFileSource
 
     private uint CachedCrc(string path, FileInfo info)
     {
-        if (_crcCache.TryGetValue(path, out var cached)
-            && cached.Length == info.Length && cached.Written == info.LastWriteTimeUtc)
+        lock (_crcCache)
         {
-            return cached.Crc;
+            if (_crcCache.TryGetValue(path, out var cached)
+                && cached.Length == info.Length && cached.Written == info.LastWriteTimeUtc)
+            {
+                return cached.Crc;
+            }
         }
 
         uint crc = Crc32.Compute(File.ReadAllBytes(path));
-        _crcCache[path] = (info.Length, info.LastWriteTimeUtc, crc);
+        lock (_crcCache) _crcCache[path] = (info.Length, info.LastWriteTimeUtc, crc);
         return crc;
+    }
+
+    /// <summary>
+    /// Forgets a file's cached CRC. Every write through the library does this: a save written over
+    /// another of the same length (every save of one game is one length) within the clock's
+    /// resolution of it would otherwise keep the old file's CRC, and the row would claim the two
+    /// sides differ. Writes happen on the network side and listings on the render thread, hence
+    /// the lock.
+    /// </summary>
+    private void Forget(string path)
+    {
+        lock (_crcCache) _crcCache.Remove(path);
     }
 
     public string Write(string titleId, string category, string name, byte[] data)
     {
         EnsureCategory(titleId, category);
         var path = FilePath(titleId, category, name);
+        Forget(path);
         File.WriteAllBytes(path, data);
+        Forget(path);
         return path;
     }
 
@@ -369,7 +386,9 @@ public sealed class SaveFileLibrary : ISaveFileSource
         try
         {
             File.WriteAllBytes(partial, data);
+            Forget(path);
             File.Move(partial, path, overwrite: true);
+            Forget(path);
         }
         catch
         {
@@ -392,6 +411,7 @@ public sealed class SaveFileLibrary : ISaveFileSource
     {
         var path = FilePath(titleId, category, name);
         if (File.Exists(path)) File.Delete(path);
+        Forget(path);
     }
 
     public void Rename(string titleId, string category, string from, string to)
@@ -401,6 +421,8 @@ public sealed class SaveFileLibrary : ISaveFileSource
         if (string.Equals(source, destination, StringComparison.Ordinal)) return;
         if (File.Exists(destination)) throw new IOException($"'{Path.GetFileName(destination)}' already exists");
         File.Move(source, destination);
+        Forget(source);
+        Forget(destination);
     }
 
     /// <summary>
@@ -945,6 +967,41 @@ public static class SaveFileTransfer
         var data = await client.ReadFileAsync(path, bytes, cancellationToken).ConfigureAwait(false);
 
         return library.WriteAtomic(titleId, category, name, data);
+    }
+
+    /// <summary>
+    /// The game's current state stored over an existing save, under the name and in the category it
+    /// already has: a <see cref="StoreAsync"/> to that name, refused, waited on and mirrored exactly
+    /// as a save is, so the console writes the new file and its sidecar and the next listing has
+    /// the new CRC.
+    /// <para>
+    /// One difference: a save this PC already has a copy of is always mirrored down, even with
+    /// mirroring off. Left alone, that copy would be the old save, the row would say the two sides
+    /// differ, and the next load would send the old bytes back over the new ones, since this PC's
+    /// copy is the one a load sends when they differ (<see cref="SaveFileMerge.PlanLoad"/>). A
+    /// store the console refuses touches neither side.
+    /// </para>
+    /// </summary>
+    public static async Task<string> OverrideAsync(
+        QwarkClient client,
+        SaveFileLibrary library,
+        string titleId,
+        string category,
+        SaveFileEntry entry,
+        bool mirror,
+        TimeSpan? timeout = null,
+        IProgress<string>? status = null,
+        IProgress<long>? bytes = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (PremadeSaveFiles.IsCategory(category)) throw PremadeSaveFiles.ReadOnly("nothing can be saved into them");
+
+        // A name the console would refuse is refused here, before anything is raised at the game.
+        if (SaveFileNames.Problem(entry.Name, file: true) is { } problem) throw new IOException(problem);
+
+        return await StoreAsync(client, library, titleId, category, entry.Name, mirror || entry.OnPc,
+                timeout, status, bytes, cancellationToken)
+            .ConfigureAwait(false);
     }
 
     /// <summary>

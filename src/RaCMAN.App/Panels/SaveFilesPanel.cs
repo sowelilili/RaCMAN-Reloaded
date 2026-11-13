@@ -49,7 +49,7 @@ public static class SaveFilesPanel
     /// A save picked from a row's menu, with the title and category it was listed under, so the
     /// answer acts on the file that was asked about even if the list has moved on meanwhile.
     /// </summary>
-    private sealed record FileQuestion(SaveFileEntry Entry, string Title, string Category);
+    public sealed record FileQuestion(SaveFileEntry Entry, string Title, string Category);
 
     /// <summary>The rename the user picked from a row's menu, waiting for a new name.</summary>
     private static FileQuestion? _pendingRename;
@@ -66,9 +66,17 @@ public static class SaveFilesPanel
     /// <summary>The question the delete dialog was last opened for, so it is opened once per question.</summary>
     private static FileQuestion? _shownDelete;
 
+    /// <summary>The override the user picked from a row's menu, waiting for the answer to its question.</summary>
+    private static FileQuestion? _pendingOverride;
+
+    /// <summary>The question the override dialog was last opened for, so it is opened once per question.</summary>
+    private static FileQuestion? _shownOverride;
+
     private const string RenameId = "###savefiles-rename";
 
     private const string DeleteId = "###savefiles-delete";
+
+    private const string OverrideId = "###savefiles-override";
 
     /// <summary>Seconds since SAVEFILE_INFO was last re-read while it said the helper had not run.</summary>
     private static float _sinceInfo;
@@ -149,6 +157,7 @@ public static class SaveFilesPanel
     {
         _pendingRename = null;
         _pendingDelete = null;
+        _pendingOverride = null;
     }
 
     private static string Category =>
@@ -193,14 +202,9 @@ public static class SaveFilesPanel
         var load = state.Describe.LoadAsideAction;
         var info = state.SaveFile;
 
-        // The console is the authority on whether it has a helper for this game: the flagged
-        // ACTIONs say a game asks for one, SAVEFILE_INFO says whether there is one to ask.
-        bool hasHelper = info.Supported && save is not null && load is not null;
-
-        // Under RPCS3 the helper is in the game only when the RPCS3 patch put it there at this
-        // boot; without it saving and loading are refused, so they are greyed out.
+        bool hasHelper = HasHelper(state);
         bool helperIn = HelperIn(session, info);
-        bool enabled = state.Ingame && hasHelper && helperIn && !_busy;
+        bool enabled = Ready(state);
 
         // INFO only observes the helper. An action installs it on demand; transfers poll INFO
         // themselves without updating this snapshot. Refresh until the helper is running so
@@ -313,8 +317,39 @@ public static class SaveFilesPanel
         {
             DrawRenameQuestion(state);
             DrawDeleteQuestion(state);
+            DrawOverrideQuestion(state);
         }
     }
+
+    /// <summary>
+    /// Whether the game asks for a savefile helper and the console has one to ask: the flagged
+    /// ACTIONs say the first, SAVEFILE_INFO the second. The console is the authority.
+    /// </summary>
+    private static bool HasHelper(AppState state) =>
+        state.SaveFile.Supported && state.Describe.SaveAsideAction is not null && state.Describe.LoadAsideAction is not null;
+
+    /// <summary>
+    /// Whether a save or a load can be asked for now: INGAME, a helper for the game, the helper in
+    /// the game (under RPCS3 only once the RPCS3 patch put it there at this boot, <see cref="HelperIn"/>;
+    /// without it saving and loading are refused, so they are greyed out), and nothing else of this
+    /// panel's under way.
+    /// </summary>
+    private static bool Ready(AppState state) =>
+        state.Ingame && HasHelper(state) && HelperIn(state.Session, state.SaveFile) && !_busy;
+
+    /// <summary>
+    /// The one rule for storing the game's state into a file, which Save on console and a row's
+    /// Override both go by: the panel is <paramref name="ready"/>, the game has a set-aside action,
+    /// the category is not the read-only premade one, and <paramref name="fileName"/> (the whole
+    /// name, .sav and all) is one the console takes.
+    /// </summary>
+    public static bool CanStore(bool ready, Feature? save, string category, string? fileName) =>
+        ready && save is not null && !IsReadOnly(category)
+        && !string.IsNullOrWhiteSpace(fileName) && SaveFileNames.Problem(fileName, file: true) is null;
+
+    /// <summary>Whether a row's Override can be offered for <paramref name="entry"/> in <paramref name="category"/> now.</summary>
+    public static bool CanOverride(AppState state, SaveFileEntry entry, string category) =>
+        CanStore(Ready(state), state.Describe.SaveAsideAction, category, entry.Name);
 
     private static void DrawCategoryRow(AppState state, string title)
     {
@@ -512,6 +547,13 @@ public static class SaveFilesPanel
         if (ImGui.MenuItem("Delete...", "Delete", false, !_busy)) AskDelete(entry, title);
         if (_busy) Ui.Tooltip(busyReason);
 
+        // The game's current state over this save, under the rule Save on console goes by.
+        bool canOverride = CanOverride(state, entry, Category);
+        if (ImGui.MenuItem("Override...", null, false, canOverride)) AskOverride(entry, title, Category);
+        Ui.Tooltip(canOverride ? "Replace this save with the game's current state."
+            : _busy ? busyReason
+            : SaveFileNames.Problem(entry.Name, file: true) ?? "Saving is not possible right now.");
+
         ImGui.EndPopup();
     }
 
@@ -569,6 +611,7 @@ public static class SaveFilesPanel
     private static void AskRename(SaveFileEntry entry, string title)
     {
         _pendingDelete = null;
+        _pendingOverride = null;
         _pendingRename = new FileQuestion(entry, title, Category);
         _renameTo = entry.DisplayName;
     }
@@ -576,7 +619,34 @@ public static class SaveFilesPanel
     private static void AskDelete(SaveFileEntry entry, string title)
     {
         _pendingRename = null;
+        _pendingOverride = null;
         _pendingDelete = new FileQuestion(entry, title, Category);
+    }
+
+    /// <summary>
+    /// A row's Override: it only asks its question, as Delete does, since the save it replaces is
+    /// gone once the console has stored over it. Nothing is sent until <see cref="ConfirmOverride"/>.
+    /// </summary>
+    public static FileQuestion AskOverride(SaveFileEntry entry, string title, string category)
+    {
+        _pendingRename = null;
+        _pendingDelete = null;
+        var question = new FileQuestion(entry, title, category);
+        _pendingOverride = question;
+        return question;
+    }
+
+    /// <summary>
+    /// The yes to an override's question: stores the game's state over the save it named when
+    /// storing is still possible (<see cref="CanOverride"/>), and says whether it started.
+    /// </summary>
+    public static bool ConfirmOverride(AppState state, FileQuestion question)
+    {
+        if (ReferenceEquals(_pendingOverride, question)) _pendingOverride = null;
+        if (!CanOverride(state, question.Entry, question.Category)) return false;
+
+        StartOverride(state, question.Title, question.Category, question.Entry);
+        return true;
     }
 
     // ---------------------------------------------------------------- the two questions
@@ -652,6 +722,13 @@ public static class SaveFilesPanel
         SaveFileLocation.Console => $"{entry.DisplayName} will be deleted from your console. This PC has no copy of it.",
         SaveFileLocation.Pc => $"{entry.DisplayName} will be deleted from this PC. Your console has no copy of it.",
         _ => $"{entry.DisplayName} will be deleted from your console and from this PC.",
+    };
+
+    /// <summary>What the override dialog says will be replaced, by where the save lives.</summary>
+    public static string OverrideWhere(SaveFileEntry entry) => entry.Location switch
+    {
+        SaveFileLocation.Console => $"{entry.DisplayName} will be replaced with the game's current state on your console.",
+        _ => $"{entry.DisplayName} will be replaced with the game's current state on your console and on this PC.",
     };
 
     /// <summary>
@@ -802,6 +879,73 @@ public static class SaveFilesPanel
         ImGui.EndPopup();
     }
 
+    /// <summary>
+    /// The question before the game's state is stored over a save, the way Delete asks before a
+    /// save goes: which file, then Override and Cancel, with Cancel the answer Enter gives.
+    /// Override is greyed out while storing is not possible, under the menu item's rule.
+    /// </summary>
+    private static void DrawOverrideQuestion(AppState state)
+    {
+        var question = _pendingOverride;
+        if (question is null)
+        {
+            _shownOverride = null;
+            return;
+        }
+
+        string label = $"Override {question.Entry.DisplayName}?{OverrideId}";
+        if (!ReferenceEquals(question, _shownOverride))
+        {
+            _shownOverride = question;
+            ImGui.OpenPopup(label);
+        }
+        else if (!ImGui.IsPopupOpen(label))
+        {
+            _pendingOverride = null;
+            _shownOverride = null;
+            return;
+        }
+
+        var centre = ImGui.GetMainViewport().GetCenter();
+        ImGui.SetNextWindowPos(centre, ImGuiCond.Appearing, new Vector2(0.5f, 0.5f));
+        ImGui.SetNextWindowSize(new Vector2(560, 0), ImGuiCond.Appearing);
+
+        bool open = true;
+        if (!ImGui.BeginPopupModal(label, ref open, ImGuiWindowFlags.AlwaysAutoResize))
+        {
+            if (!open) _pendingOverride = null;
+            return;
+        }
+
+        Ui.Paragraph(OverrideWhere(question.Entry));
+        ImGui.Spacing();
+        Ui.Hint("The old save cannot be recovered.");
+        ImGui.Separator();
+
+        ImGui.BeginDisabled(!CanOverride(state, question.Entry, question.Category));
+        bool confirm = ImGui.Button("Override", new Vector2(140, 0));
+        ImGui.EndDisabled();
+
+        ImGui.SameLine();
+        bool cancel = ImGui.Button("Cancel", new Vector2(120, 0));
+
+        // Enter on a dialog that has just opened answers no.
+        ImGui.SetItemDefaultFocus();
+
+        if (confirm)
+        {
+            ConfirmOverride(state, question);
+            ImGui.CloseCurrentPopup();
+        }
+        else if (cancel || !open)
+        {
+            _pendingOverride = null;
+            ImGui.CloseCurrentPopup();
+        }
+
+        ImGui.EndPopup();
+    }
+
     private static void DrawActions(AppState state, string title, Feature? save, Feature? load, bool enabled)
     {
         var selected = Selected;
@@ -815,7 +959,7 @@ public static class SaveFilesPanel
         // Nothing is saved into the premade savefiles: they are the release's.
         bool premade = IsPremade;
         string? problem = NameProblem(_name);
-        bool canSave = enabled && save is not null && !string.IsNullOrWhiteSpace(_name) && problem is null && !premade;
+        bool canSave = CanStore(enabled, save, Category, string.IsNullOrWhiteSpace(_name) ? null : RenameTarget(_name));
         ImGui.BeginDisabled(!canSave);
         if (ImGui.Button("Save on console") || (saveNow && canSave)) StartSave(state, title);
         ImGui.EndDisabled();
@@ -874,6 +1018,58 @@ public static class SaveFilesPanel
                     _name = string.Empty;
                     Rescan(state, title);
                     state.AddToast($"Saved '{SaveFileLibrary.DisplayName(name)}'", ToastKind.Success);
+                });
+            }
+            catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
+                                          or SaveFileTransfer.TransferFailedException
+                                          or SaveFileTransfer.RefusedException
+                                          or QwarkStatusException or ProtocolException
+                                          or IOException or UnauthorizedAccessException)
+            {
+                state.Post(() =>
+                {
+                    _status = ex.Message;
+                    state.AddToast(FailureToast(false, ex), ToastKind.Error);
+                });
+            }
+            finally
+            {
+                state.Post(() => _busy = false);
+            }
+        });
+    }
+
+    /// <summary>
+    /// A save over an existing file: the store <see cref="StartSave"/> makes, to the file's own
+    /// name and category (<see cref="SaveFileTransfer.OverrideAsync"/>), then a rescan, so the row
+    /// carries the new CRC on both sides.
+    /// </summary>
+    private static void StartOverride(AppState state, string title, string category, SaveFileEntry entry)
+    {
+        var library = state.SaveFiles;
+        bool mirror = state.Settings.MirrorSaveFiles;
+
+        _busy = true;
+        _transferred = 0;
+        _status = $"Asking your console to save over {entry.DisplayName}...";
+
+        var status = new Progress<string>(text => state.Post(() => _status = text));
+        var bytes = new Progress<long>(count => state.Post(() => _transferred = count));
+
+        state.Run(async () =>
+        {
+            try
+            {
+                var path = await SaveFileTransfer.OverrideAsync(
+                    state.Client, library, title, category, entry, mirror,
+                    timeout: null, status: status, bytes: bytes)
+                    .ConfigureAwait(false);
+
+                state.Post(() =>
+                {
+                    _status = path.Length > 0 ? "Saved over and mirrored successfully." : "Saved over successfully.";
+                    Rescan(state, title);
+                    state.AddToast($"Saved over '{entry.DisplayName}'", ToastKind.Success);
                 });
             }
             catch (Exception ex) when (ex is SaveFileTransfer.NotAnsweredException
@@ -1210,9 +1406,12 @@ public static class SaveFilesPanel
     /// <summary>
     /// A category's rows from the two listings. The premade category lists the release's files and
     /// nothing else, each one "both" once the console has its copy (<see cref="SaveFileMerge.BuildPremade"/>).
+    /// Every category, the premade one included, is in <paramref name="game"/>'s planet order
+    /// (<see cref="SaveFileOrder"/>): saves named after a planet first, the rest after them.
     /// </summary>
-    public static SaveFileEntry[] Rows(string category, IEnumerable<ConsoleSaveFile>? console, IEnumerable<LocalSaveFile>? pc) =>
-        IsReadOnly(category) ? SaveFileMerge.BuildPremade(console, pc) : SaveFileMerge.Build(console, pc);
+    public static SaveFileEntry[] Rows(string category, IEnumerable<ConsoleSaveFile>? console, IEnumerable<LocalSaveFile>? pc,
+        GameId game = GameId.None) =>
+        SaveFileOrder.Sort(IsReadOnly(category) ? SaveFileMerge.BuildPremade(console, pc) : SaveFileMerge.Build(console, pc), game);
 
     private static void RescanFiles(AppState state, string title)
     {
@@ -1234,7 +1433,7 @@ public static class SaveFilesPanel
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
-        _entries = Rows(category, null, pc);
+        _entries = Rows(category, null, pc, game);
         if (_fileIndex >= _entries.Length) _fileIndex = -1;
 
         if (!ConsoleReadable(state)) return;
@@ -1254,7 +1453,7 @@ public static class SaveFilesPanel
                     if (!string.Equals(category, Category, StringComparison.Ordinal) || !StillOn(title, game)) return;
 
                     string? keep = Selected?.Name;
-                    _entries = Rows(category, console, pc);
+                    _entries = Rows(category, console, pc, game);
                     _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
                 });
             }

@@ -2265,7 +2265,7 @@ public class AutosplitterTests
 
         Assert.True(AutosplitRoutes.Matches(GameId.Rac3, 3, "Starship Phoenix"));
         Assert.True(AutosplitRoutes.Matches(GameId.Rac3, 26, "Metropolis Rangers"));
-        // Deadlocked's list is the old dlplanets.txt verbatim, spellings and all: "dreadzone" has
+        // Deadlocked's list is the old dlplanets.txt, spellings and all (plus three whole planet names for the savefile list): "dreadzone" has
         // no space in it, so a split called "Dread Zone" (with the space) is not matched, while "DreadZone" is, like by "marauder" and friends.
         Assert.True(AutosplitRoutes.Matches(GameId.Rac4, 1, "DreadZone"));
         Assert.True(AutosplitRoutes.Matches(GameId.Rac4, 1, "Marauder"));

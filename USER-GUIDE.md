@@ -78,6 +78,8 @@ Open **Game**, then **Manips**, and pick the category type of your run. Hover a 
 
 The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
 
+In every category, saves whose name starts with a planet's name come first, in the game's planet order, and the rest follow alphabetically. Spaces, punctuation and case don't matter, and a revisit goes in its own place: "Veldin 2", "veldin_2" and "Veldin II" are the second visit to Veldin. The planet names come from the autosplitter's `<game>-planets.txt` files. To replace one of your saves with the game's current state, right-click it and choose **Override...**. It asks first, because the old save is gone afterwards, and it works whenever **Save on console** does.
+
 ## Run warnings
 
 When a run starts with a cheat or a mod on that the run should not have, your console shows a notification such as **Warning: 2 cheats enabled**. A run starts where the autosplitter starts its timer. A death or a reload does not count.

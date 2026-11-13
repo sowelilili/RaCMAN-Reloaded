@@ -129,12 +129,13 @@ public class PremadeSaveFileTests : IDisposable
         var premade = new PremadeSaveFiles(Shipped);
         Assert.Equal(new[] { "NG+ no LC.sav", "NG+.sav" }, premade.Files(Title));
 
+        // The rows are in natural order of the names on screen: "NG+" before "NG+ no LC".
         var rows = SaveFilesPanel.Rows(Premade, null, premade.FilesWithCrc(Title));
-        Assert.Equal(new[] { "NG+ no LC", "NG+" }, rows.Select(r => r.DisplayName));
+        Assert.Equal(new[] { "NG+", "NG+ no LC" }, rows.Select(r => r.DisplayName));
         Assert.All(rows, row => Assert.Equal(SaveFileLocation.Pc, row.Location));
-        Assert.Equal(Crc32.Compute(noLc), rows[0].PcCrc);
-        Assert.Equal(Crc32.Compute(plus), rows[1].PcCrc);
-        Assert.Equal(64, rows[1].PcSize);
+        Assert.Equal(Crc32.Compute(plus), rows[0].PcCrc);
+        Assert.Equal(Crc32.Compute(noLc), rows[1].PcCrc);
+        Assert.Equal(64, rows[0].PcSize);
     }
 
     [Fact]

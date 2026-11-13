@@ -3,7 +3,7 @@ cobalia
 kortog,stratus
 fastoon
 voron,space combat 1,space combat i
-mukow,fight fest
+mukow,fight fest,imperial fight fest,imperial fight festival
 nundac,apogee
 ardolis,pirate
 rakar,space combat 2,space combat ii
@@ -16,4 +16,4 @@ jasindu,kerchu
 ublik,slag
 reepor,cragmite
 igliak,meridian
-fastoon,tachyon
+fastoon,tachyon,fastoon 2,fastoon ii

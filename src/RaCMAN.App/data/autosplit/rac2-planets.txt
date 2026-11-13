@@ -1,5 +1,5 @@
 aranos
-ozla
+ozla,oozla
 maktar,entry,jamming
 endako,clank
 barlow,shortcut,return,backtrack,entry
@@ -12,9 +12,9 @@ hrugis
 joba
 todano,tando
 boldan
-aranos,a2,clank
+aranos,a2,clank,aranos 2,aranos ii
 gorn
-sniv
+sniv,snivelak
 smolg
 damosel,entry
 grelbin
@@ -24,4 +24,4 @@ orbit,dorbit,dobbo orbit
 orbit,damosel orbit,mothership
 shack
 wupash
-jam
+jam,jamming array
