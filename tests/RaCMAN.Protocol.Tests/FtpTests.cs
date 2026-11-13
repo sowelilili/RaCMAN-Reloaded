@@ -116,8 +116,8 @@ public class FtpTests
         var loader = new WebManLoader(new HttpClient(webMan)) { FtpPort = server.Port };
 
         var said = new List<string>();
-        bool sent = await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(pak), 5,
-            new InlineProgress<string>(said.Add));
+        bool sent = (await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(pak), 5,
+            new InlineProgress<string>(said.Add))).UiPakSent;
 
         Assert.True(sent);
         var (url, pakAtLoad) = Assert.Single(webMan.Requests);
@@ -132,6 +132,9 @@ public class FtpTests
                 $"STOR {WebManLoader.RemotePath}",
                 $"MKD {UiPak.ConsoleDirectory}",
                 $"STOR {UiPak.ConsolePath}",
+
+                // The boot list is read to find a boot copy; this console has none, so that is all.
+                $"RETR {WebManLoader.BootPluginsPath}",
                 "QUIT",
             },
             commands.Skip(3));
@@ -147,8 +150,8 @@ public class FtpTests
         var loader = new WebManLoader(new HttpClient(webMan)) { FtpPort = server.Port };
 
         var said = new List<string>();
-        bool sent = await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(null), 5,
-            new InlineProgress<string>(said.Add));
+        bool sent = (await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(null), 5,
+            new InlineProgress<string>(said.Add))).UiPakSent;
 
         Assert.False(sent);
         Assert.Single(webMan.Requests);
@@ -176,30 +179,14 @@ public class FtpTests
         var loader = new WebManLoader(new HttpClient(webMan)) { FtpPort = server.Port };
 
         var said = new List<string>();
-        bool sent = await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(pak), 5,
-            new InlineProgress<string>(said.Add));
+        bool sent = (await loader.LoadAsync("127.0.0.1", BootInstallTests.FakeRelease(pak), 5,
+            new InlineProgress<string>(said.Add))).UiPakSent;
 
         Assert.False(sent);
         Assert.Single(webMan.Requests);
         Assert.Contains(said, line => line.StartsWith(UiPak.SendFailedNote, StringComparison.Ordinal) && line.Contains("553"));
         Assert.Equal(new byte[] { 1, 2, 3, 4 }, server.Stored[WebManLoader.RemotePath]);
         Assert.False(server.Stored.ContainsKey(UiPak.ConsolePath));
-    }
-
-    /// <summary>webMAN's load endpoint, answered here: it records each request and what the FTP server held at that moment.</summary>
-    private sealed class WebManStub : HttpMessageHandler
-    {
-        private readonly Func<byte[]?> _pakOnConsole;
-
-        public WebManStub(Func<byte[]?> pakOnConsole) => _pakOnConsole = pakOnConsole;
-
-        public List<(string Url, byte[]? PakAtLoad)> Requests { get; } = new();
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            Requests.Add((request.RequestUri!.AbsoluteUri, _pakOnConsole()));
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
-        }
     }
 
     [Fact]
@@ -272,8 +259,28 @@ public class FtpTests
 }
 
 /// <summary>
+/// webMAN's load endpoint, answered here: it records each request and what the FTP server held at
+/// that moment (whatever the function given picks out of it).
+/// </summary>
+internal sealed class WebManStub : HttpMessageHandler
+{
+    private readonly Func<byte[]?> _pakOnConsole;
+
+    public WebManStub(Func<byte[]?> pakOnConsole) => _pakOnConsole = pakOnConsole;
+
+    public List<(string Url, byte[]? PakAtLoad)> Requests { get; } = new();
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Requests.Add((request.RequestUri!.AbsoluteUri, _pakOnConsole()));
+        return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
+    }
+}
+
+/// <summary>
 /// Just enough of RFC 959 to exercise FtpSession: anonymous login, TYPE, PASV with its own data
-/// listener, STOR, RETR, MKD and QUIT. Single connection, one command at a time.
+/// listener, STOR, RETR, MKD, DELE, RNFR/RNTO and QUIT. Single connection, one command at a time.
+/// A rename onto a file that exists is refused, as cellFs refuses it on the console.
 /// </summary>
 internal sealed class FakeFtpServer : IDisposable
 {
@@ -300,6 +307,15 @@ internal sealed class FakeFtpServer : IDisposable
     /// <summary>Takes a STOR's bytes and then never sends the completion reply: a console that stalled mid-upload.</summary>
     public bool SilentAfterStor { get; init; }
 
+    /// <summary>
+    /// STORs that break off part way: the server keeps the first half of the bytes under the path
+    /// and answers the completion with this reply instead of 226, as a transfer cut short does.
+    /// </summary>
+    public Dictionary<string, string> StorAborts { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>RNTO destinations the server refuses with 553 the next time, whatever is there; once each.</summary>
+    public HashSet<string> RntoRefused { get; } = new(StringComparer.Ordinal);
+
     public Dictionary<string, byte[]> Stored { get; } = new(StringComparer.Ordinal);
 
     public List<string> Commands { get; } = new();
@@ -320,6 +336,7 @@ internal sealed class FakeFtpServer : IDisposable
             };
 
             foreach (var line in Greeting) await writer.WriteLineAsync(line);
+            string? renameFrom = null;
 
             while (!_cts.IsCancellationRequested)
             {
@@ -355,8 +372,39 @@ internal sealed class FakeFtpServer : IDisposable
                     using var data = await _dataListener!.AcceptTcpClientAsync(_cts.Token);
                     using var buffer = new MemoryStream();
                     await data.GetStream().CopyToAsync(buffer, _cts.Token);
-                    Stored[command[5..]] = buffer.ToArray();
+                    string path = command[5..];
+                    if (StorAborts.TryGetValue(path, out var abort))
+                    {
+                        Stored[path] = buffer.ToArray()[..(int)(buffer.Length / 2)];
+                        await writer.WriteLineAsync(abort);
+                        continue;
+                    }
+
+                    Stored[path] = buffer.ToArray();
                     if (!SilentAfterStor) await writer.WriteLineAsync("226 Transfer complete");
+                }
+                else if (command.StartsWith("DELE ", StringComparison.Ordinal))
+                {
+                    await writer.WriteLineAsync(Stored.Remove(command[5..]) ? "250 Deleted" : "550 No such file");
+                }
+                else if (command.StartsWith("RNFR ", StringComparison.Ordinal))
+                {
+                    renameFrom = Stored.ContainsKey(command[5..]) ? command[5..] : null;
+                    await writer.WriteLineAsync(renameFrom is null ? "550 No such file" : "350 Ready for RNTO");
+                }
+                else if (command.StartsWith("RNTO ", StringComparison.Ordinal))
+                {
+                    string to = command[5..];
+                    if (renameFrom is null) await writer.WriteLineAsync("503 RNFR first");
+                    else if (RntoRefused.Remove(to) || Stored.ContainsKey(to)) await writer.WriteLineAsync("553 Rename refused");
+                    else
+                    {
+                        Stored[to] = Stored[renameFrom];
+                        Stored.Remove(renameFrom);
+                        await writer.WriteLineAsync("250 Renamed");
+                    }
+
+                    renameFrom = null;
                 }
                 else if (command.StartsWith("RETR ", StringComparison.Ordinal))
                 {

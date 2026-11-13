@@ -167,6 +167,7 @@ public static class ConnectionPanel
         Ui.Heading("Load qwark through webMAN");
 
         Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot. "
+                + "When boot_plugins.txt lists qwark.sprx, the copy it boots is updated too. "
                 + "In webMAN mode Connect does this on its own when nothing answers on qwark's port.");
 
         ImGui.SetNextItemWidth(360);
@@ -207,7 +208,7 @@ public static class ConnectionPanel
                 string path = sprx;
                 int slot = _slot;
                 state.Run(
-                    () => state.WebMan.LoadAsync(ip, path, slot, new Progress<string>(message => state.Post(() => state.AddToast(message)))),
+                    () => state.LoadThroughWebManAsync(ip, path, slot, new Progress<string>(message => state.Post(() => state.AddToast(message)))),
                     $"qwark.sprx loaded into slot {slot}");
             }
         }
@@ -411,7 +412,7 @@ public static class ConnectionPanel
                 connect: () => state.Connected ? Task.CompletedTask : state.Client.ConnectAsync(ip, port),
                 pluginStatus: () => state.WebMan.PluginStatusAsync(ip),
                 load: () => File.Exists(sprx)
-                    ? state.WebMan.LoadAsync(ip, sprx, slot,
+                    ? state.LoadThroughWebManAsync(ip, sprx, slot,
                         new Progress<string>(message => state.Post(() => state.AddToast(message))))
                     : throw new FileNotFoundException(
                         $"no {WebManLoader.SprxName} at {sprx}", sprx),
@@ -1057,7 +1058,7 @@ public static class ConnectionPanel
             {
                 try
                 {
-                    await state.WebMan.LoadAsync(ip, sprx, slot,
+                    await state.LoadThroughWebManAsync(ip, sprx, slot,
                         new Progress<string>(message => state.Post(() => state.AddToast(message))));
                 }
                 finally

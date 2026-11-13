@@ -7,4 +7,6 @@ A test build differs from a release in one way: it says that it is a test build,
 - When your console runs another test build than the one this client ships, or a release of the same number while this client ships a test build, the client treats it as out of date and replaces it, as it replaces an older build: by itself in standalone mode, with the out-of-date warning and the **Load qwark via webMAN** button under it in webMAN mode.
 - When the two are the same test build, nothing is sent again.
 
+A webMAN load also replaces the copy your console boots when `boot_plugins.txt` lists `qwark.sprx`, so a restart starts the test build too, with the `ui.pak` and game modules the load sent for it. If that copy can't be replaced, the client says so, and a restart loads the old build until you load again.
+
 The Connection panel names the test build your console runs and the one this client ships, so you can tell them apart.

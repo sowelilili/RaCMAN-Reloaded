@@ -98,7 +98,14 @@ public static class SprxUpdate
     /// naming an absolute path that ends in qwark.sprx. A list that names none — and a console with
     /// no list at all, which reads as empty text — falls back to where the boot install puts it.
     /// </summary>
-    public static string BootPathFrom(string? bootPluginsText)
+    public static string BootPathFrom(string? bootPluginsText) =>
+        ListedBootPath(bootPluginsText) ?? WebManLoader.BootPath;
+
+    /// <summary>
+    /// The path <see cref="BootPathFrom"/> finds on the list, or null when the list names none:
+    /// a console that does not boot qwark at all, which a webMAN load leaves that way.
+    /// </summary>
+    public static string? ListedBootPath(string? bootPluginsText)
     {
         foreach (var raw in (bootPluginsText ?? string.Empty).Split('\n'))
         {
@@ -107,7 +114,7 @@ public static class SprxUpdate
             if (line.EndsWith(WebManLoader.SprxName, StringComparison.OrdinalIgnoreCase)) return line;
         }
 
-        return WebManLoader.BootPath;
+        return null;
     }
 
     /// <summary>
@@ -185,13 +192,34 @@ public static class SprxUpdate
                 "reading boot_plugins.txt", error);
         }
 
+        bool replaced = await ReplaceBootCopyAsync(new QwarkFiles(client), bootPath, sprx, progress, cancellationToken)
+            .ConfigureAwait(false);
+        return new SprxUpdateResult(bootPath, bootPath + BackupSuffix, replaced, sprx.Length,
+            UiPakStaged: uiPak is not null, GameModulesStaged: modules);
+    }
+
+    /// <summary>
+    /// The boot copy's own replacement, over whichever link reaches the console: qwark's file ops
+    /// here, webMAN's FTP server for a webMAN load (<see cref="WebManLoader.LoadAsync"/>). The new
+    /// module is written as <c>&lt;bootPath&gt;.new</c>, read back and checked, and only then
+    /// swapped in, the old copy kept as <c>.old</c>; a swap that fails half way puts the old copy
+    /// back. So every failure leaves the console booting the module it booted before, and is one
+    /// <see cref="SprxUpdateException"/> naming its step. Answers whether there was a copy to keep.
+    /// </summary>
+    internal static async Task<bool> ReplaceBootCopyAsync(
+        IConsoleFiles files,
+        string bootPath,
+        ReadOnlyMemory<byte> sprx,
+        IProgress<string>? progress,
+        CancellationToken cancellationToken)
+    {
         string temporary = bootPath + TempSuffix;
         string backup = bootPath + BackupSuffix;
 
         progress?.Report($"Uploading {WebManLoader.SprxName}");
         try
         {
-            await client.WriteFileAsync(temporary, sprx, progress: null, cancellationToken).ConfigureAwait(false);
+            await files.WriteAsync(temporary, sprx, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -200,7 +228,7 @@ public static class SprxUpdate
 
         try
         {
-            await VerifyAsync(client, temporary, sprx, cancellationToken).ConfigureAwait(false);
+            await VerifyAsync(files, temporary, sprx, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
@@ -211,26 +239,24 @@ public static class SprxUpdate
         bool replaced;
         try
         {
-            // FILE_RENAME refuses a destination that exists, so the previous .old goes first and the
-            // boot copy moves onto the name it frees. A boot list that names a file which is not
-            // there is nothing to put right: the upload still becomes the boot copy.
-            await IgnoreMissingAsync(client.FileDeleteAsync(backup, cancellationToken)).ConfigureAwait(false);
-            replaced = await MovedAsync(client.FileRenameAsync(bootPath, backup, cancellationToken)).ConfigureAwait(false);
+            // A rename refuses a destination that exists (cellFs does), so the previous .old goes
+            // first and the boot copy moves onto the name it frees. A boot list that names a file
+            // which is not there is nothing to put right: the upload still becomes the boot copy.
+            await files.DeleteAsync(backup, cancellationToken).ConfigureAwait(false);
+            replaced = await files.RenameAsync(bootPath, backup, cancellationToken).ConfigureAwait(false);
 
             try
             {
-                await client.FileRenameAsync(temporary, bootPath, cancellationToken).ConfigureAwait(false);
+                if (!await files.RenameAsync(temporary, bootPath, cancellationToken).ConfigureAwait(false))
+                {
+                    throw new IOException($"{temporary} is not there any more");
+                }
             }
             catch
             {
                 // The one moment the console has no module at the boot path. Put the old one back,
                 // so a swap that failed half way leaves the console booting what it booted before.
-                if (replaced)
-                {
-                    await IgnoreMissingAsync(client.FileRenameAsync(backup, bootPath, cancellationToken))
-                        .ConfigureAwait(false);
-                }
-
+                if (replaced) await files.RenameAsync(backup, bootPath, cancellationToken).ConfigureAwait(false);
                 throw;
             }
         }
@@ -240,17 +266,22 @@ public static class SprxUpdate
         }
 
         progress?.Report($"{WebManLoader.SprxName} is in place");
-        return new SprxUpdateResult(bootPath, backup, replaced, sprx.Length, UiPakStaged: uiPak is not null, GameModulesStaged: modules);
+        return replaced;
     }
 
     /// <summary>
     /// Reads <paramref name="path"/> back and checks it against what was sent: the length, then the
     /// CRC32. The module's upload and every upload of ui.pak are checked this one way.
     /// </summary>
+    internal static Task VerifyAsync(
+        QwarkClient client, string path, ReadOnlyMemory<byte> sent, CancellationToken cancellationToken) =>
+        VerifyAsync(new QwarkFiles(client), path, sent, cancellationToken);
+
+    /// <summary><see cref="VerifyAsync(QwarkClient, string, ReadOnlyMemory{byte}, CancellationToken)"/> over either link.</summary>
     internal static async Task VerifyAsync(
-        QwarkClient client, string path, ReadOnlyMemory<byte> sent, CancellationToken cancellationToken)
+        IConsoleFiles files, string path, ReadOnlyMemory<byte> sent, CancellationToken cancellationToken)
     {
-        var written = await client.ReadFileAsync(path, progress: null, cancellationToken).ConfigureAwait(false);
+        var written = await files.ReadAsync(path, cancellationToken).ConfigureAwait(false);
         if (written.Length != sent.Length)
         {
             throw new IOException($"the console holds {written.Length} bytes of it, not {sent.Length}");
@@ -280,20 +311,10 @@ public static class SprxUpdate
         }
     }
 
-    /// <summary>A file that is not there is already where this wanted to put it; every other status still is a failure.</summary>
-    private static async Task IgnoreMissingAsync(Task work)
-    {
-        try
-        {
-            await work.ConfigureAwait(false);
-        }
-        catch (QwarkStatusException error) when (error.Status is Status.NotFound)
-        {
-            // Nothing of that name on the console.
-        }
-    }
-
-    /// <summary>The same, and says whether the move happened, which decides what a failed swap undoes.</summary>
+    /// <summary>
+    /// Whether a delete or a move happened: a file that is not there is already where this wanted
+    /// to put it, which decides what a failed swap undoes; every other status still is a failure.
+    /// </summary>
     internal static async Task<bool> MovedAsync(Task work)
     {
         try
@@ -306,4 +327,40 @@ public static class SprxUpdate
             return false;
         }
     }
+
+    /// <summary>The boot copy's swap over qwark's own file ops.</summary>
+    private sealed class QwarkFiles : IConsoleFiles
+    {
+        private readonly QwarkClient _client;
+
+        public QwarkFiles(QwarkClient client) => _client = client;
+
+        public Task WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken) =>
+            _client.WriteFileAsync(path, bytes, progress: null, cancellationToken);
+
+        public Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken) =>
+            _client.ReadFileAsync(path, progress: null, cancellationToken);
+
+        public Task<bool> DeleteAsync(string path, CancellationToken cancellationToken) =>
+            MovedAsync(_client.FileDeleteAsync(path, cancellationToken));
+
+        public Task<bool> RenameAsync(string from, string to, CancellationToken cancellationToken) =>
+            MovedAsync(_client.FileRenameAsync(from, to, cancellationToken));
+    }
+}
+
+/// <summary>
+/// The four file operations the boot copy's swap needs (<see cref="SprxUpdate.ReplaceBootCopyAsync"/>),
+/// over qwark's file ops or webMAN's FTP server. A delete or a rename answers false when there is
+/// no file of the name it was given, and throws for any other refusal.
+/// </summary>
+internal interface IConsoleFiles
+{
+    Task WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken);
+
+    Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken);
+
+    Task<bool> DeleteAsync(string path, CancellationToken cancellationToken);
+
+    Task<bool> RenameAsync(string from, string to, CancellationToken cancellationToken);
 }

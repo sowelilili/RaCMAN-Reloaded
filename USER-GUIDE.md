@@ -35,6 +35,8 @@ The mode is on the Settings panel, in the **Connection** section.
 
 **webMAN** is the default mode. The client asks webMAN which plugin slot holds the module. If no slot holds it, the client sends `qwark.sprx` to the console and loads it. Automatic reconnections do the same, so the client can recover a module that stopped.
 
+If your console also loads qwark at startup (`boot_plugins.txt` lists `qwark.sprx`), a webMAN load replaces that copy too, so a restart starts the same build. The old copy is kept as `qwark.sprx.old`. If the client can't replace it, it says so; the old copy stays, and a restart loads it. A console whose list doesn't name qwark is never added to it.
+
 **Standalone** never uses webMAN. The client only connects to the module's port. Use this mode if the console loads the module at startup.
 
 Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. The install puts qwark first on the list, so HEN loads it before webMAN. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.

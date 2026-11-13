@@ -35,6 +35,31 @@ public readonly record struct BootInstallResult(
     public bool BeyondHenLimit => Lines > WebManLoader.HenPluginLimit;
 }
 
+/// <summary>What a webMAN load did to the copy of qwark.sprx the console boots, if it boots one.</summary>
+public enum BootCopyOutcome
+{
+    /// <summary>boot_plugins.txt names no qwark.sprx: the user loads it live only, and that is left so.</summary>
+    NotBooted,
+
+    /// <summary>The list names the live upload's own path, so the one upload was the boot copy too.</summary>
+    SameAsLive,
+
+    /// <summary>The boot copy is the module that was just loaded; the one before it is kept as <c>.old</c>.</summary>
+    Replaced,
+
+    /// <summary>The boot copy could not be read, written, checked or swapped, and is the one it was.</summary>
+    Failed,
+}
+
+/// <summary>
+/// What <see cref="WebManLoader.LoadAsync"/> did besides the load itself: whether ui.pak went
+/// across, and what became of the boot copy (<see cref="BootCopy"/>, at <see cref="BootPath"/>).
+/// <see cref="BootCopyError"/> is the reason, when the boot copy could not be updated: the console
+/// then reboots into the old module beside the new ui.pak and game modules.
+/// </summary>
+public readonly record struct WebManLoadResult(
+    bool UiPakSent, BootCopyOutcome BootCopy, string? BootPath = null, string? BootCopyError = null);
+
 /// <summary>
 /// Gets qwark.sprx onto the console the way racman-official does it: FTP the file into
 /// /dev_hdd0/tmp/ and load it through webMAN's vshplugin.ps3mapi endpoint. The console menu's
@@ -123,9 +148,17 @@ public sealed class WebManLoader
     /// it, then asks webMAN to load the module into the given VSH slot. The pak goes across before
     /// the load, because the module checks it as it starts. A client with no pak, or a pak the
     /// console refused, still loads the module and says so: the trainer does not wait on the
-    /// menu's file. Returns whether the pak was sent.
+    /// menu's file.
+    /// <para>
+    /// The pak and the game modules go to their final paths, where the module about to be loaded
+    /// reads them, and belong to its build. So when boot_plugins.txt names a qwark.sprx, that boot
+    /// copy is replaced with the same module in the same session (see <see cref="UpdateBootCopyAsync"/>),
+    /// or the next reboot would start the old module beside the new pak and modules. A list that
+    /// names none is never touched. A boot copy that cannot be updated is in the result and does
+    /// not stop the load.
+    /// </para>
     /// </summary>
-    public async Task<bool> LoadAsync(
+    public async Task<WebManLoadResult> LoadAsync(
         string ip,
         string localSprxPath,
         int slot = DefaultSlot,
@@ -140,13 +173,15 @@ public sealed class WebManLoader
         var pak = await ReadUiPakAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
         var modules = await GameModule.ReadBesideAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
 
-        bool sent;
+        WebManLoadResult result;
         using (var ftp = new FtpSession(ip, FtpPort))
         {
             await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
             await ftp.StoreAsync(RemotePath, bytes, cancellationToken).ConfigureAwait(false);
-            sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
+            bool sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
             await StoreGameModulesAsync(ftp, modules, progress, cancellationToken).ConfigureAwait(false);
+            result = await UpdateBootCopyAsync(ftp, bytes, progress, cancellationToken).ConfigureAwait(false)
+                with { UiPakSent = sent };
         }
 
         progress?.Report($"Loading {SprxName} into slot {slot}");
@@ -155,7 +190,49 @@ public sealed class WebManLoader
         using var response = await _http.GetAsync(url, cancellationToken).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
         progress?.Report($"{SprxName} loaded into slot {slot}");
-        return sent;
+        return result;
+    }
+
+    /// <summary>
+    /// Replaces the copy of qwark.sprx the console boots with <paramref name="sprx"/>, when
+    /// boot_plugins.txt names one, the way the standalone update does (<see cref="SprxUpdate.ReplaceBootCopyAsync"/>):
+    /// written beside it as <c>.new</c>, read back and checked, the old one kept as <c>.old</c>, then
+    /// swapped in, so a failure at any step leaves the old boot copy whole. A list that names none
+    /// is a user who loads qwark live only, and nothing is written; a list naming the live upload's
+    /// own path has had it written already. boot_plugins.txt itself is only read. Never throws but
+    /// for a cancellation: a failure is the result's, so the live load still goes ahead.
+    /// </summary>
+    private static async Task<WebManLoadResult> UpdateBootCopyAsync(
+        FtpSession ftp, byte[] sprx, IProgress<string>? progress, CancellationToken cancellationToken)
+    {
+        string? bootPath;
+        try
+        {
+            var list = await ftp.RetrieveAsync(BootPluginsPath, cancellationToken).ConfigureAwait(false);
+            bootPath = SprxUpdate.ListedBootPath(list is null ? null : Encoding.UTF8.GetString(list));
+        }
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return new WebManLoadResult(false, BootCopyOutcome.Failed, null, $"reading boot_plugins.txt: {error.Message}");
+        }
+
+        if (bootPath is null) return new WebManLoadResult(false, BootCopyOutcome.NotBooted);
+        if (string.Equals(bootPath, RemotePath, StringComparison.Ordinal))
+        {
+            return new WebManLoadResult(false, BootCopyOutcome.SameAsLive, bootPath);
+        }
+
+        progress?.Report($"Updating the boot copy at {bootPath}");
+        try
+        {
+            await SprxUpdate.ReplaceBootCopyAsync(new FtpFiles(ftp), bootPath, sprx, progress: null, cancellationToken)
+                .ConfigureAwait(false);
+            return new WebManLoadResult(false, BootCopyOutcome.Replaced, bootPath);
+        }
+        catch (SprxUpdateException error)
+        {
+            return new WebManLoadResult(false, BootCopyOutcome.Failed, bootPath, error.Message);
+        }
     }
 
     /// <summary>The ui.pak beside <paramref name="localSprxPath"/>, or null when there is none.</summary>
@@ -228,6 +305,20 @@ public sealed class WebManLoader
             catch (IOException error)
             {
                 progress?.Report($"Couldn't send {module.FileName} to your console ({error.Message})");
+                continue;
+            }
+
+            // A <name>.new an earlier standalone update staged is another build's module, and the
+            // core puts it in place of <name>, without a look at its build, the next time that game
+            // boots (PROTOCOL.md 9.11). Left there, it would undo the module just written.
+            string staged = GameModule.StagedPath(module.Game);
+            try
+            {
+                await ftp.DeleteAsync(staged, cancellationToken).ConfigureAwait(false);
+            }
+            catch (IOException error)
+            {
+                progress?.Report($"Couldn't delete the old {module.FileName}.new ({error.Message})");
             }
         }
 
@@ -342,6 +433,27 @@ public sealed class WebManLoader
     /// <summary>Whether a line names qwark.sprx, at whichever path it was installed to.</summary>
     private static bool NamesSprx(string line) =>
         line.Trim().EndsWith(SprxName, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>The boot copy's swap over webMAN's FTP server.</summary>
+    private sealed class FtpFiles : IConsoleFiles
+    {
+        private readonly FtpSession _ftp;
+
+        public FtpFiles(FtpSession ftp) => _ftp = ftp;
+
+        public Task WriteAsync(string path, ReadOnlyMemory<byte> bytes, CancellationToken cancellationToken) =>
+            _ftp.StoreAsync(path, bytes.ToArray(), cancellationToken);
+
+        public async Task<byte[]> ReadAsync(string path, CancellationToken cancellationToken) =>
+            await _ftp.RetrieveAsync(path, cancellationToken).ConfigureAwait(false)
+            ?? throw new IOException($"{path} is not on the console");
+
+        public Task<bool> DeleteAsync(string path, CancellationToken cancellationToken) =>
+            _ftp.DeleteAsync(path, cancellationToken);
+
+        public Task<bool> RenameAsync(string from, string to, CancellationToken cancellationToken) =>
+            _ftp.RenameAsync(from, to, cancellationToken);
+    }
 }
 
 /// <summary>
@@ -478,6 +590,33 @@ public sealed class FtpSession : IDisposable
         var reply = await CommandAsync($"MKD {path}", cancellationToken).ConfigureAwait(false);
         if (reply.Code is 257 or 521 or 550) return;
         throw new IOException($"FTP MKD refused: {reply.Text}");
+    }
+
+    /// <summary>
+    /// DELE. False when the server answers 550, no such file (RFC 959 gives 550 for a file that is
+    /// not there); any other refusal throws.
+    /// </summary>
+    public async Task<bool> DeleteAsync(string path, CancellationToken cancellationToken = default)
+    {
+        var reply = await CommandAsync($"DELE {path}", cancellationToken).ConfigureAwait(false);
+        if (reply.Code is 550) return false;
+        if (reply.Code is not 250) throw new IOException($"FTP DELE refused: {reply.Text}");
+        return true;
+    }
+
+    /// <summary>
+    /// RNFR then RNTO. False when RNFR is answered 550, no file of that name; a refused RNTO, a
+    /// destination that exists included, throws.
+    /// </summary>
+    public async Task<bool> RenameAsync(string from, string to, CancellationToken cancellationToken = default)
+    {
+        var reply = await CommandAsync($"RNFR {from}", cancellationToken).ConfigureAwait(false);
+        if (reply.Code is 550) return false;
+        if (reply.Code is not 350) throw new IOException($"FTP RNFR refused: {reply.Text}");
+
+        var done = await CommandAsync($"RNTO {to}", cancellationToken).ConfigureAwait(false);
+        if (done.Code is not 250) throw new IOException($"FTP RNTO refused: {done.Text}");
+        return true;
     }
 
     private async Task<TcpClient> OpenDataConnectionAsync(CancellationToken cancellationToken)

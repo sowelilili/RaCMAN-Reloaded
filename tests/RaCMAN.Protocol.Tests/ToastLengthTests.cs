@@ -97,6 +97,10 @@ public class ToastLengthTests
 
         yield return AppState.GameModuleToast(null, "NPEA00385");
         yield return AppState.UiPakToast;
+
+        // A boot copy a webMAN load could not replace, at its wordiest step.
+        yield return AppState.BootCopyFailedToast("uploading it: FTP timed out after 30 s sending the file");
+        yield return AppState.BootCopyFailedToast("reading boot_plugins.txt: FTP RETR refused: 425 Can't open data connection");
         yield return UiPak.MissingNote;
         yield return UiPak.SendFailedNote + " (The process cannot access the file in use)";
 

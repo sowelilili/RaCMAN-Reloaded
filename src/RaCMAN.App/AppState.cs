@@ -307,7 +307,8 @@ public sealed class AppState : IDisposable
     /// <summary>The savefiles the release ships, beside the executable: read, loaded, copied, never written.</summary>
     public PremadeSaveFiles PremadeSaveFiles { get; }
 
-    public WebManLoader WebMan { get; }
+    /// <summary>The webMAN loader; a test points one at its loopback FTP server and webMAN stub.</summary>
+    public WebManLoader WebMan { get; init; }
 
     /// <summary>
     /// The local qwark-rpcs3.exe, for the RPCS3 target. Nothing is started until the Connection
@@ -691,9 +692,9 @@ public sealed class AppState : IDisposable
         if (!File.Exists(sprx)) return;
 
         Post(() => AddToast($"Loading {WebManLoader.SprxName} on your console"));
-        bool uiPakSent = await WebMan.LoadAsync(host, sprx, Settings.Ps3.WebManSlot, cancellationToken: token)
+        var loaded = await LoadThroughWebManAsync(host, sprx, Settings.Ps3.WebManSlot, cancellationToken: token)
             .ConfigureAwait(false);
-        if (!uiPakSent)
+        if (!loaded.UiPakSent)
         {
             string note = File.Exists(UiPak.BesideSprx(sprx)) ? UiPak.SendFailedNote : UiPak.MissingNote;
             Post(() => AddToast(note));
@@ -701,6 +702,28 @@ public sealed class AppState : IDisposable
         await Task.Delay(Ps3Connect.LoadWait, token).ConfigureAwait(false);
         Post(() => AddToast($"{WebManLoader.SprxName} loaded; reconnecting", ToastKind.Success));
     }
+
+    /// <summary>
+    /// Every webMAN load of qwark comes here: the reconnect hook above, the Connect sequence, and
+    /// the Connection panel's Load buttons, the stale-build warning's included. The load also
+    /// replaces the boot copy when boot_plugins.txt names one (<see cref="WebManLoader.LoadAsync"/>),
+    /// and a boot copy that could not be replaced is said here, in one error toast, since the load
+    /// itself went ahead without it.
+    /// </summary>
+    public async Task<WebManLoadResult> LoadThroughWebManAsync(
+        string ip, string sprx, int slot, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+    {
+        var result = await WebMan.LoadAsync(ip, sprx, slot, progress, cancellationToken).ConfigureAwait(false);
+        if (result.BootCopyError is { } error) Post(() => AddToast(BootCopyFailedToast(error), ToastKind.Error));
+        return result;
+    }
+
+    /// <summary>
+    /// The toast for a boot copy a webMAN load could not replace. The old copy is whole, and the
+    /// next reboot starts it beside the new ui.pak and game modules, which it will refuse.
+    /// </summary>
+    public static string BootCopyFailedToast(string error) =>
+        $"Couldn't update the boot copy of {WebManLoader.SprxName}; a reboot loads the old one: {error}";
 
     // ---------------------------------------------------------------- the standalone module update
 
