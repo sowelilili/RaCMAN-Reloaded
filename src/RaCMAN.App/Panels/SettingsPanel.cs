@@ -270,6 +270,22 @@ public static class SettingsPanel
 
         Ui.Hint("Save files are kept on your console. With this on, every save you take is also copied "
                 + "to this PC.");
+
+        ImGui.Spacing();
+
+        var sort = settings.SaveFileSort;
+        ImGui.TextUnformatted("Sort save files");
+        ImGui.SameLine();
+        if (ImGui.RadioButton("By planet", sort == SaveFileSort.ByPlanet)) sort = SaveFileSort.ByPlanet;
+        ImGui.SameLine();
+        if (ImGui.RadioButton("Alphabetical", sort == SaveFileSort.Alphabetical)) sort = SaveFileSort.Alphabetical;
+        if (sort != settings.SaveFileSort)
+        {
+            settings.SaveFileSort = sort;
+            settings.Save();
+        }
+
+        Ui.Hint("By planet lists each category in the game's planet order, by the planet each save was made on.");
     }
 
     // ---------------------------------------------------------------- ports

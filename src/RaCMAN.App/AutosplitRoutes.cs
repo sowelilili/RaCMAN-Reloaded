@@ -16,11 +16,11 @@ namespace RaCMAN.App;
 /// </para>
 /// <para>
 /// The Save files panel sorts a category by the same files (<see cref="SaveFileOrder"/>): a save
-/// named after a planet is filed under the line with the longest alias its name starts with. So a
-/// revisit has a line of its own with aliases that name it ("veldin 2", "veldin ii"), and a planet
-/// whose alias is only a fragment of its name for the old substring test ("sara") also carries the
-/// whole name ("sarathos"). Neither changes what a split matches, since each added alias holds one
-/// the line already had, except Veldin's "veldin ii", which now matches the second visit as it should.
+/// goes under the line its own level index names, read out of the save (<see cref="SaveFilePlanet"/>),
+/// and a <c>null</c> line or one past the end of the file is no planet. The revisit aliases
+/// ("veldin 2", "veldin ii") and whole planet names ("sarathos" beside "sara") the lines carry came
+/// with an earlier, name-based order and stay for the splits: each added alias holds one the line
+/// already had, except Veldin's "veldin ii", which matches the second visit as it should.
 /// </para>
 /// </summary>
 public static class AutosplitRoutes

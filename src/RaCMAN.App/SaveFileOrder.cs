@@ -3,36 +3,32 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App;
 
 /// <summary>
-/// The order of the rows in a savefile category. A save whose name starts with a planet's name
-/// goes above the rest, in the running game's planet order, which is the order of the lines of its
-/// planets file (<see cref="AutosplitRoutes"/>, the autosplitter's own <c>&lt;game&gt;-planets.txt</c>).
-/// Every other save comes after them, and within one planet, and among the rest, the order is
-/// natural and ignores case: "Kerwan 2" before "Kerwan 10".
+/// The order of the rows in a savefile category, by the Settings choice (<see cref="SaveFileSort"/>).
 /// <para>
-/// A name is matched against every alias of every planet with spaces, punctuation, underscores
-/// and hyphens ignored on both sides, so "veldin_2", "Veldin 2" and "veldin2" are one name. The
-/// alias has to be the start of the name and be followed by the end of it, a digit, or something
-/// that was ignored, so "Novalis" is never a planet called "Nova". Of the planets that match, the
-/// longest alias wins ("Fastoon 2" over "Fastoon"), and between two of the same length the earlier
-/// planet does, which is how a bare "Veldin" or "Aranos" is the first visit. A revisit is a line
-/// of its own in the planets file with aliases that name it ("veldin 2", "veldin ii").
+/// By planet, the default: each save goes under the planet it was made on, which the save itself
+/// says (<see cref="SaveFilePlanet"/>), in the running game's level order, the line order of its
+/// planets file (<see cref="AutosplitRoutes"/>). A level the file has no planet on is no planet.
+/// Saves on one planet are in natural order, and the saves whose planet is not known (not read
+/// yet, too short, not a save of this game, only on the console where it cannot be read) come
+/// after all of them, in natural order too.
+/// </para>
+/// <para>
+/// Alphabetical: natural order alone, which ignores case and compares numbers as numbers,
+/// "Kerwan 2" before "Kerwan 10".
 /// </para>
 /// </summary>
 public static class SaveFileOrder
 {
     /// <summary>
-    /// The rows in the order the panel lists them, for <paramref name="game"/>'s planets. A game
-    /// with no planets file, or no game at all, keeps the natural order alone.
+    /// The rows in the order the panel lists them. <paramref name="planetOf"/> is each row's level
+    /// as its save says it, or null; without it, or without a game, the order is natural.
     /// </summary>
-    public static SaveFileEntry[] Sort(IEnumerable<SaveFileEntry> rows, GameId game) =>
-        Sort(rows, game == GameId.None ? Array.Empty<string[]>() : AutosplitRoutes.For(game));
-
-    /// <summary>The same against a planet list given directly: one alias array per planet, in game order.</summary>
-    public static SaveFileEntry[] Sort(IEnumerable<SaveFileEntry> rows, IReadOnlyList<string[]> planets)
+    public static SaveFileEntry[] Sort(IEnumerable<SaveFileEntry> rows, GameId game, SaveFileSort sort,
+        Func<SaveFileEntry, int?>? planetOf)
     {
-        var aliases = Prepare(planets);
+        bool byPlanet = sort == SaveFileSort.ByPlanet && game != GameId.None && planetOf is not null;
         return rows
-            .Select(row => (Row: row, Planet: aliases.Count == 0 ? -1 : PlanetOf(row.DisplayName, aliases)))
+            .Select(row => (Row: row, Planet: byPlanet ? PlanetIndex(game, planetOf!(row)) : -1))
             .OrderBy(r => r.Planet < 0 ? 1 : 0)
             .ThenBy(r => r.Planet)
             // The name on screen, without the .sav, so "Kerwan" comes before "Kerwan 2" rather than
@@ -43,80 +39,16 @@ public static class SaveFileOrder
             .ToArray();
     }
 
-    /// <summary>
-    /// The planet a save called <paramref name="name"/> is filed under: its line in the planets
-    /// file, or -1 when the name starts with no planet's name.
-    /// </summary>
-    public static int PlanetOf(string? name, IReadOnlyList<string[]> planets) => PlanetOf(name, Prepare(planets));
-
-    private static int PlanetOf(string? name, IReadOnlyList<(int Planet, string Alias)> aliases)
-    {
-        var (folded, breaks) = Fold(name);
-        if (folded.Length == 0) return -1;
-
-        int best = -1;
-        int bestLength = 0;
-        foreach (var (planet, alias) in aliases)
-        {
-            // The list is in planet order, so a tie keeps the earlier planet.
-            if (alias.Length <= bestLength) continue;
-            if (!folded.StartsWith(alias, StringComparison.Ordinal)) continue;
-
-            int next = alias.Length;
-            bool bounded = next == folded.Length || char.IsDigit(folded[next]) || breaks[next];
-            if (!bounded) continue;
-
-            best = planet;
-            bestLength = alias.Length;
-        }
-
-        return best;
-    }
-
-    /// <summary>Every planet's aliases folded the way a name is, in planet order.</summary>
-    private static List<(int Planet, string Alias)> Prepare(IReadOnlyList<string[]> planets)
-    {
-        var aliases = new List<(int, string)>();
-        for (int planet = 0; planet < planets.Count; planet++)
-        {
-            foreach (var alias in planets[planet] ?? Array.Empty<string>())
-            {
-                string folded = Fold(alias).Folded;
-                if (folded.Length > 0) aliases.Add((planet, folded));
-            }
-        }
-
-        return aliases;
-    }
+    /// <summary>The natural order alone.</summary>
+    public static SaveFileEntry[] Sort(IEnumerable<SaveFileEntry> rows) =>
+        Sort(rows, GameId.None, SaveFileSort.Alphabetical, null);
 
     /// <summary>
-    /// The letters and digits of <paramref name="text"/> in lower case, and for each of them
-    /// whether something that was dropped (a space, punctuation, an underscore or a hyphen) came
-    /// just before it. One more entry at the end says the same of the end of the text.
+    /// Where a save on <paramref name="level"/> goes: the level itself when the game's planets file
+    /// has a planet on that line, -1 (below every planet) when not.
     /// </summary>
-    private static (string Folded, bool[] Breaks) Fold(string? text)
-    {
-        var folded = new System.Text.StringBuilder();
-        var breaks = new List<bool>();
-        bool dropped = false;
-
-        foreach (char c in text ?? string.Empty)
-        {
-            if (char.IsLetterOrDigit(c))
-            {
-                folded.Append(char.ToLowerInvariant(c));
-                breaks.Add(dropped);
-                dropped = false;
-            }
-            else
-            {
-                dropped = true;
-            }
-        }
-
-        breaks.Add(true);
-        return (folded.ToString(), breaks.ToArray());
-    }
+    public static int PlanetIndex(GameId game, int? level) =>
+        level is int index && AutosplitRoutes.Knows(game, index) ? index : -1;
 
     /// <summary>
     /// Natural order without regard to case: runs of digits compare as numbers, everything else

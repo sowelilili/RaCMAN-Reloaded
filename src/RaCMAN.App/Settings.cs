@@ -136,6 +136,26 @@ public sealed class Settings
     [JsonPropertyName("mirrorSaveFiles")]
     public bool MirrorSaveFiles { get; set; } = true;
 
+    public const string SaveFileSortPlanetName = "planet";
+
+    public const string SaveFileSortAlphabeticalName = "alphabetical";
+
+    /// <summary>
+    /// How the Save files panel orders a category: "planet" (by the planet each save was made on)
+    /// or "alphabetical". Anything else, a file from before this key included, reads as "planet".
+    /// </summary>
+    [JsonPropertyName("saveFileSort")]
+    public string SaveFileSortName { get; set; } = SaveFileSortPlanetName;
+
+    [JsonIgnore]
+    public SaveFileSort SaveFileSort
+    {
+        get => string.Equals(SaveFileSortName, SaveFileSortAlphabeticalName, StringComparison.OrdinalIgnoreCase)
+            ? SaveFileSort.Alphabetical
+            : SaveFileSort.ByPlanet;
+        set => SaveFileSortName = value == SaveFileSort.Alphabetical ? SaveFileSortAlphabeticalName : SaveFileSortPlanetName;
+    }
+
     /// <summary>
     /// The category the Save files panel was last left on, keyed by title id. A savefile library
     /// grows a category per route or per run, and the one being worked in is the same one for days

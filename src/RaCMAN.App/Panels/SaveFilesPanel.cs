@@ -12,8 +12,9 @@ namespace RaCMAN.App.Panels;
 /// does not. A save is up to 2 MB, and until qwark build 12 every single load streamed one from
 /// here.
 /// <para>
-/// No address, no game knowledge and no savefile format ever reaches this client: what a save is
-/// is whatever the game put in the helper's aside buffer.
+/// No address and no game knowledge reaches this client, and a save or a load moves whatever the
+/// game put in the helper's aside buffer. The one thing read out of a save is the planet it was
+/// made on (<see cref="SaveFilePlanet"/>), and only to list a category in planet order.
 /// </para>
 /// <para>
 /// A game the release ships premade savefiles for gets one more category, always last:
@@ -77,6 +78,19 @@ public static class SaveFilesPanel
     private const string DeleteId = "###savefiles-delete";
 
     private const string OverrideId = "###savefiles-override";
+
+    /// <summary>
+    /// The planets of the saves listed so far, by game and CRC (<see cref="SaveFilePlanetCache"/>),
+    /// for the order by planet. Kept across rescans, sessions and games, since the same bytes are
+    /// always the same planet.
+    /// </summary>
+    public static SaveFilePlanetCache Planets { get; } = new();
+
+    /// <summary>The console copies whose planet is being read right now, by game and CRC. Render thread only.</summary>
+    private static readonly HashSet<(GameId Game, uint Crc)> _readingPlanets = new();
+
+    /// <summary>The Settings order <see cref="_entries"/> was last sorted by, so a change there re-sorts.</summary>
+    private static SaveFileSort _sortedBy;
 
     /// <summary>Seconds since SAVEFILE_INFO was last re-read while it said the helper had not run.</summary>
     private static float _sinceInfo;
@@ -260,6 +274,7 @@ public static class SaveFilesPanel
         // and the premade rows all said "PC" until somebody pressed Rescan.
         if (!string.Equals(_title, title, StringComparison.Ordinal) || _game != session.Game) Rescan(state, title, session.Game);
         else if (!_consoleListed && ConsoleReadable(state)) Rescan(state, title);
+        else if (_sortedBy != state.Settings.SaveFileSort) RescanFiles(state, title);
 
         bool premade = IsPremade;
 
@@ -1406,17 +1421,123 @@ public static class SaveFilesPanel
     /// <summary>
     /// A category's rows from the two listings. The premade category lists the release's files and
     /// nothing else, each one "both" once the console has its copy (<see cref="SaveFileMerge.BuildPremade"/>).
-    /// Every category, the premade one included, is in <paramref name="game"/>'s planet order
-    /// (<see cref="SaveFileOrder"/>): saves named after a planet first, the rest after them.
+    /// Every category, the premade one included, is in the order <paramref name="sort"/> says
+    /// (<see cref="SaveFileOrder"/>), by planet with each row's planet from <paramref name="planetOf"/>.
     /// </summary>
     public static SaveFileEntry[] Rows(string category, IEnumerable<ConsoleSaveFile>? console, IEnumerable<LocalSaveFile>? pc,
-        GameId game = GameId.None) =>
-        SaveFileOrder.Sort(IsReadOnly(category) ? SaveFileMerge.BuildPremade(console, pc) : SaveFileMerge.Build(console, pc), game);
+        GameId game = GameId.None, SaveFileSort sort = SaveFileSort.ByPlanet, Func<SaveFileEntry, int?>? planetOf = null) =>
+        SaveFileOrder.Sort(IsReadOnly(category) ? SaveFileMerge.BuildPremade(console, pc) : SaveFileMerge.Build(console, pc),
+            game, sort, planetOf);
+
+    /// <summary>
+    /// A row's planet as <paramref name="planets"/> knows it: this PC's copy when there is one,
+    /// since that is the copy a load sends when the two differ, else the console's.
+    /// </summary>
+    public static Func<SaveFileEntry, int?> PlanetOf(SaveFilePlanetCache planets, GameId game) =>
+        entry => planets.Planet(game, entry.OnPc ? entry.PcCrc : entry.ConsoleCrc);
+
+    /// <summary>
+    /// Reads the planet of every file of <paramref name="pc"/> in <paramref name="folder"/> that
+    /// <paramref name="planets"/> does not know yet, a few bytes of each (<see cref="SaveFilePlanetCache.Local"/>).
+    /// </summary>
+    public static void ReadPcPlanets(SaveFilePlanetCache planets, GameId game, string? folder, IEnumerable<LocalSaveFile> pc)
+    {
+        if (folder is null || SaveFilePlanet.RangeFor(game) is null) return;
+        foreach (var file in pc) planets.Local(game, Path.Combine(folder, file.Name), file.Crc);
+    }
+
+    /// <summary>
+    /// The saves of <paramref name="rows"/> that only the console has whose planet is still to be
+    /// read and can be (<see cref="SaveFilePlanet.ReadableOnConsole"/>).
+    /// </summary>
+    public static SaveFileEntry[] ConsolePlanetsToRead(SaveFilePlanetCache planets, GameId game, IEnumerable<SaveFileEntry> rows) =>
+        SaveFilePlanet.ReadableOnConsole(game)
+            ? rows.Where(e => e.OnConsole && !e.OnPc && !planets.TryGet(game, e.ConsoleCrc, out _)).ToArray()
+            : Array.Empty<SaveFileEntry>();
+
+    /// <summary>
+    /// Reads the planet of each of <paramref name="rows"/> off the console, from
+    /// <paramref name="consoleCategory"/> under <paramref name="title"/>, one FILE_READ of each
+    /// file's head, and says how many it learnt. Nobody asked for this, so nothing is said when it
+    /// fails: a file the console no longer has is skipped, and anything else (the session gone, the
+    /// console busy) stops it, those saves staying below the others until the next scan.
+    /// </summary>
+    public static async Task<int> ReadConsolePlanetsAsync(QwarkClient client, SaveFilePlanetCache planets, GameId game,
+        string title, string consoleCategory, IEnumerable<SaveFileEntry> rows, CancellationToken cancellationToken = default)
+    {
+        int read = 0;
+        foreach (var entry in rows)
+        {
+            try
+            {
+                await planets.ConsoleAsync(client, game, QwarkClient.SaveFileConsolePath(title, consoleCategory, entry.Name),
+                    entry.ConsoleCrc, entry.ConsoleSize, cancellationToken).ConfigureAwait(false);
+                read++;
+            }
+            catch (QwarkStatusException ex) when (ex.Status == Status.NotFound)
+            {
+            }
+            catch (Exception ex) when (ex is QwarkStatusException or ProtocolException or IOException
+                                          or InvalidOperationException or OperationCanceledException)
+            {
+                break;
+            }
+        }
+
+        return read;
+    }
+
+    /// <summary>The rows on screen sorted again, the selection kept, after more planets became known.</summary>
+    private static void Resort(AppState state)
+    {
+        string? keep = Selected?.Name;
+        _sortedBy = state.Settings.SaveFileSort;
+        _entries = SaveFileOrder.Sort(_entries, _game, _sortedBy, PlanetOf(Planets, _game));
+        _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
+    }
+
+    /// <summary>
+    /// Off to the console for the planets of the console-only saves on screen, by planet only; the
+    /// list is sorted again when they are in, if it is still the same list.
+    /// </summary>
+    private static void ReadConsolePlanets(AppState state, string title, string category, string consoleCategory, GameId game)
+    {
+        if (state.Settings.SaveFileSort != SaveFileSort.ByPlanet) return;
+
+        // A listing that comes back while an earlier one's reads are still out asks only for the rest.
+        var missing = ConsolePlanetsToRead(Planets, game, _entries)
+            .Where(e => !_readingPlanets.Contains((game, e.ConsoleCrc)))
+            .ToArray();
+        if (missing.Length == 0) return;
+        foreach (var entry in missing) _readingPlanets.Add((game, entry.ConsoleCrc));
+
+        state.RunQuiet(async () =>
+        {
+            int read = 0;
+            try
+            {
+                read = await ReadConsolePlanetsAsync(state.Client, Planets, game, title, consoleCategory, missing)
+                    .ConfigureAwait(false);
+            }
+            finally
+            {
+                state.Post(() =>
+                {
+                    foreach (var entry in missing) _readingPlanets.Remove((game, entry.ConsoleCrc));
+                    if (read > 0 && string.Equals(category, Category, StringComparison.Ordinal) && StillOn(title, game))
+                    {
+                        Resort(state);
+                    }
+                });
+            }
+        });
+    }
 
     private static void RescanFiles(AppState state, string title)
     {
         string category = Category;
         GameId game = _game;
+        var sort = state.Settings.SaveFileSort;
         LocalSaveFile[] pc;
 
         try
@@ -1426,6 +1547,15 @@ public static class SaveFilesPanel
             pc = IsReadOnly(category)
                 ? state.PremadeSaveFiles.FilesWithCrc(title, game)
                 : state.SaveFiles.FilesWithCrc(title, category);
+
+            // By planet, each file's planet out of its own few bytes, read once per CRC.
+            if (sort == SaveFileSort.ByPlanet)
+            {
+                string? folder = IsReadOnly(category)
+                    ? state.PremadeSaveFiles.FolderFor(title, game)
+                    : state.SaveFiles.CategoryFolder(title, category);
+                ReadPcPlanets(Planets, game, folder, pc);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -1433,7 +1563,8 @@ public static class SaveFilesPanel
             state.AddToast($"Savefile library: {ex.Message}", ToastKind.Error);
         }
 
-        _entries = Rows(category, null, pc, game);
+        _sortedBy = sort;
+        _entries = Rows(category, null, pc, game, sort, PlanetOf(Planets, game));
         if (_fileIndex >= _entries.Length) _fileIndex = -1;
 
         if (!ConsoleReadable(state)) return;
@@ -1453,8 +1584,10 @@ public static class SaveFilesPanel
                     if (!string.Equals(category, Category, StringComparison.Ordinal) || !StillOn(title, game)) return;
 
                     string? keep = Selected?.Name;
-                    _entries = Rows(category, console, pc, game);
+                    _sortedBy = state.Settings.SaveFileSort;
+                    _entries = Rows(category, console, pc, game, _sortedBy, PlanetOf(Planets, game));
                     _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
+                    ReadConsolePlanets(state, title, category, consoleCategory, game);
                 });
             }
             catch (QwarkStatusException ex) when (ex.Status is Status.NotFound or Status.Busy)
