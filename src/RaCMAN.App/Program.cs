@@ -130,7 +130,7 @@ if (obsPad)
 
 using var state = new AppState(settings, updatesAllowed);
 
-if (migration.MovedAnything) state.AddToast(migration.Describe(AppPaths.Root));
+if (migration.MovedAnything) state.AddToast(migration.Describe());
 
 // The notes of a version just installed, once; then the check, once a day. Neither runs for a run
 // that must not touch the network.

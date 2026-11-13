@@ -330,8 +330,7 @@ public class SprxUpdateTests
         // One message, and it says which step went wrong and where.
         var errors = state.Toasts.Where(t => t.Kind == ToastKind.Error).ToArray();
         var error = Assert.Single(errors);
-        Assert.Contains("uploading it to", error.Text, StringComparison.Ordinal);
-        Assert.Contains(TempPath(WebManLoader.BootPath), error.Text, StringComparison.Ordinal);
+        Assert.Contains("uploading it", error.Text, StringComparison.Ordinal);
 
         // The swap is the last step, so a failure before it cannot have touched the boot copy.
         Assert.Equal(onConsole, server.Files[WebManLoader.BootPath]);
@@ -470,7 +469,7 @@ public class SprxUpdateTests
             client, Module(7), FakeQwarkServer.UiPakFor(QwarkClient.ExpectedQwarkBuild)));
 
         Assert.Equal(SprxUpdateStep.UiPak, failure.Step);
-        Assert.Contains($"uploading ui.pak to {UiPak.StagedPath}", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("uploading ui.pak", failure.Message, StringComparison.Ordinal);
         Assert.Contains(nameof(Status.IoError), failure.Message, StringComparison.Ordinal);
 
         Assert.Equal(0, server.RequestLog().Count(op => op == Opcode.FileRead));
@@ -495,9 +494,8 @@ public class SprxUpdateTests
         Assert.True(await PumpAsync(state, () => state.Toasts.Any(t => t.Kind == ToastKind.Error)));
 
         var error = Assert.Single(state.Toasts, t => t.Kind == ToastKind.Error);
-        Assert.StartsWith(
-            $"Updating qwark.sprx on your console failed while uploading ui.pak to {UiPak.StagedPath}: ",
-            error.Text, StringComparison.Ordinal);
+        Assert.StartsWith(WebManLoader.SprxName, error.Text, StringComparison.Ordinal);
+        Assert.Contains("uploading ui.pak", error.Text, StringComparison.Ordinal);
         Assert.Equal(onConsole, server.Files[WebManLoader.BootPath]);
         Assert.Equal(0, state.QwarkUpdateStaged);
     }

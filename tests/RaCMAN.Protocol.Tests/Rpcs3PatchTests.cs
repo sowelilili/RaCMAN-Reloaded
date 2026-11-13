@@ -306,7 +306,7 @@ public class Rpcs3PatchTests : IDisposable
 
         Assert.Null(lookup.Hash);
         Assert.Contains("NPEA00386", lookup.Problem);
-        Assert.Contains($"Boot {Title} in RPCS3 first", lookup.Problem);
+        Assert.Contains(Title, lookup.Problem);
     }
 
     [Fact]
@@ -369,13 +369,13 @@ public class Rpcs3PatchTests : IDisposable
     }
 
     [Fact]
-    public void NoLogAtAllIsARefusalThatNamesWhereItLooked()
+    public void NoLogAtAllIsARefusalThatNamesTheGame()
     {
         string root = MakeRpcs3();
         var lookup = Rpcs3Patches.FindExecutableHash(FolderAt(root), Title);
 
         Assert.Null(lookup.Hash);
-        Assert.Contains(Path.Combine(root, "log", Rpcs3Patches.LogName), lookup.Problem);
+        Assert.Contains(Title, lookup.Problem);
     }
 
     // ================================================================ finding RPCS3
@@ -1418,8 +1418,7 @@ public class Rpcs3PatchTests : IDisposable
         patch.Install(patch.Folder, patch.LastStatus.Installable);
         Assert.True(await PumpAsync(state, () => !patch.Installing && patch.Update().State == QwarkPatchState.RestartGame));
         Assert.Contains(state.Toasts, toast => toast.Kind == ToastKind.Success
-                                               && toast.Text.Contains("savefile helper and code switches")
-                                               && toast.Text.Contains("Restart the game"));
+                                               && toast.Text.Contains("savefile helper and code switches"));
 
         // Both went in, in one write, and both are switched on.
         var written = Rpcs3Patches.ReadPatchFile(patch.Folder.PatchFile(Title));

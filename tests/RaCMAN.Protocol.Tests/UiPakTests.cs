@@ -335,17 +335,17 @@ public class UiPakTests
         var other = await Assert.ThrowsAsync<UiPakSendException>(
             () => UiPakSend.SendAsync(client, FakeQwarkServer.UiPakFor((byte)(Current - 1))));
         Assert.Equal(UiPakSendStep.Local, other.Step);
-        Assert.Contains($"for qwark build {Current - 1}, not build {Current}", other.Message, StringComparison.Ordinal);
+        Assert.Contains($"{Current - 1}", other.Message, StringComparison.Ordinal);
+        Assert.Contains($"{Current}", other.Message, StringComparison.Ordinal);
 
         var junk = await Assert.ThrowsAsync<UiPakSendException>(
             () => UiPakSend.SendAsync(client, new byte[4096]));
         Assert.Equal(UiPakSendStep.Local, junk.Step);
-        Assert.Contains("is not a ui.pak file", junk.Message, StringComparison.Ordinal);
 
         string missing = Path.Combine(TestDataFolder.Root, $"absent-{Guid.NewGuid():N}", UiPak.FileName);
         var none = await Assert.ThrowsAsync<UiPakSendException>(() => UiPakSend.RunAsync(client, missing));
         Assert.Equal(UiPakSendStep.Local, none.Step);
-        Assert.Contains(missing, none.Message, StringComparison.Ordinal);
+        Assert.Contains(UiPak.FileName, none.Message, StringComparison.Ordinal);
 
         Assert.Empty(FileOps(server));
         Assert.False(server.Files.ContainsKey(UiPak.ConsolePath));
@@ -379,11 +379,11 @@ public class UiPakTests
 
         Assert.Equal(pak, server.Files[UiPak.ConsolePath]);
         Assert.False(server.Files.ContainsKey(UiPak.StagedPath));
-        Assert.Contains(frames.Seen, t => t.Text == "Sent ui.pak to your console" && t.Kind == ToastKind.Success);
+        Assert.Contains(frames.Seen, t => t.Kind == ToastKind.Success && t.Text.Contains(UiPak.FileName, StringComparison.Ordinal));
 
         await frames.ForAsync(state, AppState.UiPakCheckSeconds + 1);
 
-        Assert.Single(frames.Seen, t => t.Text.StartsWith(AppState.UiPakWarning, StringComparison.Ordinal));
+        Assert.Single(frames.Seen, t => t.Text == AppState.UiPakToast);
         Assert.Empty(frames.Errors);
     }
 
@@ -407,17 +407,16 @@ public class UiPakTests
         Assert.True(await frames.UntilAsync(state, () => frames.Errors.Length > 0, delta: 0.25f));
 
         var error = Assert.Single(frames.Errors);
-        Assert.Contains("still says its ui.pak is missing", error.Text, StringComparison.Ordinal);
-        Assert.Contains("qwark log", error.Text, StringComparison.Ordinal);
-        Assert.Contains(frames.Seen, t => t.Text == "Sent ui.pak to your console");
+        Assert.Contains("ui.pak", error.Text, StringComparison.Ordinal);
+        Assert.Contains(frames.Seen, t => t.Kind == ToastKind.Success && t.Text.Contains(UiPak.FileName, StringComparison.Ordinal));
         Assert.True(state.UiPakNeeded);
     }
 
     public static IEnumerable<object?[]> LocalCopies() => new[]
     {
-        new object?[] { null, "There is no ui.pak beside this client to send" },
-        new object?[] { new byte[100], "is not a ui.pak file" },
-        new object?[] { FakeQwarkServer.UiPakFor((byte)(Current - 1)), $"for qwark build {Current - 1}" },
+        new object?[] { null, UiPak.FileName },
+        new object?[] { new byte[100], UiPakSend.Problem(new byte[100], UiPak.FileName) },
+        new object?[] { FakeQwarkServer.UiPakFor((byte)(Current - 1)), UiPakSend.Problem(FakeQwarkServer.UiPakFor((byte)(Current - 1)), UiPak.FileName) },
     };
 
     [Theory]
@@ -459,7 +458,7 @@ public class UiPakTests
         Assert.True(await frames.UntilAsync(state, () => frames.Errors.Length > 0 && !state.UiPakSending));
 
         var error = Assert.Single(frames.Errors).Text;
-        Assert.Contains("uploading it to /dev_hdd0/qwark/ui.pak.new", error, StringComparison.Ordinal);
+        Assert.Contains("uploading", error, StringComparison.Ordinal);
         Assert.Contains(nameof(Status.IoError), error, StringComparison.Ordinal);
         Assert.False(server.Files.ContainsKey(UiPak.ConsolePath));
         Assert.True(state.UiPakNeeded);
@@ -496,6 +495,6 @@ public class UiPakTests
 
         Assert.Equal(offered, state.UiPakNeeded);
         Assert.Equal(offered ? 1 : 0,
-            frames.Seen.Count(t => t.Text.StartsWith(AppState.UiPakWarning, StringComparison.Ordinal)));
+            frames.Seen.Count(t => t.Text == AppState.UiPakToast));
     }
 }

@@ -72,9 +72,9 @@ public sealed class ManipEvents
         ManipEventKind.Activated => new(kind, $"{group} manips activated", ToastKind.Info),
         ManipEventKind.PerRunApplied => new(kind, Applied(group), null),
         ManipEventKind.RefusedNotChallengeFile =>
-            new(kind, $"{group} wasn't applied: this file isn't a challenge-mode file", ToastKind.Error),
+            new(kind, $"{group} wasn't applied: not a challenge-mode file", ToastKind.Error),
         ManipEventKind.RefusedChallengeFile =>
-            new(kind, $"{group} wasn't applied: this file is a challenge-mode file", ToastKind.Error),
+            new(kind, $"{group} wasn't applied: it's a challenge-mode file", ToastKind.Error),
         ManipEventKind.RefusedNoFile => new(kind, $"{group} wasn't applied: load a file first", ToastKind.Error),
         _ => null,
     };

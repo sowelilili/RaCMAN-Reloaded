@@ -758,8 +758,7 @@ public static class SaveFileTransfer
         if (data.Length != info.Size)
         {
             throw new NotAnsweredException(
-                $"the file is {data.Length} bytes and this game's save is exactly {info.Size}, " +
-                "so it is not a save this game can take");
+                $"the file is {data.Length} bytes; this game's save is {info.Size}");
         }
 
         status?.Report($"Writing {data.Length} bytes to your console");
@@ -915,8 +914,7 @@ public static class SaveFileTransfer
             if (DateTime.UtcNow >= deadline)
             {
                 throw new NotAnsweredException(
-                    $"your console was still copying after {limit.TotalSeconds:0.#} s. The helper only " +
-                    "runs while the game is running, so try again once the game is in play.");
+                    $"your console was still copying after {limit.TotalSeconds:0.#} s");
             }
 
             await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);
@@ -1164,8 +1162,7 @@ public static class SaveFileTransfer
             if (DateTime.UtcNow >= deadline)
             {
                 throw new NotAnsweredException(
-                    $"your console did not answer within {limit.TotalSeconds:0.#} s. The helper only " +
-                    "runs while the game is running, so try again once the game is in play.");
+                    $"your console didn't answer within {limit.TotalSeconds:0.#} s");
             }
 
             await Task.Delay(PollInterval, cancellationToken).ConfigureAwait(false);

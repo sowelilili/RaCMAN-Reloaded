@@ -135,7 +135,7 @@ public sealed class WebManLoader
         if (!File.Exists(localSprxPath)) throw new FileNotFoundException($"{SprxName} not found", localSprxPath);
         if (slot is < 0 or > 7) throw new ArgumentOutOfRangeException(nameof(slot), "VSH plugin slots are 0 to 7");
 
-        progress?.Report($"Uploading {SprxName} to {RemotePath}");
+        progress?.Report($"Uploading {SprxName}");
         var bytes = await File.ReadAllBytesAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
         var pak = await ReadUiPakAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
         var modules = await GameModule.ReadBesideAsync(localSprxPath, cancellationToken).ConfigureAwait(false);
@@ -181,7 +181,7 @@ public sealed class WebManLoader
             return false;
         }
 
-        progress?.Report($"Uploading {UiPak.FileName} to {UiPak.ConsolePath}");
+        progress?.Report($"Uploading {UiPak.FileName}");
         try
         {
             await ftp.MakeDirectoryAsync(UiPak.ConsoleDirectory, cancellationToken).ConfigureAwait(false);
@@ -219,7 +219,7 @@ public sealed class WebManLoader
         foreach (var module in modules)
         {
             string path = GameModule.ConsolePath(module.Game);
-            progress?.Report($"Uploading {module.FileName} to {path}");
+            progress?.Report($"Uploading {module.FileName}");
             try
             {
                 await ftp.StoreAsync(path, module.Bytes, cancellationToken).ConfigureAwait(false);
@@ -227,8 +227,7 @@ public sealed class WebManLoader
             }
             catch (IOException error)
             {
-                progress?.Report($"Could not send {module.FileName} to your console: {module.Game.DisplayName()} "
-                                 + $"will have no game features there ({error.Message})");
+                progress?.Report($"Couldn't send {module.FileName} to your console ({error.Message})");
             }
         }
 
@@ -257,7 +256,7 @@ public sealed class WebManLoader
         using var ftp = new FtpSession(ip, FtpPort);
         await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
 
-        progress?.Report($"Uploading {SprxName} to {BootPath}");
+        progress?.Report($"Uploading {SprxName}");
         await ftp.MakeDirectoryAsync(PluginsDirectory, cancellationToken).ConfigureAwait(false);
         await ftp.StoreAsync(BootPath, bytes, cancellationToken).ConfigureAwait(false);
         bool sent = await StoreUiPakAsync(ftp, pak, progress, cancellationToken).ConfigureAwait(false);
@@ -270,14 +269,14 @@ public sealed class WebManLoader
 
         if (result.Outcome is BootInstallOutcome.AlreadyFirst)
         {
-            progress?.Report($"{BootPluginsPath} already starts with {BootPath}");
+            progress?.Report($"boot_plugins.txt already loads {SprxName} first");
             return result;
         }
 
         await ftp.StoreAsync(BootPluginsPath, Encoding.UTF8.GetBytes(rewritten), cancellationToken).ConfigureAwait(false);
         progress?.Report(result.Outcome is BootInstallOutcome.Added
-            ? $"Added {BootPath} at the top of {BootPluginsPath}"
-            : $"Moved {BootPath} to the top of {BootPluginsPath}");
+            ? $"Added {SprxName} to the top of boot_plugins.txt"
+            : $"Moved {SprxName} to the top of boot_plugins.txt");
         return result;
     }
 
@@ -298,7 +297,7 @@ public sealed class WebManLoader
         // keeps lines keeps its final newline too, and never gains a blank line at the top.
         var text = kept.Length == 0 ? string.Empty : string.Join('\n', kept) + '\n';
         await ftp.StoreAsync(BootPluginsPath, Encoding.UTF8.GetBytes(text), cancellationToken).ConfigureAwait(false);
-        progress?.Report($"Removed {SprxName} from {BootPluginsPath}");
+        progress?.Report($"Removed {SprxName} from boot_plugins.txt");
         return true;
     }
 

@@ -603,8 +603,7 @@ public static class Rpcs3Patches
         if (log is null)
         {
             return new ExecutableHashLookup(null,
-                $"RPCS3's log was not found ({string.Join(", ", folder.LogCandidates)}). "
-                + $"Boot {titleId} in RPCS3 first, or check the RPCS3 folder.");
+                $"RPCS3's log wasn't found; boot {titleId} in RPCS3 first");
         }
 
         try
@@ -617,7 +616,7 @@ public static class Rpcs3Patches
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            return new ExecutableHashLookup(null, $"RPCS3's log {log} could not be read: {ex.Message}", Log: log);
+            return new ExecutableHashLookup(null, $"RPCS3's log couldn't be read: {ex.Message}", Log: log);
         }
     }
 
@@ -670,18 +669,18 @@ public static class Rpcs3Patches
 
         if (serial is null)
         {
-            return new ExecutableHashLookup(null, $"RPCS3's log shows no game booted. Boot {titleId} in RPCS3 first.");
+            return new ExecutableHashLookup(null, $"RPCS3's log shows no game booted; boot {titleId} first");
         }
 
         if (!string.Equals(serial, titleId, StringComparison.OrdinalIgnoreCase))
         {
             return new ExecutableHashLookup(null,
-                $"The last game RPCS3 booted is {serial}, not {titleId}. Boot {titleId} in RPCS3 first.");
+                $"RPCS3 last booted {serial}, not {titleId}");
         }
 
         return hash is null
             ? new ExecutableHashLookup(null,
-                $"RPCS3's log has no executable hash for this boot of {titleId}. Boot the game in RPCS3 first.")
+                $"RPCS3's log has no executable hash for {titleId}")
             : new ExecutableHashLookup(hash, string.Empty, applied.Contains(Description), Applied: applied.ToArray());
     }
 

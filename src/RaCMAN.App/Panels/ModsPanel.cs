@@ -920,7 +920,7 @@ public static class ModsPanel
 
                     await state.Client.ModLoadAsync(mod.DirName);
                     state.Post(() => state.RefreshMods());
-                }, keep ? $"{mod.Name} loaded: your console's newer copy" : $"{mod.Name} loaded");
+                }, keep ? $"{mod.Name} loaded from your console's newer copy" : $"{mod.Name} loaded");
             }
             else if (load && (row.ListedName ?? (row.UsbOnly ? row.Usb!.DirName : null)) is { } dir)
             {
@@ -1238,7 +1238,7 @@ public static class ModsPanel
     {
         if (!FileDialog.IsSupported)
         {
-            state.AddToast("No file dialog available; paste the path", ToastKind.Error);
+            state.AddToast("No file dialog here; paste the path", ToastKind.Error);
             return;
         }
 

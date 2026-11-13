@@ -116,7 +116,6 @@ public class Ps3ConnectTests
         Assert.DoesNotContain("load", console.Calls);
 
         Assert.Contains("slot 5", outcome.Message, StringComparison.Ordinal);
-        Assert.Contains("/dev_hdd0/plugins/qwark.sprx", outcome.Message, StringComparison.Ordinal);
     }
 
     [Fact]

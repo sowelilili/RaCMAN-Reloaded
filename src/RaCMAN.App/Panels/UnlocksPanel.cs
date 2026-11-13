@@ -416,8 +416,8 @@ public static class UnlocksPanel
         if (ids.Length == 0)
         {
             state.AddToast(filtering
-                ? "No entry matching the search can be unlocked"
-                : "No entry in this category can be unlocked", ToastKind.Error);
+                ? "Nothing in the search can be unlocked"
+                : "Nothing in this category can be unlocked", ToastKind.Error);
             return;
         }
 

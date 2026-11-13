@@ -203,12 +203,12 @@ public static class ModUninstall
             }
             catch (QwarkStatusException ex)
             {
-                failure = $"\"{step.Text}\" failed: {(plan.Rpcs3 ? "qwark-rpcs3" : "your console")} answered {ex.Status} to {ex.Opcode}";
+                failure = $"{StepName(step.Kind)} failed: {(plan.Rpcs3 ? "qwark-rpcs3" : "your console")} answered {ex.Status}";
                 break;
             }
             catch (Exception ex)
             {
-                failure = $"\"{step.Text}\" failed: {ex.Message.TrimEnd('.')}";
+                failure = $"{StepName(step.Kind)} failed: {ex.Message.TrimEnd('.')}";
                 break;
             }
         }
@@ -231,20 +231,30 @@ public static class ModUninstall
     }
 
     /// <summary>The toast an outcome makes: what was done, or where it stopped and what had been done by then.</summary>
+    /// <summary>A step in a few words, for the toast that says which one failed.</summary>
+    public static string StepName(UninstallStepKind kind) => kind switch
+    {
+        UninstallStepKind.Unload => "Unload",
+        UninstallStepKind.AutoOff => "Auto flag off",
+        UninstallStepKind.RemoveRpcs3Patch => "RPCS3 patch removal",
+        UninstallStepKind.DeleteConsoleFolder => "Folder delete",
+        _ => "Mods folder delete",
+    };
+
     public static string Describe(UninstallPlan plan, UninstallOutcome outcome)
     {
         string done = string.Join(", ", outcome.Done);
-        string rescan = outcome.RescanProblem is { } problem ? $" The rescan that follows was answered {problem}." : string.Empty;
+        string rescan = outcome.RescanProblem is { } problem ? $" Rescan: {problem}." : string.Empty;
 
         if (outcome.Succeeded)
         {
             return outcome.Done.Count == 0
-                ? $"{plan.ModName}: there was nothing to uninstall.{rescan}"
+                ? $"{plan.ModName}: nothing to uninstall.{rescan}"
                 : $"{plan.ModName} uninstalled: {done}.{rescan}";
         }
 
-        return $"{plan.ModName} was not uninstalled: {outcome.Failure}. "
-               + (outcome.Done.Count == 0 ? "Nothing was changed." : $"Done before that: {done}.")
+        return $"{plan.ModName} not uninstalled: {outcome.Failure}. "
+               + (outcome.Done.Count == 0 ? "Nothing changed." : $"Done first: {done}.")
                + rescan;
     }
 

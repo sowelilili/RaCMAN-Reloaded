@@ -241,7 +241,7 @@ public class DevBuildTests
         Assert.True(state.QwarkOtherTestBuild);
         Assert.Equal(shipped, server.Files[WebManLoader.BootPath]);
         Assert.Equal(onConsole, server.Files[WebManLoader.BootPath + SprxUpdate.BackupSuffix]);
-        Assert.Contains(state.Toasts, toast => toast.Text.Contains("another test build", StringComparison.Ordinal));
+        Assert.Contains(state.Toasts, toast => toast.Text.Contains("test build", StringComparison.Ordinal));
         Assert.DoesNotContain(state.Toasts, toast => toast.Kind == ToastKind.Error);
     }
 

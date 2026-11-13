@@ -422,7 +422,7 @@ public static class SaveFilesPanel
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            state.AddToast($"Could not create the category: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Category not created: {ex.Message}", ToastKind.Error);
             return;
         }
 
@@ -604,7 +604,7 @@ public static class SaveFilesPanel
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            state.AddToast($"Copy failed: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Not copied: {ex.Message}", ToastKind.Error);
         }
     }
 
@@ -981,7 +981,7 @@ public static class SaveFilesPanel
     /// not finish, with what stopped it.
     /// </summary>
     public static string FailureToast(bool load, Exception ex) =>
-        $"The {(load ? "load" : "save")} {(ex is SaveFileTransfer.RefusedException ? "was refused" : "did not finish")}: {ex.Message}";
+        $"{(load ? "Load" : "Save")} {(ex is SaveFileTransfer.RefusedException ? "refused" : "failed")}: {ex.Message}";
 
     /// <summary>
     /// SAVEFILE_STORE, poll SAVEFILE_INFO to completion, then mirror the file down when mirroring
@@ -1176,7 +1176,7 @@ public static class SaveFilesPanel
             catch (Exception ex) when (ex is QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
-                state.Post(() => state.AddToast($"Rename failed: {ex.Message}", ToastKind.Error));
+                state.Post(() => state.AddToast($"Not renamed: {ex.Message}", ToastKind.Error));
             }
             finally
             {
@@ -1206,7 +1206,7 @@ public static class SaveFilesPanel
             catch (Exception ex) when (ex is QwarkStatusException or ProtocolException
                                           or IOException or UnauthorizedAccessException)
             {
-                state.Post(() => state.AddToast($"Delete failed: {ex.Message}", ToastKind.Error));
+                state.Post(() => state.AddToast($"Not deleted: {ex.Message}", ToastKind.Error));
             }
             finally
             {

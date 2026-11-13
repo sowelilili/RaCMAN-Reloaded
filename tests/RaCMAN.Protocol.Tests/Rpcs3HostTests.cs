@@ -307,7 +307,7 @@ public class Rpcs3HostTests
         // 0xC0000135, what qwark-rpcs3.exe died with while it still imported libwinpthread-1.dll.
         string dll = Rpcs3Host.DescribeExit(unchecked((int)0xC0000135));
         Assert.StartsWith("exited (code -1073741515", dll, StringComparison.Ordinal);
-        Assert.Contains("STATUS_DLL_NOT_FOUND", dll, StringComparison.Ordinal);
+        Assert.Contains("DLL", dll, StringComparison.Ordinal);
         Assert.Equal("exited (code 0)", Rpcs3Host.DescribeExit(0));
     }
 

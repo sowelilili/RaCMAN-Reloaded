@@ -132,7 +132,7 @@ public sealed class Rpcs3Host : IDisposable
     {
         const int StatusDllNotFound = unchecked((int)0xC0000135);
         return code == StatusDllNotFound
-            ? $"exited (code {code}, STATUS_DLL_NOT_FOUND: a DLL it needs is missing beside it or on PATH)"
+            ? $"exited (code {code}, a DLL is missing)"
             : $"exited (code {code})";
     }
 
@@ -232,7 +232,7 @@ public sealed class Rpcs3Host : IDisposable
         if (PortInUse(QwarkPort))
         {
             Adopted = true;
-            message = $"Something is already serving port {QwarkPort}; connecting to that";
+            message = $"Port {QwarkPort} is already in use; connecting to it";
             return true;
         }
 
@@ -240,8 +240,7 @@ public sealed class Rpcs3Host : IDisposable
         string? exe = Find(overridePath);
         if (exe is null)
         {
-            Problem = $"{ExeName} was not found beside this client. Build it in ../qwark, or set "
-                      + "\"qwarkPath\" in the settings file's \"rpcs3\" section.";
+            Problem = $"{ExeName} isn't beside this client";
             message = Problem;
             return false;
         }
@@ -255,7 +254,7 @@ public sealed class Rpcs3Host : IDisposable
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException
                                        or IOException or UnauthorizedAccessException)
         {
-            Problem = $"{ExeName} would not start: {ex.Message}";
+            Problem = $"{ExeName} wouldn't start: {ex.Message}";
             message = Problem;
             return false;
         }

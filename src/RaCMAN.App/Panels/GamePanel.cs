@@ -1552,11 +1552,11 @@ public static class GamePanel
         try
         {
             state.ColourPresets.Save(game, name, values, toggles);
-            state.AddToast($"Colour preset {name} saved to {state.ColourPresets.FileFor(game)}", ToastKind.Success);
+            state.AddToast($"Colour preset {name} saved", ToastKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            state.AddToast($"Colour preset save failed: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Colour preset not saved: {ex.Message}", ToastKind.Error);
         }
 
         RefreshPresets(state, game, key);
@@ -1575,7 +1575,7 @@ public static class GamePanel
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            state.AddToast($"Colour preset delete failed: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Colour preset not deleted: {ex.Message}", ToastKind.Error);
         }
 
         _presetName = string.Empty;

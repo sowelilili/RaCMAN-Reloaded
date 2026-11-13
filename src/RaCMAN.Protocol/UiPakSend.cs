@@ -80,12 +80,12 @@ public static class UiPakSend
         catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
         {
             throw new UiPakSendException(UiPakSendStep.Local,
-                $"There is no {UiPak.FileName} beside this client to send ({localPath}).", error);
+                $"No {UiPak.FileName} beside this client to send", error);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             throw new UiPakSendException(UiPakSendStep.Local,
-                $"Could not read {localPath}: {error.Message}", error);
+                $"Couldn't read {UiPak.FileName}: {error.Message}", error);
         }
 
         if (Problem(pak, localPath) is { } problem) throw new UiPakSendException(UiPakSendStep.Local, problem);
@@ -100,13 +100,13 @@ public static class UiPakSend
     {
         if (!UiPak.TryReadBuild(pak, out int build))
         {
-            return $"{localPath} is not a {UiPak.FileName} file, so it was not sent.";
+            return $"{Path.GetFileName(localPath)} isn't a {UiPak.FileName} file; not sent";
         }
 
         if (build != QwarkClient.ExpectedQwarkBuild)
         {
-            return $"The {UiPak.FileName} beside this client is for qwark build {build}, not build "
-                   + $"{QwarkClient.ExpectedQwarkBuild}, so sending it would not fix the menu ({localPath}).";
+            return $"The {UiPak.FileName} beside this client is for build {build}, not "
+                   + $"{QwarkClient.ExpectedQwarkBuild}; not sent";
         }
 
         return null;
@@ -124,7 +124,7 @@ public static class UiPakSend
 
         const string Failed = $"Sending {UiPak.FileName} failed while";
 
-        progress?.Report($"Uploading {UiPak.FileName} to {UiPak.StagedPath}");
+        progress?.Report($"Uploading {UiPak.FileName}");
         try
         {
             await client.WriteFileAsync(UiPak.StagedPath, pak, progress: null, cancellationToken).ConfigureAwait(false);
@@ -132,7 +132,7 @@ public static class UiPakSend
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new UiPakSendException(UiPakSendStep.Upload,
-                $"{Failed} uploading it to {UiPak.StagedPath}: {error.Message}", error);
+                $"{Failed} uploading it: {error.Message}", error);
         }
 
         try
@@ -142,10 +142,10 @@ public static class UiPakSend
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new UiPakSendException(UiPakSendStep.Verify,
-                $"{Failed} checking {UiPak.StagedPath}: {error.Message}", error);
+                $"{Failed} checking it: {error.Message}", error);
         }
 
-        progress?.Report($"Putting {UiPak.StagedPath} in place of {UiPak.ConsolePath}");
+        progress?.Report($"Putting {UiPak.FileName} in place");
         bool replaced;
         try
         {
@@ -155,7 +155,7 @@ public static class UiPakSend
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new UiPakSendException(UiPakSendStep.Replace,
-                $"{Failed} deleting the old {UiPak.ConsolePath}: {error.Message}", error);
+                $"{Failed} deleting the old one: {error.Message}", error);
         }
 
         try
@@ -165,7 +165,7 @@ public static class UiPakSend
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new UiPakSendException(UiPakSendStep.Replace,
-                $"{Failed} renaming {UiPak.StagedPath} to {UiPak.ConsolePath}: {error.Message}", error);
+                $"{Failed} renaming it: {error.Message}", error);
         }
 
         return new UiPakSendResult(pak.Length, replaced);

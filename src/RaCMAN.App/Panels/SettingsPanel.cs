@@ -671,7 +671,7 @@ public static class SettingsPanel
                         if (left > 0)
                         {
                             state.AddToast(
-                                $"Your console refused {left} saved position(s) for {positions.PlanetName}: {refused}",
+                                $"Your console refused {left} position(s) for {positions.PlanetName}: {refused}",
                                 ToastKind.Error);
                         }
 
@@ -684,20 +684,20 @@ public static class SettingsPanel
                 {
                     if (done.Count == 0)
                     {
-                        state.AddToast("Nothing imported: there was nothing this client can use", ToastKind.Error);
+                        state.AddToast("Nothing imported: nothing this client can use", ToastKind.Error);
                         return;
                     }
 
                     // Only the combos and the mod flags are left for a console; a folder whose
                     // config.txt held nothing has nothing waiting on one.
                     state.AddToast(!connected && combos.Count > 0
-                        ? $"Imported {string.Join(", ", done)}; connect to import the combos and mod flags"
+                        ? $"Imported {string.Join(", ", done)}; connect for combos and mod flags"
                         : $"Imported {string.Join(", ", done)}",
                         ToastKind.Success);
 
                     if (missing.Length > 0)
                     {
-                        state.AddToast($"Not on your console yet, so not flagged: {string.Join(", ", missing)}. Load each once, then import again.");
+                        state.AddToast($"Not flagged, not on your console yet: {string.Join(", ", missing)}");
                     }
                 });
             }

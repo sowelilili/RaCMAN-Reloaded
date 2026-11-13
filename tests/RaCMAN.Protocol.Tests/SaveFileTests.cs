@@ -507,7 +507,7 @@ public class SaveFileTests : IDisposable
             var ex = await Assert.ThrowsAsync<SaveFileTransfer.NotAnsweredException>(
                 () => SaveFileTransfer.UploadAsync(client, id, data));
 
-            Assert.Contains("exactly", ex.Message);
+            Assert.Contains(data.Length.ToString(System.Globalization.CultureInfo.InvariantCulture), ex.Message);
             Assert.Empty(server.Triggered);
             Assert.Empty(server.SaveFileOrder);
             Assert.Equal(before, server.SaveFileBuffer);
@@ -918,7 +918,7 @@ public class SaveFileTests : IDisposable
                 () => SaveFileTransfer.StoreAsync(client, library, Title, "any%", "veldin.sav", mirror: true));
 
             Assert.Equal(SaveFileError.IoError, failed.Error);
-            Assert.Contains("could not read or write", failed.Message, StringComparison.Ordinal);
+            Assert.Equal(SaveFileError.IoError.Describe(), failed.Message);
 
             // Nothing was written on either side.
             Assert.Empty(await client.SaveFileListAsync("any%"));
@@ -982,13 +982,9 @@ public class SaveFileTests : IDisposable
         Assert.StartsWith("the game can't set a save aside right now", aside, StringComparison.Ordinal);
 
         // Seven: no save to act on, which is a different thing for each request.
-        Assert.Equal("the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
-            SaveFileError.NoSave.Describe(SaveFileRequest.Store));
         Assert.Equal(SaveFileError.NoSave.Describe(SaveFileRequest.Store), SaveFileError.NoSave.Describe());
-        Assert.StartsWith("there is no save to load yet", SaveFileError.NoSave.Describe(SaveFileRequest.Load));
-        Assert.Contains("Force autosave in RaC1", SaveFileError.NoSave.Describe(SaveFileRequest.Load));
-        Assert.Equal("that file is not a save of this game, so nothing was loaded",
-            SaveFileError.NoSave.Describe(SaveFileRequest.Restore));
+        Assert.Equal(3, new[] { SaveFileRequest.Store, SaveFileRequest.Load, SaveFileRequest.Restore }
+            .Select(request => SaveFileError.NoSave.Describe(request)).Distinct().Count());
 
         // The other errors read the same whatever was asked for.
         Assert.Equal(SaveFileError.FileMissing.Describe(), SaveFileError.FileMissing.Describe(SaveFileRequest.Restore));
@@ -1000,11 +996,10 @@ public class SaveFileTests : IDisposable
         Assert.False(SaveFileError.None.IsRefusal());
 
         // Build 56: a console with no usable ui.pak refuses anything that needs the helper, and
-        // says so in words that point at the fix, the same for every request.
+        // says so, the same for every request.
         Assert.True(SaveFileError.NoUiPak.IsRefusal());
         Assert.Equal(8, (byte)SaveFileError.NoUiPak);
         Assert.Contains("your console's ui.pak", SaveFileError.NoUiPak.Describe());
-        Assert.Contains("Connection panel", SaveFileError.NoUiPak.Describe(SaveFileRequest.Load));
         Assert.Equal(SaveFileError.NoUiPak.Describe(), SaveFileError.NoUiPak.Describe(SaveFileRequest.Restore));
         Assert.False(SaveFileError.IoError.IsRefusal());
         Assert.False(SaveFileError.HelperMissing.IsRefusal());
@@ -1103,30 +1098,24 @@ public class SaveFileTests : IDisposable
         Assert.Equal(8, (byte)SaveFileReason.NoSlotYet);
         Assert.Equal(9, (byte)SaveFileReason.HoldLost);
 
-        var expected = new (SaveFileReason Reason, string Words)[]
-        {
-            (SaveFileReason.NotInGameplay, "isn't in gameplay yet"),
-            (SaveFileReason.PlanetLoad, "a planet load is already under way"),
-            (SaveFileReason.TitleScreen, "still on its title screen"),
-            (SaveFileReason.GameSaving, "busy saving or loading on its own"),
-            (SaveFileReason.NoSaveSystem, "save system isn't up yet"),
-            (SaveFileReason.LoadNotTaken, "didn't take it within five seconds"),
-            (SaveFileReason.NotASave, "that file isn't a save of this game"),
-            (SaveFileReason.NoSlotYet, "hasn't saved or loaded a save since it started"),
-            (SaveFileReason.HoldLost, "started a save or load of its own"),
-        };
-        foreach (var (reason, words) in expected)
+        // Each reason the console names is its own sentence, in the console's words rather than the
+        // error's, whatever the error was.
+        var reasons = Enumerable.Range(1, 9).Select(r => (SaveFileReason)r).ToArray();
+        var texts = new List<string>();
+        foreach (var reason in reasons)
         {
             var error = reason is SaveFileReason.NotASave or SaveFileReason.NoSlotYet ? SaveFileError.NoSave : SaveFileError.NotIdle;
             string text = error.Describe(SaveFileRequest.Restore, reason);
-            Assert.Contains(words, text, StringComparison.Ordinal);
-
-            // Nothing about the original games' moments (space, multiplayer) where the console named the check.
-            Assert.DoesNotContain("multiplayer", text, StringComparison.Ordinal);
+            Assert.StartsWith("your console", text, StringComparison.Ordinal);
+            Assert.NotEqual(error.Describe(SaveFileRequest.Restore), text);
+            texts.Add(text);
         }
 
-        Assert.Contains("nothing was taken", SaveFileReason.NotASave.Describe(SaveFileRequest.Store));
-        Assert.Contains("can't take a save", SaveFileReason.TitleScreen.Describe(SaveFileRequest.Store));
+        Assert.Equal(reasons.Length, texts.Distinct().Count());
+
+        // A take and a load read differently where the request matters.
+        Assert.NotEqual(SaveFileReason.NotASave.Describe(SaveFileRequest.Store), SaveFileReason.NotASave.Describe(SaveFileRequest.Restore));
+        Assert.NotEqual(SaveFileReason.TitleScreen.Describe(SaveFileRequest.Store), SaveFileReason.TitleScreen.Describe(SaveFileRequest.Restore));
         Assert.Null(SaveFileReason.None.Describe(SaveFileRequest.Load));
         Assert.Null(((SaveFileReason)200).Describe(SaveFileRequest.Load));
         Assert.Equal(SaveFileError.NotIdle.Describe(SaveFileRequest.Load),
@@ -1154,8 +1143,7 @@ public class SaveFileTests : IDisposable
                 () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
             Assert.Equal(SaveFileError.NotIdle, refused.Error);
             Assert.Equal(SaveFileReason.TitleScreen, refused.Reason);
-            Assert.StartsWith("your console says the game is still on its title screen", refused.Message,
-                StringComparison.Ordinal);
+            Assert.Equal(SaveFileReason.TitleScreen.Describe(refused.Request), refused.Message);
             Assert.Null(server.LoadedSaveFile);
 
             // In gameplay the same load goes through.
@@ -1170,7 +1158,7 @@ public class SaveFileTests : IDisposable
             var stopped = await Assert.ThrowsAsync<SaveFileTransfer.TransferFailedException>(
                 () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
             Assert.Equal(SaveFileReason.NotASave, stopped.Reason);
-            Assert.Equal("your console says that file isn't a save of this game, so nothing was loaded", stopped.Message);
+            Assert.Equal(SaveFileReason.NotASave.Describe(stopped.Request), stopped.Message);
         }
     }
 
@@ -1221,7 +1209,7 @@ public class SaveFileTests : IDisposable
                 () => SaveFileTransfer.LoadAsync(client, library, Title, "any%", entry));
 
             Assert.Equal(SaveFileError.NoSave, failed.Error);
-            Assert.Equal("that file is not a save of this game, so nothing was loaded", failed.Message);
+            Assert.Equal(SaveFileError.NoSave.Describe(SaveFileRequest.Restore), failed.Message);
             Assert.Null(server.LoadedSaveFile);
         }
     }

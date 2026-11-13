@@ -164,7 +164,7 @@ public static class ModDependencies
             if (dependency is null)
             {
                 walking.RemoveAt(walking.Count - 1);
-                return $"{mod.Name} needs {name}, which is not in the mod library for this game.";
+                return $"{mod.Name} needs {name}, which isn't in the library";
             }
 
             string problem = Walk(dependency, library, order, walking);
@@ -545,7 +545,7 @@ public sealed class Rpcs3ModsController
     {
         if (Writing)
         {
-            _state.AddToast("Wait for the change being written to RPCS3 to finish.", ToastKind.Error);
+            _state.AddToast("Still writing the last change to RPCS3", ToastKind.Error);
             return;
         }
 
@@ -555,7 +555,7 @@ public sealed class Rpcs3ModsController
             var (order, problem) = ModDependencies.Resolve(mod, library);
             if (problem.Length > 0)
             {
-                _state.AddToast($"{mod.Name} was not enabled: {problem}", ToastKind.Error);
+                _state.AddToast($"{mod.Name} not enabled: {problem}", ToastKind.Error);
                 return;
             }
 
@@ -590,7 +590,7 @@ public sealed class Rpcs3ModsController
         var (order, problem) = ModDependencies.Resolve(mod, _state.LocalMods);
         if (problem.Length > 0)
         {
-            _state.AddToast($"{mod.Name} was not updated: {problem}", ToastKind.Error);
+            _state.AddToast($"{mod.Name} not updated: {problem}", ToastKind.Error);
             return;
         }
 
@@ -652,7 +652,7 @@ public sealed class Rpcs3ModsController
 
         if (Disk?.Folder.Folder is not { } folder)
         {
-            _state.AddToast($"{target.Name} was not {verb}: {(DiskProblem.Length > 0 ? DiskProblem : "RPCS3's folder has not been found yet.")}",
+            _state.AddToast($"{target.Name} not {verb}: RPCS3's folder isn't found",
                 ToastKind.Error);
             return;
         }
@@ -662,9 +662,9 @@ public sealed class Rpcs3ModsController
         // way to do it. It answers BUSY while a game is starting or stopping.
         if (!_state.Connected || _state.ConsoleBusy)
         {
-            _state.AddToast($"{target.Name} was not {verb}: "
-                            + (_state.Connected ? "the game is starting or stopping in RPCS3. Try again in a moment."
-                                : "connect to qwark-rpcs3 first."), ToastKind.Error);
+            _state.AddToast($"{target.Name} not {verb}: "
+                            + (_state.Connected ? "the game is starting or stopping"
+                                : "connect to qwark-rpcs3 first"), ToastKind.Error);
             return;
         }
 
@@ -719,8 +719,8 @@ public sealed class Rpcs3ModsController
                 {
                     foreach (var mod in mods) _rewritten[$"{hash}|{mod.DirName}"] = (title, generation);
                     _state.AddToast(update
-                            ? $"Updated {names}. Restart the game in RPCS3 to load it."
-                            : $"Enabled {names}. Restart the game in RPCS3 to load {(mods.Count == 1 ? "it" : "them")}.",
+                            ? $"Updated {names}; restart the game to load it"
+                            : $"Enabled {names}; restart the game to load {(mods.Count == 1 ? "it" : "them")}",
                         ToastKind.Success);
                 }
                 else
@@ -750,7 +750,7 @@ public sealed class Rpcs3ModsController
         await library.EnsureUploadedAsync(client, title, mod, consoleHash).ConfigureAwait(false);
 
         var row = Row(await client.ModListAsync().ConfigureAwait(false), mod);
-        if (row is null) return (null, ModPatchRefusal.None, $"qwark-rpcs3 does not list {mod.Name} even after the upload.");
+        if (row is null) return (null, ModPatchRefusal.None, $"qwark-rpcs3 doesn't list {mod.Name} after the upload");
 
         PatchReply reply;
         try
@@ -759,7 +759,7 @@ public sealed class Rpcs3ModsController
             if (reply.Words.Length == 0 && reply.Bytes.Length == 0)
             {
                 return (null, ModPatchRefusal.NothingToPatch,
-                    $"{mod.Name} has no patch words and no code caves, so there is nothing for RPCS3 to apply.");
+                    $"{mod.Name} has nothing for RPCS3 to apply");
             }
         }
         catch (QwarkStatusException ex) when (ex.Opcode == Opcode.ModPatch)
@@ -767,17 +767,17 @@ public sealed class Rpcs3ModsController
             return ex.Status switch
             {
                 Status.Unsupported => (null, ModPatchRefusal.NeedsLua,
-                    $"{mod.Name} has a Lua automation, which qwark cannot run, so it cannot go in as an RPCS3 patch."),
+                    $"{mod.Name} uses Lua, which an RPCS3 patch can't run"),
                 Status.IoError => (null, ModPatchRefusal.ParseError,
-                    $"qwark-rpcs3 could not parse {mod.Name}, or a .bin it names is missing."),
+                    $"qwark-rpcs3 couldn't read {mod.Name} or its .bin files"),
                 Status.Full => (null, ModPatchRefusal.TooLarge,
-                    $"{mod.Name} is more than qwark-rpcs3 can hand over in one reply."),
-                Status.NotFound => (null, ModPatchRefusal.None, $"qwark-rpcs3 no longer lists {mod.Name}. Rescan and try again."),
+                    $"{mod.Name} is too big for qwark-rpcs3 to hand over"),
+                Status.NotFound => (null, ModPatchRefusal.None, $"qwark-rpcs3 no longer lists {mod.Name}"),
                 Status.UnknownOp => (null, ModPatchRefusal.None,
-                    $"this qwark-rpcs3 cannot hand out mods; it needs build {QwarkClient.ExpectedQwarkBuild}."),
-                Status.NotIngame => (null, ModPatchRefusal.None, "qwark-rpcs3 has no game to hand out the mod for. Start the game in RPCS3."),
-                Status.Busy => (null, ModPatchRefusal.None, "the game is starting or stopping. Try again once it is running."),
-                _ => (null, ModPatchRefusal.None, $"qwark-rpcs3 answered {ex.Status} to MOD_PATCH."),
+                    $"this qwark-rpcs3 is too old; it needs build {QwarkClient.ExpectedQwarkBuild}"),
+                Status.NotIngame => (null, ModPatchRefusal.None, "no game is running in RPCS3"),
+                Status.Busy => (null, ModPatchRefusal.None, "the game is starting or stopping"),
+                _ => (null, ModPatchRefusal.None, $"qwark-rpcs3 answered {ex.Status}"),
             };
         }
         catch (ModPatchChangedException)
@@ -799,7 +799,7 @@ public sealed class Rpcs3ModsController
     /// try reads it afresh.
     /// </summary>
     public static string ChangedWhileReading(string name) =>
-        $"{name} changed on qwark-rpcs3 while RaCMAN was reading it, twice running, so nothing was written. Try again.";
+        $"{name} kept changing while being read; nothing written";
 
     private static ModEntry? Row(IEnumerable<ModEntry> list, LocalMod mod) =>
         list.FirstOrDefault(m => string.Equals(m.DirName, mod.DirName, StringComparison.OrdinalIgnoreCase));
@@ -810,7 +810,7 @@ public sealed class Rpcs3ModsController
         var target = mods[0];
         if (Disk?.Folder.Folder is not { } folder)
         {
-            _state.AddToast($"{target.Name} was not disabled: {(DiskProblem.Length > 0 ? DiskProblem : "RPCS3's folder has not been found yet.")}",
+            _state.AddToast($"{target.Name} not disabled: RPCS3's folder isn't found",
                 ToastKind.Error);
             return;
         }
@@ -841,7 +841,7 @@ public sealed class Rpcs3ModsController
                 string names = Rpcs3Patches.JoinNames(mods.Select(m => m.Name).ToList());
                 if (error is null)
                 {
-                    _state.AddToast($"Disabled {names}. Restart the game in RPCS3 to take {(mods.Count == 1 ? "it" : "them")} out of the game.",
+                    _state.AddToast($"Disabled {names}; restart the game to remove {(mods.Count == 1 ? "it" : "them")}",
                         ToastKind.Success);
                 }
                 else

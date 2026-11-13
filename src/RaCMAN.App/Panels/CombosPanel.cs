@@ -324,7 +324,7 @@ public static class CombosPanel
             // The per-user settings went away under the capture: the switch went off, or the
             // console has none. There is no user to store it for, and COMBO_OVERRIDE is not sent.
             Suspend(state, false);
-            state.AddToast($"{Label(action)} was not stored: per-user settings are off.");
+            state.AddToast($"{Label(action)} not stored: per-user settings are off");
             return;
         }
 

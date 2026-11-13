@@ -545,28 +545,23 @@ public static class SaveFileErrorExtensions
     {
         SaveFileError.None => "no error",
         SaveFileError.FileMissing => "your console no longer has that file",
-        SaveFileError.IoError => "your console could not read or write the file",
-        SaveFileError.ShortFile => "the file is not the size this game's save has to be",
+        SaveFileError.IoError => "your console couldn't read or write the file",
+        SaveFileError.ShortFile => "the file is the wrong size for this game's save",
         SaveFileError.HelperMissing => "the game stopped while your console was copying",
-        SaveFileError.BufferBusy => "your console was already busy with another save",
+        SaveFileError.BufferBusy => "your console is busy with another save",
         // Not "leave the menu": the RaC1-3 helper pauses the game from almost anywhere since build
         // 53, so what is left is a load under way, space, a screen that cannot pause and
         // multiplayer. A set-aside is refused only by Deadlocked, for the same kinds of moment.
         SaveFileError.NotIdle => request == SaveFileRequest.Store
-            ? "the game can't set a save aside right now (a load, a cutscene or a mode change is under way, "
-              + "or it's in multiplayer). Try again in a moment"
-            : "the game can't load a save right now (a planet load is under way, or it's in space, "
-              + "a menu that can't pause, or multiplayer). Try again in a moment",
+            ? "the game can't set a save aside right now"
+            : "the game can't load a save right now",
         SaveFileError.NoSave => request switch
         {
-            SaveFileRequest.Restore => "that file is not a save of this game, so nothing was loaded",
-            SaveFileRequest.Load =>
-                "there is no save to load yet: wait for an autosave (or use Force autosave in RaC1), or set a save aside first",
-            _ => "the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
+            SaveFileRequest.Restore => "that file isn't a save of this game",
+            SaveFileRequest.Load => "there's no save to load yet",
+            _ => "the game has no save yet",
         },
-        SaveFileError.NoUiPak =>
-            "your console's ui.pak is missing or from another build, and save files need it. "
-            + "Send it from the Connection panel, then try again",
+        SaveFileError.NoUiPak => "your console's ui.pak is missing or from another build",
         _ => $"error {(byte)error}",
     };
 
@@ -587,30 +582,17 @@ public static class SaveFileErrorExtensions
         string act = request == SaveFileRequest.Store ? "take a save" : "load a save";
         return reason switch
         {
-            SaveFileReason.NotInGameplay =>
-                $"your console says the game isn't in gameplay yet (a menu, a cutscene or a loading screen), so it can't {act}. "
-                + "Try again once you're playing",
-            SaveFileReason.PlanetLoad =>
-                "your console says a planet load is already under way. Try again once it has finished",
-            SaveFileReason.TitleScreen =>
-                $"your console says the game is still on its title screen, so it can't {act}. "
-                + "Continue or start a game first, then try again",
-            SaveFileReason.GameSaving =>
-                "your console says the game is busy saving or loading on its own (an autosave, or its save menu). "
-                + "Try again in a moment",
-            SaveFileReason.NoSaveSystem =>
-                "your console says the game's save system isn't up yet. Try again once the game is in play",
-            SaveFileReason.LoadNotTaken =>
-                "your console asked the game to load, but the game didn't take it within five seconds, so nothing "
-                + "was loaded. Your console's qwark.log has the details",
+            SaveFileReason.NotInGameplay => $"your console says the game isn't in gameplay, so it can't {act}",
+            SaveFileReason.PlanetLoad => "your console says a planet load is under way",
+            SaveFileReason.TitleScreen => $"your console says the game is on its title screen, so it can't {act}",
+            SaveFileReason.GameSaving => "your console says the game is saving or loading on its own",
+            SaveFileReason.NoSaveSystem => "your console says the game's save system isn't up yet",
+            SaveFileReason.LoadNotTaken => "your console says the game didn't take the load in time",
             SaveFileReason.NotASave => request == SaveFileRequest.Store
-                ? "your console says what the game holds isn't a save of this game, so nothing was taken"
-                : "your console says that file isn't a save of this game, so nothing was loaded",
-            SaveFileReason.NoSlotYet =>
-                "your console says the game hasn't saved or loaded a save since it started, so there's no save to take "
-                + "yet. Save from the game's menu or reach a checkpoint first (or load a file, which you can then save)",
-            SaveFileReason.HoldLost =>
-                "your console stopped copying because the game started a save or load of its own. Try again in a moment",
+                ? "your console says what the game holds isn't a save of this game"
+                : "your console says that file isn't a save of this game",
+            SaveFileReason.NoSlotYet => "your console says the game has no save to take yet; save in the game first",
+            SaveFileReason.HoldLost => "your console stopped: the game started its own save or load",
             _ => null,
         };
     }

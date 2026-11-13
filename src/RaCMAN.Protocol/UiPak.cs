@@ -39,10 +39,10 @@ public static class UiPak
     public static ReadOnlySpan<byte> Magic => "QPAK"u8;
 
     /// <summary>The one sentence for a client that has no pak to send beside its qwark.sprx.</summary>
-    public const string MissingNote = "No ui.pak beside qwark.sprx: the Trainer menu and save files will not work in games";
+    public const string MissingNote = "No ui.pak beside qwark.sprx: no Trainer menu or save files";
 
     /// <summary>The one sentence for a pak the console's FTP server refused; the module is sent all the same.</summary>
-    public const string SendFailedNote = "Could not send ui.pak to your console: the Trainer menu and save files will not work in games";
+    public const string SendFailedNote = "Couldn't send ui.pak to your console: no Trainer menu or save files";
 
     /// <summary>
     /// The client's own copy: beside the qwark.sprx it sends, whichever path that resolved to.

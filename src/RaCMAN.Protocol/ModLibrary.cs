@@ -425,7 +425,7 @@ public sealed class ModLibrary
         if (consoleHash == localHash && consoleHash != 0) return false;
 
         string remoteFolder = ConsoleFolder(titleId, mod.DirName);
-        progress?.Report($"Uploading {mod.DirName} to {remoteFolder}");
+        progress?.Report($"Uploading {mod.Name}");
         await client.DirCreateAsync(remoteFolder, cancellationToken).ConfigureAwait(false);
 
         await UploadFileAsync(client, $"{remoteFolder}/patch.txt", File.ReadAllBytes(mod.PatchFile), cancellationToken).ConfigureAwait(false);
@@ -450,7 +450,7 @@ public sealed class ModLibrary
             Encoding.ASCII.GetBytes(Crc32.ToSumText(localHash)), cancellationToken).ConfigureAwait(false);
 
         await client.ModRescanAsync(cancellationToken).ConfigureAwait(false);
-        progress?.Report($"{mod.Name} uploaded ({Crc32.ToSumText(localHash)})");
+        progress?.Report($"{mod.Name} uploaded");
         return true;
     }
 

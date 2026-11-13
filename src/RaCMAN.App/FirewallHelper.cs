@@ -215,7 +215,7 @@ public static class FirewallHelper
             return (false, "The firewall helper is Windows-only.");
 
         if (!ScriptPresent)
-            return (false, "windows-firewall.ps1 isn't next to the app (dev build?). Run it from a published copy.");
+            return (false, "windows-firewall.ps1 isn't beside the app");
 
         try
         {
@@ -226,7 +226,7 @@ public static class FirewallHelper
                 UseShellExecute = true,   // required for the UAC "runas" elevation the script does
             };
             Process.Start(psi);
-            return (true, "Approve the Windows administrator prompt to allow inbound UDP.");
+            return (true, "Approve the Windows prompt to allow inbound UDP");
         }
         catch (Exception ex)
         {

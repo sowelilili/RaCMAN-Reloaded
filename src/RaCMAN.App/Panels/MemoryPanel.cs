@@ -1168,11 +1168,11 @@ public static class MemoryPanel
                 .ToList();
 
             state.Watchlists.Save(title, entries, name);
-            state.AddToast($"Watchlist saved to {state.Watchlists.FileFor(title, name)}", ToastKind.Success);
+            state.AddToast($"Watchlist {name} saved", ToastKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            state.AddToast($"Watchlist save failed: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Watchlist not saved: {ex.Message}", ToastKind.Error);
         }
 
         RefreshWatchlists(state, title);
@@ -1193,7 +1193,7 @@ public static class MemoryPanel
         {
             // The names are the PC's, the watches are the console's, and the combo is usable
             // offline: half a load is worth saying out loud rather than a refused request.
-            state.AddToast($"Loaded {entries.Count} names; connect to add the watches themselves");
+            state.AddToast($"Loaded {entries.Count} names; connect to add the watches");
             return;
         }
 
@@ -1223,7 +1223,7 @@ public static class MemoryPanel
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            state.AddToast($"Watchlist delete failed: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Watchlist not deleted: {ex.Message}", ToastKind.Error);
         }
 
         _watchlistName = string.Empty;

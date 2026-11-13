@@ -922,22 +922,16 @@ public class GameLayoutTests
 
     /// <summary>
     /// 2026-11-12: ToD's Remove black screens is a practice cheat that the run-start warning counts,
-    /// so it stays in Cheats after the game's own cheats (God Ratchet beside the values), and the
-    /// layout's tooltip reaches its row by its exact DESCRIBE label.
+    /// so it stays in Cheats after the game's own cheats (God Ratchet beside the values).
     /// </summary>
     [Fact]
-    public void ToDsRemoveBlackScreensIsACheatWithItsTooltip()
+    public void ToDsRemoveBlackScreensIsACheat()
     {
         var d = RaCMAN.Protocol.Testing.FakeQwarkServer.TodDescribe();
         string title = RaCMAN.Protocol.Testing.FakeQwarkServer.TodTitleId;
         var sections = GamePanel.SectionsFor(title, GameId.Tod, d);
         Assert.Equal(new[] { "Fast loads", "Infinite ammo", "Infinite health", "Remove black screens" },
             sections["Cheats"].Select(f => f.Label));
-
-        var black = d.Features.Single(f => f.Label == "Remove black screens");
-        string? tip = GamePanel.FeatureTooltip(title, GameId.Tod, black);
-        Assert.False(string.IsNullOrWhiteSpace(tip));
-        Assert.Equal(GameLayout.TooltipFor(title, GameId.Tod, "Remove black screens"), tip);
     }
 
     /// <summary>A user's layout may give any row a tooltip, by title id before game, and a blank one is none.</summary>

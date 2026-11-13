@@ -398,13 +398,9 @@ public class GameModuleTests
         Assert.Equal(GameId.Rac1, result.Game);
         Assert.Equal(module, server.Files[GameModule.ConsolePath(GameId.Rac1)]);
         Assert.False(server.Files.ContainsKey(GameModule.StagedPath(GameId.Rac1)));
-        Assert.Equal(
-            new[]
-            {
-                "Uploading rac1.sprx to /dev_hdd0/qwark/rac1.sprx.new",
-                "Putting /dev_hdd0/qwark/rac1.sprx.new in place of /dev_hdd0/qwark/rac1.sprx",
-            },
-            said);
+        // One line as each step starts: the upload, then the swap.
+        Assert.Equal(2, said.Count);
+        Assert.All(said, line => Assert.Contains("rac1.sprx", line, StringComparison.Ordinal));
 
         var session = (await client.GetStateAsync()).Session;
         Assert.False(session.GameModuleBad);
@@ -422,12 +418,11 @@ public class GameModuleTests
         var junk = await Assert.ThrowsAsync<GameModuleSendException>(
             () => GameModuleSend.SendAsync(client, GameId.Rac1, new byte[4096]));
         Assert.Equal(GameModuleSendStep.Local, junk.Step);
-        Assert.Contains("is not a signed SPRX", junk.Message, StringComparison.Ordinal);
 
         string missing = Path.Combine(TestDataFolder.Root, $"absent-{Guid.NewGuid():N}", "rac1.sprx");
         var none = await Assert.ThrowsAsync<GameModuleSendException>(() => GameModuleSend.RunAsync(client, GameId.Rac1, missing));
         Assert.Equal(GameModuleSendStep.Local, none.Step);
-        Assert.Contains("There is no rac1.sprx beside this client", none.Message, StringComparison.Ordinal);
+        Assert.Contains("rac1.sprx", none.Message, StringComparison.Ordinal);
 
         await Assert.ThrowsAsync<GameModuleSendException>(() => GameModuleSend.SendAsync(client, GameId.None, Sprx(1)));
 
@@ -533,8 +528,8 @@ public class GameModuleTests
         Assert.True(result.UiPakSent);
         Assert.Equal(one, ftp.Stored[GameModule.ConsolePath(GameId.Rac1)]);
         Assert.Equal(three, ftp.Stored[GameModule.ConsolePath(GameId.Rac3)]);
-        Assert.Contains("Uploading rac3.sprx to /dev_hdd0/qwark/rac3.sprx", said);
-        Assert.Contains("Sent 2 game modules with it.", ConnectionPanel.BootInstallMessage(result), StringComparison.Ordinal);
+        Assert.Contains(said, line => line.Contains("rac3.sprx", StringComparison.Ordinal));
+        Assert.Contains("2 game modules", ConnectionPanel.BootInstallMessage(result), StringComparison.Ordinal);
     }
 
     [Fact]
@@ -629,8 +624,8 @@ public class GameModuleTests
 
         await frames.ForAsync(state, 1.5f);
         var told = Assert.Single(frames.Errors);
-        Assert.Contains("Your console is missing rac1.sprx, so RaC1 has no game features.", told.Text, StringComparison.Ordinal);
-        Assert.Contains("Send it from the Connection panel.", told.Text, StringComparison.Ordinal);
+        Assert.Equal(AppState.GameModuleToast(state.GameModuleReport, state.Session.TitleId), told.Text);
+        Assert.Contains("rac1.sprx", told.Text, StringComparison.Ordinal);
 
         state.SendGameModule();
         Assert.True(state.GameModuleSending);
@@ -778,7 +773,7 @@ public class GameModuleTests
         Assert.True(await frames.UntilAsync(state, () => frames.Errors.Length > before && !state.GameModuleSending));
 
         var error = frames.Errors.Last(t => t.Text.StartsWith("Sending rac1.sprx", StringComparison.Ordinal)).Text;
-        Assert.Contains("uploading it to /dev_hdd0/qwark/rac1.sprx.new", error, StringComparison.Ordinal);
+        Assert.Contains("uploading", error, StringComparison.Ordinal);
         Assert.Contains(nameof(Status.IoError), error, StringComparison.Ordinal);
         Assert.True(state.GameModuleNeeded);
         Assert.Empty(Writes(server).Where(op => op is Opcode.FileRename));

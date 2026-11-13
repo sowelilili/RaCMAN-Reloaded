@@ -231,7 +231,8 @@ public class BootInstallTests
         int stored = commands.IndexOf($"STOR {UiPak.ConsolePath}");
         Assert.True(module >= 0 && module < folder && folder < stored, string.Join(" | ", commands));
 
-        Assert.Contains("Sent ui.pak to /dev_hdd0/qwark.", ConnectionPanel.BootInstallMessage(result));
+        Assert.NotEqual(ConnectionPanel.BootInstallMessage(result with { UiPakSent = false }),
+            ConnectionPanel.BootInstallMessage(result));
     }
 
     /// <summary>No ui.pak beside the module: the module is installed all the same, and the client says the pak is missing.</summary>
@@ -254,7 +255,8 @@ public class BootInstallTests
         await WaitForQuitAsync(server);
         Assert.DoesNotContain($"MKD {UiPak.ConsoleDirectory}", server.Commands);
 
-        Assert.Contains("No ui.pak was sent.", ConnectionPanel.BootInstallMessage(result));
+        Assert.NotEqual(ConnectionPanel.BootInstallMessage(result with { UiPakSent = true }),
+            ConnectionPanel.BootInstallMessage(result));
     }
 
     /// <summary>The FTP session's last word is QUIT, so once the server has it the command list is complete.</summary>

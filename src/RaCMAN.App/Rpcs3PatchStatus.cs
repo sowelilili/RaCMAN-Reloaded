@@ -626,8 +626,8 @@ public sealed class Rpcs3PatchController
                 Installing = false;
                 if (error is null)
                 {
-                    _state.AddToast($"Wrote {names} for {game}. Restart the game in RPCS3 to load "
-                                    + $"{(wanted.Count == 1 ? "it" : "them")}.", ToastKind.Success);
+                    _state.AddToast($"Wrote {names} for {game}; restart the game to load "
+                                    + $"{(wanted.Count == 1 ? "it" : "them")}", ToastKind.Success);
 
                     // The files have changed and the words have not: only the folder is looked at
                     // again, and what it said before the install is not shown in the meantime.

@@ -2211,53 +2211,48 @@ public class SaveFileRefusalToastTests
     [Fact]
     public void ARefusedSaveOrLoadSaysItWasRefusedAndWhy()
     {
-        Assert.Equal(
-            "The save was refused: the game has no save yet: wait for an autosave (or use Force autosave in RaC1), then try again",
-            SaveFilesPanel.FailureToast(load: false, Refused(SaveFileError.NoSave, SaveFileRequest.Store)));
+        var refused = Refused(SaveFileError.NoSave, SaveFileRequest.Store);
+        string text = SaveFilesPanel.FailureToast(load: false, refused);
 
-        Assert.Equal(
-            "The load was refused: " + SaveFileError.NotIdle.Describe(SaveFileRequest.Restore),
-            SaveFilesPanel.FailureToast(load: true, Refused(SaveFileError.NotIdle, SaveFileRequest.Restore)));
+        Assert.EndsWith(SaveFileError.NoSave.Describe(SaveFileRequest.Store), text, StringComparison.Ordinal);
+
+        // A refusal reads differently from a copy that stopped, and a load from a save.
+        Assert.NotEqual(text, SaveFilesPanel.FailureToast(load: false,
+            new SaveFileTransfer.TransferFailedException(SaveFileError.NoSave, SaveFileRequest.Store)));
+        Assert.NotEqual(text, SaveFilesPanel.FailureToast(load: true, refused));
     }
 
     [Fact]
     public void ARefusalTheConsoleNamedSaysTheReasonInYourConsoleWords()
     {
-        // Revision 1.29: Tools of Destruction's console says which check it was.
+        // Revision 1.29: Tools of Destruction's console says which check it was, and that is what
+        // the toast says rather than the error's own words.
         var refused = new SaveFileTransfer.RefusedException(SaveFileError.NotIdle, SaveFileRequest.Restore,
             new QwarkStatusException(Opcode.SaveFileRestore, Status.Busy), SaveFileReason.NotInGameplay);
-        Assert.Equal(
-            "The load was refused: your console says the game isn't in gameplay yet (a menu, a cutscene or a "
-            + "loading screen), so it can't load a save. Try again once you're playing",
-            SaveFilesPanel.FailureToast(load: true, refused));
+        string reason = SaveFileReason.NotInGameplay.Describe(SaveFileRequest.Restore)!;
 
-        var noSlot = new SaveFileTransfer.RefusedException(SaveFileError.NoSave, SaveFileRequest.Store,
-            new QwarkStatusException(Opcode.SaveFileStore, Status.Busy), SaveFileReason.NoSlotYet);
-        Assert.StartsWith("Set aside file was refused: your console says the game hasn't saved or loaded a save",
-            GamePanel.AsideRefusedToast("Set aside file", noSlot.Message), StringComparison.Ordinal);
+        Assert.StartsWith("your console", reason, StringComparison.Ordinal);
+        Assert.EndsWith(reason, SaveFilesPanel.FailureToast(load: true, refused), StringComparison.Ordinal);
+        Assert.DoesNotContain(SaveFileError.NotIdle.Describe(SaveFileRequest.Restore),
+            SaveFilesPanel.FailureToast(load: true, refused), StringComparison.Ordinal);
     }
 
     [Fact]
-    public void ACopyThatStoppedStillSaysItDidNotFinish()
+    public void ACopyThatStoppedSaysWhy()
     {
-        Assert.Equal(
-            "The load did not finish: that file is not a save of this game, so nothing was loaded",
-            SaveFilesPanel.FailureToast(load: true,
-                new SaveFileTransfer.TransferFailedException(SaveFileError.NoSave, SaveFileRequest.Restore)));
-
-        Assert.Equal(
-            "The save did not finish: your console could not read or write the file",
-            SaveFilesPanel.FailureToast(load: false, new SaveFileTransfer.TransferFailedException(SaveFileError.IoError)));
+        Assert.EndsWith(SaveFileError.IoError.Describe(),
+            SaveFilesPanel.FailureToast(load: false, new SaveFileTransfer.TransferFailedException(SaveFileError.IoError)),
+            StringComparison.Ordinal);
     }
 
     [Fact]
     public void TheSetAsideButtonsNameThemselvesAndTheReason()
     {
         var refused = Refused(SaveFileError.NoSave, SaveFileRequest.Load);
+        string text = GamePanel.AsideRefusedToast("Load set-aside file", refused.Message);
 
-        Assert.Equal(
-            "Load set-aside file was refused: there is no save to load yet: wait for an autosave (or use Force autosave in RaC1), or set a save aside first",
-            GamePanel.AsideRefusedToast("Load set-aside file", refused.Message));
+        Assert.StartsWith("Load set-aside file", text, StringComparison.Ordinal);
+        Assert.EndsWith(SaveFileError.NoSave.Describe(SaveFileRequest.Load), text, StringComparison.Ordinal);
     }
 }
 

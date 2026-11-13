@@ -139,7 +139,7 @@ public static class Ps3Connect
         Func<TimeSpan, Task> wait,
         Action<Ps3ConnectStep, string> say)
     {
-        say(Ps3ConnectStep.Ask, $"Asking webMAN on {ip} which slot holds {WebManLoader.SprxName}");
+        say(Ps3ConnectStep.Ask, $"Asking webMAN on {ip} about {WebManLoader.SprxName}");
 
         VshPluginStatus status;
         string? askProblem = null;
@@ -156,14 +156,14 @@ public static class Ps3Connect
         if (status.State == VshPluginState.NotLoaded)
         {
             var loaded = await LoadThenConnectAsync(ip, connect, load, wait, say,
-                $"No VSH slot holds {WebManLoader.SprxName}: loading it").ConfigureAwait(false);
+                $"Loading {WebManLoader.SprxName} on your console").ConfigureAwait(false);
             return loaded;
         }
 
         // Either it is in a slot, or webMAN could not be asked. Both mean something may already be
         // listening, so the port is tried before anything is uploaded.
         say(Ps3ConnectStep.Connect, status.IsLoaded
-            ? $"{WebManLoader.SprxName} is in slot {status.SlotText}: connecting to {ip}"
+            ? $"{WebManLoader.SprxName} is in slot {status.SlotText}; connecting"
             : $"Connecting to qwark on {ip}");
 
         try
@@ -178,17 +178,14 @@ public static class Ps3Connect
                 // The module is in a slot and its port is shut. Sending another copy would land in
                 // a different slot and fight this one for the port, so say what is wrong instead.
                 return new Ps3ConnectOutcome(false, Ps3ConnectStep.Connect,
-                    $"{WebManLoader.SprxName} is loaded in slot {status.SlotText}"
-                    + (status.Path.Length > 0 ? $" from {status.Path}" : string.Empty)
-                    + $", but nothing answered on {ip}: {error.Message}. The module is loaded and not "
-                    + "running; unload it in webMAN, or restart your console, and try again.");
+                    $"{WebManLoader.SprxName} is in slot {status.SlotText} but {ip} didn't answer: {error.Message}");
             }
         }
 
         return await LoadThenConnectAsync(ip, connect, load, wait, say,
             askProblem is null
-                ? $"webMAN did not say whether {WebManLoader.SprxName} is loaded: loading it"
-                : $"Could not ask webMAN ({askProblem}): loading {WebManLoader.SprxName} anyway")
+                ? $"webMAN didn't say if {WebManLoader.SprxName} is loaded; loading it"
+                : $"Couldn't ask webMAN ({askProblem}); loading {WebManLoader.SprxName}")
             .ConfigureAwait(false);
     }
 
@@ -213,7 +210,7 @@ public static class Ps3Connect
         catch (Exception error)
         {
             return new Ps3ConnectOutcome(false, Ps3ConnectStep.Load,
-                $"Loading qwark through webMAN failed: {error.Message}");
+                $"Loading qwark failed: {error.Message}");
         }
 
         say(Ps3ConnectStep.Reconnect, "Waiting for qwark to come up");
@@ -227,7 +224,7 @@ public static class Ps3Connect
         catch (Exception error) when (NothingListening(error))
         {
             return new Ps3ConnectOutcome(false, Ps3ConnectStep.Reconnect,
-                $"qwark was loaded through webMAN but {ip} still did not answer: {error.Message}");
+                $"qwark loaded but {ip} didn't answer: {error.Message}");
         }
     }
 }

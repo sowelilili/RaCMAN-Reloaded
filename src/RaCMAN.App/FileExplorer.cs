@@ -43,7 +43,7 @@ public static class FileExplorer
     public static (bool ok, string message) Open(string folder)
     {
         var command = CommandFor(folder, Current);
-        if (command is null) return (false, "There is no file manager to open on this platform.");
+        if (command is null) return (false, "No file manager on this platform");
 
         var (program, target) = command.Value;
         try
@@ -57,14 +57,14 @@ public static class FileExplorer
             using var process = Process.Start(info);
 
             return process is null
-                ? (false, $"Could not open {target}: {program} did not start")
+                ? (false, $"Couldn't open {target}: {program} didn't start")
                 : (true, $"Opened {target}");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or IOException
                                       or UnauthorizedAccessException or ArgumentException
                                       or NotSupportedException or InvalidOperationException)
         {
-            return (false, $"Could not open {target}: {ex.Message}");
+            return (false, $"Couldn't open {target}: {ex.Message}");
         }
     }
 
@@ -85,7 +85,7 @@ public static class FileExplorer
     public static (bool ok, string message) OpenLink(string link)
     {
         if (WebAddress(link) is not { } address) return (false, $"Not a web address: {link}");
-        if (CommandFor(address, Current) is not { } command) return (false, "There is no browser to open on this platform.");
+        if (CommandFor(address, Current) is not { } command) return (false, "No browser on this platform");
 
         var (program, target) = command;
         try
@@ -95,13 +95,13 @@ public static class FileExplorer
             using var process = Process.Start(info);
 
             return process is null
-                ? (false, $"Could not open {address}: {program} did not start")
+                ? (false, $"Couldn't open {address}: {program} didn't start")
                 : (true, $"Opened {address}");
         }
         catch (Exception ex) when (ex is System.ComponentModel.Win32Exception or InvalidOperationException
                                       or PlatformNotSupportedException)
         {
-            return (false, $"Could not open {address}: {ex.Message}");
+            return (false, $"Couldn't open {address}: {ex.Message}");
         }
     }
 

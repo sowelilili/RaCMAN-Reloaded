@@ -372,12 +372,12 @@ public static class LuaBox
             _savedName = cleaned;
             _savedText = text;
             _overwriteArmed = false;
-            state.AddToast($"Lua script saved to {path}", ToastKind.Success);
+            state.AddToast($"Lua script saved as {Path.GetFileName(path)}", ToastKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
             _overwriteArmed = false;
-            state.AddToast($"Lua script save failed: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Lua script not saved: {ex.Message}", ToastKind.Error);
         }
 
         Relist(state);
@@ -415,12 +415,12 @@ public static class LuaBox
             _overwriteArmed = false;
             int bytes = Encoding.UTF8.GetByteCount(text);
             state.AddToast(bytes > LuaExecRequest.MaxSourceBytes
-                ? $"Opened {Path.GetFileName(path)}: {bytes} bytes, more than your console runs at a time"
+                ? $"Opened {Path.GetFileName(path)}: {bytes} bytes, too big to run"
                 : $"Opened {Path.GetFileName(path)}", bytes > LuaExecRequest.MaxSourceBytes ? ToastKind.Error : ToastKind.Success);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         {
-            state.AddToast($"Could not open {path}: {ex.Message}", ToastKind.Error);
+            state.AddToast($"Couldn't open {Path.GetFileName(path)}: {ex.Message}", ToastKind.Error);
         }
     }
 

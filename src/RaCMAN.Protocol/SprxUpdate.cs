@@ -127,7 +127,7 @@ public static class SprxUpdate
     {
         if (uiPak is not null)
         {
-            progress?.Report($"Uploading {UiPak.FileName} to {UiPak.StagedPath}");
+            progress?.Report($"Uploading {UiPak.FileName}");
             try
             {
                 await client.WriteFileAsync(UiPak.StagedPath, uiPak, progress: null, cancellationToken).ConfigureAwait(false);
@@ -135,7 +135,7 @@ public static class SprxUpdate
             catch (Exception error) when (error is not OperationCanceledException)
             {
                 throw new SprxUpdateException(SprxUpdateStep.UiPak,
-                    $"uploading {UiPak.FileName} to {UiPak.StagedPath}", error);
+                    $"uploading {UiPak.FileName}", error);
             }
 
             try
@@ -144,7 +144,7 @@ public static class SprxUpdate
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                throw new SprxUpdateException(SprxUpdateStep.UiPak, $"checking {UiPak.StagedPath}", error);
+                throw new SprxUpdateException(SprxUpdateStep.UiPak, $"checking {UiPak.FileName}", error);
             }
         }
 
@@ -152,14 +152,14 @@ public static class SprxUpdate
         foreach (var module in gameModules ?? Array.Empty<GameModuleFile>())
         {
             string staged = GameModule.StagedPath(module.Game);
-            progress?.Report($"Uploading {module.FileName} to {staged}");
+            progress?.Report($"Uploading {module.FileName}");
             try
             {
                 await client.WriteFileAsync(staged, module.Bytes, progress: null, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                throw new SprxUpdateException(SprxUpdateStep.GameModule, $"uploading {module.FileName} to {staged}", error);
+                throw new SprxUpdateException(SprxUpdateStep.GameModule, $"uploading {module.FileName}", error);
             }
 
             try
@@ -168,7 +168,7 @@ public static class SprxUpdate
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {
-                throw new SprxUpdateException(SprxUpdateStep.GameModule, $"checking {staged}", error);
+                throw new SprxUpdateException(SprxUpdateStep.GameModule, $"checking {module.FileName}", error);
             }
 
             modules++;
@@ -182,20 +182,20 @@ public static class SprxUpdate
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new SprxUpdateException(SprxUpdateStep.BootPath,
-                $"reading {WebManLoader.BootPluginsPath}", error);
+                "reading boot_plugins.txt", error);
         }
 
         string temporary = bootPath + TempSuffix;
         string backup = bootPath + BackupSuffix;
 
-        progress?.Report($"Uploading {WebManLoader.SprxName} to {temporary}");
+        progress?.Report($"Uploading {WebManLoader.SprxName}");
         try
         {
             await client.WriteFileAsync(temporary, sprx, progress: null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            throw new SprxUpdateException(SprxUpdateStep.Upload, $"uploading it to {temporary}", error);
+            throw new SprxUpdateException(SprxUpdateStep.Upload, "uploading it", error);
         }
 
         try
@@ -204,10 +204,10 @@ public static class SprxUpdate
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            throw new SprxUpdateException(SprxUpdateStep.Verify, $"checking {temporary}", error);
+            throw new SprxUpdateException(SprxUpdateStep.Verify, "checking it", error);
         }
 
-        progress?.Report($"Putting {temporary} in place of {bootPath}");
+        progress?.Report($"Putting {WebManLoader.SprxName} in place");
         bool replaced;
         try
         {
@@ -236,10 +236,10 @@ public static class SprxUpdate
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            throw new SprxUpdateException(SprxUpdateStep.Swap, $"putting {temporary} in place of {bootPath}", error);
+            throw new SprxUpdateException(SprxUpdateStep.Swap, "putting it in place", error);
         }
 
-        progress?.Report($"{bootPath} is the new {WebManLoader.SprxName}");
+        progress?.Report($"{WebManLoader.SprxName} is in place");
         return new SprxUpdateResult(bootPath, backup, replaced, sprx.Length, UiPakStaged: uiPak is not null, GameModulesStaged: modules);
     }
 

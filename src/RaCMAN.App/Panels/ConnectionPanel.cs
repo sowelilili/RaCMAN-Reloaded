@@ -194,7 +194,7 @@ public static class ConnectionPanel
             if (!File.Exists(sprx))
             {
                 // "It did not work" without a path is nothing anybody can act on.
-                state.AddToast($"No qwark.sprx at {sprx}. Build ../qwark, or point the box above at the SPRX.",
+                state.AddToast($"No qwark.sprx at {sprx}",
                     ToastKind.Error);
             }
             else
@@ -219,10 +219,9 @@ public static class ConnectionPanel
             state.Run(() => state.WebMan.PluginStatusAsync(ip), status => state.AddToast(
                 status.State switch
                 {
-                    VshPluginState.Loaded => $"{WebManLoader.SprxName} is in VSH slot {status.SlotText}"
-                                             + (status.Path.Length > 0 ? $", loaded from {status.Path}" : string.Empty),
+                    VshPluginState.Loaded => $"{WebManLoader.SprxName} is in VSH slot {status.SlotText}",
                     VshPluginState.NotLoaded => $"No VSH slot holds {WebManLoader.SprxName}",
-                    _ => $"webMAN on {ip} did not answer with a plugin page",
+                    _ => $"webMAN on {ip} didn't answer",
                 },
                 status.State switch
                 {
@@ -305,8 +304,7 @@ public static class ConnectionPanel
                     if (result.BeyondHenLimit)
                     {
                         state.AddToast(
-                            $"HEN reads only the first {WebManLoader.HenPluginLimit} lines of boot_plugins.txt"
-                            + $" and the list now has {result.Lines}; the ones past the sixth will not load.",
+                            $"HEN loads only {WebManLoader.HenPluginLimit} boot plugins; boot_plugins.txt has {result.Lines}",
                             ToastKind.Error);
                     }
                 });
@@ -317,7 +315,7 @@ public static class ConnectionPanel
         {
             string ip = _host.Trim();
             state.Run(() => state.WebMan.RemoveFromBootAsync(ip, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt did not list it"));
+                changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt didn't list it"));
         }
 
         ImGui.EndDisabled();
@@ -334,22 +332,27 @@ public static class ConnectionPanel
     public static string BootInstallMessage(BootInstallResult result) =>
         result.Outcome switch
         {
-            BootInstallOutcome.Added => "Added at the top of boot_plugins.txt.",
-            BootInstallOutcome.Moved => "Moved to the top of boot_plugins.txt.",
-            _ => "boot_plugins.txt already starts with it.",
+            BootInstallOutcome.Added => "Added to boot_plugins.txt",
+            BootInstallOutcome.Moved => "Moved to the top of boot_plugins.txt",
+            _ => "Already first in boot_plugins.txt",
         }
-        + (result.UiPakSent ? $" Sent {UiPak.FileName} to {UiPak.ConsoleDirectory}." : $" No {UiPak.FileName} was sent.")
-        + GameModulesSentNote(result.GameModulesSent)
-        + " Restart your console; the module only loads at boot.";
+        + SentWithIt(result)
+        + ". Restart your console to load it";
 
-    /// <summary>The boot install's word on the game modules: nothing when none went (none beside the module).</summary>
-    private static string GameModulesSentNote(int sent) =>
-        sent switch
-        {
-            0 => string.Empty,
-            1 => " Sent 1 game module with it.",
-            _ => $" Sent {sent} game modules with it.",
-        };
+    /// <summary>
+    /// What went with the module: ui.pak and the game modules, or that the pak did not. Nothing is
+    /// said of the game modules when none went (none beside the module).
+    /// </summary>
+    private static string SentWithIt(BootInstallResult result)
+    {
+        var sent = new List<string>(2);
+        if (result.UiPakSent) sent.Add(UiPak.FileName);
+        if (result.GameModulesSent == 1) sent.Add("1 game module");
+        else if (result.GameModulesSent > 1) sent.Add($"{result.GameModulesSent} game modules");
+
+        string with = sent.Count > 0 ? " with " + string.Join(" and ", sent) : string.Empty;
+        return result.UiPakSent ? with : $"{with}, no {UiPak.FileName}";
+    }
 
     /// <summary>
     /// Under the SPRX's path, where it is drawn: a release has ui.pak beside qwark.sprx, so only
@@ -411,8 +414,7 @@ public static class ConnectionPanel
                     ? state.WebMan.LoadAsync(ip, sprx, slot,
                         new Progress<string>(message => state.Post(() => state.AddToast(message))))
                     : throw new FileNotFoundException(
-                        $"no {WebManLoader.SprxName} at {sprx}; build ../qwark, or turn on \"Show debug "
-                        + "information\" in Settings to point this at the SPRX", sprx),
+                        $"no {WebManLoader.SprxName} at {sprx}", sprx),
                 wait: delay => Task.Delay(delay),
                 say: (step, message) =>
                 {

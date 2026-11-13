@@ -17,6 +17,21 @@ public sealed class Toast
     public ToastKind Kind { get; init; } = ToastKind.Info;
 
     public float Remaining { get; set; } = 6f;
+
+    /// <summary>
+    /// The toast box's width: half the smallest window (<see cref="WindowGeometry"/>), so it fits
+    /// beside the panels at any size. Every toast wraps inside it.
+    /// </summary>
+    public const float Width = WindowGeometry.DefaultWidth / 2f;
+
+    /// <summary>The box's padding on each side, held here so the wrap width does not follow the theme.</summary>
+    public const float Padding = 10f;
+
+    /// <summary>The width a toast's text wraps at.</summary>
+    public const float WrapWidth = Width - (2 * Padding);
+
+    /// <summary>The most lines a toast may take. A toast is a brief; detail goes in a tooltip or the user guide.</summary>
+    public const int MaxLines = 3;
 }
 
 /// <summary>
@@ -226,8 +241,8 @@ public sealed class AppState : IDisposable
             if (_helloStale && QwarkUpdateStaged == 0)
             {
                 AddToast(QwarkClient.IsStaleBuild(info.QwarkVersion)
-                    ? "qwark.sprx on your console is older than this client; see the Connection panel"
-                    : "qwark.sprx on your console is another test build than this client's; see the Connection panel");
+                    ? "qwark.sprx on your console is out of date"
+                    : "qwark.sprx on your console is a different test build");
             }
 
             // Not a re-read of everything: if this is the game that was running when the link
@@ -675,7 +690,7 @@ public sealed class AppState : IDisposable
         string sprx = Ps3Connect.ResolveSprx(Settings.Ps3.SprxPath);
         if (!File.Exists(sprx)) return;
 
-        Post(() => AddToast($"No VSH slot holds {WebManLoader.SprxName}: loading it"));
+        Post(() => AddToast($"Loading {WebManLoader.SprxName} on your console"));
         bool uiPakSent = await WebMan.LoadAsync(host, sprx, Settings.Ps3.WebManSlot, cancellationToken: token)
             .ConfigureAwait(false);
         if (!uiPakSent)
@@ -684,7 +699,7 @@ public sealed class AppState : IDisposable
             Post(() => AddToast(note));
         }
         await Task.Delay(Ps3Connect.LoadWait, token).ConfigureAwait(false);
-        Post(() => AddToast($"{WebManLoader.SprxName} loaded through webMAN; reconnecting", ToastKind.Success));
+        Post(() => AddToast($"{WebManLoader.SprxName} loaded; reconnecting", ToastKind.Success));
     }
 
     // ---------------------------------------------------------------- the standalone module update
@@ -755,7 +770,7 @@ public sealed class AppState : IDisposable
             catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
                 Post(() => AddToast(
-                    $"Updating {WebManLoader.SprxName} on your console failed while reading {reading}: {error.Message}",
+                    $"{WebManLoader.SprxName} update failed reading {Path.GetFileName(reading)}: {error.Message}",
                     ToastKind.Error));
                 return;
             }
@@ -776,7 +791,7 @@ public sealed class AppState : IDisposable
                     if (!result.UiPakStaged) AddToast(UiPak.MissingNote);
                     if (Panels.Ui.Debug && result.ReplacedACopy)
                     {
-                        AddToast($"The module it replaced is at {result.BackupPath}");
+                        AddToast($"Old module kept at {result.BackupPath}");
                     }
                 });
             }
@@ -785,7 +800,7 @@ public sealed class AppState : IDisposable
                 // The message already names the step and carries what the console said, so this is
                 // the whole of what the user is told, once.
                 Post(() => AddToast(
-                    $"Updating {WebManLoader.SprxName} on your console failed while {error.Message}",
+                    $"{WebManLoader.SprxName} update failed while {error.Message}",
                     ToastKind.Error));
             }
         });
@@ -796,6 +811,9 @@ public sealed class AppState : IDisposable
     /// <summary>The Connection panel's line for <see cref="UiPakNeeded"/>, and the start of its toast.</summary>
     public const string UiPakWarning =
         "Your console's ui.pak is missing or from another build, so the Trainer menu and save files can't work in games.";
+
+    /// <summary>The toast for <see cref="UiPakNeeded"/>, once a connection.</summary>
+    public const string UiPakToast = "Your console's ui.pak is missing or wrong: no Trainer menu or save files";
 
     /// <summary>The Save files panel's line for <see cref="UiPakNeeded"/>: since build 56 the helper is in the pak.</summary>
     public const string UiPakSaveFilesWarning =
@@ -884,7 +902,7 @@ public sealed class AppState : IDisposable
         if (needed && !_uiPakToasted)
         {
             _uiPakToasted = true;
-            AddToast($"{UiPakWarning} See the Connection panel.");
+            AddToast(UiPakToast);
         }
 
         if (_uiPakCheckIn <= 0) return;
@@ -895,8 +913,7 @@ public sealed class AppState : IDisposable
         _uiPakCheckIn = 0;
         if (needed)
         {
-            AddToast("Your console still says its ui.pak is missing or from another build. The ui.pak beside "
-                     + "this client may be from another build; your console's qwark log says why.", ToastKind.Error);
+            AddToast("Your console still rejects ui.pak; its qwark log says why", ToastKind.Error);
         }
     }
 
@@ -978,12 +995,21 @@ public sealed class AppState : IDisposable
     /// The whole sentence for a game whose module is not to be had (flags2 bit5): which file, which
     /// game, and why, from GAME_MODULE. Without an answer yet it says what the bit says.
     /// </summary>
-    public static string GameModuleProblem(GameModuleInfo? info, string titleId)
+    public static string GameModuleProblem(GameModuleInfo? info, string titleId) =>
+        $"{GameModuleWhat(info, titleId)}, so {PendingGameName(info?.Game ?? GameId.None, titleId)} has no game features. "
+        + "The memory tools still work.";
+
+    /// <summary>The toast for <see cref="GameModuleProblem"/>: which file and what is wrong with it, in brief.</summary>
+    public static string GameModuleToast(GameModuleInfo? info, string titleId) =>
+        $"{GameModuleWhat(info, titleId)}: no game features";
+
+    /// <summary>Which file, and what is wrong with it, from GAME_MODULE.</summary>
+    private static string GameModuleWhat(GameModuleInfo? info, string titleId)
     {
         var game = info?.Game ?? GameId.None;
         string name = PendingGameName(game, titleId);
         string file = GameModule.HasModule(game) ? GameModule.FileName(game) : "the game's module";
-        string what = info?.State switch
+        return info?.State switch
         {
             GameModuleState.Missing => $"Your console is missing {file}",
             GameModuleState.Failed when info.Error == 0 => $"{file} on your console is damaged",
@@ -991,8 +1017,6 @@ public sealed class AppState : IDisposable
             GameModuleState.Other => $"{file} on your console is from another build",
             _ => $"Game support for {name} is missing or broken on your console",
         };
-
-        return $"{what}, so {name} has no game features. The memory tools still work.";
     }
 
     /// <summary>The header's few words for <see cref="GameModuleProblem"/>.</summary>
@@ -1128,8 +1152,7 @@ public sealed class AppState : IDisposable
             if (_gameModuleToasted != key)
             {
                 _gameModuleToasted = key;
-                string fix = GameModuleCanSend ? " Send it from the Connection panel." : string.Empty;
-                AddToast(GameModuleProblem(GameModuleReport, Session.TitleId) + fix, ToastKind.Error);
+                AddToast(GameModuleToast(GameModuleReport, Session.TitleId), ToastKind.Error);
             }
         }
 
@@ -1141,9 +1164,7 @@ public sealed class AppState : IDisposable
         _gameModuleCheckIn = 0;
         if (needed)
         {
-            AddToast("Your console still says its game module is missing or from another build. The game modules "
-                     + "beside this client may be from another build; your console's qwark log says why.",
-                ToastKind.Error);
+            AddToast("Your console still rejects the game module; its qwark log says why", ToastKind.Error);
         }
     }
 
@@ -1160,7 +1181,7 @@ public sealed class AppState : IDisposable
         var game = PendingGame;
         if (GameModuleLocalPath is not { } path)
         {
-            AddToast("Your console has not said which game it is running yet; try again in a moment.", ToastKind.Error);
+            AddToast("Your console hasn't said which game is running yet", ToastKind.Error);
             return;
         }
 
@@ -1176,8 +1197,8 @@ public sealed class AppState : IDisposable
 
                 Post(() =>
                 {
-                    AddToast($"Sent {GameModule.FileName(game)} to your console. {game.DisplayName()} support "
-                             + "loads as soon as your console has room for it.", ToastKind.Success);
+                    AddToast($"Sent {GameModule.FileName(game)} to your console; it loads when there's room",
+                        ToastKind.Success);
                     if (connection == _connection) _gameModuleCheckIn = GameModuleCheckSeconds;
                 });
             }
@@ -1335,8 +1356,8 @@ public sealed class AppState : IDisposable
 
             Run(() => Client.ProfileEnableAsync(true, ProfileSetup.None),
                 info.SignedIn
-                    ? $"Per-user settings on. {Panels.CombosPanel.Possessive(who)} saved settings are back."
-                    : "Per-user settings on. Nobody is signed in on your console yet.");
+                    ? $"Per-user settings on: {Panels.CombosPanel.Possessive(who)} settings are back"
+                    : "Per-user settings on; nobody is signed in yet");
         });
     }
 
@@ -1346,7 +1367,7 @@ public sealed class AppState : IDisposable
         if (!Panels.CombosPanel.ShowsProfiles(Session)) return;
 
         Run(() => Client.ProfileEnableAsync(false, ProfileSetup.None),
-            "Per-user settings off. Your console's shared settings are in use.");
+            "Per-user settings off");
     }
 
     /// <summary>
@@ -1363,8 +1384,8 @@ public sealed class AppState : IDisposable
 
         Run(() => Client.ProfileEnableAsync(true, chosen),
             chosen == ProfileSetup.Copy
-                ? $"{question.Who} starts with a copy of the current settings."
-                : $"{question.Who} starts from the default settings.");
+                ? $"{question.Who} starts with a copy of these settings"
+                : $"{question.Who} starts with default settings");
     }
 
     // ---------------------------------------------------------------- plumbing
@@ -2003,7 +2024,7 @@ public sealed class AppState : IDisposable
         }
 
         DescriptionsReplaced++;
-        if (Panels.Ui.Debug) AddToast("qwark now describes this game differently: the panels start again");
+        if (Panels.Ui.Debug) AddToast("The game's description changed; panels reset");
 
         ResetPanels();
 
@@ -2576,7 +2597,7 @@ public sealed class AppState : IDisposable
                 Post(() =>
                 {
                     Unlocks = UnlockList.Empty;
-                    if (!UnlocksUnsupported) AddToast("This game has no unlock table.");
+                    if (!UnlocksUnsupported) AddToast("This game has no unlocks");
                     UnlocksUnsupported = true;
                 });
             }

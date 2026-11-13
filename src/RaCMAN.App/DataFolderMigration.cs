@@ -30,8 +30,8 @@ public static class DataFolderMigration
         public bool MovedAnything => Moved.Count > 0;
 
         /// <summary>The toast: what moved, in the order it was found.</summary>
-        public string Describe(string dataFolder) =>
-            $"Your {string.Join(", ", Moved)} moved to {dataFolder}. The originals were left where they were.";
+        public string Describe() =>
+            $"Your {string.Join(", ", Moved)} moved to the data folder; originals kept";
     }
 
     /// <summary>The folders that are copied whole, in the order the toast names them.</summary>

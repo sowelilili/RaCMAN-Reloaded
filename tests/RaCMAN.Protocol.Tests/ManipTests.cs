@@ -640,7 +640,7 @@ public class ManipEventTests
 
         var refused = events.Observe(Event(8, ManipEventKind.RefusedNotChallengeFile));
         Assert.Equal(ToastKind.Error, refused?.Toast);
-        Assert.Equal("NG+ no IMG wasn't applied: this file isn't a challenge-mode file", refused?.Text);
+        Assert.Equal(ManipEvents.NoticeFor(ManipEventKind.RefusedNotChallengeFile, "NG+ no IMG")!.Value.Text, refused?.Text);
 
         // The same event read again, however many times, is not new.
         Assert.Null(events.Observe(Event(8, ManipEventKind.RefusedNotChallengeFile)));
@@ -684,15 +684,26 @@ public class ManipEventTests
     }
 
     [Theory]
-    [InlineData(ManipEventKind.Activated, "NG+ no IMG manips activated", ToastKind.Info)]
-    [InlineData(ManipEventKind.RefusedNotChallengeFile, "NG+ no IMG wasn't applied: this file isn't a challenge-mode file", ToastKind.Error)]
-    [InlineData(ManipEventKind.RefusedChallengeFile, "NG+ no IMG wasn't applied: this file is a challenge-mode file", ToastKind.Error)]
-    [InlineData(ManipEventKind.RefusedNoFile, "NG+ no IMG wasn't applied: load a file first", ToastKind.Error)]
-    public void EachKindHasItsWords(ManipEventKind kind, string text, ToastKind toast)
+    [InlineData(ManipEventKind.Activated, ToastKind.Info)]
+    [InlineData(ManipEventKind.RefusedNotChallengeFile, ToastKind.Error)]
+    [InlineData(ManipEventKind.RefusedChallengeFile, ToastKind.Error)]
+    [InlineData(ManipEventKind.RefusedNoFile, ToastKind.Error)]
+    public void EachKindNamesTheGroupAndHasItsToast(ManipEventKind kind, ToastKind toast)
     {
         var notice = ManipEvents.NoticeFor(kind, "NG+ no IMG");
-        Assert.Equal(text, notice?.Text);
+        Assert.StartsWith("NG+ no IMG ", notice?.Text, StringComparison.Ordinal);
         Assert.Equal(toast, notice?.Toast);
+    }
+
+    [Fact]
+    public void EachKindHasItsOwnWords()
+    {
+        var kinds = new[]
+        {
+            ManipEventKind.Activated, ManipEventKind.RefusedNotChallengeFile,
+            ManipEventKind.RefusedChallengeFile, ManipEventKind.RefusedNoFile,
+        };
+        Assert.Equal(kinds.Length, kinds.Select(k => ManipEvents.NoticeFor(k, "NG+ no IMG")?.Text).Distinct().Count());
     }
 
     [Fact]
@@ -718,7 +729,7 @@ public class ManipEventTests
     public void TheEventNamesItsOwnGroupNotTheSelection()
     {
         var notice = ManipEvents.NoticeFor(Event(2, ManipEventKind.RefusedChallengeFile, group: 3));
-        Assert.Equal("Any% wasn't applied: this file is a challenge-mode file", notice?.Text);
+        Assert.Equal(ManipEvents.NoticeFor(ManipEventKind.RefusedChallengeFile, "Any%")!.Value.Text, notice?.Text);
     }
 }
 
@@ -850,7 +861,7 @@ public class ManipStateTests
         Assert.True(await PumpAsync(state, () => state.Manips is not null));
 
         server.RaiseManipEvent(ManipEventKind.RefusedNotChallengeFile, 2);
-        const string text = "NG+ (no poki skip) wasn't applied: this file isn't a challenge-mode file";
+        string text = ManipEvents.NoticeFor(ManipEventKind.RefusedNotChallengeFile, "NG+ (no poki skip)")!.Value.Text;
 
         state.RefreshManips();
         Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1));
@@ -903,7 +914,7 @@ public class ManipStateTests
         server.Session = server.Session with { CurrentPlanet = (byte)(server.Session.CurrentPlanet + 1) };
 
         Assert.True(await PumpAsync(state,
-            () => ToastsSaying(state, "All Missions wasn't applied: this file is a challenge-mode file") == 1));
+            () => ToastsSaying(state, ManipEvents.NoticeFor(ManipEventKind.RefusedChallengeFile, "All Missions")!.Value.Text) == 1));
     }
 
     [Fact]
@@ -971,7 +982,7 @@ public class ManipStateTests
 
         // UYA's NG+ no QE is a setup. Picking it with a fresh file in play checks and writes
         // nothing, so nothing is toasted; the refusal comes with the next run start.
-        const string text = "NG+ no QE wasn't applied: this file isn't a challenge-mode file";
+        string text = ManipEvents.NoticeFor(ManipEventKind.RefusedNotChallengeFile, "NG+ no QE")!.Value.Text;
         state.SelectManipGroup(1);
         Assert.True(await PumpAsync(state, () => state.Manips?.Selected == 1));
         await PumpForAsync(state, 200);
@@ -1003,7 +1014,7 @@ public class ManipStateTests
         byte planet = server.Session.CurrentPlanet;
         server.ManipRunStart();
 
-        const string text = "NG+ (poki skip) wasn't applied: this file isn't a challenge-mode file";
+        string text = ManipEvents.NoticeFor(ManipEventKind.RefusedNotChallengeFile, "NG+ (poki skip)")!.Value.Text;
         ManipReadDue(state);
         Assert.True(await PumpAsync(state, () => ToastsSaying(state, text) == 1));
         Assert.Equal(planet, server.Session.CurrentPlanet);
@@ -1058,7 +1069,7 @@ public class ManipStateTests
 
         // One event on the first module: number 1, told once.
         first.RaiseManipEvent(ManipEventKind.RefusedNotChallengeFile, 2);
-        const string told = "NG+ (no poki skip) wasn't applied: this file isn't a challenge-mode file";
+        string told = ManipEvents.NoticeFor(ManipEventKind.RefusedNotChallengeFile, "NG+ (no poki skip)")!.Value.Text;
         state.RefreshManips();
         Assert.True(await PumpAsync(state, () => state.ManipToasts == 1));
         Assert.Equal(1, ToastsSaying(state, told));
@@ -1075,7 +1086,7 @@ public class ManipStateTests
         await PumpForAsync(state, 300);
 
         Assert.Equal(1, state.ManipToasts);
-        Assert.Equal(0, ToastsSaying(state, "All Missions wasn't applied: this file is a challenge-mode file"));
+        Assert.Equal(0, ToastsSaying(state, ManipEvents.NoticeFor(ManipEventKind.RefusedChallengeFile, "All Missions")!.Value.Text));
 
         // A third module restart, reached with nothing raised yet; its first event is number 1,
         // which the first module had used too. It is told.

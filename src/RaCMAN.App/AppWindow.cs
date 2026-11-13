@@ -589,12 +589,19 @@ public sealed class AppWindow : GameWindow
         ImGui.SetNextWindowPos(position, ImGuiCond.Always, new Vector2(1f, 1f));
         ImGui.SetNextWindowBgAlpha(0.9f);
 
+        // One fixed width, half the smallest window, and the height of whatever is in it: every
+        // toast wraps at the same edge instead of the box growing as wide as its longest line.
+        ImGui.SetNextWindowSizeConstraints(new Vector2(Toast.Width, 0f), new Vector2(Toast.Width, float.MaxValue));
+        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new Vector2(Toast.Padding, Toast.Padding));
+
         const ImGuiWindowFlags flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoResize
                                        | ImGuiWindowFlags.NoMove | ImGuiWindowFlags.AlwaysAutoResize
                                        | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoNav;
 
         if (ImGui.Begin("##toasts", flags))
         {
+            ImGui.PushTextWrapPos(0f);
+
             for (int i = 0; i < toasts.Count; i++)
             {
                 var toast = toasts[i];
@@ -609,9 +616,12 @@ public sealed class AppWindow : GameWindow
                 // "Any% (co-op)" would arrive on screen as "Any(co-op)".
                 Ui.Text(colour, toast.Text);
             }
+
+            ImGui.PopTextWrapPos();
         }
 
         ImGui.End();
+        ImGui.PopStyleVar();
     }
 
     /// <summary>

@@ -580,9 +580,13 @@ public class ModConsoleTests : IDisposable
             Assert.False(outcome.Succeeded);
             Assert.Equal(new[] { "unloaded" }, outcome.Done);
             Assert.Contains("IoError", outcome.Failure);
-            Assert.Contains("ModSetAuto", outcome.Failure);
-            Assert.StartsWith("Bolt mod was not uninstalled: \"Turn its auto flag off", ModUninstall.Describe(plan, outcome));
-            Assert.EndsWith("Done before that: unloaded.", ModUninstall.Describe(plan, outcome));
+            Assert.StartsWith(ModUninstall.StepName(UninstallStepKind.AutoOff), outcome.Failure, StringComparison.Ordinal);
+
+            // The toast names the mod, the step that stopped it and what was done before it.
+            string told = ModUninstall.Describe(plan, outcome);
+            Assert.StartsWith("Bolt mod", told, StringComparison.Ordinal);
+            Assert.Contains(outcome.Failure!, told, StringComparison.Ordinal);
+            Assert.Contains("unloaded", told, StringComparison.Ordinal);
 
             // Nothing after it: the console's folder and the library's are both still there.
             Assert.DoesNotContain(Opcode.DirDelete, server.RequestLog());
@@ -607,7 +611,8 @@ public class ModConsoleTests : IDisposable
             var outcome = await ModUninstall.RunAsync(plan, client, library, new Rpcs3PatchWriter());
 
             Assert.False(outcome.Succeeded);
-            Assert.EndsWith("Nothing was changed.", ModUninstall.Describe(plan, outcome));
+            Assert.NotEqual(ModUninstall.Describe(plan, outcome with { Done = new[] { "unloaded" } }),
+                ModUninstall.Describe(plan, outcome));
             Assert.Contains(server.Mods, m => m.DirName == "sfhelper-old");
         }
     }

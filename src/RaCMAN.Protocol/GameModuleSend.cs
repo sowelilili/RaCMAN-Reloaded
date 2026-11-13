@@ -69,7 +69,7 @@ public static class GameModuleSend
     {
         if (!GameModule.HasModule(game))
         {
-            throw new GameModuleSendException(GameModuleSendStep.Local, "There is no game module for this title.");
+            throw new GameModuleSendException(GameModuleSendStep.Local, "This game has no game module");
         }
 
         byte[] module;
@@ -80,11 +80,11 @@ public static class GameModuleSend
         catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
         {
             throw new GameModuleSendException(GameModuleSendStep.Local,
-                $"There is no {GameModule.FileName(game)} beside this client to send ({localPath}).", error);
+                $"No {GameModule.FileName(game)} beside this client to send", error);
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            throw new GameModuleSendException(GameModuleSendStep.Local, $"Could not read {localPath}: {error.Message}", error);
+            throw new GameModuleSendException(GameModuleSendStep.Local, $"Couldn't read {GameModule.FileName(game)}: {error.Message}", error);
         }
 
         if (Problem(game, module, localPath) is { } problem) throw new GameModuleSendException(GameModuleSendStep.Local, problem);
@@ -95,7 +95,7 @@ public static class GameModuleSend
     public static string? Problem(GameId game, ReadOnlySpan<byte> module, string localPath) =>
         GameModule.LooksLikeSprx(module)
             ? null
-            : $"{localPath} is not a signed SPRX, so {GameModule.FileName(game)} was not sent.";
+            : $"{Path.GetFileName(localPath)} isn't a signed SPRX; not sent";
 
     /// <summary>The four steps against the console: upload, read back, delete the old copy, rename.</summary>
     public static async Task<GameModuleSendResult> SendAsync(
@@ -107,7 +107,7 @@ public static class GameModuleSend
     {
         if (!GameModule.HasModule(game))
         {
-            throw new GameModuleSendException(GameModuleSendStep.Local, "There is no game module for this title.");
+            throw new GameModuleSendException(GameModuleSendStep.Local, "This game has no game module");
         }
 
         string name = GameModule.FileName(game);
@@ -117,14 +117,14 @@ public static class GameModuleSend
         string target = GameModule.ConsolePath(game);
         string failed = $"Sending {name} failed while";
 
-        progress?.Report($"Uploading {name} to {staged}");
+        progress?.Report($"Uploading {name}");
         try
         {
             await client.WriteFileAsync(staged, module, progress: null, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            throw new GameModuleSendException(GameModuleSendStep.Upload, $"{failed} uploading it to {staged}: {error.Message}", error);
+            throw new GameModuleSendException(GameModuleSendStep.Upload, $"{failed} uploading it: {error.Message}", error);
         }
 
         try
@@ -133,10 +133,10 @@ public static class GameModuleSend
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            throw new GameModuleSendException(GameModuleSendStep.Verify, $"{failed} checking {staged}: {error.Message}", error);
+            throw new GameModuleSendException(GameModuleSendStep.Verify, $"{failed} checking it: {error.Message}", error);
         }
 
-        progress?.Report($"Putting {staged} in place of {target}");
+        progress?.Report($"Putting {name} in place");
         bool replaced;
         try
         {
@@ -144,7 +144,7 @@ public static class GameModuleSend
         }
         catch (Exception error) when (error is not OperationCanceledException)
         {
-            throw new GameModuleSendException(GameModuleSendStep.Replace, $"{failed} deleting the old {target}: {error.Message}", error);
+            throw new GameModuleSendException(GameModuleSendStep.Replace, $"{failed} deleting the old one: {error.Message}", error);
         }
 
         try
@@ -154,7 +154,7 @@ public static class GameModuleSend
         catch (Exception error) when (error is not OperationCanceledException)
         {
             throw new GameModuleSendException(GameModuleSendStep.Replace,
-                $"{failed} renaming {staged} to {target}: {error.Message}", error);
+                $"{failed} renaming it: {error.Message}", error);
         }
 
         return new GameModuleSendResult(game, module.Length, replaced);
