@@ -13,8 +13,14 @@ namespace RaCMAN.App;
 
 /// <summary>
 /// One telemetry packet's pad, copied out of it where the packet arrives: the mask, the four analog
-/// axes in the protocol's own order (rx, ry, lx, ly), and whether the console was in a game.
-/// Immutable, so the network thread can hand one to the server and forget about it.
+/// axes in the protocol's own order (rx, ry, lx, ly), and whether it is live. Immutable, so the
+/// network thread can hand one to the server and forget about it.
+/// <para>
+/// Every packet's pad is live, whatever the session state: since qwark revision 1.31 the console
+/// reads the controller through the XMB's own pad as well as the game's (the VSH pad probe), so the
+/// pad at the XMB is the real one, not a game's left over. It goes grey only when the packets stop
+/// (the watchdog's <c>StaleMs</c>) or before the first one.
+/// </para>
 /// </summary>
 public readonly record struct PadSnapshot(uint Mask, float Rx, float Ry, float Lx, float Ly, bool Live)
 {
@@ -25,7 +31,7 @@ public readonly record struct PadSnapshot(uint Mask, float Rx, float Ry, float L
     {
         var analog = session.Analog;
         return new PadSnapshot(session.PadMask, At(analog, 0), At(analog, 1), At(analog, 2), At(analog, 3),
-            session.State == SessionState.Ingame);
+            Live: true);
     }
 
     /// <summary>

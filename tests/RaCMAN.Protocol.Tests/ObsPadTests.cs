@@ -150,7 +150,7 @@ public class ObsPadTests : IDisposable
     }
 
     [Fact]
-    public void ASnapshotTakesThePadAndWhetherTheConsoleWasInAGame()
+    public void ASnapshotTakesThePadAndIsLiveAtTheXmbAsInAGame()
     {
         var session = SessionInfo.Empty with
         {
@@ -165,8 +165,13 @@ public class ObsPadTests : IDisposable
         Assert.Equal(-1f, snapshot.Ly);
         Assert.True(snapshot.Live);
 
-        // At the XMB the pad is still reported, and the overlay has to show that it is not live.
-        Assert.False(PadSnapshot.From(session with { State = SessionState.Xmb }).Live);
+        // Revision 1.31: at the XMB the console reads the controller through the VSH, so the pad it
+        // sends there is the real one and the overlay draws it live, buttons and sticks, as in a game.
+        var xmb = PadSnapshot.From(session with { State = SessionState.Xmb, Game = GameId.None });
+        Assert.True(xmb.Live);
+        Assert.Equal((uint)PadButton.Cross, xmb.Mask);
+        Assert.Equal(-1f, xmb.Ly);
+        Assert.True(PadSnapshot.From(session with { State = SessionState.Booting }).Live);
     }
 
     // ---------------------------------------------------------------- the server itself

@@ -30,7 +30,7 @@ The name is the folder name in `controllerskins/`. If the client does not have t
 
 ## When there is no data
 
-The page makes the pad grey when the client is not connected, when no game runs, and when telemetry stops. It connects again by itself when the client starts again, so a source can stay in the scene. If you select another skin in the client, the page loads the new skin without a refresh.
+The page makes the pad grey when the client is not connected and when telemetry stops. At the XMB, with no game running, the pad stays live: on your console it shows the buttons you press there (under RPCS3 it stays at rest until a game runs). It connects again by itself when the client starts again, so a source can stay in the scene. If you select another skin in the client, the page loads the new skin without a refresh.
 
 ## The port
 
