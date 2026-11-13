@@ -112,7 +112,7 @@ public static class SaveFilePlanet
         GameId.Rac1 => global == 0x153C && planet == 0x82A4,
         GameId.Rac2 => global is 0x1D08 or 0x1CF8 && planet is 0x84D0 or 0x0CD0,
         GameId.Rac3 => global is 0x37B0 or 0x1CF8 && planet is 0x84C0 or 0x0CD0,
-        GameId.Rac4 => global == 0x41F0 && planet == 0x031C,
+        GameId.Rac4 => global is 0x41F0 or 0x1CF8 && planet is 0x031C or 0x0CD0,
         _ => false,
     };
 
