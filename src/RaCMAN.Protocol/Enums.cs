@@ -671,6 +671,30 @@ public enum AutosplitEventFlags : byte
     /// open. Tools of Destruction's long load, the old ToD autosplitter's pause.
     /// </summary>
     Hold = 1 << 4,
+
+    /// <summary>
+    /// Revision 1.33 (pending), on the planet row only: the game marks a planet event that is a
+    /// revisit with <see cref="AutosplitEventMarks.Revisit"/>, so the panel can offer not to split
+    /// on one. Tools of Destruction's, for Metropolis and Cobalia; no other game sets it.
+    /// </summary>
+    Revisits = 1 << 5,
+}
+
+/// <summary>
+/// Revision 1.33 (pending): the event's own flags, the u16 at +10 that was reserved and always 0
+/// before. A bit this client does not know is ignored.
+/// </summary>
+[Flags]
+public enum AutosplitEventMarks : ushort
+{
+    None = 0,
+
+    /// <summary>
+    /// On a planet event of a game whose planet row has <see cref="AutosplitEventFlags.Revisits"/>:
+    /// the load is a revisit by the game's own state (in Tools of Destruction, Metropolis or
+    /// Cobalia with their arrival FMVs behind the player).
+    /// </summary>
+    Revisit = 1 << 0,
 }
 
 /// <summary>Reply status codes, section 2 of PROTOCOL.md.</summary>

@@ -12,8 +12,14 @@ namespace RaCMAN.Protocol;
 /// wrapping every 49 days. It is what the client subtracts to measure a load or a pause, so the
 /// arithmetic is unsigned and a wrap comes out right on its own.
 /// </para>
+/// <para>
+/// <see cref="Marks"/> is revision 1.33's (pending): the u16 that was reserved, 0 from every older
+/// module and on every event but the ones a game marks.
+/// </para>
 /// </summary>
-public readonly record struct AutosplitEvent(uint Seq, uint TimeMs, AutosplitKind Kind, byte Code, uint Arg)
+public readonly record struct AutosplitEvent(
+    uint Seq, uint TimeMs, AutosplitKind Kind, byte Code, uint Arg,
+    AutosplitEventMarks Marks = AutosplitEventMarks.None)
 {
     public const int Size = 16;
 
@@ -25,6 +31,9 @@ public readonly record struct AutosplitEvent(uint Seq, uint TimeMs, AutosplitKin
 
     /// <summary>True when this is the "planet entered" SPLIT the planet route applies to.</summary>
     public bool IsPlanetEntered => Kind == AutosplitKind.Split && Code == PlanetEnteredCode;
+
+    /// <summary>Revision 1.33 (pending): the console marked this planet event a revisit.</summary>
+    public bool IsRevisit => (Marks & AutosplitEventMarks.Revisit) != 0;
 
     /// <summary>
     /// Milliseconds from an earlier event's <see cref="TimeMs"/> to this one's. The subtraction is
@@ -45,9 +54,9 @@ public readonly record struct AutosplitEvent(uint Seq, uint TimeMs, AutosplitKin
         uint timeMs = r.ReadU32();
         var kind = (AutosplitKind)r.ReadU8();
         byte code = r.ReadU8();
-        r.Skip(2);
+        var marks = (AutosplitEventMarks)r.ReadU16();
         uint arg = r.ReadU32();
-        return new AutosplitEvent(seq, timeMs, kind, code, arg);
+        return new AutosplitEvent(seq, timeMs, kind, code, arg, marks);
     }
 
     public void Write(Span<byte> destination)
@@ -57,7 +66,7 @@ public readonly record struct AutosplitEvent(uint Seq, uint TimeMs, AutosplitKin
         w.WriteU32(TimeMs);
         w.WriteU8((byte)Kind);
         w.WriteU8(Code);
-        w.WriteU16(0);
+        w.WriteU16((ushort)Marks);
         w.WriteU32(Arg);
     }
 
@@ -101,6 +110,9 @@ public sealed record AutosplitEventDesc(
 
     /// <summary>Revision 1.29: game time stands still while this row's load pair is open.</summary>
     public bool Hold => (Flags & AutosplitEventFlags.Hold) != 0;
+
+    /// <summary>Revision 1.33 (pending): this game marks its planet events that are revisits.</summary>
+    public bool MarksRevisits => (Flags & AutosplitEventFlags.Revisits) != 0;
 
     /// <summary>True for a row the panel shows as a checkbox; a timing row is never an option.</summary>
     public bool IsSplitOption => Kind == AutosplitKind.Split;

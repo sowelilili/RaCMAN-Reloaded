@@ -864,6 +864,15 @@ public sealed class AutosplitGameSettings
     [JsonPropertyName("planetRoute")]
     public bool PlanetRoute { get; set; }
 
+    /// <summary>
+    /// "Don't split on revisit": a planet event the console marks a revisit does not split. Only a
+    /// game whose planet row says it marks revisits (qwark revision 1.33, pending: Tools of
+    /// Destruction, for Metropolis and Cobalia) ever sends one, so for every other game this
+    /// changes nothing. On unless the file says otherwise, including a file from before it.
+    /// </summary>
+    [JsonPropertyName("skipRevisits")]
+    public bool SkipRevisits { get; set; } = true;
+
     /// <summary>START events start the timer.</summary>
     [JsonPropertyName("start")]
     public bool Start { get; set; } = true;

@@ -235,10 +235,45 @@ public static class AutosplitterPanel
                                  + $"{AutosplitRoutes.FileFor(game)}.");
             }
 
+            // Only for a game whose console marks revisits (Tools of Destruction): the switch would
+            // do nothing anywhere else, so it is not shown there.
+            if (OffersSkipRevisits(desc)) DrawSkipRevisits(options, settings, on);
+
             ImGui.Unindent();
         }
 
         if (!any) Ui.Hint("This game reports only timing events, so there is nothing to choose.");
+    }
+
+    /// <summary>
+    /// True for the planet row of a game whose console marks revisits (qwark revision 1.33,
+    /// pending: Tools of Destruction), the only row "Don't split on revisit" is drawn under.
+    /// </summary>
+    public static bool OffersSkipRevisits(AutosplitEventDesc desc) => desc.PlanetRoute && desc.MarksRevisits;
+
+    /// <summary>
+    /// "Don't split on revisit", beside the route and, like it, meaningless while the planet split
+    /// is off. The console says which loads are revisits; this only decides whether they split.
+    /// </summary>
+    private static void DrawSkipRevisits(AutosplitGameSettings options, Settings settings, bool planetSplitOn)
+    {
+        ImGui.BeginDisabled(!planetSplitOn);
+        bool skip = options.SkipRevisits;
+        if (ImGui.Checkbox("Don't split on revisit", ref skip))
+        {
+            options.SkipRevisits = skip;
+            settings.Save();
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered())
+        {
+            Ui.SetTooltip("Don't split on a load your console marks as a revisit. In Tools of "
+                             + "Destruction that is Metropolis or Cobalia once their arrival "
+                             + "cutscenes are behind you (the ship fixed on Fastoon). Your console "
+                             + "reads it from the save, so Fast loads and Remove cutscenes make no "
+                             + "difference.");
+        }
     }
 
     /// <summary>

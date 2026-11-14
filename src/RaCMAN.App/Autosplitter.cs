@@ -567,6 +567,17 @@ public sealed class Autosplitter
             return false;
         }
 
+        // "Don't split on revisit" (qwark revision 1.33, pending): the console marks a planet event
+        // whose load is a revisit by the game's own state, Tools of Destruction's Metropolis and
+        // Cobalia once their arrival FMVs are behind the player. The client knows nothing of
+        // which planets or why; it only honours the mark, before the route, so a revisit never
+        // splits however the next split is named. Off, the mark is ignored and nothing changes.
+        if (game.SkipRevisits && ev.IsPlanetEntered && ev.IsRevisit)
+        {
+            Record(ev, what, "no split: a revisit, and \"Don't split on revisit\" is on", false);
+            return false;
+        }
+
         bool routed = game.PlanetRoute
                       && ev.Code == AutosplitEvent.PlanetEnteredCode
                       && (desc?.PlanetRoute ?? true);
@@ -876,7 +887,8 @@ public sealed class Autosplitter
         if (ev.Code != AutosplitEvent.PlanetEnteredCode) return ev.Arg == 0 ? label : $"{label} ({ev.Arg})";
 
         string planet = ev.Arg < (uint)PlanetNames.Count ? PlanetNames[(int)ev.Arg] : string.Empty;
-        return string.IsNullOrEmpty(planet) ? $"{label} (planet {ev.Arg})" : $"{label}: {planet}";
+        string named = string.IsNullOrEmpty(planet) ? $"{label} (planet {ev.Arg})" : $"{label}: {planet}";
+        return ev.IsRevisit ? $"{named} (revisit)" : named;
     }
 
     // ---------------------------------------------------------------- LiveSplit state

@@ -77,6 +77,52 @@ public class AutosplitTests
         Assert.Equal(0u, AutosplitEvent.Elapsed(1_234, 1_234));
     }
 
+    /// <summary>
+    /// Qwark revision 1.33 (pending): the u16 at +10, reserved before, carries the event's marks.
+    /// A revisit is bit0 on the wire and in the datagram; an older module's 0 is no mark; a bit this
+    /// client does not know is kept but is not a revisit.
+    /// </summary>
+    [Fact]
+    public void AnEventsMarksAreTheHalfwordThatWasReserved()
+    {
+        var ev = new AutosplitEvent(7, 1_000, AutosplitKind.Split, 1, 1, AutosplitEventMarks.Revisit);
+        var bytes = ev.ToBytes();
+        Assert.Equal(new byte[] { 0, 1 }, bytes[10..12]);
+        Assert.Equal(new byte[] { 0, 0, 0, 1 }, bytes[12..16]);
+
+        var parsed = AutosplitEvent.Parse(bytes);
+        Assert.Equal(ev, parsed);
+        Assert.True(parsed.IsRevisit);
+
+        Assert.True(AutosplitDatagram.TryParse(AutosplitDatagram.Build(ev), out var pushed));
+        Assert.True(pushed.IsRevisit);
+
+        bytes[11] = 0;
+        Assert.False(AutosplitEvent.Parse(bytes).IsRevisit);
+        Assert.Equal(AutosplitEventMarks.None, AutosplitEvent.Parse(bytes).Marks);
+
+        bytes[10] = 0x80;
+        var unknown = AutosplitEvent.Parse(bytes);
+        Assert.False(unknown.IsRevisit);
+        Assert.Equal(1u, unknown.Arg);
+    }
+
+    /// <summary>Revision 1.33 (pending): EventDesc flags bit5, a planet row that marks revisits.</summary>
+    [Fact]
+    public void APlanetRowSaysWhetherItMarksRevisits()
+    {
+        var row = new AutosplitEventDesc(1, AutosplitKind.Split,
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute | AutosplitEventFlags.Revisits,
+            0, "Planet entered");
+        var bytes = row.ToBytes();
+        Assert.Equal(0x23, bytes[2]);
+        var parsed = AutosplitEventDesc.Parse(bytes);
+        Assert.True(parsed.MarksRevisits && parsed.PlanetRoute && !parsed.IsTiming);
+
+        bytes[2] = 0x03;
+        Assert.False(AutosplitEventDesc.Parse(bytes).MarksRevisits);
+    }
+
     [Fact]
     public void EventDescIsThirtyTwoBytesAndRoundTripsItsLabelFlagsAndParameter()
     {

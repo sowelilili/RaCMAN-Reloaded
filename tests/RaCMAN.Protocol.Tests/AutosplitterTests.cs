@@ -2684,6 +2684,138 @@ public class AutosplitterTests
         Assert.True(await WaitFor(() => h.Engine.View.Phase == LiveSplitPhase.Running));
     }
 
+    // ---------------------------------------------------------------- ToD: don't split on revisit
+
+    /// <summary>A planet event, marked a revisit or not, at its own console moment.</summary>
+    private static AutosplitEvent Planet(uint planet, uint seq, uint timeMs, bool revisit) =>
+        new(seq, timeMs, AutosplitKind.Split, AutosplitEvent.PlanetEnteredCode, planet,
+            revisit ? AutosplitEventMarks.Revisit : AutosplitEventMarks.None);
+
+    /// <summary>
+    /// Qwark revision 1.33 (pending): ToD marks a load into Metropolis or Cobalia past their
+    /// arrival FMVs a revisit, and with "Don't split on revisit" on (its default) the client takes
+    /// no split for it, route or no route. The first arrival, which carries no mark, splits; and
+    /// the mark on any other code is not the planet's and changes nothing.
+    /// </summary>
+    [Fact]
+    public async Task ToDsRevisitDoesNotSplitAndAFirstArrivalDoes()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia", "Kortog" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        Assert.True(h.Options.SkipRevisits);
+
+        // Cobalia again with the ship fixed: no split, and the log says why.
+        h.Engine.Handle(Planet(1, seq: 1, timeMs: 1_000, revisit: true));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("revisit", h.Engine.Log()[^1].Action);
+        Assert.EndsWith("(revisit)", h.Engine.Log()[^1].Event);
+
+        // Cobalia's first arrival: the same planet, no mark, splits.
+        h.Engine.Handle(Planet(1, seq: 2, timeMs: 2_000, revisit: false));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Single(h.Server.Actions, a => a == LiveSplitClient.Split);
+
+        // With the route on, Metropolis is planet 0, which the route always splits on (the old
+        // scripts' "0 is Vox"): only the option keeps its revisit from splitting.
+        h.Options.PlanetRoute = true;
+        h.Server.ClearCommands();
+        h.Engine.Handle(Planet(0, seq: 3, timeMs: 3_000, revisit: true));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+
+        // A mark on a code that is not the planet's is not a revisit split.
+        h.Engine.Handle(new AutosplitEvent(4, 4_000, AutosplitKind.Split, 7, 0, AutosplitEventMarks.Revisit));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    /// <summary>With "Don't split on revisit" off, a revisit splits exactly as it did before the mark existed.</summary>
+    [Fact]
+    public async Task ToDsRevisitSplitsAsBeforeWithTheOptionOff()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia", "Kortog" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        h.Options.SkipRevisits = false;
+
+        // No route: every planet change splits, the revisit included.
+        h.Engine.Handle(Planet(1, seq: 1, timeMs: 1_000, revisit: true));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.DoesNotContain("revisit", h.Engine.Log()[^1].Action);
+
+        // The route on: Metropolis, planet 0, splits as it always has; a Cobalia revisit while the
+        // next split is Kortog is turned down by the route, as it always was.
+        h.Options.PlanetRoute = true;
+        h.Server.SplitIndex = 1;
+        await h.RefreshAsync();
+        Assert.Equal("Kortog", h.Engine.View.UpcomingSplit);
+        h.Server.ClearCommands();
+        h.Engine.Handle(Planet(1, seq: 2, timeMs: 2_000, revisit: true));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
+        h.Engine.Handle(Planet(0, seq: 3, timeMs: 3_000, revisit: true));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+    }
+
+    /// <summary>
+    /// The option is ToD's only: the panel draws it under a planet row that marks revisits, which
+    /// only ToD's does, and never for another game's rows.
+    /// </summary>
+    [Fact]
+    public void OnlyToDsPlanetRowOffersDontSplitOnRevisit()
+    {
+        var tod = FakeQwarkServer.TodAutosplitDescriptors();
+        Assert.Single(tod, AutosplitterPanel.OffersSkipRevisits);
+        Assert.True(AutosplitterPanel.OffersSkipRevisits(tod.Single(d => d.Code == AutosplitEvent.PlanetEnteredCode)));
+
+        using var fake = new FakeQwarkServer();
+        foreach (var row in fake.AutosplitDescriptors.Concat(new[] { PlanetEntered, VoxDefeated }))
+            Assert.False(AutosplitterPanel.OffersSkipRevisits(row), row.Label);
+    }
+
+    /// <summary>
+    /// "Don't split on revisit" is on by default, for a fresh file and for one written before it
+    /// existed, is kept per game, and an off is written out and read back.
+    /// </summary>
+    [Fact]
+    public void DontSplitOnRevisitIsOnByDefaultAndPersisted()
+    {
+        Assert.True(new AutosplitGameSettings().SkipRevisits);
+
+        const string older = """
+        {
+          "autosplit": {
+            "enabled": true,
+            "games": { "tod": { "planetRoute": true } }
+          }
+        }
+        """;
+
+        var folder = Path.Combine(Path.GetTempPath(), "racman-autosplit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            File.WriteAllText(path, older);
+
+            var loaded = Settings.Load(path);
+            Assert.True(loaded.Autosplit.For(GameId.Tod).PlanetRoute);
+            Assert.True(loaded.Autosplit.For(GameId.Tod).SkipRevisits);
+
+            loaded.Autosplit.For(GameId.Tod).SkipRevisits = false;
+            loaded.Save();
+            Assert.Contains("\"skipRevisits\": false", File.ReadAllText(path));
+
+            var back = Settings.Load(path);
+            Assert.False(back.Autosplit.For(GameId.Tod).SkipRevisits);
+            Assert.True(back.Autosplit.For(GameId.Rac4).SkipRevisits);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
     /// <summary>
     /// tod-planets.txt matches qwark's own names, which are the ship's planet names since revision
     /// 1.29 (Kortog for Stratus City), and still the level names qwark used before, so a route whose

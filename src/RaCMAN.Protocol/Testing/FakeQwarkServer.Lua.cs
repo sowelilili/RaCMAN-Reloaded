@@ -99,8 +99,10 @@ public sealed partial class FakeQwarkServer
     /// </summary>
     public static AutosplitEventDesc[] TodAutosplitDescriptors() => new[]
     {
+        // Revision 1.33 (pending): the planet row marks revisits (Metropolis and Cobalia).
         new AutosplitEventDesc(1, AutosplitKind.Split,
-            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute, 0, "Planet entered"),
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.PlanetRoute | AutosplitEventFlags.Revisits,
+            0, "Planet entered"),
         new AutosplitEventDesc(7, AutosplitKind.Split, AutosplitEventFlags.EnabledByDefault, 0, "Tachyon defeated"),
         new AutosplitEventDesc(6, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Mission completed"),
         new AutosplitEventDesc(4, AutosplitKind.LoadStart,
