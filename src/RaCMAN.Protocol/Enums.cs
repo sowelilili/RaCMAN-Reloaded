@@ -182,9 +182,11 @@ public enum Opcode : ushort
     /// <summary>
     /// Revision 1.30: <c>u8 on</c>, no reply. Writes the console's <c>run.warnings</c>: 1 (the
     /// default) the console warns as a run starts with cheats or mods that are not run-legal, 0 it
-    /// says nothing. Anything else is BAD_ARG. <see cref="SessionFlags3.RunWarningsOff"/> is where the
-    /// setting comes back. Sent only while <see cref="SessionFlags3.RunWarnings"/> is set: an older
-    /// module answers UNKNOWN_OP.
+    /// says nothing, and since revision 1.33 2 it warns about the cheats alone (only while
+    /// <see cref="SessionFlags3.Settings133"/> is set: an older module answers 2 BAD_ARG). Anything
+    /// else is BAD_ARG. <see cref="SessionFlags3.RunWarningsOff"/> and
+    /// <see cref="SessionFlags3.RunWarningsCheats"/> are where the setting comes back. Sent only while
+    /// <see cref="SessionFlags3.RunWarnings"/> is set: an older module answers UNKNOWN_OP.
     /// </summary>
     RunWarn = 0x0096,
 
@@ -196,6 +198,22 @@ public enum Opcode : ushort
     /// set: an older module answers UNKNOWN_OP.
     /// </summary>
     TelemetryRate = 0x0097,
+
+    /// <summary>
+    /// Revision 1.33: <c>u8 mode</c>, no reply, writes the console's per-user <c>boot.apply</c>:
+    /// 0 Always (the default), 1 Ask, 2 Never, whether a game boot applies the toggles and mods
+    /// flagged on boot. With no byte it is a read and the reply is <c>u8 mode</c>; no SessionInfo bit
+    /// carries it. Sent only while <see cref="SessionFlags3.Settings133"/> is set: an older module
+    /// answers UNKNOWN_OP.
+    /// </summary>
+    BootApply = 0x0098,
+
+    /// <summary>
+    /// Revision 1.33: <c>u8 apply</c>, no reply. The answer to a boot's question under
+    /// <c>boot.apply</c> Ask (<see cref="SessionFlags3.BootAsk"/>): 1 applies the running game's
+    /// on-boot toggles and mods, 0 leaves them off. NOT_FOUND with no question waiting.
+    /// </summary>
+    BootAsk = 0x0099,
 
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
@@ -936,6 +954,48 @@ public enum SessionFlags3 : byte
     /// not a flag; <see cref="SessionInfo.TelemetryHz"/> reads it.
     /// </summary>
     TelemetryRateMask = 0b11 << 3,
+
+    /// <summary>
+    /// bit5 SETTINGS_133 (revision 1.33): the module takes RUN_WARN 2, cheats only, and answers
+    /// BOOT_APPLY and BOOT_ASK. The capability bit for the Cheat warnings' third choice and for Apply
+    /// toggles on game boot.
+    /// </summary>
+    Settings133 = 1 << 5,
+
+    /// <summary>bit6 RUN_WARN_CHEATS (revision 1.33): the console's <c>run.warnings</c> is 2, cheats only.</summary>
+    RunWarningsCheats = 1 << 6,
+
+    /// <summary>
+    /// bit7 BOOT_ASK (revision 1.33): <c>boot.apply</c> is Ask and this boot's on-boot toggles and
+    /// mods wait for a client's BOOT_ASK.
+    /// </summary>
+    BootAsk = 1 << 7,
+}
+
+/// <summary>The console's Cheat warnings, <c>run.warnings</c> (RUN_WARN), as the client offers it.</summary>
+public enum RunWarningMode : byte
+{
+    /// <summary>0: nothing is said at a run start.</summary>
+    Off = 0,
+
+    /// <summary>1, the default: cheats, illegal mods and unknown mods.</summary>
+    ModsAndCheats = 1,
+
+    /// <summary>2 (revision 1.33): the cheats line alone.</summary>
+    CheatsOnly = 2,
+}
+
+/// <summary>The console's Apply toggles on game boot, <c>boot.apply</c> (BOOT_APPLY, revision 1.33).</summary>
+public enum BootApplyMode : byte
+{
+    /// <summary>0, the default: a boot applies the on-boot toggles and mods, as every older module does.</summary>
+    Always = 0,
+
+    /// <summary>1: none applied; a connected client is asked, and with none it is Never.</summary>
+    Ask = 1,
+
+    /// <summary>2: none applied; the flags are kept.</summary>
+    Never = 2,
 }
 
 /// <summary>SessionInfo byte 29, <c>flags2</c> (revision 1.24): a pad byte, always 0, before it.</summary>

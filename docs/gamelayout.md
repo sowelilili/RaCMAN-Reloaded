@@ -9,7 +9,7 @@ anything.
 The release puts a copy in the application folder. An update replaces that copy.
 
 To keep your changes, put a file named `gamelayout.json` in the data folder. The client reads that
-file instead. **Game layout**, on the **RaCMAN** tab of the Settings page, shows which of the two
+file instead. **Game layout**, on the **Advanced** tab of the Settings page, shows which of the two
 files is in use, and its **Reload gamelayout.json** button reads the file again while the client runs.
 
 ## The two lists at the top of the file

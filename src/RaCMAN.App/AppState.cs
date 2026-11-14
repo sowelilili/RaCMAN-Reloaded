@@ -50,7 +50,7 @@ public sealed class Toast
 /// out of the running process goes the moment that process does; see <see cref="ClearGameViews"/>.
 /// </para>
 /// </summary>
-public sealed class AppState : IDisposable
+public sealed partial class AppState : IDisposable
 {
     /// <summary>
     /// Which game the described data on this object belongs to, and which module described it. A
@@ -258,6 +258,9 @@ public sealed class AppState : IDisposable
             // Who is signed in is read again on every connection, and the setup question is
             // asked again on it (once per user).
             ForgetProfile();
+
+            // A standalone console's boot plugin list, looked at once on connecting.
+            CheckBootPlugins();
         });
 
         Client.Disconnected += ex => Post(() =>
@@ -1733,6 +1736,11 @@ public sealed class AppState : IDisposable
             Previous = null;
             PreviousModalRequested = false;
         }
+
+        // Qwark revision 1.33: the console's Apply toggles on game boot, read once per connection
+        // and profile, and a boot's question under its Ask.
+        TickBootApply();
+        TickBootAsk();
     }
 
     /// <summary>

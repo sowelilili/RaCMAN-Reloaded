@@ -383,6 +383,7 @@ public sealed class AppWindow : GameWindow
         // panel switch. The inspectors go first, which leaves a modal on top of them.
         MobyInspector.Draw(_state);
         PreviousSessionModal.Draw(_state);
+        BootAskModal.Draw(_state);
         ProfileSetupModal.Draw(_state);
         FirewallModal.Draw(_state);
         LiveSplitModal.Draw(_state);

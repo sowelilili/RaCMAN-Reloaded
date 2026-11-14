@@ -5,42 +5,49 @@ namespace RaCMAN.App.Panels;
 /// <summary>The Settings page's own side tabs, in the order the nav lists them.</summary>
 public enum SettingsTab
 {
-    /// <summary>This client: theme, updates, debug information, its files, the old RaCMAN's import.</summary>
+    /// <summary>This client: theme, updates, save files, its files, the old RaCMAN's import.</summary>
     RaCMAN,
 
     /// <summary>The two servers on this PC the client talks to: RPCS3's IPC server and LiveSplit's.</summary>
     Ipc,
 
-    /// <summary>How the client reaches the console and how often it reads it back.</summary>
-    Connection,
+    /// <summary>
+    /// The console: qwark's own settings, kept in its config.txt, then how the client reaches the
+    /// console and how often it reads it back. The Connection and Qwark tabs until the second round.
+    /// </summary>
+    Console,
 
-    /// <summary>The console's own settings, kept in qwark's config.txt.</summary>
-    Qwark,
+    /// <summary>What most users never touch: debug information, the game layout, the qwark.sprx path.</summary>
+    Advanced,
 }
 
 /// <summary>
 /// Every row the Settings page draws. A row is one setting, or one thing on the page that is drawn
-/// as a row of the list (the version and its buttons, a folder and its button, the import).
+/// as a row of the list (the version and its buttons, a folder and its button, the import, the
+/// boot plugin install).
 /// </summary>
 public enum SettingRow
 {
     Theme,
-    DebugInformation,
-    GameLayout,
     Version,
     CheckForUpdates,
-    Folders,
     MirrorSaves,
     SortSaveFiles,
+    Folders,
     ImportFromRaCMAN,
     Rpcs3Port,
     LiveSplit,
-    ConnectionMode,
-    TableRefresh,
-    InputDisplayRate,
     InGameMenus,
-    RunWarnings,
+    CheatWarnings,
+    BootApply,
     PerUserSettings,
+    InputDisplayRate,
+    ConnectionMode,
+    Installation,
+    TableRefresh,
+    DebugInformation,
+    GameLayout,
+    SprxPath,
 }
 
 /// <summary>
@@ -52,15 +59,15 @@ public enum SettingRow
 public sealed class SettingsNav
 {
     /// <summary>The tabs in the order the nav lists them.</summary>
-    public static readonly SettingsTab[] Tabs = { SettingsTab.RaCMAN, SettingsTab.Ipc, SettingsTab.Connection, SettingsTab.Qwark };
+    public static readonly SettingsTab[] Tabs = { SettingsTab.RaCMAN, SettingsTab.Ipc, SettingsTab.Console, SettingsTab.Advanced };
 
     /// <summary>What the nav calls a tab.</summary>
     public static string Name(SettingsTab tab) => tab switch
     {
         SettingsTab.RaCMAN => "RaCMAN",
         SettingsTab.Ipc => "IPC",
-        SettingsTab.Connection => "Connection",
-        SettingsTab.Qwark => "Qwark",
+        SettingsTab.Console => "Console",
+        SettingsTab.Advanced => "Advanced",
         _ => tab.ToString(),
     };
 
@@ -116,7 +123,10 @@ public sealed class SettingsNav
     public bool EscapeGoesBack(bool escapePressed, bool typing, bool popupOpen) =>
         Open && escapePressed && !typing && !popupOpen;
 
-    /// <summary>A tab named on the command line (<c>--settings-tab</c>), by its name or its number; null for none.</summary>
+    /// <summary>
+    /// A tab named on the command line (<c>--settings-tab</c>), by its name or its number; null for
+    /// none. The first round's Connection and Qwark name the Console tab, which holds both.
+    /// </summary>
     public static SettingsTab? Parse(string? text)
     {
         if (string.IsNullOrWhiteSpace(text)) return null;
@@ -127,16 +137,32 @@ public sealed class SettingsNav
             if (string.Equals(Name(tab), text, StringComparison.OrdinalIgnoreCase)) return tab;
         }
 
+        if (string.Equals(text, "connection", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(text, "qwark", StringComparison.OrdinalIgnoreCase))
+        {
+            return SettingsTab.Console;
+        }
+
         return null;
     }
 }
 
-/// <summary>What a tab's rows depend on: the session, whether it is live, and what the client remembers of it.</summary>
-public readonly record struct SettingsContext(SessionInfo Session, bool Connected, InputRateMemory InputRate);
+/// <summary>
+/// What a tab's rows depend on: the session, whether it is live, what the client remembers of it,
+/// and whether the console is set up as standalone (the Installation row is that mode's).
+/// </summary>
+public readonly record struct SettingsContext(
+    SessionInfo Session, bool Connected, InputRateMemory InputRate, bool Standalone = false);
 
 /// <summary>Which rows each tab of the Settings page has, and what each is called.</summary>
 public static class SettingsLayout
 {
+    /// <summary>The Console tab's first group: the settings qwark keeps on the console.</summary>
+    public const string QwarkGroup = "Qwark";
+
+    /// <summary>The Console tab's second group: how this client reaches the console.</summary>
+    public const string ConnectionGroup = "Connection";
+
     /// <summary>The rows of a tab, in the order they are drawn. The page draws exactly these.</summary>
     public static IReadOnlyList<SettingRow> Rows(SettingsTab tab, SettingsContext context)
     {
@@ -146,9 +172,10 @@ public static class SettingsLayout
             case SettingsTab.RaCMAN:
                 rows.AddRange(new[]
                 {
-                    SettingRow.Theme, SettingRow.DebugInformation, SettingRow.GameLayout,
+                    SettingRow.Theme,
                     SettingRow.Version, SettingRow.CheckForUpdates,
-                    SettingRow.Folders, SettingRow.MirrorSaves, SettingRow.SortSaveFiles,
+                    SettingRow.MirrorSaves, SettingRow.SortSaveFiles,
+                    SettingRow.Folders,
                     SettingRow.ImportFromRaCMAN,
                 });
                 break;
@@ -158,19 +185,31 @@ public static class SettingsLayout
                 rows.Add(SettingRow.LiveSplit);
                 break;
 
-            case SettingsTab.Connection:
-                rows.Add(SettingRow.ConnectionMode);
-                rows.Add(SettingRow.TableRefresh);
+            case SettingsTab.Console:
+                // qwark's settings first. They are read from the session and written by ops, so
+                // without a console there is nothing to show and nothing to send; the rate row
+                // alone stays, greyed at the last rate seen (InputRateMemory).
+                if (context.Connected)
+                {
+                    if (QwarkSettings.ShowsInGameMenus(context.Session)) rows.Add(SettingRow.InGameMenus);
+                    if (QwarkSettings.ShowsCheatWarnings(context.Session)) rows.Add(SettingRow.CheatWarnings);
+                    if (QwarkSettings.ShowsBootApply(context.Session)) rows.Add(SettingRow.BootApply);
+                    if (QwarkSettings.ShowsPerUserSettings(context.Session)) rows.Add(SettingRow.PerUserSettings);
+                }
+
                 if (context.InputRate.Shows(context.Session, context.Connected)) rows.Add(SettingRow.InputDisplayRate);
+
+                // Then the connection: the boot plugin install is the standalone mode's setup step,
+                // so it sits under the mode while that mode is picked.
+                rows.Add(SettingRow.ConnectionMode);
+                if (context.Standalone) rows.Add(SettingRow.Installation);
+                rows.Add(SettingRow.TableRefresh);
                 break;
 
-            case SettingsTab.Qwark:
-                // The console's settings are read from the session and written by ops, so without
-                // a console there is nothing to show and nothing to send.
-                if (!context.Connected) break;
-                if (QwarkSettings.ShowsInGameMenus(context.Session)) rows.Add(SettingRow.InGameMenus);
-                if (QwarkSettings.ShowsRunWarnings(context.Session)) rows.Add(SettingRow.RunWarnings);
-                if (QwarkSettings.ShowsPerUserSettings(context.Session)) rows.Add(SettingRow.PerUserSettings);
+            case SettingsTab.Advanced:
+                rows.Add(SettingRow.DebugInformation);
+                rows.Add(SettingRow.GameLayout);
+                rows.Add(SettingRow.SprxPath);
                 break;
         }
 
@@ -181,18 +220,27 @@ public static class SettingsLayout
     public static SettingsTab TabOf(SettingRow row) => row switch
     {
         SettingRow.Rpcs3Port or SettingRow.LiveSplit => SettingsTab.Ipc,
-        SettingRow.ConnectionMode or SettingRow.TableRefresh or SettingRow.InputDisplayRate => SettingsTab.Connection,
-        SettingRow.InGameMenus or SettingRow.RunWarnings or SettingRow.PerUserSettings => SettingsTab.Qwark,
+        SettingRow.InGameMenus or SettingRow.CheatWarnings or SettingRow.BootApply or SettingRow.PerUserSettings
+            or SettingRow.InputDisplayRate or SettingRow.ConnectionMode or SettingRow.Installation
+            or SettingRow.TableRefresh => SettingsTab.Console,
+        SettingRow.DebugInformation or SettingRow.GameLayout or SettingRow.SprxPath => SettingsTab.Advanced,
         _ => SettingsTab.RaCMAN,
     };
 
-    /// <summary>The group heading a RaCMAN-tab row sits under; the other tabs are one list each.</summary>
+    /// <summary>
+    /// The group heading a row sits under, each group its own table; IPC and Advanced are one list
+    /// each, with no heading.
+    /// </summary>
     public static string? Group(SettingRow row) => row switch
     {
-        SettingRow.Theme or SettingRow.DebugInformation or SettingRow.GameLayout => "General",
+        SettingRow.Theme => "General",
         SettingRow.Version or SettingRow.CheckForUpdates => "Updates",
-        SettingRow.Folders or SettingRow.MirrorSaves or SettingRow.SortSaveFiles => "Files",
+        SettingRow.MirrorSaves or SettingRow.SortSaveFiles => "Save files",
+        SettingRow.Folders => "Files",
         SettingRow.ImportFromRaCMAN => "Import",
+        SettingRow.InGameMenus or SettingRow.CheatWarnings or SettingRow.BootApply or SettingRow.PerUserSettings
+            or SettingRow.InputDisplayRate => QwarkGroup,
+        SettingRow.ConnectionMode or SettingRow.Installation or SettingRow.TableRefresh => ConnectionGroup,
         _ => null,
     };
 
@@ -211,11 +259,14 @@ public static class SettingsLayout
         SettingRow.Rpcs3Port => "RPCS3 IPC port",
         SettingRow.LiveSplit => "LiveSplit server",
         SettingRow.ConnectionMode => "Connection mode",
+        SettingRow.Installation => "Installation",
         SettingRow.TableRefresh => "Table refresh",
         SettingRow.InputDisplayRate => "Input display rate",
         SettingRow.InGameMenus => "In-game menus",
-        SettingRow.RunWarnings => "Run warnings",
+        SettingRow.CheatWarnings => "Cheat warnings",
+        SettingRow.BootApply => "Apply toggles on game boot",
         SettingRow.PerUserSettings => "Per-user settings",
+        SettingRow.SprxPath => "qwark.sprx path",
         _ => row.ToString(),
     };
 }
@@ -231,8 +282,8 @@ public sealed class InputRateMemory
     /// <summary>A module with the switch has been connected to in this run.</summary>
     public bool Seen { get; private set; }
 
-    /// <summary>The rate that module last reported.</summary>
-    public int LastHz { get; private set; } = 30;
+    /// <summary>The rate that module last reported; 60 before any, the default since qwark revision 1.33.</summary>
+    public int LastHz { get; private set; } = 60;
 
     /// <summary>Takes in the session of a frame: a live session with the switch is remembered.</summary>
     public void Observe(SessionInfo session, bool connected)

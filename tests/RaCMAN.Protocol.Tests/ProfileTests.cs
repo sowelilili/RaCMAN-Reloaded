@@ -696,27 +696,27 @@ public class ProfileTests
     }
 
     /// <summary>
-    /// The switch is the console's, so it is a row of the Settings page's Qwark tab (it was the
-    /// Combos panel's until the page had tabs), there only while a console with users is connected,
-    /// and on no other tab.
+    /// The switch is the console's, so it is a row of the Settings page's Console tab (it was the
+    /// Combos panel's until the page had tabs, and the Qwark tab's until the second round), there
+    /// only while a console with users is connected, and on no other tab.
     /// </summary>
     [Fact]
-    public void TheSwitchIsOnTheQwarkTabOfTheSettingsPage()
+    public void TheSwitchIsOnTheConsoleTabOfTheSettingsPage()
     {
         var memory = new InputRateMemory();
         var connected = new SettingsContext(ConsoleSession, true, memory);
 
-        Assert.Contains(SettingRow.PerUserSettings, SettingsLayout.Rows(SettingsTab.Qwark, connected));
-        foreach (var tab in SettingsNav.Tabs.Where(t => t != SettingsTab.Qwark))
+        Assert.Contains(SettingRow.PerUserSettings, SettingsLayout.Rows(SettingsTab.Console, connected));
+        foreach (var tab in SettingsNav.Tabs.Where(t => t != SettingsTab.Console))
         {
             Assert.DoesNotContain(SettingRow.PerUserSettings, SettingsLayout.Rows(tab, connected));
         }
 
         Assert.DoesNotContain(SettingRow.PerUserSettings,
-            SettingsLayout.Rows(SettingsTab.Qwark, connected with { Connected = false }));
+            SettingsLayout.Rows(SettingsTab.Console, connected with { Connected = false }));
         var rpcs3 = ConsoleSession with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
         Assert.DoesNotContain(SettingRow.PerUserSettings,
-            SettingsLayout.Rows(SettingsTab.Qwark, connected with { Session = rpcs3 }));
+            SettingsLayout.Rows(SettingsTab.Console, connected with { Session = rpcs3 }));
     }
 
     [Fact]

@@ -371,6 +371,18 @@ public sealed class WebManLoader
         return result;
     }
 
+    /// <summary>
+    /// boot_plugins.txt as text, read over FTP and nothing written; empty for a console with no
+    /// list. What the Settings page's standalone check reads when no console is connected.
+    /// </summary>
+    public async Task<string> ReadBootPluginsAsync(string ip, CancellationToken cancellationToken = default)
+    {
+        using var ftp = new FtpSession(ip, FtpPort);
+        await ftp.ConnectAsync(cancellationToken).ConfigureAwait(false);
+        var existing = await ftp.RetrieveAsync(BootPluginsPath, cancellationToken).ConfigureAwait(false);
+        return existing is null ? string.Empty : Encoding.UTF8.GetString(existing);
+    }
+
     /// <summary>Drops every boot_plugins.txt line naming qwark.sprx, wherever it points.</summary>
     public async Task<bool> RemoveFromBootAsync(string ip, IProgress<string>? progress = null, CancellationToken cancellationToken = default)
     {

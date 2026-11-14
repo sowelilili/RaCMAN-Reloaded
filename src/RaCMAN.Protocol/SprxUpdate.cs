@@ -297,7 +297,7 @@ public static class SprxUpdate
     /// The boot plugin list as text. A console that has none answers NOT_FOUND, which says the same
     /// thing an empty list does: nothing names the module, so the caller's default stands.
     /// </summary>
-    private static async Task<string> ReadBootPluginsAsync(QwarkClient client, CancellationToken cancellationToken)
+    public static async Task<string> ReadBootPluginsAsync(QwarkClient client, CancellationToken cancellationToken = default)
     {
         try
         {

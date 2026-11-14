@@ -902,8 +902,12 @@ public sealed partial class FakeQwarkServer : IDisposable
                      | moduleBits,
                      // Revision 1.29: ToD's console menu is its own pause menu, so no NO_MENU any more.
             Flags3 = (!_reportsRunWarnings ? SessionFlags3.None
-                      : SessionFlags3.RunWarnings | (_runWarnings ? SessionFlags3.None : SessionFlags3.RunWarningsOff))
-                     | (_reportsTelemetryRate ? SessionInfo.TelemetryRateBits(_telemetryHz) : SessionFlags3.None),
+                      : SessionFlags3.RunWarnings
+                        | (_runWarnings == RunWarningMode.Off ? SessionFlags3.RunWarningsOff : SessionFlags3.None)
+                        | (_runWarnings == RunWarningMode.CheatsOnly ? SessionFlags3.RunWarningsCheats : SessionFlags3.None))
+                     | (_reportsTelemetryRate ? SessionInfo.TelemetryRateBits(_telemetryHz) : SessionFlags3.None)
+                     | (_reportsSettings133 ? SessionFlags3.Settings133 : SessionFlags3.None)
+                     | (_reportsSettings133 && _bootAskPending ? SessionFlags3.BootAsk : SessionFlags3.None),
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };
@@ -1557,11 +1561,60 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// <summary>The console's <c>run.warnings</c> (RUN_WARN): on by default, as a fresh config is; off sets flags3 bit1.</summary>
     public bool RunWarnings
     {
+        get { lock (_gate) return _runWarnings != RunWarningMode.Off; }
+        set { lock (_gate) _runWarnings = value ? RunWarningMode.ModsAndCheats : RunWarningMode.Off; }
+    }
+
+    /// <summary>The console's <c>run.warnings</c> with its third value (revision 1.33): cheats only sets flags3 bit6.</summary>
+    public RunWarningMode RunWarningMode
+    {
         get { lock (_gate) return _runWarnings; }
         set { lock (_gate) _runWarnings = value; }
     }
 
-    private bool _runWarnings = true;
+    private RunWarningMode _runWarnings = RunWarningMode.ModsAndCheats;
+
+    /// <summary>
+    /// Revision 1.33: whether this fake has the revision's settings (SessionInfo flags3 bit5): RUN_WARN
+    /// takes 2, and BOOT_APPLY and BOOT_ASK are answered. On by default; off is a module before it,
+    /// which answers RUN_WARN 2 BAD_ARG and the two ops UNKNOWN_OP.
+    /// </summary>
+    public bool ReportsSettings133
+    {
+        get { lock (_gate) return _reportsSettings133; }
+        set { lock (_gate) _reportsSettings133 = value; }
+    }
+
+    private bool _reportsSettings133 = true;
+
+    /// <summary>The console's <c>boot.apply</c> (BOOT_APPLY): Always by default, as a fresh config is.</summary>
+    public BootApplyMode BootApply
+    {
+        get { lock (_gate) return _bootApply; }
+        set { lock (_gate) _bootApply = value; }
+    }
+
+    private BootApplyMode _bootApply = BootApplyMode.Always;
+
+    /// <summary>
+    /// A boot's question under Ask (flags3 bit7): set by a test to stage the boot, cleared by a
+    /// BOOT_ASK. An answer of 1 turns on every toggle flagged on boot, as the module applies them.
+    /// </summary>
+    public bool BootAskPending
+    {
+        get { lock (_gate) return _bootAskPending; }
+        set { lock (_gate) _bootAskPending = value; }
+    }
+
+    private bool _bootAskPending;
+
+    /// <summary>The BOOT_ASK answers this fake took, in order: true for apply.</summary>
+    public IReadOnlyList<bool> BootAskAnswers
+    {
+        get { lock (_gate) return _bootAskAnswers.ToArray(); }
+    }
+
+    private readonly List<bool> _bootAskAnswers = new();
 
     /// <summary>
     /// Revision 1.32: whether this fake has the telemetry rate (SessionInfo flags3 bit2, TELEMETRY_RATE
@@ -1577,9 +1630,10 @@ public sealed partial class FakeQwarkServer : IDisposable
     private bool _reportsTelemetryRate = true;
 
     /// <summary>
-    /// The console's <c>telemetry.hz</c> (TELEMETRY_RATE): 30 by default, as a fresh config is. A
-    /// TELEMETRY_RATE also sets <see cref="TelemetryInterval"/> to match, so the packets arrive at the
-    /// rate asked for, as far as this PC's timers allow.
+    /// The console's <c>telemetry.hz</c> (TELEMETRY_RATE): 60 by default, as a fresh config is since
+    /// qwark revision 1.33. A TELEMETRY_RATE also sets <see cref="TelemetryInterval"/> to match, so
+    /// the packets arrive at the rate asked for, as far as this PC's timers allow; until one does,
+    /// the fake keeps its own 33 ms pace, which no test of the reported rate depends on.
     /// </summary>
     public int TelemetryHz
     {
@@ -1587,7 +1641,7 @@ public sealed partial class FakeQwarkServer : IDisposable
         set { lock (_gate) _telemetryHz = value; }
     }
 
-    private int _telemetryHz = 30;
+    private int _telemetryHz = 60;
 
     /// <summary>The console's filesystem, as far as the file ops are concerned.</summary>
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
@@ -3165,9 +3219,32 @@ public sealed partial class FakeQwarkServer : IDisposable
                 case Opcode.RunWarn:
                 {
                     // Revision 1.30: `u8 on`, 0 or 1, as MENU_HELP, on every platform and in a release too.
+                    // Revision 1.33: and 2, cheats only, from a module with the revision's settings.
                     if (!_reportsRunWarnings) return (Status.UnknownOp, null);
+                    if (payload.Length < 1 || payload[0] > (_reportsSettings133 ? 2 : 1)) return (Status.BadArg, null);
+                    _runWarnings = (RunWarningMode)payload[0];
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.BootApply:
+                {
+                    // Revision 1.33: `u8 mode` writes boot.apply; no byte reads it back.
+                    if (!_reportsSettings133) return (Status.UnknownOp, null);
+                    if (payload.Length == 0) return (Status.Ok, new[] { (byte)_bootApply });
+                    if (payload[0] > 2) return (Status.BadArg, null);
+                    _bootApply = (BootApplyMode)payload[0];
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.BootAsk:
+                {
+                    // Revision 1.33: the answer to a boot's question; NOT_FOUND with none waiting.
+                    if (!_reportsSettings133) return (Status.UnknownOp, null);
                     if (payload.Length < 1 || payload[0] > 1) return (Status.BadArg, null);
-                    _runWarnings = payload[0] != 0;
+                    if (!_bootAskPending) return (Status.NotFound, null);
+                    _bootAskPending = false;
+                    _bootAskAnswers.Add(payload[0] == 1);
+                    if (payload[0] == 1) _session = _session with { ToggleState = _session.ToggleState | _session.ToggleAuto };
                     return (Status.Ok, null);
                 }
 

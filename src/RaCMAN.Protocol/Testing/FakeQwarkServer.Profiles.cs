@@ -25,7 +25,8 @@ public sealed partial class FakeQwarkServer
     private sealed class PerUserSettings
     {
         public bool MenuHelp = true;
-        public bool RunWarnings = true;
+        public RunWarningMode RunWarnings = RunWarningMode.ModsAndCheats;
+        public BootApplyMode BootApply = BootApplyMode.Always;
         public byte SelectedSlot;
         public ulong ToggleAuto;
         public HashSet<string> ModAuto = new(StringComparer.Ordinal);
@@ -38,6 +39,7 @@ public sealed partial class FakeQwarkServer
         {
             MenuHelp = MenuHelp,
             RunWarnings = RunWarnings,
+            BootApply = BootApply,
             SelectedSlot = SelectedSlot,
             ToggleAuto = ToggleAuto,
             ModAuto = new HashSet<string>(ModAuto, StringComparer.Ordinal),
@@ -388,6 +390,7 @@ public sealed partial class FakeQwarkServer
     {
         MenuHelp = (_session.Flags & SessionFlags.MenuHelpOff) == 0,
         RunWarnings = _runWarnings,
+        BootApply = _bootApply,
         SelectedSlot = _session.SelectedSlot,
         ToggleAuto = _session.ToggleAuto,
         ModAuto = Mods.Where(m => m.Auto).Select(m => m.DirName).ToHashSet(StringComparer.Ordinal),
@@ -406,6 +409,7 @@ public sealed partial class FakeQwarkServer
             ToggleAuto = settings.ToggleAuto,
         };
         _runWarnings = settings.RunWarnings;
+        _bootApply = settings.BootApply;
 
         for (int i = 0; i < Mods.Count; i++)
         {

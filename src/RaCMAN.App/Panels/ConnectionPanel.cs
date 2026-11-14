@@ -21,7 +21,6 @@ public static class ConnectionPanel
     private static int _slot = 5;
     private static string _rpcs3Folder = string.Empty;
     private static bool _rpcs3FolderRead;
-    private static bool _confirmBootInstall;
     private static bool _initialised;
 
     private const string PatchDialogTitle = "Install qwark's patches";
@@ -42,6 +41,13 @@ public static class ConnectionPanel
         _host = host;
         _initialised = true;
     }
+
+    /// <summary>
+    /// The console's address as the address box has it, typed or not yet connected to: what the
+    /// Settings page's boot plugin install and its look at boot_plugins.txt are aimed at. The
+    /// stored address before the panel has been drawn.
+    /// </summary>
+    public static string CurrentHost(AppState state) => _initialised ? _host : state.Settings.Ps3.Host;
 
     public static void Draw(AppState state)
     {
@@ -141,22 +147,19 @@ public static class ConnectionPanel
             return;
         }
 
+        // The qwark.sprx path is the Settings page's Advanced tab's, so the stored value is the only
+        // one there is; taking it here also picks up an import or an edit there.
+        _sprxPath = state.Settings.Ps3.SprxPath;
+
         // Nothing here for anybody who is not developing qwark: in webMAN mode Connect does the
         // whole of it by itself, asking webMAN and loading the module only when nothing answers on
-        // qwark's port. The buttons that do the two halves by hand, the file they send and the slot
-        // it goes into are all detail, so that much only exists with debug information on.
+        // qwark's port. The buttons that do the two halves by hand and the slot it goes into are
+        // detail, so that much only exists with debug information on. The boot plugin install,
+        // standalone mode's setup step, is on the Settings page's Console tab, under the mode.
         if (!Ui.Debug)
         {
-            // The boxes that edit these two are hidden, so the stored values are the only ones
-            // there are; taking them here also picks up an import that landed after this panel was
-            // first drawn.
-            _sprxPath = state.Settings.Ps3.SprxPath;
+            // The box that edits this one is hidden, so the stored value is the only one there is.
             _slot = state.Settings.Ps3.WebManSlot;
-
-            // Standalone is the mode for a console that loads qwark itself, and the boot plugin is
-            // how it comes to: that install is the setup step, not a debug detail, so it is the one
-            // part of this section a standalone user sees.
-            if (state.Settings.Ps3.StandaloneConnection) DrawBootInstall(state, withPathBox: true);
 
             DrawConsoleSection(state);
             return;
@@ -168,10 +171,10 @@ public static class ConnectionPanel
 
         Ui.Hint($"Uploads qwark.sprx to {WebManLoader.RemotePath} over FTP, then asks webMAN to load it into a VSH slot. "
                 + "When boot_plugins.txt lists qwark.sprx, the copy it boots is updated too. "
-                + "In webMAN mode Connect does this on its own when nothing answers on qwark's port.");
+                + "In webMAN mode Connect does this on its own when nothing answers on qwark's port. "
+                + "Which qwark.sprx is on the Settings page's Advanced tab.");
 
-        ImGui.SetNextItemWidth(360);
-        bool load = Ui.SubmitText("qwark.sprx path", ref _sprxPath, 512);
+        bool load = false;
 
         // The default is qwark.sprx beside the executable, which is where the release layout puts it.
         string sprx = Ps3Connect.ResolveSprx(_sprxPath);
@@ -200,7 +203,6 @@ public static class ConnectionPanel
             }
             else
             {
-                state.Settings.Ps3.SprxPath = _sprxPath;
                 state.Settings.Ps3.WebManSlot = _slot;
                 state.Settings.Save();
 
@@ -232,68 +234,23 @@ public static class ConnectionPanel
                 }));
         }
 
-        DrawBootInstall(state, withPathBox: false);
-
         DrawConsoleSection(state);
     }
 
     /// <summary>
-    /// The boot plugin: the console loads qwark itself at every start and nothing has to send it
-    /// afterwards, which is the whole of what standalone mode expects of a console. A change to how
-    /// the console starts, and a bad one needs a recovery to undo, so it keeps its own paragraph
-    /// behind a checkbox rather than sitting under the buttons that only load for this session.
-    /// <paramref name="withPathBox"/> adds the file box the debug section above already draws, for
-    /// the standalone user who sees this block and nothing else of the webMAN section.
+    /// The boot plugin's two buttons, the Settings page's Installation row under Standalone: the
+    /// console loads qwark itself at every start and nothing has to send it afterwards, which is
+    /// the whole of what standalone mode expects of a console. Both go through webMAN's FTP to the
+    /// address in the Connection panel's box. <paramref name="done"/> runs on the render thread
+    /// once either has finished, whatever it found, so the boot_plugins.txt look can follow.
     /// </summary>
-    private static void DrawBootInstall(AppState state, bool withPathBox)
+    public static void DrawBootInstallButtons(AppState state, Action done)
     {
-        ImGui.Spacing();
+        string sprx = Ps3Connect.ResolveSprx(state.Settings.Ps3.SprxPath);
 
-        bool install = false;
-        if (withPathBox)
+        if (ImGui.Button("Install to boot_plugins.txt"))
         {
-            ImGui.Separator();
-            Ui.Heading("Installation");
-
-            Ui.Hint($"Puts qwark.sprx in {WebManLoader.BootPluginsPath} to load it on console boot. "
-                    + "Requires webMAN for installation.");
-
-            ImGui.SetNextItemWidth(360);
-            install = Ui.SubmitText("qwark.sprx path", ref _sprxPath, 512);
-        }
-        else
-        {
-            Ui.Hint($"Automatically boot qwark.sprx on startup. Writes to {WebManLoader.BootPluginsPath}.");
-        }
-
-        string sprx = Ps3Connect.ResolveSprx(_sprxPath);
-
-        // The debug section above has already said where the file is; this block says it only when
-        // it is the whole of what a standalone user sees of the SPRX.
-        if (withPathBox)
-        {
-            if (File.Exists(sprx))
-            {
-                Ui.Hint(sprx);
-                DrawUiPakBeside(sprx);
-            }
-            else
-            {
-                Ui.Warning($"{sprx} (not found; the release puts qwark.sprx beside this client)");
-            }
-        }
-
-        ImGui.Checkbox("I understand a bad boot plugin needs a plugin-disabling recovery", ref _confirmBootInstall);
-        ImGui.BeginDisabled(!_confirmBootInstall);
-
-        // The path box above the checkbox is not greyed out with the buttons below it, so Enter in
-        // it waits for the same confirmation a press would.
-        if (ImGui.Button("Install to boot_plugins.txt") || (install && _confirmBootInstall))
-        {
-            state.Settings.Ps3.SprxPath = _sprxPath;
-            state.Settings.Save();
-
-            string ip = _host.Trim();
+            string ip = CurrentHost(state).Trim();
             string path = sprx;
             state.Run(() => state.WebMan.InstallToBootAsync(ip, path, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
                 result =>
@@ -308,20 +265,34 @@ public static class ConnectionPanel
                             $"HEN loads only {WebManLoader.HenPluginLimit} boot plugins; boot_plugins.txt has {result.Lines}",
                             ToastKind.Error);
                     }
+
+                    done();
                 });
         }
 
-        ImGui.SameLine();
+        // One under the other: side by side they are the widest control on the Console tab, and the
+        // hints of its table start after the widest control.
         if (ImGui.Button("Remove from boot_plugins.txt"))
         {
-            string ip = _host.Trim();
+            string ip = CurrentHost(state).Trim();
             state.Run(() => state.WebMan.RemoveFromBootAsync(ip, new Progress<string>(m => state.Post(() => state.AddToast(m)))),
-                changed => state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt didn't list it"));
+                changed =>
+                {
+                    state.AddToast(changed ? "Removed from boot_plugins.txt" : "boot_plugins.txt didn't list it");
+                    done();
+                });
         }
 
-        ImGui.EndDisabled();
-
         DrawUpdateModuleButton(state, sprx);
+    }
+
+    /// <summary>What the Installation row says beside its buttons, and where the file it sends is.</summary>
+    public static void DrawBootInstallNotes(string sprx)
+    {
+        Ui.Hint($"adds qwark.sprx to {WebManLoader.BootPluginsPath} so it loads on console boot; needs webMAN to install");
+
+        if (File.Exists(sprx)) DrawUiPakBeside(sprx);
+        else Ui.Warning($"{sprx} (not found; the release puts qwark.sprx beside this client)");
     }
 
     /// <summary>
@@ -378,8 +349,6 @@ public static class ConnectionPanel
         ImGui.BeginDisabled(!state.Connected || !File.Exists(sprx));
         if (ImGui.Button("Update qwark.sprx on your console now"))
         {
-            state.Settings.Ps3.SprxPath = _sprxPath;
-            state.Settings.Save();
             state.UpdateConsoleModule(sprx);
         }
 

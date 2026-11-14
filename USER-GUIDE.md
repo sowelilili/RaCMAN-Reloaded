@@ -31,7 +31,7 @@ The Connection panel shows how much memory the console's system software (the VS
 
 ## Connection modes
 
-The mode is **Connection mode**, on the **Connection** tab of the Settings page.
+The mode is **Connection mode**, on the **Console** tab of the Settings page.
 
 **webMAN** is the default mode. The client asks webMAN which plugin slot holds the module. If no slot holds it, the client sends `qwark.sprx` to the console and loads it. Automatic reconnections do the same, so the client can recover a module that stopped.
 
@@ -39,7 +39,9 @@ If your console also loads qwark at startup (`boot_plugins.txt` lists `qwark.spr
 
 **Standalone** never uses webMAN. The client only connects to the module's port. Use this mode if the console loads the module at startup.
 
-Standalone mode adds an **Installation** part to the Connection panel. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. The install puts qwark first on the list, so HEN loads it before webMAN. This one installation needs webMAN's FTP server. After it, the client does not need webMAN.
+In Standalone mode, an **Installation** row appears under **Connection mode**. It makes the console load the module at startup. Press **Install to boot_plugins.txt**, then restart the console. The console reads that list only at startup. The install puts qwark first on the list, so HEN loads it before webMAN. This one installation needs webMAN's FTP server. After it, the client does not need webMAN. **Remove from boot_plugins.txt** takes qwark off the list again.
+
+In Standalone mode the client also checks whether `boot_plugins.txt` lists qwark, and shows **qwark is not installed** under **Connection mode** if it does not. It checks when you connect, when you open the Console tab, when you pick Standalone, and after an install or a removal. While you are connected it reads the list through qwark; otherwise through webMAN's FTP server.
 
 The client sends `qwark.sprx`, `ui.pak` and the game files by itself. To copy them by hand, put `qwark.sprx` in `/dev_hdd0/plugins/` and make `/dev_hdd0/plugins/qwark.sprx` the first line of `/dev_hdd0/boot_plugins.txt`. Put `ui.pak` and the game files (`rac1.sprx` to `rac4.sprx` and `tod.sprx`) in `/dev_hdd0/qwark/`.
 
@@ -80,11 +82,11 @@ Open **Game**, then **Manips**, and pick the category type of your run. Hover a 
 
 The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
 
-Every category is in the game's planet order: each save goes under the planet it was made on, which the client reads from the save itself, whatever the save is called. A revisit has its own place after the planets before it, such as RaC1's second visit to Veldin, RaC2's return to Aranos and ToD's Fastoon II. Saves on the same planet are alphabetical, with numbers in number order ("Kerwan 9" before "Kerwan 10"). Saves whose planet the client cannot read come last, also alphabetical: a file that is not a save of this game, and a ToD save that is only on your console. The order of the planets is the line order of the autosplitter's `<game>-planets.txt` files, which is the game's own level order. In UYA that is not quite the story order (Daxx comes before Annihilation Nation, for example), and Deadlocked's Dreadzone Station, which you return to between planets, comes first. To list saves alphabetically only, open **Settings**, and on the **RaCMAN** tab, under **Files**, set **Sort save files** to **Alphabetical**. To replace one of your saves with the game's current state, right-click it and choose **Override...**. It asks first, because the old save is gone afterwards, and it works whenever **Save on console** does.
+Every category is in the game's planet order: each save goes under the planet it was made on, which the client reads from the save itself, whatever the save is called. A revisit has its own place after the planets before it, such as RaC1's second visit to Veldin, RaC2's return to Aranos and ToD's Fastoon II. Saves on the same planet are alphabetical, with numbers in number order ("Kerwan 9" before "Kerwan 10"). Saves whose planet the client cannot read come last, also alphabetical: a file that is not a save of this game, and a ToD save that is only on your console. The order of the planets is the line order of the autosplitter's `<game>-planets.txt` files, which is the game's own level order. In UYA that is not quite the story order (Daxx comes before Annihilation Nation, for example), and Deadlocked's Dreadzone Station, which you return to between planets, comes first. To list saves alphabetically only, open **Settings**, and on the **RaCMAN** tab, under **Save files**, set **Sort save files** to **Alphabetical**. To replace one of your saves with the game's current state, right-click it and choose **Override...**. It asks first, because the old save is gone afterwards, and it works whenever **Save on console** does.
 
 ## Run warnings
 
-When a run starts with a cheat or a mod on that the run should not have, your console shows a notification such as **Warning: 2 cheats enabled**. A run starts where the autosplitter starts its timer. A death or a reload does not count.
+When a run starts with a cheat or a mod on that the run should not have, your console shows a notification such as **Warning: 2 cheats enabled**. A run starts where the autosplitter starts its timer. A death or a reload does not count. **Cheat warnings**, on the **Console** tab of the Settings page, chooses what it warns about: **Mods and cheats** (the default), **Cheats only**, or **Off**.
 
 - **Cheats** are the cheats of the game's Cheats page, fast loads included, and a few more such as RaC1's goodies menu and RaC2's resets on death. UYA's **Quick-select pause**, ToD's **Remove cutscenes** and the manips do not count.
 - **Mods**: a mod whose author says it is allowed in speedruns says **This mod is legal for speedruns.** under its description on the Mods panel. Mods whose author says they are not allowed are counted at every run start. Unknown mods (the author has not said) are mentioned once, until you load another one.
@@ -93,7 +95,7 @@ Under RPCS3 the warnings go to qwark-rpcs3's log.
 
 ## Console menu
 
-On a console, all four games and ToD have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was (in ToD, where **Inventory** was, in the pause menu's first list), or press L1, R1, L2, R2, L3 and R3 together in play. ToD's Trainer menu uses the pause menu's own list and its Game Options screen, scrolls a page at a time like the game's lists (Down on a page's last row shows the next page, Up on the first page's top row goes round to the last), and works under RPCS3 too once RaCMAN has written its RPCS3 patch and the game has been restarted. The Combos panel can change that combo. Untick **In-game menus** on the **Qwark** tab of the Settings page to keep the game's own Help (in ToD, Inventory) in the pause menu; the combo still opens the Trainer menu.
+On a console, all four games and ToD have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was (in ToD, where **Inventory** was, in the pause menu's first list), or press L1, R1, L2, R2, L3 and R3 together in play. ToD's Trainer menu uses the pause menu's own list and its Game Options screen, scrolls a page at a time like the game's lists (Down on a page's last row shows the next page, Up on the first page's top row goes round to the last), and works under RPCS3 too once RaCMAN has written its RPCS3 patch and the game has been restarted. The Combos panel can change that combo. Untick **In-game menus** on the **Console** tab of the Settings page to keep the game's own Help (in ToD, Inventory) in the pause menu; the combo still opens the Trainer menu.
 
 The Combos panel also has a **Toggle fast loads** combo. It has no buttons until you capture some, and the console says whether fast loads are now on or off.
 
@@ -103,9 +105,9 @@ The Trainer menu has a **Mods** page, after **Unlocks**, with a row for each mod
 
 ## Per-user settings
 
-Your console can keep separate settings for each user on it. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, the **In-game menus** setting, and the chargeboot and HUD colours set for the boot. The mod and savefile libraries stay shared.
+Your console can keep separate settings for each user on it. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, the **In-game menus**, **Cheat warnings** and **Apply toggles on game boot** settings, and the chargeboot and HUD colours set for the boot. The mod and savefile libraries stay shared, and so does the **Input display rate**.
 
-Turn it on with **Per-user settings** on the **Qwark** tab of the Settings page, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line beside the switch says whose settings you are editing.
+Turn it on with **Per-user settings** on the **Console** tab of the Settings page, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line beside the switch says whose settings you are editing.
 
 Combos are shared by everyone, and so is the **Combos enabled** switch. To give the signed-in user their own combo for one action, press **Override** on that row and press the buttons. That row then shows in orange, and its buttons read **Override**, which captures the override again, and **Clear Override**, which removes only the override, so the shared combo comes back; press **Clear** again to clear the shared combo. Overrides are kept while per-user settings are off.
 
@@ -176,14 +178,26 @@ The **Level flags** panel lists ToD's level flags by name, grouped by planet, as
 
 ## Settings
 
-Press **Settings** at the bottom of the side bar. The side bar then shows the settings' own tabs: **RaCMAN**, **IPC**, **Connection** and **Qwark**. Press **< Back** at the top, or Esc, to go back to the panel you came from. Each tab is a list of settings. Hover over a setting to see what it does; the grey text beside it says what its current value does.
+Press **Settings** at the bottom of the side bar. The side bar then shows the settings' own tabs: **RaCMAN**, **IPC**, **Console** and **Advanced**. Press **< Back** at the top, or Esc, to go back to the panel you came from. Each tab is one or more tables of settings. Hover over a setting to see what it does; the grey text to its right says what its current value does.
 
-- **RaCMAN**: the theme, debug information, the game layout, updates, and your files: the folders, **Mirror saves to this PC**, **Sort save files** and **Import from RaCMAN**.
-- **IPC**: the port of RPCS3's IPC server, and the address and port of LiveSplit's server.
-- **Connection**: the connection mode, **Table refresh** (how many seconds apart the Unlocks and Level flags tables read your console again; 0 reads only when you press **Refresh**), and **Input display rate**.
-- **Qwark**: your console's own settings, **In-game menus** and **Per-user settings**. They show while you are connected.
+- **RaCMAN**: **General** (the theme), **Updates**, **Save files** (**Mirror saves to this PC** and **Sort save files**), **Files** (a button for each folder) and **Import from RaCMAN**.
+- **IPC**: the port of RPCS3's IPC server, and the address and port of LiveSplit's server. **Reset to default** under each puts back RPCS3's port 28012 or LiveSplit's 127.0.0.1:16834.
+- **Console**: first your console's own settings, kept by qwark on your console: **In-game menus**, **Cheat warnings**, **Apply toggles on game boot**, **Per-user settings** and **Input display rate**. They show while you are connected (the input display rate stays greyed out after you disconnect). Then the connection: **Connection mode**, the **Installation** row in Standalone mode (see [Connection modes](#connection-modes)), and **Table refresh** (how many seconds apart the Unlocks and Level flags tables read your console again; 0 reads only when you press **Refresh**).
+- **Advanced**: **Debug information**, **Game layout**, and **qwark.sprx path**. Leave the path empty to use the `qwark.sprx` beside RaCMAN, which is the one the release ships; the grey text says whether it was found there or whether your own file is in use.
 
-**Input display rate** is how often your console sends the controller, and the rest of what the panels show live, to the client: 30, 60 or 120 times a second. A higher rate makes the input display and the OBS page smoother, and uses more network traffic. The setting is kept on your console, so it applies to every PC connected to it and stays after a restart. It shows when your console's module has it, and is greyed out while you are not connected.
+With per-user settings on, a line at the top of the Console tab says which settings are the signed-in user's: **In-game menus**, **Cheat warnings** and **Apply toggles on game boot**. The others are shared by every user.
+
+**Input display rate** is how often your console sends the controller, and the rest of what the panels show live, to the client: 30, 60 or 120 times a second, 60 unless you change it. A higher rate makes the input display and the OBS page smoother, and uses more network traffic. The setting is kept on your console, so it applies to every PC connected to it and stays after a restart. It shows when your console's module has it, and is greyed out while you are not connected. An older qwark sends 30 times a second and has no such setting.
+
+**Cheat warnings** chooses what your console's run-start notification warns about (see [Run warnings](#run-warnings)): **Mods and cheats**, **Cheats only** or **Off**. An older qwark offers no **Cheats only**.
+
+**Apply toggles on game boot** decides what happens to the toggles and mods you set to apply **on boot** (the **on boot** boxes, and **On boot** on the Mods page):
+
+- **Always** (the default): they are applied every time the game boots.
+- **Ask**: the game boots with none of them applied. If RaCMAN is connected, it lists them and asks whether to apply them; **Leave off** is the default answer. If no PC is connected, nothing is applied and nothing asks later.
+- **Never**: none of them is applied when the game boots.
+
+Your **on boot** choices are kept in every mode, so switching back to **Always** brings them back at the next boot.
 
 ## Updates
 
@@ -219,7 +233,7 @@ The client checks for its rule at every start. It asks again only if the rule is
 
 ## The input display in OBS
 
-The client can serve the input display as a page for OBS. Add a Browser Source with the URL on the Input display panel, and give it the size the panel shows. The page is served on 127.0.0.1 only, so it needs no firewall rule. For a smoother display, raise **Input display rate** on the **Connection** tab of the Settings page. See [docs/obs.md](docs/obs.md).
+The client can serve the input display as a page for OBS. Add a Browser Source with the URL on the Input display panel, and give it the size the panel shows. The page is served on 127.0.0.1 only, so it needs no firewall rule. For a smoother display, raise **Input display rate** on the **Console** tab of the Settings page. See [docs/obs.md](docs/obs.md).
 
 ## Customising the Game page
 

@@ -129,6 +129,24 @@ public sealed record SessionInfo(
     /// <summary>The console's <c>run.warnings</c> is 0 (flags3 bit1): a run start says nothing.</summary>
     public bool RunWarningsOff => (Flags3 & SessionFlags3.RunWarningsOff) != 0;
 
+    /// <summary>
+    /// The module has qwark revision 1.33's settings (flags3 bit5): RUN_WARN takes 2, cheats only,
+    /// and it answers BOOT_APPLY and BOOT_ASK.
+    /// </summary>
+    public bool HasSettings133 => (Flags3 & SessionFlags3.Settings133) != 0;
+
+    /// <summary>The console's <c>run.warnings</c> is 2 (flags3 bit6): a run start says the cheats line alone.</summary>
+    public bool RunWarningsCheatsOnly => (Flags3 & SessionFlags3.RunWarningsCheats) != 0;
+
+    /// <summary>The console's Cheat warnings, from flags3 bits 1 and 6.</summary>
+    public RunWarningMode RunWarnings =>
+        RunWarningsOff ? RunWarningMode.Off
+        : RunWarningsCheatsOnly ? RunWarningMode.CheatsOnly
+        : RunWarningMode.ModsAndCheats;
+
+    /// <summary>A boot's on-boot toggles and mods wait for this client's answer (flags3 bit7, revision 1.33).</summary>
+    public bool BootAskPending => (Flags3 & SessionFlags3.BootAsk) != 0;
+
     /// <summary>The module answers TELEMETRY_RATE (flags3 bit2, qwark revision 1.32).</summary>
     public bool HasTelemetryRate => (Flags3 & SessionFlags3.TelemetryRate) != 0;
 
@@ -138,6 +156,8 @@ public sealed record SessionInfo(
     /// <summary>
     /// How often the console sends telemetry, in Hz: flags3 bits 3-4 (revision 1.32). 30 from a
     /// module without the switch, which always sent at 30 Hz, and for the code 3 no module sends.
+    /// A module from revision 1.33 sends 60 when its config.txt does not name a rate, which these
+    /// bits say like any other.
     /// </summary>
     public int TelemetryHz
     {
@@ -261,7 +281,9 @@ public sealed record SessionInfo(
         var flags2 = (SessionFlags2)flags2Byte & Flags2Bits;
         byte profileSeq = r.ReadU8();
         var flags3 = (SessionFlags3)r.ReadU8() & (SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff
-                                                  | SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask);
+                                                  | SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask
+                                                  | SessionFlags3.Settings133 | SessionFlags3.RunWarningsCheats
+                                                  | SessionFlags3.BootAsk);
         float x = r.ReadF32();
         float y = r.ReadF32();
         float z = r.ReadF32();

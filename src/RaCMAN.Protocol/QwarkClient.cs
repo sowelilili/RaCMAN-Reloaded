@@ -1594,9 +1594,54 @@ public sealed class QwarkClient : IDisposable
     /// <see cref="SessionInfo.HasRunWarnings"/> is set: an older module answers UNKNOWN_OP.
     /// </summary>
     public Task RunWarnAsync(bool on, CancellationToken cancellationToken = default) =>
+        RunWarnAsync(on ? RunWarningMode.ModsAndCheats : RunWarningMode.Off, cancellationToken);
+
+    /// <summary>
+    /// RUN_WARN with one of its three values (qwark revision 1.33): off, mods and cheats, or cheats
+    /// only. Cheats only only while <see cref="SessionInfo.HasSettings133"/> is set: an older module
+    /// answers it BAD_ARG.
+    /// </summary>
+    public Task RunWarnAsync(RunWarningMode mode, CancellationToken cancellationToken = default) =>
         RequestAsync(Opcode.RunWarn, Bytes(1, (scoped ref SpanWriter w) =>
         {
-            w.WriteU8((byte)(on ? 1 : 0));
+            w.WriteU8((byte)mode);
+        }), cancellationToken);
+
+    /// <summary>
+    /// BOOT_APPLY, qwark revision 1.33: writes the console's Apply toggles on game boot
+    /// (<c>boot.apply</c>, per user). Send it only while <see cref="SessionInfo.HasSettings133"/> is set.
+    /// </summary>
+    public Task BootApplyAsync(BootApplyMode mode, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.BootApply, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)mode);
+        }), cancellationToken);
+
+    /// <summary>
+    /// BOOT_APPLY with no byte: the console's <c>boot.apply</c> as it reads it, which no SessionInfo
+    /// bit carries. A reply that is not one byte throws <see cref="ProtocolException"/>.
+    /// </summary>
+    public async Task<BootApplyMode> BootApplyReadAsync(CancellationToken cancellationToken = default)
+    {
+        var reply = await RequestAsync(Opcode.BootApply, null, cancellationToken).ConfigureAwait(false);
+        if (reply.Length < 1) throw new ProtocolException("BOOT_APPLY's read answered no byte");
+        return reply[0] switch
+        {
+            1 => BootApplyMode.Ask,
+            2 => BootApplyMode.Never,
+            _ => BootApplyMode.Always,
+        };
+    }
+
+    /// <summary>
+    /// BOOT_ASK, qwark revision 1.33: the answer to this boot's question
+    /// (<see cref="SessionInfo.BootAskPending"/>): apply the running game's on-boot toggles and mods,
+    /// or leave them off.
+    /// </summary>
+    public Task BootAskAsync(bool apply, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.BootAsk, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)(apply ? 1 : 0));
         }), cancellationToken);
 
     /// <summary>

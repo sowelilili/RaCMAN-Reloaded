@@ -7,9 +7,10 @@ using RaCMAN.Protocol.Testing;
 namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
-/// Qwark revision 1.30: the run-start warnings. RUN_WARN and SessionInfo flags3 (the Combos panel's
-/// Run warnings box, hidden since build 57), a mod's <c>#- legal:</c> line as the library and
-/// MOD_LIST carry it, and the green line a run-legal mod's details end with.
+/// Qwark revision 1.30: the run-start warnings. RUN_WARN and SessionInfo flags3 (the Settings
+/// page's Cheat warnings dropdown, a hidden checkbox from build 57 until revision 1.33's third
+/// value), a mod's <c>#- legal:</c> line as the library and MOD_LIST carry it, and the green line a
+/// run-legal mod's details end with.
 /// </summary>
 public class RunWarningsTests
 {
@@ -25,9 +26,9 @@ public class RunWarningsTests
         return condition();
     }
 
-    private static async Task<(FakeQwarkServer Server, QwarkClient Client)> ConnectAsync(bool reports = true)
+    private static async Task<(FakeQwarkServer Server, QwarkClient Client)> ConnectAsync(bool reports = true, bool settings133 = true)
     {
-        var server = new FakeQwarkServer { ReportsRunWarnings = reports };
+        var server = new FakeQwarkServer { ReportsRunWarnings = reports, ReportsSettings133 = settings133 };
         server.Start();
 
         var client = new QwarkClient { AutoReconnect = false };
@@ -48,15 +49,14 @@ public class RunWarningsTests
             var session = (await client.GetStateAsync()).Session;
             Assert.True(session.HasRunWarnings);
             Assert.False(session.RunWarningsOff);
-            // After build 57 the box is hidden, though the module has the switch.
-            Assert.False(QwarkSettings.ShowsRunWarnings(session));
-            Assert.Equal("warns about cheats and mods as a run starts", QwarkSettings.RunWarningsStatus(session));
+            Assert.True(QwarkSettings.ShowsCheatWarnings(session));
+            Assert.Equal(RunWarningMode.ModsAndCheats, session.RunWarnings);
 
             await client.RunWarnAsync(false);
             Assert.False(server.RunWarnings);
             session = (await client.GetStateAsync()).Session;
             Assert.True(session.RunWarningsOff);
-            Assert.Equal("no warnings", QwarkSettings.RunWarningsStatus(session));
+            Assert.Equal(RunWarningMode.Off, session.RunWarnings);
             Assert.True(await WaitFor(() =>
                 client.LatestTelemetry is { Session.RunWarningsOff: true } && !client.TelemetryViaTcp));
 
@@ -68,9 +68,9 @@ public class RunWarningsTests
     }
 
     [Theory]
-    [InlineData(2)]
+    [InlineData(3)]
     [InlineData(255)]
-    public async Task RunWarnRefusesAByteThatIsNeitherOffNorOn(byte value)
+    public async Task RunWarnRefusesAByteThatIsNoneOfTheThree(byte value)
     {
         var (server, client) = await ConnectAsync();
         using (server)
@@ -93,7 +93,7 @@ public class RunWarningsTests
             var session = (await client.GetStateAsync()).Session;
             Assert.False(session.HasRunWarnings);
             Assert.False(session.RunWarningsOff);
-            Assert.False(QwarkSettings.ShowsRunWarnings(session));
+            Assert.False(QwarkSettings.ShowsCheatWarnings(session));
             var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => client.RunWarnAsync(false));
             Assert.Equal(Status.UnknownOp, refused.Status);
         }
@@ -110,11 +110,16 @@ public class RunWarningsTests
         Assert.True(info.RunWarningsOff);
         Assert.Equal(SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff, info.Flags3);
 
-        // Bits 2 to 4 are the telemetry rate's since qwark revision 1.32; bits 5 to 7 mean nothing yet.
+        // Bits 2 to 4 are the telemetry rate's since qwark revision 1.32, and bits 5 to 7 revision
+        // 1.33's: its settings, cheats only and a boot's question.
         bytes[31] = 0xE0;
-        Assert.Equal(SessionFlags3.None, SessionInfo.Parse(bytes).Flags3);
+        var high = SessionInfo.Parse(bytes);
+        Assert.Equal(SessionFlags3.Settings133 | SessionFlags3.RunWarningsCheats | SessionFlags3.BootAsk, high.Flags3);
+        Assert.True(high.HasSettings133 && high.RunWarningsCheatsOnly && high.BootAskPending);
+        Assert.Equal(0xE0, high.ToBytes()[31]);
         bytes[31] = 0xFC;
-        Assert.Equal(SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask, SessionInfo.Parse(bytes).Flags3);
+        Assert.Equal(SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask | SessionFlags3.Settings133
+                     | SessionFlags3.RunWarningsCheats | SessionFlags3.BootAsk, SessionInfo.Parse(bytes).Flags3);
 
         var again = SessionInfo.Parse(info.ToBytes());
         Assert.Equal(info.Flags3, again.Flags3);
@@ -125,6 +130,118 @@ public class RunWarningsTests
     {
         Assert.True(StatusToast.IsSettingsWrite(Opcode.RunWarn));
     }
+
+    // ------------------------------------------------------------------ the Cheat warnings dropdown (1.33)
+
+    /// <summary>
+    /// Bit1 still means off and nothing else, so an older client reads cheats only as on; the new
+    /// client reads all three from bits 1 and 6, off winning should a module ever set both.
+    /// </summary>
+    [Theory]
+    [InlineData(0x01, RunWarningMode.ModsAndCheats)]
+    [InlineData(0x03, RunWarningMode.Off)]
+    [InlineData(0x41, RunWarningMode.CheatsOnly)]
+    [InlineData(0x43, RunWarningMode.Off)]
+    public void TheModeIsReadFromBitsOneAndSix(byte flags3, RunWarningMode want)
+    {
+        var bytes = new byte[SessionInfo.Size];
+        bytes[0] = 1;
+        bytes[31] = flags3;
+        Assert.Equal(want, SessionInfo.Parse(bytes).RunWarnings);
+    }
+
+    [Fact]
+    public async Task CheatsOnlyIsSentAsTwoAndComesBackInBitSix()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            var session = (await client.GetStateAsync()).Session;
+            Assert.True(session.HasSettings133);
+            Assert.Equal(new[] { RunWarningMode.ModsAndCheats, RunWarningMode.CheatsOnly, RunWarningMode.Off },
+                QwarkSettings.CheatWarningChoices(session).Select(c => c.Mode));
+
+            await client.RunWarnAsync(RunWarningMode.CheatsOnly);
+            Assert.Equal(RunWarningMode.CheatsOnly, server.RunWarningMode);
+            session = (await client.GetStateAsync()).Session;
+            Assert.True(session.RunWarningsCheatsOnly);
+            Assert.False(session.RunWarningsOff);
+            Assert.Equal(RunWarningMode.CheatsOnly, session.RunWarnings);
+            Assert.Equal("warns about cheats only", QwarkSettings.CheatWarningsHint(session.RunWarnings));
+        }
+    }
+
+    /// <summary>
+    /// A module before revision 1.33 takes 0 and 1 and refuses 2: the dropdown leaves Cheats only out
+    /// for it, and the panel's own path never sends it there.
+    /// </summary>
+    [Fact]
+    public async Task AModuleWithoutTheThirdValueIsNeverOfferedNorSentCheatsOnly()
+    {
+        using var server = new FakeQwarkServer { ReportsSettings133 = false };
+        server.Start();
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0));
+
+        Assert.False(state.Session.HasSettings133);
+        Assert.Equal(new[] { RunWarningMode.ModsAndCheats, RunWarningMode.Off },
+            QwarkSettings.CheatWarningChoices(state.Session).Select(c => c.Mode));
+        Assert.False(QwarkSettings.SetCheatWarnings(state, RunWarningMode.CheatsOnly));
+        await PumpForAsync(state, 200);
+        Assert.Equal(RunWarningMode.ModsAndCheats, server.RunWarningMode);
+        Assert.DoesNotContain(Opcode.RunWarn, server.RequestLog());
+
+        // What the module would have answered.
+        var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => state.Client.RunWarnAsync(RunWarningMode.CheatsOnly));
+        Assert.Equal(Status.BadArg, refused.Status);
+
+        // Off it does take, through the dropdown's own path.
+        Assert.True(QwarkSettings.SetCheatWarnings(state, RunWarningMode.Off));
+        Assert.True(await PumpAsync(state, () => state.Session.RunWarningsOff));
+        Assert.Equal(RunWarningMode.Off, server.RunWarningMode);
+    }
+
+    [Fact]
+    public async Task TheDropdownsPickSendsOneRequestAndTheSessionFollows()
+    {
+        using var server = new FakeQwarkServer();
+        server.Start();
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        Assert.True(await PumpAsync(state, () => state.Session.HasSettings133));
+
+        Assert.True(QwarkSettings.SetCheatWarnings(state, RunWarningMode.CheatsOnly));
+        Assert.True(await PumpAsync(state, () => state.Session.RunWarnings == RunWarningMode.CheatsOnly));
+        Assert.Equal(1, server.RequestLog().Count(op => op == Opcode.RunWarn));
+        Assert.Empty(state.Toasts.Where(t => t.Kind == ToastKind.Error));
+    }
+
+    [Fact]
+    public void WithoutAConnectionTheDropdownSendsNothing()
+    {
+        using var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+        Assert.False(QwarkSettings.SetCheatWarnings(state, RunWarningMode.Off));
+    }
+
+    private static async Task<bool> PumpAsync(AppState state, Func<bool> condition, int timeoutMs = 5000)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            state.Tick(1f / 60f);
+            if (condition()) return true;
+            await Task.Delay(16);
+        }
+
+        state.Tick(1f / 60f);
+        return condition();
+    }
+
+    private static Task PumpForAsync(AppState state, int milliseconds) => PumpAsync(state, () => false, milliseconds);
 
     // ------------------------------------------------------------------ #- legal:
 
