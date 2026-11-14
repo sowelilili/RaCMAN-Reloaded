@@ -1086,7 +1086,7 @@ public class SaveFileTests : IDisposable
     }
 
     [Fact]
-    public void EachReasonSaysWhatTheConsoleSaidInPlainWords()
+    public void EachReasonSaysTheProblemInPlainWords()
     {
         Assert.Equal(1, (byte)SaveFileReason.NotInGameplay);
         Assert.Equal(2, (byte)SaveFileReason.PlanetLoad);
@@ -1098,15 +1098,15 @@ public class SaveFileTests : IDisposable
         Assert.Equal(8, (byte)SaveFileReason.NoSlotYet);
         Assert.Equal(9, (byte)SaveFileReason.HoldLost);
 
-        // Each reason the console names is its own sentence, in the console's words rather than the
-        // error's, whatever the error was.
+        // Each reason the console names is its own sentence, in its own words rather than the
+        // error's, whatever the error was. (A NotASave with the NoSave error reads the same either
+        // way on a load, "that file isn't a save of this game", so the error here is NotIdle.)
         var reasons = Enumerable.Range(1, 9).Select(r => (SaveFileReason)r).ToArray();
         var texts = new List<string>();
         foreach (var reason in reasons)
         {
-            var error = reason is SaveFileReason.NotASave or SaveFileReason.NoSlotYet ? SaveFileError.NoSave : SaveFileError.NotIdle;
+            const SaveFileError error = SaveFileError.NotIdle;
             string text = error.Describe(SaveFileRequest.Restore, reason);
-            Assert.StartsWith("your console", text, StringComparison.Ordinal);
             Assert.NotEqual(error.Describe(SaveFileRequest.Restore), text);
             texts.Add(text);
         }
@@ -1115,7 +1115,6 @@ public class SaveFileTests : IDisposable
 
         // A take and a load read differently where the request matters.
         Assert.NotEqual(SaveFileReason.NotASave.Describe(SaveFileRequest.Store), SaveFileReason.NotASave.Describe(SaveFileRequest.Restore));
-        Assert.NotEqual(SaveFileReason.TitleScreen.Describe(SaveFileRequest.Store), SaveFileReason.TitleScreen.Describe(SaveFileRequest.Restore));
         Assert.Null(SaveFileReason.None.Describe(SaveFileRequest.Load));
         Assert.Null(((SaveFileReason)200).Describe(SaveFileRequest.Load));
         Assert.Equal(SaveFileError.NotIdle.Describe(SaveFileRequest.Load),

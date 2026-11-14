@@ -566,36 +566,32 @@ public static class SaveFileErrorExtensions
     };
 
     /// <summary>
-    /// The same, with SAVEFILE_INFO's <c>why</c> (revision 1.29): what the console said, in words,
-    /// when it said which check it was, and the error's own words
-    /// when it did not.
+    /// The same, with SAVEFILE_INFO's <c>why</c> (revision 1.29): the reason in words when the
+    /// console named which check it was, and the error's own words when it did not.
     /// </summary>
     public static string Describe(this SaveFileError error, SaveFileRequest request, SaveFileReason reason) =>
         reason.Describe(request) ?? error.Describe(request);
 
     /// <summary>
-    /// A reason in plain words, "your console says ...", or null for <see cref="SaveFileReason.None"/>
-    /// and a value this client does not know. <paramref name="request"/> is what was asked for.
+    /// A reason in plain words, the problem itself ("not in gameplay"), or null for
+    /// <see cref="SaveFileReason.None"/> and a value this client does not know. The toast around it
+    /// already says whether a save or a load was refused. <paramref name="request"/> is what was asked for.
     /// </summary>
-    public static string? Describe(this SaveFileReason reason, SaveFileRequest request = SaveFileRequest.Store)
+    public static string? Describe(this SaveFileReason reason, SaveFileRequest request = SaveFileRequest.Store) => reason switch
     {
-        string act = request == SaveFileRequest.Store ? "take a save" : "load a save";
-        return reason switch
-        {
-            SaveFileReason.NotInGameplay => $"your console says the game isn't in gameplay, so it can't {act}",
-            SaveFileReason.PlanetLoad => "your console says a planet load is under way",
-            SaveFileReason.TitleScreen => $"your console says the game is on its title screen, so it can't {act}",
-            SaveFileReason.GameSaving => "your console says the game is saving or loading on its own",
-            SaveFileReason.NoSaveSystem => "your console says the game's save system isn't up yet",
-            SaveFileReason.LoadNotTaken => "your console says the game didn't take the load in time",
-            SaveFileReason.NotASave => request == SaveFileRequest.Store
-                ? "your console says what the game holds isn't a save of this game"
-                : "your console says that file isn't a save of this game",
-            SaveFileReason.NoSlotYet => "your console says the game has no save to take yet; save in the game first",
-            SaveFileReason.HoldLost => "your console stopped: the game started its own save or load",
-            _ => null,
-        };
-    }
+        SaveFileReason.NotInGameplay => "not in gameplay",
+        SaveFileReason.PlanetLoad => "a planet load is under way",
+        SaveFileReason.TitleScreen => "the game is on its title screen",
+        SaveFileReason.GameSaving => "the game is saving or loading",
+        SaveFileReason.NoSaveSystem => "the save system isn't up yet",
+        SaveFileReason.LoadNotTaken => "the game didn't take the load in time",
+        SaveFileReason.NotASave => request == SaveFileRequest.Store
+            ? "what the game holds isn't a save of this game"
+            : "that file isn't a save of this game",
+        SaveFileReason.NoSlotYet => "no save to take yet; save in the game first",
+        SaveFileReason.HoldLost => "your console stopped: the game started its own save or load",
+        _ => null,
+    };
 
     /// <summary>
     /// The errors a BUSY answer to a set-aside, a load, a STORE or a RESTORE carries: why the

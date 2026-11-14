@@ -2223,7 +2223,7 @@ public class SaveFileRefusalToastTests
     }
 
     [Fact]
-    public void ARefusalTheConsoleNamedSaysTheReasonInYourConsoleWords()
+    public void ARefusalTheConsoleNamedSaysTheReason()
     {
         // Revision 1.29: Tools of Destruction's console says which check it was, and that is what
         // the toast says rather than the error's own words.
@@ -2231,7 +2231,6 @@ public class SaveFileRefusalToastTests
             new QwarkStatusException(Opcode.SaveFileRestore, Status.Busy), SaveFileReason.NotInGameplay);
         string reason = SaveFileReason.NotInGameplay.Describe(SaveFileRequest.Restore)!;
 
-        Assert.StartsWith("your console", reason, StringComparison.Ordinal);
         Assert.EndsWith(reason, SaveFilesPanel.FailureToast(load: true, refused), StringComparison.Ordinal);
         Assert.DoesNotContain(SaveFileError.NotIdle.Describe(SaveFileRequest.Restore),
             SaveFilesPanel.FailureToast(load: true, refused), StringComparison.Ordinal);

@@ -1154,7 +1154,7 @@ public static class GamePanel
             if (current < 0)
             {
                 ImGui.SameLine();
-                Ui.Text(Ui.Yellow, $"readout says {live}");
+                Ui.Text(Ui.Yellow, $"unknown value {live}");
             }
         }
         else // Color

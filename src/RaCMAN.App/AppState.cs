@@ -1204,7 +1204,7 @@ public sealed class AppState : IDisposable
         var game = PendingGame;
         if (GameModuleLocalPath is not { } path)
         {
-            AddToast("Your console hasn't said which game is running yet", ToastKind.Error);
+            AddToast("The running game isn't known yet", ToastKind.Error);
             return;
         }
 
