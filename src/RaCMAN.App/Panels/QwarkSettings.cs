@@ -164,7 +164,7 @@ public static class QwarkSettings
     /// its heading's (<see cref="QwarkHeading"/>), so this names nobody.
     /// </summary>
     public static string ProfileStatus(SessionInfo session) =>
-        !session.ProfilesOn ? "shared by every user"
+        !session.ProfilesOn ? "settings shared by every user"
         : !session.ProfileActive ? "waiting for a user to sign in"
-        : "each user keeps their own";
+        : "different settings for each user";
 }
