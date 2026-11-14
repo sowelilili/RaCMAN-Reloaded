@@ -200,20 +200,14 @@ public enum Opcode : ushort
     TelemetryRate = 0x0097,
 
     /// <summary>
-    /// Revision 1.33: <c>u8 mode</c>, no reply, writes the console's per-user <c>boot.apply</c>:
-    /// 0 Always (the default), 1 Ask, 2 Never, whether a game boot applies the toggles and mods
-    /// flagged on boot. With no byte it is a read and the reply is <c>u8 mode</c>; no SessionInfo bit
-    /// carries it. Sent only while <see cref="SessionFlags3.Settings133"/> is set: an older module
-    /// answers UNKNOWN_OP.
+    /// Revision 1.33: <c>u8 mode</c>, no reply, writes the console's per-user <c>reboot.apply</c>,
+    /// Apply toggles on game reboot: what a same-game reboot does with the previous-session record.
+    /// 0 Always re-applies it on the console, 1 Ask (the default) leaves it pending for a client to
+    /// offer (and drops it when no client is connected), 2 Never drops it. With no byte it is a read
+    /// and the reply is <c>u8 mode</c>; no SessionInfo bit carries it. Sent only while
+    /// <see cref="SessionFlags3.Settings133"/> is set: an older module answers UNKNOWN_OP.
     /// </summary>
-    BootApply = 0x0098,
-
-    /// <summary>
-    /// Revision 1.33: <c>u8 apply</c>, no reply. The answer to a boot's question under
-    /// <c>boot.apply</c> Ask (<see cref="SessionFlags3.BootAsk"/>): 1 applies the running game's
-    /// on-boot toggles and mods, 0 leaves them off. NOT_FOUND with no question waiting.
-    /// </summary>
-    BootAsk = 0x0099,
+    RebootApply = 0x0098,
 
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
@@ -957,19 +951,13 @@ public enum SessionFlags3 : byte
 
     /// <summary>
     /// bit5 SETTINGS_133 (revision 1.33): the module takes RUN_WARN 2, cheats only, and answers
-    /// BOOT_APPLY and BOOT_ASK. The capability bit for the Cheat warnings' third choice and for Apply
-    /// toggles on game boot.
+    /// REBOOT_APPLY. The capability bit for the Cheat warnings' third choice and for Apply toggles on
+    /// game reboot.
     /// </summary>
     Settings133 = 1 << 5,
 
     /// <summary>bit6 RUN_WARN_CHEATS (revision 1.33): the console's <c>run.warnings</c> is 2, cheats only.</summary>
     RunWarningsCheats = 1 << 6,
-
-    /// <summary>
-    /// bit7 BOOT_ASK (revision 1.33): <c>boot.apply</c> is Ask and this boot's on-boot toggles and
-    /// mods wait for a client's BOOT_ASK.
-    /// </summary>
-    BootAsk = 1 << 7,
 }
 
 /// <summary>The console's Cheat warnings, <c>run.warnings</c> (RUN_WARN), as the client offers it.</summary>
@@ -985,16 +973,16 @@ public enum RunWarningMode : byte
     CheatsOnly = 2,
 }
 
-/// <summary>The console's Apply toggles on game boot, <c>boot.apply</c> (BOOT_APPLY, revision 1.33).</summary>
-public enum BootApplyMode : byte
+/// <summary>The console's Apply toggles on game reboot, <c>reboot.apply</c> (REBOOT_APPLY, revision 1.33).</summary>
+public enum RebootApplyMode : byte
 {
-    /// <summary>0, the default: a boot applies the on-boot toggles and mods, as every older module does.</summary>
+    /// <summary>0: the console re-applies the previous session's toggles, mods, freezes and patches itself.</summary>
     Always = 0,
 
-    /// <summary>1: none applied; a connected client is asked, and with none it is Never.</summary>
+    /// <summary>1, the default: the previous session waits for a client to offer it, as with every older module.</summary>
     Ask = 1,
 
-    /// <summary>2: none applied; the flags are kept.</summary>
+    /// <summary>2: the previous session is dropped; nothing is offered.</summary>
     Never = 2,
 }
 

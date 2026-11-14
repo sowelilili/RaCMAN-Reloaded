@@ -7,10 +7,11 @@ namespace RaCMAN.Protocol.Tests;
 
 /// <summary>
 /// The Settings page's tabs: the side nav it puts in place of the panels (Back and Esc), which rows
-/// each tab has (the second round's RaCMAN, IPC, Console and Advanced), the IPC rows' resets, the
-/// Console tab's boot plugin look and Installation row under Standalone, Apply toggles on game boot
-/// and its question (qwark revision 1.33), and the Input display rate, the console's telemetry rate
-/// of qwark revision 1.32 (TELEMETRY_RATE, SessionInfo flags3 bits 2 to 4), against the fake console.
+/// each tab has (the third round's Console layout, the import hidden and the qwark.sprx path under
+/// debug information), the IPC rows' resets, the Console tab's boot plugin look and Installation row
+/// under Standalone, Apply toggles on game reboot and the previous-session prompt it governs (qwark
+/// revision 1.33), and the Input display rate, the console's telemetry rate of qwark revision 1.32
+/// (TELEMETRY_RATE, SessionInfo flags3 bits 2 to 4), against the fake console.
 /// </summary>
 [Collection(SettingsPanelStatics.Name)]
 public class SettingsPageTests
@@ -28,8 +29,8 @@ public class SettingsPageTests
     private static readonly SessionInfo OlderModule = Capable with { Flags3 = SessionFlags3.RunWarnings };
 
     private static SettingsContext Context(SessionInfo session, bool connected, InputRateMemory? memory = null,
-        bool standalone = false) =>
-        new(session, connected, memory ?? new InputRateMemory(), standalone);
+        bool standalone = false, bool debug = false) =>
+        new(session, connected, memory ?? new InputRateMemory(), standalone, debug);
 
     // ---------------------------------------------------------------- the nav
 
@@ -134,7 +135,7 @@ public class SettingsPageTests
     /// <summary>
     /// The client's own settings are on their tabs with or without a console, in the second round's
     /// order: RaCMAN's General has the theme alone, Save files sits between Updates and Files, and
-    /// Advanced has what was General's debug information and game layout, and the qwark.sprx path.
+    /// Advanced has what was General's debug information and game layout. The import is hidden.
     /// </summary>
     [Theory]
     [InlineData(true)]
@@ -151,25 +152,56 @@ public class SettingsPageTests
                 SettingRow.Version, SettingRow.CheckForUpdates,
                 SettingRow.MirrorSaves, SettingRow.SortSaveFiles,
                 SettingRow.Folders,
-                SettingRow.ImportFromRaCMAN,
             },
             racman);
-        Assert.Equal(new[] { "General", "Updates", "Save files", "Files", "Import" },
-            racman.Select(SettingsLayout.Group).Distinct());
+        Assert.Equal(new[] { "General", "Updates", "Save files", "Files" }, racman.Select(SettingsLayout.Group).Distinct());
         Assert.Equal(new[] { SettingRow.Rpcs3Port, SettingRow.LiveSplit }, SettingsLayout.Rows(SettingsTab.Ipc, context));
-        Assert.Equal(new[] { SettingRow.DebugInformation, SettingRow.GameLayout, SettingRow.SprxPath },
-            SettingsLayout.Rows(SettingsTab.Advanced, context));
     }
 
     /// <summary>
-    /// Every row on exactly one tab, the tab it says it is on, and every row the page knows on some
-    /// tab against a standalone console that has it all.
+    /// The qwark.sprx path is debug information's: on the Advanced tab, last, only while it is on.
+    /// The setting itself is the same either way (an empty path is detection, below).
+    /// </summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void TheSprxPathIsOnTheAdvancedTabOnlyWithDebugInformation(bool connected)
+    {
+        Assert.Equal(new[] { SettingRow.DebugInformation, SettingRow.GameLayout },
+            SettingsLayout.Rows(SettingsTab.Advanced, Context(Capable, connected)));
+        Assert.Equal(new[] { SettingRow.DebugInformation, SettingRow.GameLayout, SettingRow.SprxPath },
+            SettingsLayout.Rows(SettingsTab.Advanced, Context(Capable, connected, debug: true)));
+    }
+
+    /// <summary>
+    /// Import from RaCMAN is on no tab, whatever the session, the mode or debug information say, and
+    /// it is the only row the page knows that is hidden.
+    /// </summary>
+    [Fact]
+    public void ImportFromRaCMANIsOnNoTab()
+    {
+        foreach (bool connected in new[] { true, false })
+        foreach (bool flag in new[] { true, false })
+        {
+            var context = Context(Capable, connected, standalone: flag, debug: flag);
+            foreach (var tab in SettingsNav.Tabs)
+            {
+                Assert.DoesNotContain(SettingRow.ImportFromRaCMAN, SettingsLayout.Rows(tab, context));
+            }
+        }
+
+        Assert.Equal(new[] { SettingRow.ImportFromRaCMAN }, Enum.GetValues<SettingRow>().Where(SettingsLayout.Hidden));
+    }
+
+    /// <summary>
+    /// Every row on exactly one tab, the tab it says it is on, and every row the page knows but the
+    /// hidden ones on some tab against a standalone console that has it all, with debug information on.
     /// </summary>
     [Fact]
     public void EveryRowIsOnExactlyOneTabAndEachIsOnTheTabItSaysItIsOn()
     {
         var memory = new InputRateMemory();
-        var context = Context(Capable, true, memory, standalone: true);
+        var context = Context(Capable, true, memory, standalone: true, debug: true);
         var seen = new HashSet<SettingRow>();
 
         foreach (var tab in SettingsNav.Tabs)
@@ -181,11 +213,15 @@ public class SettingsPageTests
             }
         }
 
-        Assert.Empty(Enum.GetValues<SettingRow>().Where(row => !seen.Contains(row)));
+        Assert.Empty(Enum.GetValues<SettingRow>().Where(row => !seen.Contains(row) && !SettingsLayout.Hidden(row)));
         Assert.Equal(new[] { SettingsTab.RaCMAN, SettingsTab.Ipc, SettingsTab.Console, SettingsTab.Advanced }, SettingsNav.Tabs);
     }
 
-    /// <summary>The Console tab is qwark's settings first, then the connection's, each a group of its own.</summary>
+    /// <summary>
+    /// The Console tab is qwark's settings first, Per-user settings at their top, then the
+    /// connection's, each a group of its own: the Input display rate, which is the console's for
+    /// every user, is in Connection, right above Table refresh.
+    /// </summary>
     [Fact]
     public void TheConsoleTabIsQwarksSettingsFirstThenTheConnection()
     {
@@ -193,17 +229,25 @@ public class SettingsPageTests
         Assert.Equal(
             new[]
             {
-                SettingRow.InGameMenus, SettingRow.CheatWarnings, SettingRow.BootApply, SettingRow.PerUserSettings,
-                SettingRow.InputDisplayRate,
-                SettingRow.ConnectionMode, SettingRow.Installation, SettingRow.TableRefresh,
+                SettingRow.PerUserSettings, SettingRow.InGameMenus, SettingRow.CheatWarnings, SettingRow.RebootApply,
+                SettingRow.ConnectionMode, SettingRow.Installation, SettingRow.InputDisplayRate, SettingRow.TableRefresh,
             },
             rows);
 
         var groups = rows.Select(SettingsLayout.Group).ToArray();
-        int lastQwark = Array.LastIndexOf(groups, SettingsLayout.QwarkGroup);
-        int firstConnection = Array.IndexOf(groups, SettingsLayout.ConnectionGroup);
-        Assert.True(lastQwark >= 0 && firstConnection > lastQwark, string.Join(", ", groups));
-        Assert.Equal(new[] { SettingsLayout.QwarkGroup, SettingsLayout.ConnectionGroup }, groups.Distinct());
+        Assert.Equal(
+            new[]
+            {
+                SettingsLayout.QwarkGroup, SettingsLayout.QwarkGroup, SettingsLayout.QwarkGroup, SettingsLayout.QwarkGroup,
+                SettingsLayout.ConnectionGroup, SettingsLayout.ConnectionGroup, SettingsLayout.ConnectionGroup,
+                SettingsLayout.ConnectionGroup,
+            },
+            groups);
+
+        // Without Standalone the rate still sits right above Table refresh.
+        var webman = SettingsLayout.Rows(SettingsTab.Console, Context(Capable, true)).ToList();
+        Assert.Equal(webman.IndexOf(SettingRow.TableRefresh) - 1, webman.IndexOf(SettingRow.InputDisplayRate));
+        Assert.Equal(webman.IndexOf(SettingRow.ConnectionMode) + 1, webman.IndexOf(SettingRow.InputDisplayRate));
     }
 
     [Fact]
@@ -215,15 +259,17 @@ public class SettingsPageTests
         // A game with no console menu has no In-game menus row; RPCS3 has no users.
         var noMenu = SettingsLayout.Rows(SettingsTab.Console, Context(Capable with { Flags2 = SessionFlags2.NoMenu }, true));
         Assert.DoesNotContain(SettingRow.InGameMenus, noMenu);
-        Assert.Contains(SettingRow.PerUserSettings, noMenu);
+        Assert.Equal(SettingRow.PerUserSettings, noMenu[0]);
         var rpcs3 = Capable with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
-        Assert.DoesNotContain(SettingRow.PerUserSettings, SettingsLayout.Rows(SettingsTab.Console, Context(rpcs3, true)));
+        var rpcs3Rows = SettingsLayout.Rows(SettingsTab.Console, Context(rpcs3, true));
+        Assert.DoesNotContain(SettingRow.PerUserSettings, rpcs3Rows);
+        Assert.Equal(SettingRow.InGameMenus, rpcs3Rows[0]);
 
         // A module before revision 1.33: Cheat warnings without its third value, no Apply toggles
-        // on game boot; before 1.30 no Cheat warnings at all.
+        // on game reboot; before 1.30 no Cheat warnings at all.
         var older = SettingsLayout.Rows(SettingsTab.Console, Context(OlderModule, true));
         Assert.Contains(SettingRow.CheatWarnings, older);
-        Assert.DoesNotContain(SettingRow.BootApply, older);
+        Assert.DoesNotContain(SettingRow.RebootApply, older);
         Assert.DoesNotContain(SettingRow.CheatWarnings,
             SettingsLayout.Rows(SettingsTab.Console, Context(Capable with { Flags3 = SessionFlags3.None }, true)));
     }
@@ -242,27 +288,6 @@ public class SettingsPageTests
         {
             Assert.DoesNotContain(SettingRow.Installation, SettingsLayout.Rows(tab, Context(Capable, connected, standalone: false)));
         }
-    }
-
-    // ---------------------------------------------------------------- the Console tab's heading
-
-    [Fact]
-    public void TheHeadingIsTheUsersWordsAndThePerUserNoteSaysWhichRowsAreWhose()
-    {
-        Assert.Equal("Editing console settings. These are saved persistently on your console and apply whenever qwark is loaded.",
-            QwarkSettings.ConsoleHeading);
-
-        var user1 = new ProfileInfo(ProfileFlags.Supported, ProfileKind.User, 0, 1, "user-00000001", string.Empty);
-        Assert.Null(QwarkSettings.PerUserNote(Capable, user1));
-
-        var on = Capable with { ProfileFlags = ProfileFlags.Supported | ProfileFlags.On | ProfileFlags.Active };
-        string note = QwarkSettings.PerUserNote(on, user1)!;
-        Assert.Contains("user 1", note, StringComparison.Ordinal);
-        Assert.Contains("Cheat warnings", note, StringComparison.Ordinal);
-        Assert.Contains("shared", note, StringComparison.Ordinal);
-
-        var waiting = Capable with { ProfileFlags = ProfileFlags.Supported | ProfileFlags.On };
-        Assert.Contains("once one signs in", QwarkSettings.PerUserNote(waiting, user1), StringComparison.Ordinal);
     }
 
     // ---------------------------------------------------------------- IPC's resets
@@ -503,26 +528,26 @@ public class SettingsPageTests
         Assert.Contains(Opcode.FileRead, server.RequestLog());
     }
 
-    // ---------------------------------------------------------------- Apply toggles on game boot (1.33)
+    // ---------------------------------------------------------------- Apply toggles on game reboot (1.33)
 
     [Fact]
-    public async Task BootApplyIsReadOnConnectingAndAPickSendsIt()
+    public async Task RebootApplyIsReadOnConnectingAndAPickSendsIt()
     {
         using var server = StartServer();
-        server.BootApply = BootApplyMode.Never;
+        server.RebootApply = RebootApplyMode.Never;
         using var state = await ConnectedStateAsync(server);
 
-        Assert.True(await PumpAsync(state, () => state.BootApply is not null));
-        Assert.Equal(BootApplyMode.Never, state.BootApply);
+        Assert.True(await PumpAsync(state, () => state.RebootApply is not null));
+        Assert.Equal(RebootApplyMode.Never, state.RebootApply);
 
-        Assert.True(state.SetBootApply(BootApplyMode.Ask));
-        Assert.True(await PumpAsync(state, () => state.BootApply == BootApplyMode.Ask));
-        Assert.Equal(BootApplyMode.Ask, server.BootApply);
+        Assert.True(state.SetRebootApply(RebootApplyMode.Always));
+        Assert.True(await PumpAsync(state, () => state.RebootApply == RebootApplyMode.Always));
+        Assert.Equal(RebootApplyMode.Always, server.RebootApply);
         Assert.Empty(state.Toasts.Where(t => t.Kind == ToastKind.Error));
     }
 
     [Fact]
-    public async Task AnOlderModuleIsNeverAskedForBootApply()
+    public async Task AnOlderModuleIsNeverAskedForRebootApply()
     {
         using var server = StartServer();
         server.ReportsSettings133 = false;
@@ -530,54 +555,100 @@ public class SettingsPageTests
         Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0));
         await PumpForAsync(state, 200);
 
-        Assert.Null(state.BootApply);
-        Assert.False(state.SetBootApply(BootApplyMode.Never));
+        Assert.Null(state.RebootApply);
+        Assert.False(state.SetRebootApply(RebootApplyMode.Never));
         await PumpForAsync(state, 100);
-        Assert.Equal(0, Count(server, Opcode.BootApply));
+        Assert.Equal(0, Count(server, Opcode.RebootApply));
+    }
+
+    /// <summary>Infinite ammo, RaC1's feature 1: a toggle on by hand, not flagged on boot.</summary>
+    private const ulong ByHand = 1UL << 1;
+
+    /// <summary>Ghost Ratchet, RaC1's feature 3, flagged on boot: it comes back at every boot in every mode.</summary>
+    private const ulong OnBoot = 1UL << 3;
+
+    /// <summary>
+    /// A same-game reboot with this client connected, under each mode of Apply toggles on game
+    /// reboot. Ask is the previous-session prompt: it goes up with the toggle that was on listed and
+    /// nothing re-applied. Always puts the toggle back with no prompt and no PREVIOUS_LIST; Never
+    /// neither prompts nor puts it back. The on-boot toggle is back in all three.
+    /// </summary>
+    [Theory]
+    [InlineData(RebootApplyMode.Ask)]
+    [InlineData(RebootApplyMode.Always)]
+    [InlineData(RebootApplyMode.Never)]
+    public async Task ARebootAsksOnlyUnderAskAndPutsTheToggleBackOnlyUnderAlways(RebootApplyMode mode)
+    {
+        using var server = StartServer();
+        server.RebootApply = mode;
+        server.Session = server.Session with { ToggleState = ByHand | OnBoot, ToggleAuto = OnBoot };
+        using var state = await ConnectedStateAsync(server);
+        Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0 && state.Describe.Features.Any()));
+        uint generation = state.Session.Generation;
+
+        server.RebootSameGame();
+        Assert.True(await PumpAsync(state, () => state.Session.Generation != generation));
+
+        if (mode == RebootApplyMode.Ask)
+        {
+            Assert.True(await PumpAsync(state, () => state.PreviousModalRequested));
+            Assert.Equal(ByHand, state.Previous!.Toggles);
+            Assert.Equal(OnBoot, state.Session.ToggleState);
+            return;
+        }
+
+        await PumpForAsync(state, 300);
+        Assert.False(state.PreviousModalRequested);
+        Assert.False(state.Session.PreviousPending);
+        Assert.Equal(0, Count(server, Opcode.PreviousList));
+        Assert.Equal(mode == RebootApplyMode.Always ? ByHand | OnBoot : OnBoot, state.Session.ToggleState);
     }
 
     /// <summary>
-    /// A boot under Ask with this client connected: the question goes up once, lists the on-boot
-    /// toggles, and the answer is one BOOT_ASK; the console's bit going down takes the question away.
+    /// A fresh attach never prompts, in any mode: a reboot while no client was connected leaves
+    /// nothing for one that connects afterwards to be asked about (Ask with no client is Never), and
+    /// Always has already put the toggle back.
     /// </summary>
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ABootsQuestionIsAskedOnceAndAnsweredWithOneRequest(bool apply)
+    [InlineData(RebootApplyMode.Ask)]
+    [InlineData(RebootApplyMode.Always)]
+    [InlineData(RebootApplyMode.Never)]
+    public async Task AClientThatConnectsAfterTheRebootIsNeverAsked(RebootApplyMode mode)
     {
         using var server = StartServer();
+        server.RebootApply = mode;
+        server.Session = server.Session with { ToggleState = ByHand | OnBoot, ToggleAuto = OnBoot };
+        server.RebootSameGame();
+
         using var state = await ConnectedStateAsync(server);
-        Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0));
-        Assert.False(state.BootAskRequested);
+        Assert.True(await PumpAsync(state, () => state.Session.QwarkVersion != 0 && state.Describe.Features.Any()));
+        await PumpForAsync(state, 300);
 
-        var ghost = state.Session.Game == GameId.None ? 0 : 3;
-        server.Session = server.Session with { ToggleAuto = 1UL << ghost };
-        server.BootAskPending = true;
-        Assert.True(await PumpAsync(state, () => state.BootAskRequested));
-        Assert.Single(BootAskModal.Items(state).Toggles);
-
-        state.AnswerBootAsk(apply);
-        Assert.False(state.BootAskRequested);
-        Assert.True(await PumpAsync(state, () => !state.Session.BootAskPending));
-        Assert.Equal(new[] { apply }, server.BootAskAnswers);
-        Assert.Equal(apply, (state.Session.ToggleState & (1UL << ghost)) != 0);
-
-        // Nothing asks again for the same boot.
-        await PumpForAsync(state, 200);
-        Assert.False(state.BootAskRequested);
+        Assert.False(state.PreviousModalRequested);
+        Assert.Equal(0, Count(server, Opcode.PreviousList));
+        Assert.Equal(mode == RebootApplyMode.Always ? ByHand | OnBoot : OnBoot, state.Session.ToggleState);
     }
 
+    /// <summary>
+    /// The prompt is still there for a client that drops and comes back while the reboot's record
+    /// waits (a reconnect is inside the same session): the console kept it because a client was
+    /// connected at the reboot.
+    /// </summary>
     [Fact]
-    public async Task AQuestionAnsweredElsewhereGoesAway()
+    public async Task AReconnectAfterAnAskRebootIsAskedAgain()
     {
         using var server = StartServer();
-        using var state = await ConnectedStateAsync(server);
-        server.BootAskPending = true;
-        Assert.True(await PumpAsync(state, () => state.BootAskRequested));
+        server.Session = server.Session with { ToggleState = ByHand };
+        using (var first = await ConnectedStateAsync(server))
+        {
+            Assert.True(await PumpAsync(first, () => first.Session.QwarkVersion != 0));
+            server.RebootSameGame();
+            Assert.True(await PumpAsync(first, () => first.PreviousModalRequested));
+        }
 
-        server.BootAskPending = false;
-        Assert.True(await PumpAsync(state, () => !state.BootAskRequested));
-        Assert.Empty(server.BootAskAnswers);
+        using var state = await ConnectedStateAsync(server);
+        Assert.True(await PumpAsync(state, () => state.PreviousModalRequested));
+        Assert.Equal(ByHand, state.Previous!.Toggles);
     }
 
     // ---------------------------------------------------------------- the rate on the wire

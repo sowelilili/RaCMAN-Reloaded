@@ -906,8 +906,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                         | (_runWarnings == RunWarningMode.Off ? SessionFlags3.RunWarningsOff : SessionFlags3.None)
                         | (_runWarnings == RunWarningMode.CheatsOnly ? SessionFlags3.RunWarningsCheats : SessionFlags3.None))
                      | (_reportsTelemetryRate ? SessionInfo.TelemetryRateBits(_telemetryHz) : SessionFlags3.None)
-                     | (_reportsSettings133 ? SessionFlags3.Settings133 : SessionFlags3.None)
-                     | (_reportsSettings133 && _bootAskPending ? SessionFlags3.BootAsk : SessionFlags3.None),
+                     | (_reportsSettings133 ? SessionFlags3.Settings133 : SessionFlags3.None),
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };
@@ -1576,8 +1575,8 @@ public sealed partial class FakeQwarkServer : IDisposable
 
     /// <summary>
     /// Revision 1.33: whether this fake has the revision's settings (SessionInfo flags3 bit5): RUN_WARN
-    /// takes 2, and BOOT_APPLY and BOOT_ASK are answered. On by default; off is a module before it,
-    /// which answers RUN_WARN 2 BAD_ARG and the two ops UNKNOWN_OP.
+    /// takes 2, and REBOOT_APPLY is answered. On by default; off is a module before it, which answers
+    /// RUN_WARN 2 BAD_ARG and REBOOT_APPLY UNKNOWN_OP.
     /// </summary>
     public bool ReportsSettings133
     {
@@ -1587,34 +1586,52 @@ public sealed partial class FakeQwarkServer : IDisposable
 
     private bool _reportsSettings133 = true;
 
-    /// <summary>The console's <c>boot.apply</c> (BOOT_APPLY): Always by default, as a fresh config is.</summary>
-    public BootApplyMode BootApply
+    /// <summary>The console's <c>reboot.apply</c> (REBOOT_APPLY): Ask by default, as a fresh config is.</summary>
+    public RebootApplyMode RebootApply
     {
-        get { lock (_gate) return _bootApply; }
-        set { lock (_gate) _bootApply = value; }
+        get { lock (_gate) return _rebootApply; }
+        set { lock (_gate) _rebootApply = value; }
     }
 
-    private BootApplyMode _bootApply = BootApplyMode.Always;
+    private RebootApplyMode _rebootApply = RebootApplyMode.Ask;
+
+    /// <summary>The toggles of the previous-session record (PREVIOUS_LIST); the fake keeps no mods, freezes or patches in it.</summary>
+    private ulong _previousToggles;
 
     /// <summary>
-    /// A boot's question under Ask (flags3 bit7): set by a test to stage the boot, cleared by a
-    /// BOOT_ASK. An answer of 1 turns on every toggle flagged on boot, as the module applies them.
+    /// A same-game reboot as qwark has it (PROTOCOL.md 4.1 and 5.10.4): the generation moves, the
+    /// toggles flagged on boot come back on, and every other toggle that was on goes into the
+    /// previous-session record, which <see cref="RebootApply"/> decides: Always turns them back on
+    /// here, Never drops them, and Ask leaves them pending (flags bit0) while a client is
+    /// connected and drops them while none is.
     /// </summary>
-    public bool BootAskPending
+    public void RebootSameGame()
     {
-        get { lock (_gate) return _bootAskPending; }
-        set { lock (_gate) _bootAskPending = value; }
+        lock (_gate)
+        {
+            var session = _session;
+            ulong previous = session.ToggleState & ~session.ToggleAuto;
+            ulong on = session.ToggleAuto;
+
+            if (_rebootApply == RebootApplyMode.Always) on |= previous;
+            if (_rebootApply != RebootApplyMode.Ask || _clients.IsEmpty) previous = 0;
+            _previousToggles = previous;
+
+            Session = session with
+            {
+                Generation = session.Generation + 1,
+                ToggleState = on,
+                Flags = previous != 0 ? session.Flags | SessionFlags.PreviousPending : session.Flags & ~SessionFlags.PreviousPending,
+            };
+        }
     }
 
-    private bool _bootAskPending;
-
-    /// <summary>The BOOT_ASK answers this fake took, in order: true for apply.</summary>
-    public IReadOnlyList<bool> BootAskAnswers
+    /// <summary>The previous-session record is answered or gone: the pending flag goes with it.</summary>
+    private void ClearPrevious()
     {
-        get { lock (_gate) return _bootAskAnswers.ToArray(); }
+        _previousToggles = 0;
+        _session = _session with { Flags = _session.Flags & ~SessionFlags.PreviousPending };
     }
-
-    private readonly List<bool> _bootAskAnswers = new();
 
     /// <summary>
     /// Revision 1.32: whether this fake has the telemetry rate (SessionInfo flags3 bit2, TELEMETRY_RATE
@@ -3226,27 +3243,39 @@ public sealed partial class FakeQwarkServer : IDisposable
                     return (Status.Ok, null);
                 }
 
-                case Opcode.BootApply:
+                case Opcode.RebootApply:
                 {
-                    // Revision 1.33: `u8 mode` writes boot.apply; no byte reads it back.
+                    // Revision 1.33: `u8 mode` writes reboot.apply; no byte reads it back.
                     if (!_reportsSettings133) return (Status.UnknownOp, null);
-                    if (payload.Length == 0) return (Status.Ok, new[] { (byte)_bootApply });
+                    if (payload.Length == 0) return (Status.Ok, new[] { (byte)_rebootApply });
                     if (payload[0] > 2) return (Status.BadArg, null);
-                    _bootApply = (BootApplyMode)payload[0];
+                    _rebootApply = (RebootApplyMode)payload[0];
                     return (Status.Ok, null);
                 }
 
-                case Opcode.BootAsk:
+                case Opcode.PreviousList:
                 {
-                    // Revision 1.33: the answer to a boot's question; NOT_FOUND with none waiting.
-                    if (!_reportsSettings133) return (Status.UnknownOp, null);
-                    if (payload.Length < 1 || payload[0] > 1) return (Status.BadArg, null);
-                    if (!_bootAskPending) return (Status.NotFound, null);
-                    _bootAskPending = false;
-                    _bootAskAnswers.Add(payload[0] == 1);
-                    if (payload[0] == 1) _session = _session with { ToggleState = _session.ToggleState | _session.ToggleAuto };
+                    // Section 4.1: the record's toggles, and no mods, freezes or patches in this fake.
+                    var reply = new byte[8 + 4 + 1 + 1];
+                    System.Buffers.Binary.BinaryPrimitives.WriteUInt64BigEndian(reply, _previousToggles);
+                    return (Status.Ok, reply);
+                }
+
+                case Opcode.PreviousReapply:
+                {
+                    if (payload.Length < 1) return (Status.BadArg, null);
+                    if ((payload[0] & (byte)PreviousCategories.Toggles) != 0)
+                    {
+                        _session = _session with { ToggleState = _session.ToggleState | _previousToggles };
+                    }
+
+                    ClearPrevious();
                     return (Status.Ok, null);
                 }
+
+                case Opcode.PreviousDismiss:
+                    ClearPrevious();
+                    return (Status.Ok, null);
 
                 case Opcode.TelemetryRate:
                 {

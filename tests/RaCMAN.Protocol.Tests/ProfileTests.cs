@@ -719,26 +719,27 @@ public class ProfileTests
             SettingsLayout.Rows(SettingsTab.Console, connected with { Session = rpcs3 }));
     }
 
+    /// <summary>
+    /// Whose settings the Console tab's Qwark table holds is its heading's: "Qwark (User 1)" while
+    /// per-user settings are on and someone is signed in, a name if the console sends one, and plain
+    /// "Qwark" with the switch off, with nobody signed in yet, or before PROFILE_INFO has said who.
+    /// </summary>
     [Fact]
-    public void TheStatusLineSaysWhoseSettingsAreBeingEdited()
+    public void TheQwarkTablesHeadingNamesTheSignedInUserOnlyWhilePerUserSettingsAreOn()
     {
-        Assert.Equal("Editing your console's shared settings", QwarkSettings.ProfileStatus(ConsoleSession, User1));
-        Assert.Equal("Per-user settings are on; waiting for a user to sign in",
-            QwarkSettings.ProfileStatus(With(ProfileFlags.On), ProfileInfo.None));
-
         var active = With(ProfileFlags.On | ProfileFlags.Active);
-        Assert.Equal("Editing settings for User 1", QwarkSettings.ProfileStatus(active, User1));
-        Assert.Equal("Editing settings for User 2", QwarkSettings.ProfileStatus(active, User1 with { UserId = 2 }));
-        Assert.Equal("Editing the signed-in user's settings", QwarkSettings.ProfileStatus(active, ProfileInfo.None));
-
-        Assert.Equal("User 1", CombosPanel.UserName(User1));
-        Assert.Equal("User 1's", CombosPanel.PossessiveName(User1));
-        Assert.Equal("this user", CombosPanel.UserName(ProfileInfo.None));
+        Assert.Equal("Qwark (User 1)", QwarkSettings.QwarkHeading(active, User1));
+        Assert.Equal("Qwark (User 2)", QwarkSettings.QwarkHeading(active, User1 with { UserId = 2 }));
 
         // A name comes only with named profiles, a later revision.
-        var named = User1 with { Name = "Alex" };
-        Assert.Equal("Editing settings for Alex (user 1)", QwarkSettings.ProfileStatus(active, named));
-        Assert.Equal("Alex", CombosPanel.UserName(named));
+        Assert.Equal("Qwark (Alex)", QwarkSettings.QwarkHeading(active, User1 with { Name = "Alex" }));
+
+        Assert.Equal("Qwark", QwarkSettings.QwarkHeading(ConsoleSession, User1));
+        Assert.Equal("Qwark", QwarkSettings.QwarkHeading(With(ProfileFlags.On), User1));
+        Assert.Equal("Qwark", QwarkSettings.QwarkHeading(active, ProfileInfo.None));
+
+        Assert.Equal("User 1's", CombosPanel.PossessiveName(User1));
+        Assert.Equal("this user", CombosPanel.UserName(ProfileInfo.None));
     }
 
     [Fact]

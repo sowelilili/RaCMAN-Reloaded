@@ -289,7 +289,7 @@ public static class ConnectionPanel
     /// <summary>What the Installation row says beside its buttons, and where the file it sends is.</summary>
     public static void DrawBootInstallNotes(string sprx)
     {
-        Ui.Hint($"adds qwark.sprx to {WebManLoader.BootPluginsPath} so it loads on console boot; needs webMAN to install");
+        Ui.Hint($"installs qwark.sprx to {WebManLoader.BootPluginsPath} so it loads on console boot");
 
         if (File.Exists(sprx)) DrawUiPakBeside(sprx);
         else Ui.Warning($"{sprx} (not found; the release puts qwark.sprx beside this client)");

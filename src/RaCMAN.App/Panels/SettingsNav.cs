@@ -5,7 +5,7 @@ namespace RaCMAN.App.Panels;
 /// <summary>The Settings page's own side tabs, in the order the nav lists them.</summary>
 public enum SettingsTab
 {
-    /// <summary>This client: theme, updates, save files, its files, the old RaCMAN's import.</summary>
+    /// <summary>This client: theme, updates, save files, its files (the old RaCMAN's import is hidden for now).</summary>
     RaCMAN,
 
     /// <summary>The two servers on this PC the client talks to: RPCS3's IPC server and LiveSplit's.</summary>
@@ -17,7 +17,7 @@ public enum SettingsTab
     /// </summary>
     Console,
 
-    /// <summary>What most users never touch: debug information, the game layout, the qwark.sprx path.</summary>
+    /// <summary>What most users never touch: debug information, the game layout, and with debug information on the qwark.sprx path.</summary>
     Advanced,
 }
 
@@ -39,7 +39,7 @@ public enum SettingRow
     LiveSplit,
     InGameMenus,
     CheatWarnings,
-    BootApply,
+    RebootApply,
     PerUserSettings,
     InputDisplayRate,
     ConnectionMode,
@@ -149,19 +149,34 @@ public sealed class SettingsNav
 
 /// <summary>
 /// What a tab's rows depend on: the session, whether it is live, what the client remembers of it,
-/// and whether the console is set up as standalone (the Installation row is that mode's).
+/// whether the console is set up as standalone (the Installation row is that mode's), and whether
+/// debug information is on (the qwark.sprx path is shown only then).
 /// </summary>
 public readonly record struct SettingsContext(
-    SessionInfo Session, bool Connected, InputRateMemory InputRate, bool Standalone = false);
+    SessionInfo Session, bool Connected, InputRateMemory InputRate, bool Standalone = false, bool Debug = false);
 
 /// <summary>Which rows each tab of the Settings page has, and what each is called.</summary>
 public static class SettingsLayout
 {
-    /// <summary>The Console tab's first group: the settings qwark keeps on the console.</summary>
+    /// <summary>
+    /// The Console tab's first group: the settings qwark keeps on the console. Its heading names the
+    /// signed-in user while per-user settings are on (<see cref="QwarkSettings.QwarkHeading"/>).
+    /// </summary>
     public const string QwarkGroup = "Qwark";
 
-    /// <summary>The Console tab's second group: how this client reaches the console.</summary>
+    /// <summary>
+    /// The Console tab's second group: how this client reaches the console and how often it hears
+    /// from it, the console-wide Input display rate among them, which no user has their own of.
+    /// </summary>
     public const string ConnectionGroup = "Connection";
+
+    /// <summary>
+    /// Rows the page knows and draws on no tab for now. Import from RaCMAN waits for a rework: its
+    /// Import button is drawn only once the box names an old config.txt that holds something, so the
+    /// row showed a box and Browse and nothing to press, and since the Settings tabs the line that
+    /// said what to put in the box is only a tooltip. Its code stays.
+    /// </summary>
+    public static bool Hidden(SettingRow row) => row == SettingRow.ImportFromRaCMAN;
 
     /// <summary>The rows of a tab, in the order they are drawn. The page draws exactly these.</summary>
     public static IReadOnlyList<SettingRow> Rows(SettingsTab tab, SettingsContext context)
@@ -176,7 +191,6 @@ public static class SettingsLayout
                     SettingRow.Version, SettingRow.CheckForUpdates,
                     SettingRow.MirrorSaves, SettingRow.SortSaveFiles,
                     SettingRow.Folders,
-                    SettingRow.ImportFromRaCMAN,
                 });
                 break;
 
@@ -186,30 +200,34 @@ public static class SettingsLayout
                 break;
 
             case SettingsTab.Console:
-                // qwark's settings first. They are read from the session and written by ops, so
-                // without a console there is nothing to show and nothing to send; the rate row
-                // alone stays, greyed at the last rate seen (InputRateMemory).
+                // qwark's settings first, Per-user settings at the top since it decides whose the
+                // rest are. They are read from the session and written by ops, so without a
+                // console there is nothing to show and nothing to send.
                 if (context.Connected)
                 {
+                    if (QwarkSettings.ShowsPerUserSettings(context.Session)) rows.Add(SettingRow.PerUserSettings);
                     if (QwarkSettings.ShowsInGameMenus(context.Session)) rows.Add(SettingRow.InGameMenus);
                     if (QwarkSettings.ShowsCheatWarnings(context.Session)) rows.Add(SettingRow.CheatWarnings);
-                    if (QwarkSettings.ShowsBootApply(context.Session)) rows.Add(SettingRow.BootApply);
-                    if (QwarkSettings.ShowsPerUserSettings(context.Session)) rows.Add(SettingRow.PerUserSettings);
+                    if (QwarkSettings.ShowsRebootApply(context.Session)) rows.Add(SettingRow.RebootApply);
                 }
 
-                if (context.InputRate.Shows(context.Session, context.Connected)) rows.Add(SettingRow.InputDisplayRate);
-
                 // Then the connection: the boot plugin install is the standalone mode's setup step,
-                // so it sits under the mode while that mode is picked.
+                // so it sits under the mode while that mode is picked. The input display rate is
+                // the console's for every user and PC, so it is here rather than under Qwark, and
+                // stays without a console, greyed at the last rate seen (InputRateMemory).
                 rows.Add(SettingRow.ConnectionMode);
                 if (context.Standalone) rows.Add(SettingRow.Installation);
+                if (context.InputRate.Shows(context.Session, context.Connected)) rows.Add(SettingRow.InputDisplayRate);
                 rows.Add(SettingRow.TableRefresh);
                 break;
 
             case SettingsTab.Advanced:
                 rows.Add(SettingRow.DebugInformation);
                 rows.Add(SettingRow.GameLayout);
-                rows.Add(SettingRow.SprxPath);
+
+                // Empty is detection, which is what nearly everyone wants, so the box is debug
+                // information's; the setting is read and kept whether it shows or not.
+                if (context.Debug) rows.Add(SettingRow.SprxPath);
                 break;
         }
 
@@ -220,7 +238,7 @@ public static class SettingsLayout
     public static SettingsTab TabOf(SettingRow row) => row switch
     {
         SettingRow.Rpcs3Port or SettingRow.LiveSplit => SettingsTab.Ipc,
-        SettingRow.InGameMenus or SettingRow.CheatWarnings or SettingRow.BootApply or SettingRow.PerUserSettings
+        SettingRow.InGameMenus or SettingRow.CheatWarnings or SettingRow.RebootApply or SettingRow.PerUserSettings
             or SettingRow.InputDisplayRate or SettingRow.ConnectionMode or SettingRow.Installation
             or SettingRow.TableRefresh => SettingsTab.Console,
         SettingRow.DebugInformation or SettingRow.GameLayout or SettingRow.SprxPath => SettingsTab.Advanced,
@@ -238,9 +256,9 @@ public static class SettingsLayout
         SettingRow.MirrorSaves or SettingRow.SortSaveFiles => "Save files",
         SettingRow.Folders => "Files",
         SettingRow.ImportFromRaCMAN => "Import",
-        SettingRow.InGameMenus or SettingRow.CheatWarnings or SettingRow.BootApply or SettingRow.PerUserSettings
-            or SettingRow.InputDisplayRate => QwarkGroup,
-        SettingRow.ConnectionMode or SettingRow.Installation or SettingRow.TableRefresh => ConnectionGroup,
+        SettingRow.PerUserSettings or SettingRow.InGameMenus or SettingRow.CheatWarnings or SettingRow.RebootApply => QwarkGroup,
+        SettingRow.ConnectionMode or SettingRow.Installation or SettingRow.InputDisplayRate
+            or SettingRow.TableRefresh => ConnectionGroup,
         _ => null,
     };
 
@@ -264,7 +282,7 @@ public static class SettingsLayout
         SettingRow.InputDisplayRate => "Input display rate",
         SettingRow.InGameMenus => "In-game menus",
         SettingRow.CheatWarnings => "Cheat warnings",
-        SettingRow.BootApply => "Apply toggles on game boot",
+        SettingRow.RebootApply => "Apply toggles on game reboot",
         SettingRow.PerUserSettings => "Per-user settings",
         SettingRow.SprxPath => "qwark.sprx path",
         _ => row.ToString(),

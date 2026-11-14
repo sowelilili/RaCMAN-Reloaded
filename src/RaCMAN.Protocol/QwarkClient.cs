@@ -1608,41 +1608,31 @@ public sealed class QwarkClient : IDisposable
         }), cancellationToken);
 
     /// <summary>
-    /// BOOT_APPLY, qwark revision 1.33: writes the console's Apply toggles on game boot
-    /// (<c>boot.apply</c>, per user). Send it only while <see cref="SessionInfo.HasSettings133"/> is set.
+    /// REBOOT_APPLY, qwark revision 1.33: writes the console's Apply toggles on game reboot
+    /// (<c>reboot.apply</c>, per user). Send it only while <see cref="SessionInfo.HasSettings133"/> is set.
     /// </summary>
-    public Task BootApplyAsync(BootApplyMode mode, CancellationToken cancellationToken = default) =>
-        RequestAsync(Opcode.BootApply, Bytes(1, (scoped ref SpanWriter w) =>
+    public Task RebootApplyAsync(RebootApplyMode mode, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.RebootApply, Bytes(1, (scoped ref SpanWriter w) =>
         {
             w.WriteU8((byte)mode);
         }), cancellationToken);
 
     /// <summary>
-    /// BOOT_APPLY with no byte: the console's <c>boot.apply</c> as it reads it, which no SessionInfo
-    /// bit carries. A reply that is not one byte throws <see cref="ProtocolException"/>.
+    /// REBOOT_APPLY with no byte: the console's <c>reboot.apply</c> as it reads it, which no
+    /// SessionInfo bit carries; a number qwark does not know reads as Ask, as the console reads it.
+    /// A reply with no byte throws <see cref="ProtocolException"/>.
     /// </summary>
-    public async Task<BootApplyMode> BootApplyReadAsync(CancellationToken cancellationToken = default)
+    public async Task<RebootApplyMode> RebootApplyReadAsync(CancellationToken cancellationToken = default)
     {
-        var reply = await RequestAsync(Opcode.BootApply, null, cancellationToken).ConfigureAwait(false);
-        if (reply.Length < 1) throw new ProtocolException("BOOT_APPLY's read answered no byte");
+        var reply = await RequestAsync(Opcode.RebootApply, null, cancellationToken).ConfigureAwait(false);
+        if (reply.Length < 1) throw new ProtocolException("REBOOT_APPLY's read answered no byte");
         return reply[0] switch
         {
-            1 => BootApplyMode.Ask,
-            2 => BootApplyMode.Never,
-            _ => BootApplyMode.Always,
+            0 => RebootApplyMode.Always,
+            2 => RebootApplyMode.Never,
+            _ => RebootApplyMode.Ask,
         };
     }
-
-    /// <summary>
-    /// BOOT_ASK, qwark revision 1.33: the answer to this boot's question
-    /// (<see cref="SessionInfo.BootAskPending"/>): apply the running game's on-boot toggles and mods,
-    /// or leave them off.
-    /// </summary>
-    public Task BootAskAsync(bool apply, CancellationToken cancellationToken = default) =>
-        RequestAsync(Opcode.BootAsk, Bytes(1, (scoped ref SpanWriter w) =>
-        {
-            w.WriteU8((byte)(apply ? 1 : 0));
-        }), cancellationToken);
 
     /// <summary>
     /// TELEMETRY_RATE, qwark revision 1.32: how often the console sends telemetry, 30, 60 or 120 Hz.

@@ -131,7 +131,7 @@ public sealed record SessionInfo(
 
     /// <summary>
     /// The module has qwark revision 1.33's settings (flags3 bit5): RUN_WARN takes 2, cheats only,
-    /// and it answers BOOT_APPLY and BOOT_ASK.
+    /// and it answers REBOOT_APPLY.
     /// </summary>
     public bool HasSettings133 => (Flags3 & SessionFlags3.Settings133) != 0;
 
@@ -143,9 +143,6 @@ public sealed record SessionInfo(
         RunWarningsOff ? RunWarningMode.Off
         : RunWarningsCheatsOnly ? RunWarningMode.CheatsOnly
         : RunWarningMode.ModsAndCheats;
-
-    /// <summary>A boot's on-boot toggles and mods wait for this client's answer (flags3 bit7, revision 1.33).</summary>
-    public bool BootAskPending => (Flags3 & SessionFlags3.BootAsk) != 0;
 
     /// <summary>The module answers TELEMETRY_RATE (flags3 bit2, qwark revision 1.32).</summary>
     public bool HasTelemetryRate => (Flags3 & SessionFlags3.TelemetryRate) != 0;
@@ -282,8 +279,7 @@ public sealed record SessionInfo(
         byte profileSeq = r.ReadU8();
         var flags3 = (SessionFlags3)r.ReadU8() & (SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff
                                                   | SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask
-                                                  | SessionFlags3.Settings133 | SessionFlags3.RunWarningsCheats
-                                                  | SessionFlags3.BootAsk);
+                                                  | SessionFlags3.Settings133 | SessionFlags3.RunWarningsCheats);
         float x = r.ReadF32();
         float y = r.ReadF32();
         float z = r.ReadF32();

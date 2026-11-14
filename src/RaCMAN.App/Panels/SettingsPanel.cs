@@ -12,11 +12,14 @@ namespace RaCMAN.App.Panels;
 /// does; an obvious one has neither. Which rows a tab has is <see cref="SettingsLayout"/>'s, so the
 /// page draws exactly what the tests check.
 /// <para>
-/// RaCMAN is this client's own: theme, updates, save files, its folders and the import from the old
-/// RaCMAN. IPC is the two servers on this PC it talks to. Console is qwark's own settings, read from
-/// the session and written by ops, and then how the client reaches the console: the connection
-/// mode, the boot plugin install under Standalone, and the table refresh. Advanced is debug
-/// information, the game layout and the qwark.sprx path.
+/// RaCMAN is this client's own: theme, updates, save files and its folders (the import from the old
+/// RaCMAN is drawn by code that stays here, on no tab for now: <see cref="SettingsLayout.Hidden"/>).
+/// IPC is the two servers on this PC it talks to. Console is qwark's own settings, read from the
+/// session and written by ops, under a heading that names the signed-in user while per-user
+/// settings are on, and then how the client reaches the console: the connection mode, the boot
+/// plugin install under Standalone, the console's input display rate and the table refresh.
+/// Advanced is debug information, the game layout and, with debug information on, the qwark.sprx
+/// path.
 /// </para>
 /// </summary>
 public static class SettingsPanel
@@ -68,7 +71,7 @@ public static class SettingsPanel
 
     /// <summary>The context a tab's rows are worked out in.</summary>
     public static SettingsContext Context(AppState state) =>
-        new(state.Session, state.Connected, InputRate, state.Settings.Ps3.StandaloneConnection);
+        new(state.Session, state.Connected, InputRate, state.Settings.Ps3.StandaloneConnection, state.Settings.DebugInfo);
 
     /// <summary>The page's heading for a tab.</summary>
     public static string Title(SettingsTab tab) => $"{SettingsNav.Name(tab)} settings";
@@ -94,7 +97,6 @@ public static class SettingsPanel
             if (ConsoleTabOpened(tab, ImGui.GetFrameCount())) state.CheckBootPlugins();
 
             Ui.Hint(QwarkSettings.ConsoleHeading);
-            if (state.Connected && QwarkSettings.PerUserNote(state.Session, state.Profile) is { } note) Ui.Hint(note);
             if (!state.Connected) Ui.Hint("Connect to change the settings qwark keeps on your console.");
             ImGui.Spacing();
         }
@@ -112,7 +114,7 @@ public static class SettingsPanel
             {
                 if (tableOpen) EndList();
                 if (started) ImGui.Spacing();
-                if (rowGroup is not null) Ui.Text(Ui.Grey, rowGroup);
+                if (rowGroup is not null) Ui.Text(Ui.Grey, Heading(state, rowGroup));
 
                 tableOpen = BeginList($"settings-{tab}-{rowGroup}", labelColumn, wide: row == SettingRow.ImportFromRaCMAN);
                 group = rowGroup;
@@ -128,6 +130,14 @@ public static class SettingsPanel
 
         if (tableOpen) EndList();
     }
+
+    /// <summary>
+    /// What a group's heading says: its name, but the Qwark table's names whose settings it holds
+    /// while per-user settings are on (<see cref="QwarkSettings.QwarkHeading"/>). The table's ID
+    /// stays the group's own, so ImGui keeps its state as the heading changes.
+    /// </summary>
+    private static string Heading(AppState state, string group) =>
+        group == SettingsLayout.QwarkGroup && state.Connected ? QwarkSettings.QwarkHeading(state.Session, state.Profile) : group;
 
     // ---------------------------------------------------------------- the list
 
@@ -245,7 +255,7 @@ public static class SettingsPanel
             case SettingRow.InputDisplayRate: DrawInputDisplayRate(state); break;
             case SettingRow.InGameMenus: DrawInGameMenus(state); break;
             case SettingRow.CheatWarnings: DrawCheatWarnings(state); break;
-            case SettingRow.BootApply: DrawBootApply(state); break;
+            case SettingRow.RebootApply: DrawRebootApply(state); break;
             case SettingRow.PerUserSettings: DrawPerUserSettings(state); break;
             case SettingRow.SprxPath: DrawSprxPath(state); break;
         }
@@ -748,25 +758,26 @@ public static class SettingsPanel
     }
 
     /// <summary>
-    /// The console's Apply toggles on game boot, BOOT_APPLY of qwark revision 1.33: no SessionInfo
-    /// bit carries it, so it is drawn from the client's read (once per connection and profile), and
-    /// greyed until that read is in.
+    /// The console's Apply toggles on game reboot, REBOOT_APPLY of qwark revision 1.33: what a
+    /// same-game reboot does with the toggles and mods that were on. No SessionInfo bit carries it,
+    /// so it is drawn from the client's read (once per connection and profile), and greyed until that
+    /// read is in. The console acts on it; Ask's question is the previous-session prompt.
     /// </summary>
-    private static void DrawBootApply(AppState state)
+    private static void DrawRebootApply(AppState state)
     {
-        Label(SettingsLayout.Label(SettingRow.BootApply), QwarkSettings.BootApplyTooltip);
+        Label(SettingsLayout.Label(SettingRow.RebootApply), QwarkSettings.RebootApplyTooltip);
 
-        var choices = QwarkSettings.BootApplyChoices;
+        var choices = QwarkSettings.RebootApplyChoices;
         var labels = choices.Select(c => c.Label).ToArray();
-        var mode = state.BootApply;
+        var mode = state.RebootApply;
         int index = mode is { } known ? Math.Max(0, choices.ToList().FindIndex(c => c.Mode == known)) : 0;
 
         ImGui.BeginDisabled(mode is null);
-        if (Ui.Dropdown("##boot-apply", labels, ref index)) state.SetBootApply(choices[index].Mode);
+        if (Ui.Dropdown("##reboot-apply", labels, ref index)) state.SetRebootApply(choices[index].Mode);
         ImGui.EndDisabled();
 
-        ControlTooltip(QwarkSettings.BootApplyTooltip);
-        InlineHint(mode is { } shown ? QwarkSettings.BootApplyHint(shown) : "reading your console's setting...");
+        ControlTooltip(QwarkSettings.RebootApplyTooltip);
+        InlineHint(mode is { } shown ? QwarkSettings.RebootApplyHint(shown) : "reading your console's setting...");
     }
 
     /// <summary>
@@ -789,7 +800,7 @@ public static class SettingsPanel
 
         ImGui.EndDisabled();
         ControlTooltip(QwarkSettings.ProfilesTooltip);
-        InlineHint(QwarkSettings.ProfileStatus(session, state.Profile));
+        InlineHint(QwarkSettings.ProfileStatus(session));
     }
 
     // ---------------------------------------------------------------- Advanced

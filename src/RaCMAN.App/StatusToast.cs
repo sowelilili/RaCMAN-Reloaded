@@ -69,7 +69,7 @@ public static class StatusToast
     /// <summary>The ops that write a setting into config.txt or a user's profile.</summary>
     public static bool IsSettingsWrite(Opcode opcode) => opcode is
         Opcode.FeatureSetAuto or Opcode.ModSetAuto or Opcode.PlanetSelect or Opcode.ComboSet or
-        Opcode.ComboEnable or Opcode.ConfigSave or Opcode.MenuHelp or Opcode.RunWarn or Opcode.TelemetryRate or Opcode.BootApply or Opcode.ProfileEnable or
+        Opcode.ComboEnable or Opcode.ConfigSave or Opcode.MenuHelp or Opcode.RunWarn or Opcode.TelemetryRate or Opcode.RebootApply or Opcode.ProfileEnable or
         Opcode.ComboOverride or Opcode.ManipSelect or Opcode.ManipOptions;
 }
 

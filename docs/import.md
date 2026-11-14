@@ -1,5 +1,7 @@
 # Import from RaCMAN
 
+**Hidden for now.** The import is not on the Settings page in this version while it is reworked. What follows describes how it works when it is there.
+
 The old RaCMAN kept everything in one folder, beside `racman.exe`: `config.txt`, a `savefiles` folder and a `mods` folder. This client keeps the same three things in its own data folder. **Import from RaCMAN**, on the **RaCMAN** tab of the Settings page, brings all of them over in one press.
 
 ## What to point it at

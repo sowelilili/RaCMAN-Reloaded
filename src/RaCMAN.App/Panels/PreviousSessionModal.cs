@@ -6,7 +6,10 @@ namespace RaCMAN.App.Panels;
 
 /// <summary>
 /// The prompt section 4.1 asks for: when flags.PREVIOUS_PENDING is set, list what the last
-/// same-game session left behind and let the user re-apply categories. Default is nothing.
+/// same-game session left behind and let the user re-apply categories. Default is nothing. This is
+/// the console's Apply toggles on game reboot's Ask (qwark revision 1.33, <c>reboot.apply</c>):
+/// under Always the console re-applies the record itself and under Never drops it, so neither
+/// raises the flag, and under Ask it is raised only when a client was connected at the reboot.
 /// </summary>
 public static class PreviousSessionModal
 {

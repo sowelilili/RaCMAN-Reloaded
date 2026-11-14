@@ -4,8 +4,8 @@ namespace RaCMAN.App;
 
 /// <summary>
 /// The Settings page's Console tab's state that is not a SessionInfo bit: whether the console boots
-/// qwark (standalone mode's boot plugin list), the console's Apply toggles on game boot, which only
-/// a BOOT_APPLY read says, and a boot's question under its Ask.
+/// qwark (standalone mode's boot plugin list), and the console's Apply toggles on game reboot, which
+/// only a REBOOT_APPLY read says.
 /// </summary>
 public sealed partial class AppState
 {
@@ -55,82 +55,55 @@ public sealed partial class AppState
         return true;
     }
 
-    /// <summary>The console's <c>boot.apply</c> as last read, or null before a read (or without a console that has it).</summary>
-    public BootApplyMode? BootApply { get; private set; }
+    /// <summary>
+    /// The console's <c>reboot.apply</c> as last read, or null before a read (or without a console
+    /// that has it). The console acts on it, not this client: under Always it re-applies the previous
+    /// session itself and under Never it drops it, so neither ever raises PREVIOUS_PENDING, and the
+    /// previous-session prompt (<see cref="Panels.PreviousSessionModal"/>) is Ask's question.
+    /// </summary>
+    public RebootApplyMode? RebootApply { get; private set; }
 
     /// <summary>The connection and profile the last read was for, so a read happens once for each.</summary>
-    private (SessionInfo? Hello, byte ProfileSeq)? _bootApplyReadFor;
+    private (SessionInfo? Hello, byte ProfileSeq)? _rebootApplyReadFor;
 
     /// <summary>
-    /// Reads <c>boot.apply</c> once per connection and once per profile change (it is a per-user
+    /// Reads <c>reboot.apply</c> once per connection and once per profile change (it is a per-user
     /// key), from a module that has it (qwark revision 1.33); forgets it without a connection.
     /// </summary>
-    private void TickBootApply()
+    private void TickRebootApply()
     {
         if (!Connected)
         {
-            BootApply = null;
-            _bootApplyReadFor = null;
+            RebootApply = null;
+            _rebootApplyReadFor = null;
             return;
         }
 
         if (!Session.HasSettings133 || Session.QwarkVersion == 0) return;
 
         var key = (Hello, Session.ProfileSeq);
-        if (_bootApplyReadFor == key) return;
-        _bootApplyReadFor = key;
-        RefreshBootApply();
+        if (_rebootApplyReadFor == key) return;
+        _rebootApplyReadFor = key;
+        RefreshRebootApply();
     }
 
-    /// <summary>One BOOT_APPLY read; a background read, so its refusals say nothing.</summary>
-    public void RefreshBootApply() =>
-        Run(() => Client.BootApplyReadAsync(), mode => BootApply = mode, quiet: true);
+    /// <summary>One REBOOT_APPLY read; a background read, so its refusals say nothing.</summary>
+    public void RefreshRebootApply() =>
+        Run(() => Client.RebootApplyReadAsync(), mode => RebootApply = mode, quiet: true);
 
     /// <summary>
-    /// The dropdown's pick: one BOOT_APPLY, to a console that has it; the dropdown follows once the
+    /// The dropdown's pick: one REBOOT_APPLY, to a console that has it; the dropdown follows once the
     /// console has said OK. False when there was nothing to send.
     /// </summary>
-    public bool SetBootApply(BootApplyMode mode)
+    public bool SetRebootApply(RebootApplyMode mode)
     {
         if (!Connected || !Session.HasSettings133) return false;
 
         Run(async () =>
         {
-            await Client.BootApplyAsync(mode).ConfigureAwait(false);
+            await Client.RebootApplyAsync(mode).ConfigureAwait(false);
             return mode;
-        }, done => BootApply = done, quiet: false);
+        }, done => RebootApply = done, quiet: false);
         return true;
-    }
-
-    /// <summary>Set when a boot's question should be put to the user; the modal takes it.</summary>
-    public bool BootAskRequested { get; set; }
-
-    private bool _lastBootAsk;
-
-    /// <summary>
-    /// A boot under Ask with this client connected (flags3 bit7): the question goes up once per
-    /// boot, after the previous-session prompt if that one is up, and comes down when the console
-    /// says it has been answered (by this client or another).
-    /// </summary>
-    private void TickBootAsk()
-    {
-        bool pending = Connected && Session.BootAskPending;
-        if (pending && !_lastBootAsk && !ConsoleBusy && !UnknownGame)
-        {
-            _lastBootAsk = true;
-            BootAskRequested = true;
-        }
-        else if (!pending && _lastBootAsk)
-        {
-            _lastBootAsk = false;
-            BootAskRequested = false;
-        }
-    }
-
-    /// <summary>The user's answer: one BOOT_ASK, its refusal toasted like any request.</summary>
-    public void AnswerBootAsk(bool apply)
-    {
-        BootAskRequested = false;
-        Run(() => Client.BootAskAsync(apply), apply ? "On-boot toggles and mods applied" : null);
     }
 }

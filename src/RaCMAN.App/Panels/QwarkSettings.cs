@@ -3,11 +3,11 @@ using RaCMAN.Protocol;
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// The console's own settings, the Settings page's Console tab's first group: In-game menus
-/// (MENU_HELP), Cheat warnings (RUN_WARN), Apply toggles on game boot (BOOT_APPLY) and Per-user
-/// settings (PROFILE_ENABLE). Each is drawn from the session (Apply toggles on game boot from its
-/// own read, which no SessionInfo bit carries), so it always says what the console says, and each
-/// pick sends one request. The rules live here, apart from the drawing, so they can be tested.
+/// The console's own settings, the Settings page's Console tab's first group: Per-user settings
+/// (PROFILE_ENABLE), In-game menus (MENU_HELP), Cheat warnings (RUN_WARN) and Apply toggles on game
+/// reboot (REBOOT_APPLY). Each is drawn from the session (Apply toggles on game reboot from its own
+/// read, which no SessionInfo bit carries), so it always says what the console says, and each pick
+/// sends one request. The rules live here, apart from the drawing, so they can be tested.
 /// </summary>
 public static class QwarkSettings
 {
@@ -16,23 +16,15 @@ public static class QwarkSettings
         "Editing console settings. These are saved persistently on your console and apply whenever qwark is loaded.";
 
     /// <summary>
-    /// The line under <see cref="ConsoleHeading"/> while per-user settings are on, or null: which of
-    /// the rows are the signed-in user's and which stay the console's, so the heading's "your
-    /// console" and the Per-user row's "Editing settings for ..." do not read as two answers to one
-    /// question.
+    /// The Qwark table's heading: "Qwark", and "Qwark (User 1)" while per-user settings are on and
+    /// someone is signed in, so the table says whose settings it holds. The user is named as the
+    /// Combos panel names them (<see cref="CombosPanel.UserName"/>): a name if the console sends one,
+    /// else "User n". Plain "Qwark" until PROFILE_INFO has said who is signed in.
     /// </summary>
-    public static string? PerUserNote(SessionInfo session, ProfileInfo profile)
-    {
-        if (!session.ProfilesOn) return null;
-        const string rows = "In-game menus, Cheat warnings and Apply toggles on game boot";
-        if (!session.ProfileActive) return $"Per-user settings are on: {rows} will be kept for each user once one signs in.";
-
-        // Named as the Per-user settings row names them.
-        string who = !profile.SignedIn ? "the signed-in user"
-            : profile.Name.Length > 0 ? $"{profile.Name} (user {profile.UserId})"
-            : $"user {profile.UserId}";
-        return $"Per-user settings are on: {rows} are kept for {who}; the rest are shared by every user.";
-    }
+    public static string QwarkHeading(SessionInfo session, ProfileInfo profile) =>
+        session.ProfilesOn && session.ProfileActive && profile.SignedIn
+            ? $"{SettingsLayout.QwarkGroup} ({CombosPanel.UserName(profile)})"
+            : SettingsLayout.QwarkGroup;
     /// <summary>
     /// The first qwark build with the In-game menus switch (MENU_HELP), revision 1.23, the same
     /// build as the fast-loads combo.
@@ -130,29 +122,28 @@ public static class QwarkSettings
         return true;
     }
 
-    /// <summary>Whether the Apply toggles on game boot dropdown is drawn: flags3 bit5, qwark revision 1.33.</summary>
-    public static bool ShowsBootApply(SessionInfo session) => session.HasSettings133;
+    /// <summary>Whether the Apply toggles on game reboot dropdown is drawn: flags3 bit5, qwark revision 1.33.</summary>
+    public static bool ShowsRebootApply(SessionInfo session) => session.HasSettings133;
 
     /// <summary>The dropdown's choices, in its order.</summary>
-    public static readonly IReadOnlyList<(BootApplyMode Mode, string Label)> BootApplyChoices = new[]
+    public static readonly IReadOnlyList<(RebootApplyMode Mode, string Label)> RebootApplyChoices = new[]
     {
-        (BootApplyMode.Always, "Always"),
-        (BootApplyMode.Ask, "Ask"),
-        (BootApplyMode.Never, "Never"),
+        (RebootApplyMode.Always, "Always"),
+        (RebootApplyMode.Ask, "Ask"),
+        (RebootApplyMode.Never, "Never"),
     };
 
-    /// <summary>What the Apply toggles on game boot dropdown says when the pointer rests on it.</summary>
-    public const string BootApplyTooltip =
-        "Whether the toggles and mods you set to apply on boot are applied when a game boots. Ask asks "
-        + "in RaCMAN while it is connected, and applies nothing when it isn't. Your on-boot choices are "
-        + "kept either way.";
+    /// <summary>What the Apply toggles on game reboot dropdown says when the pointer rests on it.</summary>
+    public const string RebootApplyTooltip =
+        "Whether the toggles and mods you had on come back when your game reboots. Ask asks in RaCMAN, "
+        + "and needs RaCMAN connected at the reboot. Toggles and mods set to apply on boot always come back.";
 
-    /// <summary>What the Apply toggles on game boot dropdown says beside itself.</summary>
-    public static string BootApplyHint(BootApplyMode mode) => mode switch
+    /// <summary>What the Apply toggles on game reboot dropdown says beside itself.</summary>
+    public static string RebootApplyHint(RebootApplyMode mode) => mode switch
     {
-        BootApplyMode.Ask => "asks in RaCMAN when a game boots; nothing applied without RaCMAN connected",
-        BootApplyMode.Never => "nothing is applied when a game boots",
-        _ => "applies your on-boot toggles and mods when a game boots",
+        RebootApplyMode.Always => "re-applies your last session's toggles after a reboot",
+        RebootApplyMode.Never => "never re-applies them",
+        _ => "asks in RaCMAN after a reboot",
     };
 
     /// <summary>What the Per-user settings box says when the pointer rests on it.</summary>
@@ -169,16 +160,11 @@ public static class QwarkSettings
     public static bool ShowsPerUserSettings(SessionInfo session) => CombosPanel.ShowsProfiles(session);
 
     /// <summary>
-    /// The line beside the box: whose settings the panels are editing, from the session's bits
-    /// and the last PROFILE_INFO.
+    /// The line beside the box: what the switch does as it stands. Whose settings the table holds is
+    /// its heading's (<see cref="QwarkHeading"/>), so this names nobody.
     /// </summary>
-    public static string ProfileStatus(SessionInfo session, ProfileInfo profile)
-    {
-        if (!session.ProfilesOn) return "Editing your console's shared settings";
-        if (!session.ProfileActive) return "Per-user settings are on; waiting for a user to sign in";
-        if (!profile.SignedIn) return "Editing the signed-in user's settings";
-
-        string who = profile.Name.Length > 0 ? $"{profile.Name} (user {profile.UserId})" : $"User {profile.UserId}";
-        return $"Editing settings for {who}";
-    }
+    public static string ProfileStatus(SessionInfo session) =>
+        !session.ProfilesOn ? "shared by every user"
+        : !session.ProfileActive ? "waiting for a user to sign in"
+        : "each user keeps their own";
 }

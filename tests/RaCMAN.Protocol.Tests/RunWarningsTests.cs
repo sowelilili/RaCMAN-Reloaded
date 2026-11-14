@@ -110,16 +110,16 @@ public class RunWarningsTests
         Assert.True(info.RunWarningsOff);
         Assert.Equal(SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff, info.Flags3);
 
-        // Bits 2 to 4 are the telemetry rate's since qwark revision 1.32, and bits 5 to 7 revision
-        // 1.33's: its settings, cheats only and a boot's question.
+        // Bits 2 to 4 are the telemetry rate's since qwark revision 1.32, and bits 5 and 6 revision
+        // 1.33's: its settings and cheats only. Bit7 is reserved: a 1 there is not kept.
         bytes[31] = 0xE0;
         var high = SessionInfo.Parse(bytes);
-        Assert.Equal(SessionFlags3.Settings133 | SessionFlags3.RunWarningsCheats | SessionFlags3.BootAsk, high.Flags3);
-        Assert.True(high.HasSettings133 && high.RunWarningsCheatsOnly && high.BootAskPending);
-        Assert.Equal(0xE0, high.ToBytes()[31]);
+        Assert.Equal(SessionFlags3.Settings133 | SessionFlags3.RunWarningsCheats, high.Flags3);
+        Assert.True(high.HasSettings133 && high.RunWarningsCheatsOnly);
+        Assert.Equal(0x60, high.ToBytes()[31]);
         bytes[31] = 0xFC;
         Assert.Equal(SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask | SessionFlags3.Settings133
-                     | SessionFlags3.RunWarningsCheats | SessionFlags3.BootAsk, SessionInfo.Parse(bytes).Flags3);
+                     | SessionFlags3.RunWarningsCheats, SessionInfo.Parse(bytes).Flags3);
 
         var again = SessionInfo.Parse(info.ToBytes());
         Assert.Equal(info.Flags3, again.Flags3);

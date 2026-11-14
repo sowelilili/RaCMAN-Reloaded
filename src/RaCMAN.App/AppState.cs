@@ -1737,10 +1737,9 @@ public sealed partial class AppState : IDisposable
             PreviousModalRequested = false;
         }
 
-        // Qwark revision 1.33: the console's Apply toggles on game boot, read once per connection
-        // and profile, and a boot's question under its Ask.
-        TickBootApply();
-        TickBootAsk();
+        // Qwark revision 1.33: the console's Apply toggles on game reboot, read once per connection
+        // and profile. The console acts on it; the prompt above is its Ask.
+        TickRebootApply();
     }
 
     /// <summary>

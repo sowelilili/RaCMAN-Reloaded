@@ -105,9 +105,9 @@ The Trainer menu has a **Mods** page, after **Unlocks**, with a row for each mod
 
 ## Per-user settings
 
-Your console can keep separate settings for each user on it. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, the **In-game menus**, **Cheat warnings** and **Apply toggles on game boot** settings, and the chargeboot and HUD colours set for the boot. The mod and savefile libraries stay shared, and so does the **Input display rate**.
+Your console can keep separate settings for each user on it. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, the **In-game menus**, **Cheat warnings** and **Apply toggles on game reboot** settings, and the chargeboot and HUD colours set for the boot. The mod and savefile libraries stay shared, and so does the **Input display rate**.
 
-Turn it on with **Per-user settings** on the **Console** tab of the Settings page, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line beside the switch says whose settings you are editing.
+Turn it on with **Per-user settings** on the **Console** tab of the Settings page, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen. While per-user settings are on, the heading of the **Qwark** table names the user whose settings you are editing, for example **Qwark (User 1)**.
 
 Combos are shared by everyone, and so is the **Combos enabled** switch. To give the signed-in user their own combo for one action, press **Override** on that row and press the buttons. That row then shows in orange, and its buttons read **Override**, which captures the override again, and **Clear Override**, which removes only the override, so the shared combo comes back; press **Clear** again to clear the shared combo. Overrides are kept while per-user settings are off.
 
@@ -180,24 +180,22 @@ The **Level flags** panel lists ToD's level flags by name, grouped by planet, as
 
 Press **Settings** at the bottom of the side bar. The side bar then shows the settings' own tabs: **RaCMAN**, **IPC**, **Console** and **Advanced**. Press **< Back** at the top, or Esc, to go back to the panel you came from. Each tab is one or more tables of settings. Hover over a setting to see what it does; the grey text to its right says what its current value does.
 
-- **RaCMAN**: **General** (the theme), **Updates**, **Save files** (**Mirror saves to this PC** and **Sort save files**), **Files** (a button for each folder) and **Import from RaCMAN**.
+- **RaCMAN**: **General** (the theme), **Updates**, **Save files** (**Mirror saves to this PC** and **Sort save files**) and **Files** (a button for each folder).
 - **IPC**: the port of RPCS3's IPC server, and the address and port of LiveSplit's server. **Reset to default** under each puts back RPCS3's port 28012 or LiveSplit's 127.0.0.1:16834.
-- **Console**: first your console's own settings, kept by qwark on your console: **In-game menus**, **Cheat warnings**, **Apply toggles on game boot**, **Per-user settings** and **Input display rate**. They show while you are connected (the input display rate stays greyed out after you disconnect). Then the connection: **Connection mode**, the **Installation** row in Standalone mode (see [Connection modes](#connection-modes)), and **Table refresh** (how many seconds apart the Unlocks and Level flags tables read your console again; 0 reads only when you press **Refresh**).
-- **Advanced**: **Debug information**, **Game layout**, and **qwark.sprx path**. Leave the path empty to use the `qwark.sprx` beside RaCMAN, which is the one the release ships; the grey text says whether it was found there or whether your own file is in use.
-
-With per-user settings on, a line at the top of the Console tab says which settings are the signed-in user's: **In-game menus**, **Cheat warnings** and **Apply toggles on game boot**. The others are shared by every user.
+- **Console**: first the **Qwark** table, your console's own settings, kept by qwark on your console: **Per-user settings**, **In-game menus**, **Cheat warnings** and **Apply toggles on game reboot**. They show while you are connected. With per-user settings on, the table's heading names the signed-in user, for example **Qwark (User 1)**, and these settings are that user's. Then the **Connection** table: **Connection mode**, the **Installation** row in Standalone mode (see [Connection modes](#connection-modes)), **Input display rate** (shared by every user; it stays greyed out after you disconnect), and **Table refresh** (how many seconds apart the Unlocks and Level flags tables read your console again; 0 reads only when you press **Refresh**).
+- **Advanced**: **Debug information** and **Game layout**, and with **Debug information** on, **qwark.sprx path**. Leave the path empty to use the `qwark.sprx` beside RaCMAN, which is the one the release ships; the grey text says whether it was found there or whether your own file is in use.
 
 **Input display rate** is how often your console sends the controller, and the rest of what the panels show live, to the client: 30, 60 or 120 times a second, 60 unless you change it. A higher rate makes the input display and the OBS page smoother, and uses more network traffic. The setting is kept on your console, so it applies to every PC connected to it and stays after a restart. It shows when your console's module has it, and is greyed out while you are not connected. An older qwark sends 30 times a second and has no such setting.
 
 **Cheat warnings** chooses what your console's run-start notification warns about (see [Run warnings](#run-warnings)): **Mods and cheats**, **Cheats only** or **Off**. An older qwark offers no **Cheats only**.
 
-**Apply toggles on game boot** decides what happens to the toggles and mods you set to apply **on boot** (the **on boot** boxes, and **On boot** on the Mods page):
+**Apply toggles on game reboot** decides what happens to the toggles, mods, freezes and patches you had on when your game reboots into the same game:
 
-- **Always** (the default): they are applied every time the game boots.
-- **Ask**: the game boots with none of them applied. If RaCMAN is connected, it lists them and asks whether to apply them; **Leave off** is the default answer. If no PC is connected, nothing is applied and nothing asks later.
-- **Never**: none of them is applied when the game boots.
+- **Ask** (the default): RaCMAN lists them and asks which to put back. Nothing is selected by default. RaCMAN asks only if it was connected when the game rebooted; if it connects later, it doesn't ask.
+- **Always**: your console puts them all back by itself, even with no PC connected.
+- **Never**: they stay off and nothing asks.
 
-Your **on boot** choices are kept in every mode, so switching back to **Always** brings them back at the next boot.
+The toggles and mods you set to apply **on boot** (the **on boot** boxes, and **On boot** on the Mods page) come back at every boot whatever this says. Starting a game fresh, or after another game, never puts anything back.
 
 ## Updates
 
@@ -223,7 +221,7 @@ The **RaCMAN** tab of the Settings page has an **Open folder** button for it. To
 
 You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours replaces a shipped mod with the same folder name. To remove a mod from the PC and the console, right-click it on the Mods panel and pick **Uninstall...**.
 
-If you come from the old RaCMAN, **Import from RaCMAN** on the **RaCMAN** tab of the Settings page copies its save files and its mods into that folder as well as its settings, and it replaces nothing you already have. A few of the old default mods are left behind, and the import says which and why. See [docs/import.md](docs/import.md).
+**Import from RaCMAN**, which copied the old RaCMAN's save files, mods and settings, is hidden from the Settings page for now while it is reworked. See [docs/import.md](docs/import.md).
 
 ## Windows firewall
 
