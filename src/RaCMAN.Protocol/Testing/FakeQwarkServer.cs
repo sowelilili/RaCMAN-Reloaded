@@ -901,8 +901,9 @@ public sealed partial class FakeQwarkServer : IDisposable
                      | (DevBuild ? SessionFlags2.Dev : SessionFlags2.None)
                      | moduleBits,
                      // Revision 1.29: ToD's console menu is its own pause menu, so no NO_MENU any more.
-            Flags3 = !_reportsRunWarnings ? SessionFlags3.None
-                : SessionFlags3.RunWarnings | (_runWarnings ? SessionFlags3.None : SessionFlags3.RunWarningsOff),
+            Flags3 = (!_reportsRunWarnings ? SessionFlags3.None
+                      : SessionFlags3.RunWarnings | (_runWarnings ? SessionFlags3.None : SessionFlags3.RunWarningsOff))
+                     | (_reportsTelemetryRate ? SessionInfo.TelemetryRateBits(_telemetryHz) : SessionFlags3.None),
             ModLoaded = ModBits(ModFlags.Loaded),
             ModAuto = ModBits(ModFlags.Auto),
         };
@@ -1561,6 +1562,32 @@ public sealed partial class FakeQwarkServer : IDisposable
     }
 
     private bool _runWarnings = true;
+
+    /// <summary>
+    /// Revision 1.32: whether this fake has the telemetry rate (SessionInfo flags3 bit2, TELEMETRY_RATE
+    /// answered). On by default, as every module from the revision; off is an older module, which
+    /// sends at 30 Hz and answers TELEMETRY_RATE UNKNOWN_OP.
+    /// </summary>
+    public bool ReportsTelemetryRate
+    {
+        get { lock (_gate) return _reportsTelemetryRate; }
+        set { lock (_gate) _reportsTelemetryRate = value; }
+    }
+
+    private bool _reportsTelemetryRate = true;
+
+    /// <summary>
+    /// The console's <c>telemetry.hz</c> (TELEMETRY_RATE): 30 by default, as a fresh config is. A
+    /// TELEMETRY_RATE also sets <see cref="TelemetryInterval"/> to match, so the packets arrive at the
+    /// rate asked for, as far as this PC's timers allow.
+    /// </summary>
+    public int TelemetryHz
+    {
+        get { lock (_gate) return _telemetryHz; }
+        set { lock (_gate) _telemetryHz = value; }
+    }
+
+    private int _telemetryHz = 30;
 
     /// <summary>The console's filesystem, as far as the file ops are concerned.</summary>
     public Dictionary<string, byte[]> Files { get; } = new(StringComparer.Ordinal);
@@ -3141,6 +3168,16 @@ public sealed partial class FakeQwarkServer : IDisposable
                     if (!_reportsRunWarnings) return (Status.UnknownOp, null);
                     if (payload.Length < 1 || payload[0] > 1) return (Status.BadArg, null);
                     _runWarnings = payload[0] != 0;
+                    return (Status.Ok, null);
+                }
+
+                case Opcode.TelemetryRate:
+                {
+                    // Revision 1.32: `u8 hz`, 30, 60 or 120, console-wide, on every platform.
+                    if (!_reportsTelemetryRate) return (Status.UnknownOp, null);
+                    if (payload.Length < 1 || !SessionInfo.TelemetryRates.Contains(payload[0])) return (Status.BadArg, null);
+                    _telemetryHz = payload[0];
+                    TelemetryInterval = TimeSpan.FromMilliseconds(1000.0 / _telemetryHz);
                     return (Status.Ok, null);
                 }
 

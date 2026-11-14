@@ -94,7 +94,8 @@
     canvas.className = pad.live ? '' : 'offline';
   }
 
-  // Telemetry is 30 Hz and the screen is usually 60: one draw per frame, not one per packet.
+  // Telemetry is 30 to 120 Hz (the console's Input display rate) and the screen is usually 60:
+  // one draw per frame, not one per packet.
   function schedule() {
     if (drawing) return;
     drawing = true;

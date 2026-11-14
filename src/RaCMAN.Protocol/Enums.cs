@@ -188,6 +188,15 @@ public enum Opcode : ushort
     /// </summary>
     RunWarn = 0x0096,
 
+    /// <summary>
+    /// Revision 1.32: <c>u8 hz</c>, no reply. Writes the console's <c>telemetry.hz</c>, how often
+    /// telemetry (and with it the input display) arrives: 30 (the default), 60 or 120. Anything else
+    /// is BAD_ARG. Console-wide, for every client connected. <see cref="SessionInfo.TelemetryHz"/> is
+    /// where the setting comes back. Sent only while <see cref="SessionFlags3.TelemetryRate"/> is
+    /// set: an older module answers UNKNOWN_OP.
+    /// </summary>
+    TelemetryRate = 0x0097,
+
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
@@ -891,6 +900,18 @@ public enum SessionFlags3 : byte
 
     /// <summary>bit1 RUN_WARN_OFF: the console's <c>run.warnings</c> is 0, so a run start says nothing.</summary>
     RunWarningsOff = 1 << 1,
+
+    /// <summary>
+    /// bit2 TELEMETRY_RATE (revision 1.32): the module answers TELEMETRY_RATE. The capability bit:
+    /// the client offers the Input display rate only while it is set.
+    /// </summary>
+    TelemetryRate = 1 << 2,
+
+    /// <summary>
+    /// Bits 3-4 (revision 1.32): the telemetry rate in force, 0 30 Hz, 1 60 Hz, 2 120 Hz. A field,
+    /// not a flag; <see cref="SessionInfo.TelemetryHz"/> reads it.
+    /// </summary>
+    TelemetryRateMask = 0b11 << 3,
 }
 
 /// <summary>SessionInfo byte 29, <c>flags2</c> (revision 1.24): a pad byte, always 0, before it.</summary>

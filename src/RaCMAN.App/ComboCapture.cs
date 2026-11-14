@@ -3,10 +3,10 @@ using System.Numerics;
 namespace RaCMAN.App;
 
 /// <summary>
-/// Turns the telemetry pad mask into one combo. Telemetry is a 30 Hz sample of what is held right
-/// now, so a press of two buttons arrives as a run of masks and the fingers rarely leave the pad in
-/// the same frame; keeping the last non-zero mask therefore stored whichever button happened to be
-/// let go of last. The fullest mask of the press is the combo the user meant, so that is the one
+/// Turns the telemetry pad mask into one combo. Telemetry is a sample of what is held right now
+/// (30 to 120 Hz, the console's Input display rate, read here once a frame), so a press of two
+/// buttons arrives as a run of masks and the fingers rarely leave the pad in the same frame;
+/// keeping the last non-zero mask therefore stored whichever button happened to be let go of last. The fullest mask of the press is the combo the user meant, so that is the one
 /// kept, and it is committed when the pad returns to 0, which is when qwark re-arms a combo.
 /// </summary>
 public sealed class ComboCapture

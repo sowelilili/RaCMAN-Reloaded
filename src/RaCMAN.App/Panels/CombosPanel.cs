@@ -116,9 +116,6 @@ public static class CombosPanel
     /// </summary>
     public const byte FastLoadsComboBuild = 55;
 
-    /// <inheritdoc cref="FastLoadsComboBuild"/>
-    public const byte InGameMenusBuild = 55;
-
     /// <summary>
     /// Whether the panel draws a row for the action: the console menu's and the fast-loads one only
     /// against a module that has them, since an older one answers their COMBO_SET with BAD_ARG.
@@ -138,28 +135,6 @@ public static class CombosPanel
     public static bool ShowsRow(ComboAction action, SessionInfo session) =>
         ShowsRow(action, session.QwarkVersion)
         && !(action == ComboAction.OpenConsoleMenu && session.NoConsoleMenu);
-
-    /// <summary>
-    /// Whether the In-game menus box is drawn: only against a module that has MENU_HELP, which an
-    /// older one answers UNKNOWN_OP.
-    /// </summary>
-    public static bool ShowsInGameMenus(byte qwarkBuild) => qwarkBuild >= InGameMenusBuild;
-
-    /// <summary>
-    /// The same, for the session: not in a game with no console menu (<c>flags2</c> bit7 NO_MENU),
-    /// which has no Help row for the switch to give to the Trainer menu.
-    /// </summary>
-    public static bool ShowsInGameMenus(SessionInfo session) =>
-        ShowsInGameMenus(session.QwarkVersion) && !session.NoConsoleMenu;
-
-    /// <summary>
-    /// Whether the In-game menus box is greyed: under RPCS3 there is no console menu, and qwark
-    /// answers MENU_HELP UNSUPPORTED. Qwark revision 1.29: but Tools of Destruction's, which is the
-    /// game's own pause menu and works under RPCS3 with the Lua helper's patch, so there the box
-    /// is live.
-    /// </summary>
-    public static bool InGameMenusBlocked(SessionInfo session) =>
-        (session.IsEmulator || session.CodePatchesUnsupported) && session.Game != GameId.Tod;
 
     /// <summary>
     /// What the row says about itself when the pointer rests on it. The console menu's combo is
@@ -368,100 +343,6 @@ public static class CombosPanel
         ImGui.Spacing();
     }
 
-    /// <summary>
-    /// The console's In-game menus switch, MENU_HELP of revision 1.23: whether the Trainer menu
-    /// takes the place of Help in the game's pause menu. It sits right under the table's last row,
-    /// the console menu's combo, which is the other way into that menu, and it is the only setting
-    /// of the menu the client has. Drawn from the session flag, like the combo switch, so it always
-    /// says what the console says: a click sends the request, the next packet moves the box, and
-    /// the console swaps the row at once in play or as soon as the pause menu closes. Hidden
-    /// against a module without the op, greyed under RPCS3, which has no console menu (but in
-    /// ToD, whose pause menu is its console menu there too, qwark revision 1.29).
-    /// </summary>
-    private static void DrawInGameMenus(AppState state)
-    {
-        if (!ShowsInGameMenus(state.Session)) return;
-
-        bool blocked = InGameMenusBlocked(state.Session);
-        bool on = !state.Session.MenuHelpOff;
-
-        ImGui.BeginDisabled(blocked);
-        if (ImGui.Checkbox("In-game menus", ref on))
-        {
-            bool want = on;
-            state.Run(() => state.Client.MenuHelpAsync(want));
-        }
-
-        ImGui.EndDisabled();
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled))
-        {
-            Ui.SetTooltip(blocked
-                ? "The console menu is not available under RPCS3."
-                : "When enabled, shows the in-game Trainer menu in place of the Help menu. "
-                  + "When disabled, the Trainer menu is only accessible with its button combo.");
-        }
-
-        ImGui.SameLine();
-        Ui.Text(Ui.Grey, InGameMenusStatus(state.Session));
-    }
-
-    /// <summary>
-    /// What the In-game menus box says beside itself, from the session alone. In Tools of Destruction
-    /// the Trainer takes the pause list's Inventory row (qwark revision 1.29), elsewhere Help's.
-    /// </summary>
-    public static string InGameMenusStatus(SessionInfo session) =>
-        InGameMenusBlocked(session) ? "not under RPCS3"
-        : session.MenuHelpOff ? "the game's default pause menu"
-        : session.Game == GameId.Tod ? "Trainer replaces Inventory in the pause menu"
-        : "Trainer replaces Help in the pause menu";
-
-    /// <summary>
-    /// Whether the Run warnings box is shown at all. After build 57 (the user's call) it is not:
-    /// the console's switch, RUN_WARN and SessionInfo <c>flags3</c> stay as they are, and the box
-    /// stays here, so showing it again is this one word.
-    /// </summary>
-    public const bool RunWarningsSwitchShown = false;
-
-    /// <summary>
-    /// Whether the Run warnings box is drawn: <see cref="RunWarningsSwitchShown"/>, and SessionInfo
-    /// <c>flags3</c> bit0 (qwark revision 1.30), the module's capability bit, and not the build
-    /// number, so a test build of the same number without it shows nothing. RPCS3 has the warnings
-    /// too: they go to qwark-rpcs3's log there.
-    /// </summary>
-    public static bool ShowsRunWarnings(SessionInfo session) => RunWarningsSwitchShown && session.HasRunWarnings;
-
-    /// <summary>What the Run warnings box says when the pointer rests on it.</summary>
-    public const string RunWarningsTooltip =
-        "When enabled, your console shows a notification as a speedrun starts if cheats are on, or mods "
-        + "that are not allowed in runs or whose authors haven't said. Unknown mods are "
-        + "mentioned once.";
-
-    /// <summary>What the Run warnings box says beside itself, from the session alone.</summary>
-    public static string RunWarningsStatus(SessionInfo session) =>
-        session.RunWarningsOff ? "no warnings" : "warns about cheats and mods as a run starts";
-
-    /// <summary>
-    /// The console's run-start warnings switch, RUN_WARN of qwark revision 1.30, under In-game menus
-    /// and wired the same way: drawn from the session flag, a click sends the request and the next
-    /// packet moves the box. Hidden against a module without the warnings.
-    /// </summary>
-    private static void DrawRunWarnings(AppState state)
-    {
-        if (!ShowsRunWarnings(state.Session)) return;
-
-        bool on = !state.Session.RunWarningsOff;
-        if (ImGui.Checkbox("Run warnings", ref on))
-        {
-            bool want = on;
-            state.Run(() => state.Client.RunWarnAsync(want));
-        }
-
-        if (ImGui.IsItemHovered()) Ui.SetTooltip(RunWarningsTooltip);
-
-        ImGui.SameLine();
-        Ui.Text(Ui.Grey, RunWarningsStatus(state.Session));
-    }
-
     public static void Draw(AppState state)
     {
         Ui.Heading("Controller combos");
@@ -603,7 +484,6 @@ public static class CombosPanel
 
         ImGui.EndTable();
 
-
         ImGui.Spacing();
         if (ImGui.SmallButton("Refresh")) state.RefreshCombos();
 
@@ -615,28 +495,11 @@ public static class CombosPanel
             Ui.DebugHint($"Live pad mask: 0x{state.Session.PadMask:X4}  {PadButtons.Describe(state.Session.PadMask)}");
         }
 
-        ImGui.Spacing();
-        Ui.Heading("Qwark settings");
-
-        DrawInGameMenus(state);
-        DrawRunWarnings(state);
-
-        // The console's per-user settings (revision 1.24), and only while there is a console that
-        // has them: the switch that gives each console user their own combos, In-game menus
-        // setting and the rest, which is why it lives here and not among this client's settings.
-        if (ShowsProfiles(state.Session))
-        {
-            DrawProfiles(state);
-        }
+        // The console's own settings that were here (In-game menus, Run warnings, Per-user settings)
+        // are on the Settings page's Qwark tab (QwarkSettings).
     }
 
     // ---------------------------------------------------------------- per-user settings
-
-    /// <summary>What the Per-user settings box says when the pointer rests on it.</summary>
-    public const string ProfilesTooltip =
-        "When enabled, each console user keeps its own saved positions and settings. " +
-        "Combos are shared by default, but can be overridden manually. " +  
-        "When disabled, positions and settings are shared between all users.";
 
     /// <summary>
     /// Whether anything about per-user settings is drawn: SessionInfo byte 29 bit1, the capability
@@ -659,43 +522,4 @@ public static class CombosPanel
 
     /// <inheritdoc cref="Possessive(string)"/>
     public static string PossessiveName(ProfileInfo profile) => Possessive(UserName(profile));
-
-    /// <summary>
-    /// The line under the box: whose settings the panels are editing, from the session's bits
-    /// and the last PROFILE_INFO.
-    /// </summary>
-    public static string ProfileStatus(SessionInfo session, ProfileInfo profile)
-    {
-        if (!session.ProfilesOn) return "Editing your console's shared settings";
-        if (!session.ProfileActive) return "Per-user settings are on; waiting for a user to sign in";
-        if (!profile.SignedIn) return "Editing the signed-in user's settings";
-
-        string who = profile.Name.Length > 0 ? $"{profile.Name} (user {profile.UserId})" : $"User {profile.UserId}";
-        return $"Editing settings for {who}";
-    }
-
-    /// <summary>
-    /// The console-wide switch, the panel's Console users section, drawn from SessionInfo byte 29
-    /// bit2 so it always says what the console says. Ticking it reads PROFILE_INFO and either asks
-    /// the copy-or-defaults question or turns the switch on (<see cref="AppState.TurnProfilesOn"/>);
-    /// unticking sends PROFILE_ENABLE(0, 0).
-    /// </summary>
-    private static void DrawProfiles(AppState state)
-    {
-        var session = state.Session;
-        bool on = session.ProfilesOn;
-
-        ImGui.BeginDisabled(state.ProfileQuestion is not null);
-        if (ImGui.Checkbox("Per-user settings", ref on))
-        {
-            if (on) state.TurnProfilesOn();
-            else state.TurnProfilesOff();
-        }
-
-        ImGui.EndDisabled();
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(ProfilesTooltip);
-
-        ImGui.SameLine();
-        Ui.Text(Ui.Grey, ProfileStatus(session, state.Profile));
-    }
 }

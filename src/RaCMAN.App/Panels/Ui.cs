@@ -358,6 +358,43 @@ public static class Ui
         return builder.ToString();
     }
 
+    /// <summary>
+    /// A dropdown of fixed choices, the Settings page's control for anything with a few named
+    /// values (two included, where a pair of radio buttons used to be). <paramref name="index"/> is
+    /// the choice shown, and is moved to the one picked; true when the pick changed it. Sized to
+    /// its longest choice unless <paramref name="width"/> says otherwise.
+    /// </summary>
+    public static bool Dropdown(string id, IReadOnlyList<string> options, ref int index, float width = 0f)
+    {
+        string preview = index >= 0 && index < options.Count ? options[index] : string.Empty;
+
+        if (width <= 0f)
+        {
+            float widest = 0f;
+            foreach (var option in options) widest = MathF.Max(widest, ImGui.CalcTextSize(option).X);
+            width = widest + ImGui.GetFrameHeight() + (ImGui.GetStyle().FramePadding.X * 2f) + 8f;
+        }
+
+        ImGui.SetNextItemWidth(width);
+        if (!ImGui.BeginCombo(id, preview)) return false;
+
+        bool changed = false;
+        for (int i = 0; i < options.Count; i++)
+        {
+            bool selected = i == index;
+            if (ImGui.Selectable(options[i], selected) && !selected)
+            {
+                index = i;
+                changed = true;
+            }
+
+            if (selected) ImGui.SetItemDefaultFocus();
+        }
+
+        ImGui.EndCombo();
+        return changed;
+    }
+
     public static bool InputTextWithHint(string label, string hint, ref string value, uint maxLength = 256) =>
         ImGui.InputTextWithHint(label, hint, ref value, maxLength);
 

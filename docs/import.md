@@ -1,6 +1,6 @@
 # Import from RaCMAN
 
-The old RaCMAN kept everything in one folder, beside `racman.exe`: `config.txt`, a `savefiles` folder and a `mods` folder. This client keeps the same three things in its own data folder. **Import from RaCMAN**, on the Settings panel, brings all of them over in one press.
+The old RaCMAN kept everything in one folder, beside `racman.exe`: `config.txt`, a `savefiles` folder and a `mods` folder. This client keeps the same three things in its own data folder. **Import from RaCMAN**, on the **RaCMAN** tab of the Settings page, brings all of them over in one press.
 
 ## What to point it at
 
@@ -22,7 +22,7 @@ Nothing outside `savefiles` and `mods` is touched. If the old folder has neither
 
 ## Mods that are not imported
 
-Not every mod in an old folder is one this client can use, so the import leaves some of them where they are. It never deletes anything: the old folder keeps its copy, and the section on the Settings panel counts them apart from the rest, for example "In that folder: 12 saves in 3 categories, 4 mods, 6 excluded".
+Not every mod in an old folder is one this client can use, so the import leaves some of them where they are. It never deletes anything: the old folder keeps its copy, and the import's row on the Settings page counts them apart from the rest, for example "In that folder: 12 saves in 3 categories, 4 mods, 6 excluded".
 
 These are the rules, in the order they are applied to each folder under `mods/<TITLEID>/`:
 

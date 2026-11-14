@@ -49,14 +49,14 @@ public class RunWarningsTests
             Assert.True(session.HasRunWarnings);
             Assert.False(session.RunWarningsOff);
             // After build 57 the box is hidden, though the module has the switch.
-            Assert.False(CombosPanel.ShowsRunWarnings(session));
-            Assert.Equal("warns about cheats and mods as a run starts", CombosPanel.RunWarningsStatus(session));
+            Assert.False(QwarkSettings.ShowsRunWarnings(session));
+            Assert.Equal("warns about cheats and mods as a run starts", QwarkSettings.RunWarningsStatus(session));
 
             await client.RunWarnAsync(false);
             Assert.False(server.RunWarnings);
             session = (await client.GetStateAsync()).Session;
             Assert.True(session.RunWarningsOff);
-            Assert.Equal("no warnings", CombosPanel.RunWarningsStatus(session));
+            Assert.Equal("no warnings", QwarkSettings.RunWarningsStatus(session));
             Assert.True(await WaitFor(() =>
                 client.LatestTelemetry is { Session.RunWarningsOff: true } && !client.TelemetryViaTcp));
 
@@ -93,7 +93,7 @@ public class RunWarningsTests
             var session = (await client.GetStateAsync()).Session;
             Assert.False(session.HasRunWarnings);
             Assert.False(session.RunWarningsOff);
-            Assert.False(CombosPanel.ShowsRunWarnings(session));
+            Assert.False(QwarkSettings.ShowsRunWarnings(session));
             var refused = await Assert.ThrowsAsync<QwarkStatusException>(() => client.RunWarnAsync(false));
             Assert.Equal(Status.UnknownOp, refused.Status);
         }
@@ -110,8 +110,11 @@ public class RunWarningsTests
         Assert.True(info.RunWarningsOff);
         Assert.Equal(SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff, info.Flags3);
 
-        bytes[31] = 0xFC;
+        // Bits 2 to 4 are the telemetry rate's since qwark revision 1.32; bits 5 to 7 mean nothing yet.
+        bytes[31] = 0xE0;
         Assert.Equal(SessionFlags3.None, SessionInfo.Parse(bytes).Flags3);
+        bytes[31] = 0xFC;
+        Assert.Equal(SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask, SessionInfo.Parse(bytes).Flags3);
 
         var again = SessionInfo.Parse(info.ToBytes());
         Assert.Equal(info.Flags3, again.Flags3);

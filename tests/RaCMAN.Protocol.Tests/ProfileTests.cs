@@ -696,31 +696,40 @@ public class ProfileTests
     }
 
     /// <summary>
-    /// The switch is the console's, so it is on the Combos panel, as its Console users section,
-    /// beside the overrides it brings; the Settings panel holds only this client's own settings.
+    /// The switch is the console's, so it is a row of the Settings page's Qwark tab (it was the
+    /// Combos panel's until the page had tabs), there only while a console with users is connected,
+    /// and on no other tab.
     /// </summary>
     [Fact]
-    public void TheSwitchIsOnTheCombosPanelAndNotOnTheSettingsPanel()
+    public void TheSwitchIsOnTheQwarkTabOfTheSettingsPage()
     {
-        const System.Reflection.BindingFlags all = System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.NonPublic
-            | System.Reflection.BindingFlags.Static;
+        var memory = new InputRateMemory();
+        var connected = new SettingsContext(ConsoleSession, true, memory);
 
-        Assert.NotNull(typeof(CombosPanel).GetMethod("DrawProfiles", all));
-        Assert.Empty(typeof(SettingsPanel).GetMembers(all)
-            .Where(member => member.Name.Contains("Profile", StringComparison.Ordinal)));
+        Assert.Contains(SettingRow.PerUserSettings, SettingsLayout.Rows(SettingsTab.Qwark, connected));
+        foreach (var tab in SettingsNav.Tabs.Where(t => t != SettingsTab.Qwark))
+        {
+            Assert.DoesNotContain(SettingRow.PerUserSettings, SettingsLayout.Rows(tab, connected));
+        }
+
+        Assert.DoesNotContain(SettingRow.PerUserSettings,
+            SettingsLayout.Rows(SettingsTab.Qwark, connected with { Connected = false }));
+        var rpcs3 = ConsoleSession with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
+        Assert.DoesNotContain(SettingRow.PerUserSettings,
+            SettingsLayout.Rows(SettingsTab.Qwark, connected with { Session = rpcs3 }));
     }
 
     [Fact]
     public void TheStatusLineSaysWhoseSettingsAreBeingEdited()
     {
-        Assert.Equal("Editing your console's shared settings", CombosPanel.ProfileStatus(ConsoleSession, User1));
+        Assert.Equal("Editing your console's shared settings", QwarkSettings.ProfileStatus(ConsoleSession, User1));
         Assert.Equal("Per-user settings are on; waiting for a user to sign in",
-            CombosPanel.ProfileStatus(With(ProfileFlags.On), ProfileInfo.None));
+            QwarkSettings.ProfileStatus(With(ProfileFlags.On), ProfileInfo.None));
 
         var active = With(ProfileFlags.On | ProfileFlags.Active);
-        Assert.Equal("Editing settings for User 1", CombosPanel.ProfileStatus(active, User1));
-        Assert.Equal("Editing settings for User 2", CombosPanel.ProfileStatus(active, User1 with { UserId = 2 }));
-        Assert.Equal("Editing the signed-in user's settings", CombosPanel.ProfileStatus(active, ProfileInfo.None));
+        Assert.Equal("Editing settings for User 1", QwarkSettings.ProfileStatus(active, User1));
+        Assert.Equal("Editing settings for User 2", QwarkSettings.ProfileStatus(active, User1 with { UserId = 2 }));
+        Assert.Equal("Editing the signed-in user's settings", QwarkSettings.ProfileStatus(active, ProfileInfo.None));
 
         Assert.Equal("User 1", CombosPanel.UserName(User1));
         Assert.Equal("User 1's", CombosPanel.PossessiveName(User1));
@@ -728,7 +737,7 @@ public class ProfileTests
 
         // A name comes only with named profiles, a later revision.
         var named = User1 with { Name = "Alex" };
-        Assert.Equal("Editing settings for Alex (user 1)", CombosPanel.ProfileStatus(active, named));
+        Assert.Equal("Editing settings for Alex (user 1)", QwarkSettings.ProfileStatus(active, named));
         Assert.Equal("Alex", CombosPanel.UserName(named));
     }
 

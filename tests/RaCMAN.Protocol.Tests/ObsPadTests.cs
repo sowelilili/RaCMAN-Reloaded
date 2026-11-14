@@ -238,6 +238,59 @@ public class ObsPadTests : IDisposable
         probe.Stop();
     }
 
+    /// <summary>
+    /// Telemetry at 120 Hz (qwark revision 1.32) is four times the packets the overlay had at 30. A
+    /// stream that falls behind keeps the newest of them (its queue drops the oldest), so however
+    /// many arrive at once the source ends on the pad as it is now, and publishing never waits on it.
+    /// </summary>
+    [Fact]
+    public async Task ABurstOfPacketsLeavesTheStreamOnTheLatestPad()
+    {
+        int port = FreePort();
+        var server = new ObsPadServer(new OneSkin(Skin()));
+
+        try
+        {
+            server.Apply(enabled: true, port);
+            using var http = new HttpClient(new HttpClientHandler { UseProxy = false })
+            {
+                BaseAddress = new Uri($"http://127.0.0.1:{port}/"),
+                Timeout = TimeSpan.FromSeconds(10),
+            };
+
+            using var events = await http.GetStreamAsync("events");
+            using var reader = new StreamReader(events);
+            Assert.Equal(PadSnapshot.Idle.ToJson(), await NextDataAsync(reader));
+
+            // Two seconds of 120 Hz in one go, each packet a different pad, faster than any reader.
+            var watch = System.Diagnostics.Stopwatch.StartNew();
+            PadSnapshot last = PadSnapshot.Idle;
+            for (uint i = 1; i <= 240; i++)
+            {
+                last = new PadSnapshot(i, 0f, 0f, 0f, 0f, Live: true);
+                server.Publish(last);
+            }
+
+            Assert.True(watch.ElapsedMilliseconds < 1000, $"publishing 240 packets took {watch.ElapsedMilliseconds} ms");
+
+            string want = last.ToJson();
+            int read = 0;
+            string seen;
+            do
+            {
+                seen = await NextDataAsync(reader);
+                read++;
+            }
+            while (seen != want && read < 240);
+
+            Assert.Equal(want, seen);
+        }
+        finally
+        {
+            server.Dispose();
+        }
+    }
+
     [Fact]
     public void ADisabledServerListensOnNothing()
     {

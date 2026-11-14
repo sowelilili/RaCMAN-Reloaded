@@ -23,12 +23,19 @@ public sealed class AppWindow : GameWindow
     private int _panel;
     private double _elapsed;
 
-    public AppWindow(AppState state, double exitAfterSeconds = 0, int startPanel = 0)
+    /// <summary>The Settings page's own tabs, which take the nav's place while Settings is open.</summary>
+    private readonly SettingsNav _settingsNav = new();
+
+    public AppWindow(AppState state, double exitAfterSeconds = 0, int startPanel = 0, SettingsTab? settingsTab = null)
         : base(new GameWindowSettings { UpdateFrequency = 60 }, WindowSettings(state.Settings))
     {
         _state = state;
         _exitAfterSeconds = exitAfterSeconds;
         _panel = Math.Clamp(startPanel, 0, PanelNames.Length - 1);
+
+        // A run started on Settings opens its tabs, with Back leading to Connection.
+        if (_panel == PanelNav.Settings) _panel = _settingsNav.Enter(PanelNav.Connection);
+        if (settingsTab is { } tab) _settingsNav.Select(tab);
 
         // Before OnLoad, so the controller builds its style from the saved theme and the very
         // first frame is already the right one.
@@ -43,7 +50,9 @@ public sealed class AppWindow : GameWindow
     /// The panel the nav is on, by name. A headless run prints it on its way out, which is the only
     /// way to see from outside the window where <c>--panel</c> and <c>--game-section</c> landed.
     /// </summary>
-    public string PanelName => PanelNames[Math.Clamp(_panel, 0, PanelNames.Length - 1)];
+    public string PanelName => _settingsNav.Open && _panel == PanelNav.Settings
+        ? $"{PanelNames[PanelNav.Settings]}: {SettingsNav.Name(_settingsNav.Tab)}"
+        : PanelNames[Math.Clamp(_panel, 0, PanelNames.Length - 1)];
 
     /// <summary>
     /// The window this run opens: the default size, or the size and corner the last run was left
@@ -191,6 +200,7 @@ public sealed class AppWindow : GameWindow
 
             _state.Tick((float)args.Time);
             CombosPanel.Update(_state);
+            SettingsPanel.Observe(_state);
 
             // Here rather than in Tick: a test builds an AppState of its own, and nothing a test
             // builds may open a socket.
@@ -293,7 +303,11 @@ public sealed class AppWindow : GameWindow
                 if (!PanelVisible(_panel)) _panel = PanelNav.Fallback(_state.UnknownGame, _state.GameModulePending);
                 if (DisabledReason(_panel) is not null) _panel = PanelNav.Connection;
 
-                for (int i = 0; i < PanelNames.Length; i++)
+                // Settings has tabs of its own, drawn where the panels were until Back or Esc.
+                _settingsNav.Follow(_panel);
+                if (_settingsNav.Open) DrawSettingsNav();
+
+                for (int i = 0; i < PanelNames.Length && !_settingsNav.Open; i++)
                 {
                     if (!PanelVisible(i)) continue;
 
@@ -320,7 +334,7 @@ public sealed class AppWindow : GameWindow
 
                     if (clicked)
                     {
-                        _panel = i;
+                        _panel = i == PanelNav.Settings ? _settingsNav.Enter(_panel) : i;
                         if (isGame) SubPageNav.Open = null;
                     }
 
@@ -374,6 +388,35 @@ public sealed class AppWindow : GameWindow
         LiveSplitModal.Draw(_state);
         WhatsNewModal.Draw(_state);
         DrawToasts();
+    }
+
+    /// <summary>
+    /// The Settings page's side tabs, in the nav's place: Back first, which puts the panels back on
+    /// the one that was open (Esc does the same), then the four tabs.
+    /// </summary>
+    private void DrawSettingsNav()
+    {
+        bool escape = ImGui.IsKeyPressed(ImGuiKey.Escape, false);
+        bool typing = ImGui.GetIO().WantTextInput;
+        bool popup = ImGui.IsPopupOpen(string.Empty, ImGuiPopupFlags.AnyPopupId | ImGuiPopupFlags.AnyPopupLevel);
+
+        bool back = ImGui.Selectable(SettingsNav.BackLabel, false, ImGuiSelectableFlags.None, new Vector2(0, 26));
+        Ui.Tooltip($"Back to {PanelNames[_settingsNav.ReturnPanel]} (Esc)");
+
+        if (back || _settingsNav.EscapeGoesBack(escape, typing, popup))
+        {
+            _panel = _settingsNav.Back();
+            return;
+        }
+
+        ImGui.Separator();
+        foreach (var tab in SettingsNav.Tabs)
+        {
+            if (ImGui.Selectable(SettingsNav.Name(tab), _settingsNav.Tab == tab, ImGuiSelectableFlags.None, new Vector2(0, 26)))
+            {
+                _settingsNav.Select(tab);
+            }
+        }
     }
 
     /// <summary>
@@ -574,7 +617,7 @@ public sealed class AppWindow : GameWindow
             case PanelNav.LevelFlags: LevelFlagsPanel.Draw(_state); break;
             case PanelNav.Memory: MemoryPanel.Draw(_state); break;
             case PanelNav.Combos: CombosPanel.Draw(_state); break;
-            case PanelNav.Settings: SettingsPanel.Draw(_state); break;
+            case PanelNav.Settings: SettingsPanel.Draw(_state, _settingsNav.Tab); break;
         }
     }
 

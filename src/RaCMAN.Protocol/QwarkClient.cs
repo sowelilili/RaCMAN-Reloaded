@@ -1600,6 +1600,19 @@ public sealed class QwarkClient : IDisposable
         }), cancellationToken);
 
     /// <summary>
+    /// TELEMETRY_RATE, qwark revision 1.32: how often the console sends telemetry, 30, 60 or 120 Hz.
+    /// Console-wide (<c>telemetry.hz</c>), so every client connected gets the new rate, and read back
+    /// from <see cref="SessionInfo.TelemetryHz"/>. Send it only while
+    /// <see cref="SessionInfo.HasTelemetryRate"/> is set: an older module answers UNKNOWN_OP. Any
+    /// other rate is the console's to refuse (BAD_ARG), so it is sent as it is.
+    /// </summary>
+    public Task TelemetryRateAsync(int hz, CancellationToken cancellationToken = default) =>
+        RequestAsync(Opcode.TelemetryRate, Bytes(1, (scoped ref SpanWriter w) =>
+        {
+            w.WriteU8((byte)Math.Clamp(hz, 0, 255));
+        }), cancellationToken);
+
+    /// <summary>
     /// PROFILE_INFO, revision 1.24 (build 56): who is signed in on the console and whose per-user
     /// settings are in use. Answered in every session state. Send it only while
     /// <see cref="SessionInfo.ProfilesSupported"/> is set: a module before the revision answers

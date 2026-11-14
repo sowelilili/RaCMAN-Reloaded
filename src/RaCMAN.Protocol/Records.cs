@@ -129,6 +129,30 @@ public sealed record SessionInfo(
     /// <summary>The console's <c>run.warnings</c> is 0 (flags3 bit1): a run start says nothing.</summary>
     public bool RunWarningsOff => (Flags3 & SessionFlags3.RunWarningsOff) != 0;
 
+    /// <summary>The module answers TELEMETRY_RATE (flags3 bit2, qwark revision 1.32).</summary>
+    public bool HasTelemetryRate => (Flags3 & SessionFlags3.TelemetryRate) != 0;
+
+    /// <summary>The telemetry rates TELEMETRY_RATE takes, in the order of flags3 bits 3-4's codes.</summary>
+    public static IReadOnlyList<int> TelemetryRates { get; } = new[] { 30, 60, 120 };
+
+    /// <summary>
+    /// How often the console sends telemetry, in Hz: flags3 bits 3-4 (revision 1.32). 30 from a
+    /// module without the switch, which always sent at 30 Hz, and for the code 3 no module sends.
+    /// </summary>
+    public int TelemetryHz
+    {
+        get
+        {
+            if (!HasTelemetryRate) return 30;
+            int code = ((int)(Flags3 & SessionFlags3.TelemetryRateMask)) >> 3;
+            return code < TelemetryRates.Count ? TelemetryRates[code] : 30;
+        }
+    }
+
+    /// <summary>The flags3 bits a module with the switch sends for <paramref name="hz"/>; for the fake and the tests.</summary>
+    public static SessionFlags3 TelemetryRateBits(int hz) =>
+        SessionFlags3.TelemetryRate | (SessionFlags3)(Math.Max(0, TelemetryRates.ToList().IndexOf(hz)) << 3);
+
     /// <summary>
     /// The module reads mods off the console's USB drives (revision 1.24): MOD_USB_LIST answers,
     /// and a mod only a drive has loads with MOD_LOAD, which copies it in first.
@@ -236,7 +260,8 @@ public sealed record SessionInfo(
         var profileFlags = (ProfileFlags)flags2Byte & ProfileBits;
         var flags2 = (SessionFlags2)flags2Byte & Flags2Bits;
         byte profileSeq = r.ReadU8();
-        var flags3 = (SessionFlags3)r.ReadU8() & (SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff);
+        var flags3 = (SessionFlags3)r.ReadU8() & (SessionFlags3.RunWarnings | SessionFlags3.RunWarningsOff
+                                                  | SessionFlags3.TelemetryRate | SessionFlags3.TelemetryRateMask);
         float x = r.ReadF32();
         float y = r.ReadF32();
         float z = r.ReadF32();

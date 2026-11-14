@@ -1,14 +1,21 @@
+using System.Numerics;
 using ImGuiNET;
 using RaCMAN.Protocol;
 
 namespace RaCMAN.App.Panels;
 
 /// <summary>
-/// This client's own settings: how it looks and where it keeps its files. Anything the console
-/// owns (auto-reconnect aside, which is a client habit) stays on the Connection panel, and the
-/// console-wide per-user settings switch is on the Combos panel. One exception: the import from
-/// the old RaCMAN, which pushes combos and mod flags to the console because that is where they
-/// live now.
+/// The Settings page: four tabs of their own in the side nav (<see cref="SettingsNav"/>), each a
+/// compact list of rows, a label and its control, as the Combos panel's table is. A setting that is
+/// not obvious carries a tooltip saying what it does and, beside its control, a grey line saying
+/// what its current value does; an obvious one has neither. Which rows a tab has is
+/// <see cref="SettingsLayout"/>'s, so the page draws exactly what the tests check.
+/// <para>
+/// RaCMAN is this client's own: theme, debug information, the game layout, updates, its files and
+/// the import from the old RaCMAN. IPC is the two servers on this PC it talks to. Connection is how
+/// it reaches the console and how often it reads it back, the console's telemetry rate included.
+/// Qwark is the console's own settings, read from the session and written by ops.
+/// </para>
 /// </summary>
 public static class SettingsPanel
 {
@@ -43,45 +50,198 @@ public static class SettingsPanel
     private static int _liveSplitPort;
     private static bool _portsRead;
 
-    public static void Draw(AppState state)
+    /// <summary>The Input display rate row's memory of the console's telemetry rate, fed every frame.</summary>
+    public static InputRateMemory InputRate { get; } = new();
+
+    /// <summary>The window's per-frame look at the session, so the rate row knows a console it has seen.</summary>
+    public static void Observe(AppState state) => InputRate.Observe(state.Session, state.Connected);
+
+    /// <summary>The context a tab's rows are worked out in.</summary>
+    public static SettingsContext Context(AppState state) => new(state.Session, state.Connected, InputRate);
+
+    /// <summary>The page's heading for a tab.</summary>
+    public static string Title(SettingsTab tab) => $"{SettingsNav.Name(tab)} settings";
+
+    public static void Draw(AppState state, SettingsTab tab)
+    {
+        Ui.Heading(Title(tab));
+
+        if (tab == SettingsTab.Qwark && !state.Connected)
+        {
+            Ui.Hint("Connect to change your console's settings.");
+            return;
+        }
+
+        var rows = SettingsLayout.Rows(tab, Context(state));
+        if (rows.Count == 0)
+        {
+            Ui.Hint("Your console has no settings to show here.");
+            return;
+        }
+
+        float labelColumn = LabelColumnWidth(state, rows);
+        string? group = null;
+        bool started = false;
+        bool tableOpen = false;
+
+        foreach (var row in rows)
+        {
+            string? rowGroup = SettingsLayout.Group(row);
+            if (!started || rowGroup != group)
+            {
+                if (tableOpen) ImGui.EndTable();
+                if (started) ImGui.Spacing();
+                if (rowGroup is not null) Ui.Text(Ui.Grey, rowGroup);
+
+                tableOpen = BeginList($"settings-{tab}-{rowGroup}", labelColumn);
+                group = rowGroup;
+                started = true;
+            }
+
+            if (!tableOpen) continue;
+
+            ImGui.PushID((int)row);
+            DrawRow(state, row);
+            ImGui.PopID();
+        }
+
+        if (tableOpen) ImGui.EndTable();
+    }
+
+    // ---------------------------------------------------------------- the list
+
+    /// <summary>One list: the labels' column as wide as the widest label of the whole tab, the controls the rest.</summary>
+    private static bool BeginList(string id, float labelColumn)
+    {
+        // No alternating row colour: an unticked checkbox's frame all but vanished on the light one.
+        const ImGuiTableFlags flags = ImGuiTableFlags.BordersInnerH | ImGuiTableFlags.BordersOuter
+                                      | ImGuiTableFlags.SizingStretchProp;
+        if (!ImGui.BeginTable(id, 2, flags)) return false;
+
+        ImGui.TableSetupColumn("Setting", ImGuiTableColumnFlags.WidthFixed, labelColumn);
+        ImGui.TableSetupColumn("Value", ImGuiTableColumnFlags.WidthStretch);
+        return true;
+    }
+
+    /// <summary>
+    /// The width of the labels' column for a tab: its widest label, so every list on the tab puts
+    /// its controls at the same place.
+    /// </summary>
+    private static float LabelColumnWidth(AppState state, IReadOnlyList<SettingRow> rows)
+    {
+        float widest = 0f;
+        foreach (var row in rows)
+        {
+            if (row == SettingRow.Folders)
+            {
+                foreach (var folder in Folders(state)) widest = MathF.Max(widest, ImGui.CalcTextSize(folder.Label).X);
+            }
+            else
+            {
+                widest = MathF.Max(widest, ImGui.CalcTextSize(SettingsLayout.Label(row)).X);
+            }
+        }
+
+        return MathF.Ceiling(widest + (ImGui.GetStyle().CellPadding.X * 2f) + 12f);
+    }
+
+    /// <summary>A new row: its label, with the setting's tooltip on it, and the cursor in the control's cell.</summary>
+    private static void Label(string label, string? tooltip = null)
+    {
+        ImGui.TableNextRow();
+        ImGui.TableNextColumn();
+        Ui.TableLabel(label);
+        if (tooltip is not null) Ui.Tooltip(tooltip);
+        ImGui.TableNextColumn();
+    }
+
+    /// <summary>The setting's tooltip on the control just drawn as well, so it is on the whole row.</summary>
+    private static void ControlTooltip(string? tooltip)
+    {
+        if (tooltip is not null) Ui.Tooltip(tooltip);
+    }
+
+    /// <summary>The grey line beside a control: what its current value does.</summary>
+    private static void InlineHint(string text) => InlineText(Ui.Grey, text);
+
+    private static void InlineText(Vector4 colour, string text)
+    {
+        ImGui.SameLine();
+        ImGui.PushStyleColor(ImGuiCol.Text, colour);
+        ImGui.PushTextWrapPos(0f);
+        ImGui.TextUnformatted(text);
+        ImGui.PopTextWrapPos();
+        ImGui.PopStyleColor();
+    }
+
+    private static void DrawRow(AppState state, SettingRow row)
+    {
+        switch (row)
+        {
+            case SettingRow.Theme: DrawTheme(state); break;
+            case SettingRow.DebugInformation: DrawDebug(state); break;
+            case SettingRow.GameLayout: DrawGameLayout(state); break;
+            case SettingRow.Version: DrawVersion(state); break;
+            case SettingRow.CheckForUpdates: DrawCheckForUpdates(state); break;
+            case SettingRow.Folders: DrawFolders(state); break;
+            case SettingRow.MirrorSaves: DrawMirrorSaves(state); break;
+            case SettingRow.SortSaveFiles: DrawSortSaveFiles(state); break;
+            case SettingRow.ImportFromRaCMAN: DrawImportRow(state); break;
+            case SettingRow.Rpcs3Port: DrawRpcs3Port(state); break;
+            case SettingRow.LiveSplit: DrawLiveSplit(state); break;
+            case SettingRow.ConnectionMode: DrawConnectionMode(state); break;
+            case SettingRow.TableRefresh: DrawTableRefresh(state); break;
+            case SettingRow.InputDisplayRate: DrawInputDisplayRate(state); break;
+            case SettingRow.InGameMenus: DrawInGameMenus(state); break;
+            case SettingRow.RunWarnings: DrawRunWarnings(state); break;
+            case SettingRow.PerUserSettings: DrawPerUserSettings(state); break;
+        }
+    }
+
+    // ---------------------------------------------------------------- RaCMAN: general
+
+    private static readonly string[] Themes = { "Light", "Dark" };
+
+    private static void DrawTheme(AppState state)
+    {
+        Label(SettingsLayout.Label(SettingRow.Theme));
+
+        int theme = state.Settings.LightTheme ? 0 : 1;
+        if (Ui.Dropdown("##theme", Themes, ref theme)) SetTheme(state, theme == 0 ? "light" : "dark");
+    }
+
+    public const string DebugInformationTooltip =
+        "Shows extra technical detail across RaCMAN: qwark and protocol versions, reboot and tick "
+        + "counters, request names in error messages, frame rate, raw readouts and internal addresses.";
+
+    /// <summary>What the Debug information box says beside itself.</summary>
+    public static string DebugInformationHint(bool on) =>
+        on ? "technical detail shown on every panel" : "technical detail hidden";
+
+    private static void DrawDebug(AppState state)
     {
         var settings = state.Settings;
+        Label(SettingsLayout.Label(SettingRow.DebugInformation), DebugInformationTooltip);
 
-        Ui.Heading("Settings");
+        bool debug = settings.DebugInfo;
+        if (ImGui.Checkbox("##debug", ref debug))
+        {
+            settings.DebugInfo = debug;
+            settings.Save();
+            state.ThemeDirty = true;
+        }
 
-        ImGui.TextUnformatted("Theme");
+        ControlTooltip(DebugInformationTooltip);
+        InlineHint(DebugInformationHint(settings.DebugInfo));
+    }
 
-        bool light = settings.LightTheme;
-        if (ImGui.RadioButton("Light", light) && !light) SetTheme(state, "light");
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Dark", !light) && light) SetTheme(state, "dark");
+    public const string GameLayoutTooltip =
+        "gamelayout.json decides where the Game page and its sub-pages put each of the game's features. "
+        + "To edit it, copy it into the data folder, then reload it.";
 
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Updates");
-        DrawUpdates(state);
-
-        // Then the import, because it is the one thing on this panel that is done once, on the
-        // first run, and never looked at again: it belongs where somebody arriving from the old
-        // RaCMAN will see it rather than below the settings they have come to change.
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Import from RaCMAN");
-        DrawImport(state);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Connection");
-        DrawConnection(settings);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Ports");
-        DrawPorts(state);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Layout");
+    private static void DrawGameLayout(AppState state)
+    {
+        Label(SettingsLayout.Label(SettingRow.GameLayout), GameLayoutTooltip);
 
         if (ImGui.Button("Reload gamelayout.json"))
         {
@@ -100,102 +260,29 @@ public static class SettingsPanel
                 GameLayout.Problems.Count == 0 ? ToastKind.Success : ToastKind.Error);
         }
 
+        ControlTooltip(GameLayoutTooltip);
         ImGui.SameLine();
         Ui.OpenFolderButton(state, FolderOf(GameLayout.DefaultPath), GameLayout.DefaultPath);
 
-        Ui.Hint(GameLayout.UsingOverride
-            ? "Using a custom gamelayout.json override."
-            : "Using the default gamelayout.json. Copy to the data folder to edit it.");
+        InlineHint(GameLayout.UsingOverride ? "using your own copy" : "using the default");
 
         foreach (var problem in GameLayout.Problems) Ui.Warning(problem);
-
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Files");
-        DrawFiles(state, settings);
-
-        // Last, because it is the one switch here that is about this client's own workings rather
-        // than about the user's files, and because everything it reveals is elsewhere.
-        ImGui.Spacing();
-        ImGui.Separator();
-        Ui.Heading("Debug");
-
-        bool debug = settings.DebugInfo;
-        if (ImGui.Checkbox("Show debug information", ref debug))
-        {
-            settings.DebugInfo = debug;
-            settings.Save();
-            state.ThemeDirty = true;
-        }
-
-        Ui.Hint("Shows debug information: qwark and protocol versions, reboot and tick "
-                + "counters, request names in error messages, frame rate, raw readouts and internal addresses.");
     }
 
-    // ---------------------------------------------------------------- connection
+    // ---------------------------------------------------------------- RaCMAN: updates
 
     /// <summary>
-    /// How this client gets qwark onto a console, and how often the panels that watch live state
-    /// read it back. Two settings about the link, in the order they are met: the mode decides what
-    /// pressing Connect does at all, and the refresh rate is what a slow link is turned down for.
+    /// Which version this is and the buttons for a newer one. A copy the installer did not put here
+    /// cannot replace itself, so it says that instead of offering a check that could only end in a
+    /// download link.
     /// </summary>
-    private static void DrawConnection(Settings settings)
-    {
-        // The mode is the console's: RPCS3 has nothing to load and never asks webMAN anything.
-        int mode = settings.Ps3.StandaloneConnection ? 1 : 0;
-        int chosen = mode;
-
-        ImGui.TextUnformatted("Mode");
-        ImGui.SameLine();
-        ImGui.RadioButton("webMAN", ref chosen, 0);
-        ImGui.SameLine();
-        ImGui.RadioButton("Standalone", ref chosen, 1);
-
-        if (chosen != mode)
-        {
-            settings.Ps3.StandaloneConnection = chosen == 1;
-            settings.Save();
-        }
-
-        Ui.Hint(chosen == 0
-            ? "webMAN: automatically re-send and load the qwark SPRX using webMAN when connecting."
-            : "Standalone: load the qwark SPRX manually, or install it to run on boot.");
-
-        ImGui.Spacing();
-
-        // The panels read this every frame, so a change here is live in the table you can see.
-        float seconds = settings.TableRefreshSeconds;
-        ImGui.SetNextItemWidth(160);
-        if (ImGui.InputFloat("Refresh rate (Hz)", ref seconds, 0.1f, 1f, "%.1f"))
-        {
-            // The property clamps to 0..10, so a typed 99 or a typed -1 is still a period the
-            // panels can use.
-            settings.TableRefreshSeconds = seconds;
-            settings.Save();
-        }
-
-        Ui.Hint("How often to refresh data tables. If you're using a slower connection, decrease this. Set to 0 for manual refresh.");
-    }
-
-    // ---------------------------------------------------------------- updates
-
-    /// <summary>
-    /// Which version this is, whether it looks for a newer one, and the button for asking now. A
-    /// copy the installer did not put here cannot replace itself, so it says that instead of
-    /// offering a check that could only end in a download link.
-    /// </summary>
-    private static void DrawUpdates(AppState state)
+    private static void DrawVersion(AppState state)
     {
         var updates = state.Updates;
+        Label(SettingsLayout.Label(SettingRow.Version));
 
-        ImGui.TextUnformatted($"Version {AppVersion.Current}");
-
-        bool check = state.Settings.Updates.Check;
-        if (ImGui.Checkbox("Check for updates on start", ref check))
-        {
-            state.Settings.Updates.Check = check;
-            state.Settings.Save();
-        }
+        Ui.TableLabel(AppVersion.Current);
+        ImGui.SameLine();
 
         ImGui.BeginDisabled(updates.IsInert || updates.Busy);
         if (ImGui.Button("Check now")) updates.CheckNow();
@@ -212,105 +299,162 @@ public static class SettingsPanel
             if (ImGui.Button("Restart to update")) updates.RestartAndApply();
         }
 
-        if (updates.InertReason is { } reason) Ui.Hint(reason);
-        else if (updates.Stage == UpdateStage.Failed) Ui.Error(updates.StatusLine());
-        else Ui.Hint(updates.StatusLine());
-
-        if (updates.Stage != UpdateStage.Idle && updates.LastCheckUtc is { } last)
+        string status = updates.InertReason ?? updates.StatusLine();
+        if (updates.InertReason is null && updates.Stage != UpdateStage.Idle && updates.LastCheckUtc is { } last)
         {
-            Ui.Hint($"Last checked {last.ToLocalTime():yyyy-MM-dd HH:mm}.");
+            status += $" Last checked {last.ToLocalTime():yyyy-MM-dd HH:mm}.";
         }
+
+        InlineText(updates.InertReason is null && updates.Stage == UpdateStage.Failed ? Ui.Red : Ui.Grey, status);
 
         Ui.DebugHint(UpdateService.RepositoryUrl);
     }
 
-    // ---------------------------------------------------------------- files
+    private static void DrawCheckForUpdates(AppState state)
+    {
+        Label(SettingsLayout.Label(SettingRow.CheckForUpdates));
+
+        bool check = state.Settings.Updates.Check;
+        if (ImGui.Checkbox("##check-updates", ref check))
+        {
+            state.Settings.Updates.Check = check;
+            state.Settings.Save();
+        }
+    }
+
+    // ---------------------------------------------------------------- RaCMAN: files
 
     /// <summary>
-    /// The two folders and the difference between them, because it is the difference that matters:
-    /// what is in the data folder is the user's and survives an update, and what is beside the
-    /// executable is the release's and does not.
+    /// The client's places on disk, a row each with a button that opens it. What is in the data
+    /// folder is the user's and survives an update; what is beside the executable is the release's.
     /// </summary>
-    /// <summary>The gap between the longest label and the column the buttons share.</summary>
-    private const float FolderButtonGap = 16f;
-
-    private static void DrawFiles(AppState state, Settings settings)
+    private static IEnumerable<(string Label, string Folder, string? Tooltip)> Folders(AppState state)
     {
+        var settings = state.Settings;
         string settingsFile = string.IsNullOrEmpty(settings.Path) ? Settings.DefaultPath : settings.Path;
 
-        // The labels are one column and the buttons another, at a single offset measured from the
-        // longest label of the lot: a button per row at the end of its own label would leave the
-        // section a ragged edge of nine Open folder buttons, and there is nothing to read down.
-        var rows = new List<(string Label, string Folder, string? Tooltip)>
+        yield return ("Data folder", AppPaths.Root, null);
+        yield return ("Settings file", FolderOf(settingsFile), settingsFile);
+        yield return ("Mods you installed", state.Mods.RootPath, null);
+        yield return ("Save files", state.SaveFiles.RootPath, null);
+        yield return ("Colour presets", state.ColourPresets.Folder, null);
+        yield return ("Watchlists", state.Watchlists.Folder, null);
+        yield return ("Lua scripts", state.LuaScripts.Folder, null);
+    }
+
+    private static void DrawFolders(AppState state)
+    {
+        foreach (var folder in Folders(state))
         {
-            ("Data folder", AppPaths.Root, null),
-            ("Settings file", FolderOf(settingsFile), settingsFile),
-            ("Mods you installed", state.Mods.RootPath, null),
-            ("Save files", state.SaveFiles.RootPath, null),
-            ("Colour presets", state.ColourPresets.Folder, null),
-            ("Watchlists", state.Watchlists.Folder, null),
-            ("Lua scripts", state.LuaScripts.Folder, null),
-        };
+            Label(folder.Label);
+            Ui.OpenFolderButton(state, folder.Folder, folder.Tooltip);
+        }
+    }
 
-        float column = 0;
-        foreach (var row in rows) column = Math.Max(column, ImGui.CalcTextSize(row.Label).X);
-        column += FolderButtonGap;
+    public const string MirrorSavesTooltip =
+        "Save files are kept on your console. When enabled, every save you take is also copied to this PC.";
 
-        foreach (var row in rows) Folder(state, row.Label, row.Folder, column, row.Tooltip);
+    /// <summary>What the Mirror saves box says beside itself.</summary>
+    public static string MirrorSavesHint(bool on) =>
+        on ? "every save is also copied to this PC" : "saves are kept on your console only";
 
-        ImGui.Spacing();
+    private static void DrawMirrorSaves(AppState state)
+    {
+        var settings = state.Settings;
+        Label(SettingsLayout.Label(SettingRow.MirrorSaves), MirrorSavesTooltip);
 
         // The savefile library lives on the console since qwark build 12; this is the second copy.
         bool mirror = settings.MirrorSaveFiles;
-        if (ImGui.Checkbox("Mirror saves to this PC", ref mirror))
+        if (ImGui.Checkbox("##mirror", ref mirror))
         {
             settings.MirrorSaveFiles = mirror;
             settings.Save();
         }
 
-        Ui.Hint("Save files are kept on your console. With this on, every save you take is also copied "
-                + "to this PC.");
+        ControlTooltip(MirrorSavesTooltip);
+        InlineHint(MirrorSavesHint(settings.MirrorSaveFiles));
+    }
 
-        ImGui.Spacing();
+    private static readonly string[] SaveSorts = { "By planet", "Alphabetical" };
 
-        var sort = settings.SaveFileSort;
-        ImGui.TextUnformatted("Sort save files");
-        ImGui.SameLine();
-        if (ImGui.RadioButton("By planet", sort == SaveFileSort.ByPlanet)) sort = SaveFileSort.ByPlanet;
-        ImGui.SameLine();
-        if (ImGui.RadioButton("Alphabetical", sort == SaveFileSort.Alphabetical)) sort = SaveFileSort.Alphabetical;
-        if (sort != settings.SaveFileSort)
+    /// <summary>
+    /// What the Sort save files dropdown says on hover. The By planet sentence is the user's own
+    /// wording for the option (2026-11-14), which began "When enabled" while it was a pair of radio
+    /// buttons; as a dropdown it names the choice it is about instead.
+    /// </summary>
+    public const string SortSaveFilesTooltip =
+        "How each category of save files is ordered. By planet uses the planet ID of each stored save "
+        + "to determine its order. Alphabetical orders the saves by name.";
+
+    /// <summary>What the Sort save files dropdown says beside itself.</summary>
+    public static string SortSaveFilesHint(SaveFileSort sort) =>
+        sort == SaveFileSort.ByPlanet
+            ? "uses the planet ID of each stored save to determine its order"
+            : "orders the saves by name";
+
+    private static void DrawSortSaveFiles(AppState state)
+    {
+        var settings = state.Settings;
+        Label(SettingsLayout.Label(SettingRow.SortSaveFiles), SortSaveFilesTooltip);
+
+        int sort = settings.SaveFileSort == SaveFileSort.Alphabetical ? 1 : 0;
+        if (Ui.Dropdown("##sort", SaveSorts, ref sort))
         {
-            settings.SaveFileSort = sort;
+            settings.SaveFileSort = sort == 1 ? SaveFileSort.Alphabetical : SaveFileSort.ByPlanet;
             settings.Save();
         }
 
-        Ui.Hint("By planet lists each category in the game's planet order, by the planet each save was made on.");
+        ControlTooltip(SortSaveFilesTooltip);
+        InlineHint(SortSaveFilesHint(settings.SaveFileSort));
     }
 
-    // ---------------------------------------------------------------- ports
+    public const string ImportTooltip =
+        "Imports settings, save files and mods from previous versions of RaCMAN: point it at the old "
+        + "RaCMAN's config.txt.";
 
-    /// <summary>
-    /// The two ports nobody should have to think about: RPCS3's IPC server, which the helper is
-    /// pointed at, and LiveSplit's TCP server. Both are typed once, if ever, so they live here and
-    /// the panels that use them only name the value they are using.
-    /// </summary>
-    private static void DrawPorts(AppState state)
+    private static void DrawImportRow(AppState state)
+    {
+        Label(SettingsLayout.Label(SettingRow.ImportFromRaCMAN), ImportTooltip);
+        DrawImport(state);
+    }
+
+    // ---------------------------------------------------------------- IPC
+
+    public const string Rpcs3PortTooltip =
+        "Where RaCMAN looks for RPCS3's IPC server. It has to match the port in RPCS3's IPC settings.";
+
+    private static void DrawRpcs3Port(AppState state)
     {
         var settings = state.Settings;
-        var autosplit = settings.Autosplit;
+        Label(SettingsLayout.Label(SettingRow.Rpcs3Port), Rpcs3PortTooltip);
 
         int pine = settings.Rpcs3.PinePort;
         ImGui.SetNextItemWidth(140);
-        if (ImGui.InputInt("RPCS3 IPC port", ref pine))
+        if (ImGui.InputInt("##pine", ref pine))
         {
             settings.Rpcs3.PinePort = Math.Clamp(pine, 1, 65535);
             settings.Save();
         }
 
-        Ui.Hint($"Where to look for RPCS3 (default: {Rpcs3Host.DefaultPinePort})");
+        ControlTooltip(Rpcs3PortTooltip);
+        InlineHint(settings.Rpcs3.PinePort == Rpcs3Host.DefaultPinePort
+            ? "RPCS3's default"
+            : $"RPCS3's default is {Rpcs3Host.DefaultPinePort}");
+    }
 
-        ImGui.Spacing();
+    public const string LiveSplitTooltip =
+        "Where RaCMAN looks for LiveSplit's server, as a host and a port. A change takes effect once you "
+        + "leave both boxes.";
+
+    /// <summary>
+    /// LiveSplit's TCP server, host and port. Committed the moment both boxes are left alone: a
+    /// half-typed host would otherwise send a connection attempt somewhere nobody asked for, and a
+    /// popup after it.
+    /// </summary>
+    private static void DrawLiveSplit(AppState state)
+    {
+        var autosplit = state.Settings.Autosplit;
+        Label(SettingsLayout.Label(SettingRow.LiveSplit), LiveSplitTooltip);
 
         if (!_portsRead)
         {
@@ -320,25 +464,31 @@ public static class SettingsPanel
         }
 
         ImGui.SetNextItemWidth(180);
-        ImGui.InputText("LiveSplit host", ref _liveSplitHost, 64);
+        ImGui.InputText("##livesplit-host", ref _liveSplitHost, 64);
         bool editing = ImGui.IsItemActive();
+        ControlTooltip(LiveSplitTooltip);
 
         ImGui.SameLine();
+        Ui.TableLabel(":");
+        ImGui.SameLine();
         ImGui.SetNextItemWidth(140);
-        if (ImGui.InputInt("LiveSplit port", ref _liveSplitPort))
+        if (ImGui.InputInt("##livesplit-port", ref _liveSplitPort))
         {
             _liveSplitPort = Math.Clamp(_liveSplitPort, 1, 65535);
         }
 
         editing |= ImGui.IsItemActive();
+        ControlTooltip(LiveSplitTooltip);
 
-        // Committed the moment both boxes are left alone: a half-typed host would otherwise send
-        // a connection attempt somewhere nobody asked for, and a popup after it.
         bool changed = !string.Equals(_liveSplitHost.Trim(), autosplit.Host, StringComparison.OrdinalIgnoreCase)
                        || _liveSplitPort != autosplit.Port;
         if (changed && !editing) ApplyLiveSplit(state, autosplit);
 
-        Ui.Hint($"Where to look for LiveSplit server (default: {LiveSplitClient.DefaultHost}:{LiveSplitClient.DefaultPort})");
+        bool isDefault = string.Equals(autosplit.Host, LiveSplitClient.DefaultHost, StringComparison.OrdinalIgnoreCase)
+                         && autosplit.Port == LiveSplitClient.DefaultPort;
+        InlineHint(isDefault
+            ? "LiveSplit's default"
+            : $"LiveSplit's default is {LiveSplitClient.DefaultHost}:{LiveSplitClient.DefaultPort}");
     }
 
     /// <summary>Saves the LiveSplit endpoint and moves a connection that is pointed at the old one.</summary>
@@ -361,6 +511,185 @@ public static class SettingsPanel
         state.LiveSplit.Start(autosplit.Host, autosplit.Port);
     }
 
+    // ---------------------------------------------------------------- connection
+
+    private static readonly string[] ConnectionModes = { "webMAN", "Standalone" };
+
+    public const string ConnectionModeTooltip = "How RaCMAN gets qwark onto your console when you connect.";
+
+    /// <summary>What the Connection mode dropdown says beside itself.</summary>
+    public static string ConnectionModeHint(bool standalone) =>
+        standalone
+            ? "load qwark yourself, or install it to run on boot"
+            : "re-sends and loads qwark through webMAN when connecting";
+
+    /// <summary>The console's mode: RPCS3 has nothing to load and never asks webMAN anything.</summary>
+    private static void DrawConnectionMode(AppState state)
+    {
+        var settings = state.Settings;
+        Label(SettingsLayout.Label(SettingRow.ConnectionMode), ConnectionModeTooltip);
+
+        int mode = settings.Ps3.StandaloneConnection ? 1 : 0;
+        if (Ui.Dropdown("##mode", ConnectionModes, ref mode))
+        {
+            settings.Ps3.StandaloneConnection = mode == 1;
+            settings.Save();
+        }
+
+        ControlTooltip(ConnectionModeTooltip);
+        InlineHint(ConnectionModeHint(settings.Ps3.StandaloneConnection));
+    }
+
+    public const string TableRefreshTooltip =
+        "How often, in seconds, the Unlocks and Level flags tables read your console again. On a slow "
+        + "connection, raise it. 0 reads only when you press Refresh.";
+
+    /// <summary>What the Table refresh box says beside itself.</summary>
+    public static string TableRefreshHint(float seconds) =>
+        seconds > 0f
+            ? $"read again every {seconds.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture)} s"
+            : "read only when you press Refresh";
+
+    /// <summary>
+    /// How often the tables that watch live game state read themselves back. The panels read this
+    /// every frame, so a change here is live in the table you can see. It is a period in seconds,
+    /// <c>tableRefreshSeconds</c>, which the box was labelled in Hz until the Settings tabs.
+    /// </summary>
+    private static void DrawTableRefresh(AppState state)
+    {
+        var settings = state.Settings;
+        Label(SettingsLayout.Label(SettingRow.TableRefresh), TableRefreshTooltip);
+
+        float seconds = settings.TableRefreshSeconds;
+        ImGui.SetNextItemWidth(160);
+        if (ImGui.InputFloat("##refresh", ref seconds, 0.1f, 1f, "%.1f s"))
+        {
+            // The property clamps to 0..10, so a typed 99 or a typed -1 is still a period the
+            // panels can use.
+            settings.TableRefreshSeconds = seconds;
+            settings.Save();
+        }
+
+        ControlTooltip(TableRefreshTooltip);
+        InlineHint(TableRefreshHint(settings.TableRefreshSeconds));
+    }
+
+    private static readonly string[] InputRates = SessionInfo.TelemetryRates.Select(hz => $"{hz} Hz").ToArray();
+
+    public const string InputDisplayRateTooltip =
+        "How often your console sends the controller and the rest of the live state to RaCMAN. Higher "
+        + "rates make the input display and the OBS overlay smoother, and use more network traffic. "
+        + "It is your console's setting, so it applies to every PC connected to it.";
+
+    /// <summary>What the Input display rate dropdown says beside itself.</summary>
+    public static string InputDisplayRateHint(int hz) => hz switch
+    {
+        >= 120 => "smoothest input display; the most network traffic",
+        >= 60 => "smoother input display",
+        _ => "the default; the least network traffic",
+    };
+
+    /// <summary>
+    /// The console's telemetry rate (TELEMETRY_RATE, qwark revision 1.32). Drawn from the session
+    /// like the Qwark tab's switches, so it always says what the console says; a pick sends the op
+    /// and the next packet moves it. Only for a module with the switch, and greyed without a console.
+    /// </summary>
+    private static void DrawInputDisplayRate(AppState state)
+    {
+        bool enabled = InputRateMemory.Enabled(state.Connected);
+        string tooltip = enabled ? InputDisplayRateTooltip : $"{InputDisplayRateTooltip} Connect to change it.";
+        Label(SettingsLayout.Label(SettingRow.InputDisplayRate), tooltip);
+
+        int shown = InputRate.Shown(state.Session, state.Connected);
+        int index = Math.Max(0, SessionInfo.TelemetryRates.ToList().IndexOf(shown));
+
+        ImGui.BeginDisabled(!enabled);
+        if (Ui.Dropdown("##input-rate", InputRates, ref index)) SetInputRate(state, SessionInfo.TelemetryRates[index]);
+        ImGui.EndDisabled();
+
+        ControlTooltip(tooltip);
+        InlineHint(InputDisplayRateHint(shown));
+    }
+
+    /// <summary>
+    /// The dropdown's pick: one TELEMETRY_RATE, and only to a console that has the switch. False
+    /// when there was nobody to send it to.
+    /// </summary>
+    public static bool SetInputRate(AppState state, int hz)
+    {
+        if (!state.Connected || !state.Session.HasTelemetryRate) return false;
+
+        state.Run(() => state.Client.TelemetryRateAsync(hz));
+        return true;
+    }
+
+    // ---------------------------------------------------------------- qwark
+
+    /// <summary>
+    /// The console's In-game menus switch, MENU_HELP of revision 1.23: whether the Trainer menu
+    /// takes the place of Help in the game's pause menu. Greyed under RPCS3, which has no console
+    /// menu (but in ToD, whose pause menu is its console menu there too, qwark revision 1.29).
+    /// </summary>
+    private static void DrawInGameMenus(AppState state)
+    {
+        var session = state.Session;
+        string tooltip = QwarkSettings.InGameMenusTooltip(session);
+        Label(SettingsLayout.Label(SettingRow.InGameMenus), tooltip);
+
+        bool blocked = QwarkSettings.InGameMenusBlocked(session);
+        bool on = !session.MenuHelpOff;
+
+        ImGui.BeginDisabled(blocked);
+        if (ImGui.Checkbox("##in-game-menus", ref on))
+        {
+            bool want = on;
+            state.Run(() => state.Client.MenuHelpAsync(want));
+        }
+
+        ImGui.EndDisabled();
+        ControlTooltip(tooltip);
+        InlineHint(QwarkSettings.InGameMenusStatus(session));
+    }
+
+    /// <summary>The console's run-start warnings switch, RUN_WARN of qwark revision 1.30; hidden today.</summary>
+    private static void DrawRunWarnings(AppState state)
+    {
+        Label(SettingsLayout.Label(SettingRow.RunWarnings), QwarkSettings.RunWarningsTooltip);
+
+        bool on = !state.Session.RunWarningsOff;
+        if (ImGui.Checkbox("##run-warnings", ref on))
+        {
+            bool want = on;
+            state.Run(() => state.Client.RunWarnAsync(want));
+        }
+
+        ControlTooltip(QwarkSettings.RunWarningsTooltip);
+        InlineHint(QwarkSettings.RunWarningsStatus(state.Session));
+    }
+
+    /// <summary>
+    /// The console-wide per-user settings switch, drawn from SessionInfo byte 29 bit2. Ticking it
+    /// reads PROFILE_INFO and either asks the copy-or-defaults question or turns the switch on
+    /// (<see cref="AppState.TurnProfilesOn"/>); unticking sends PROFILE_ENABLE(0, 0).
+    /// </summary>
+    private static void DrawPerUserSettings(AppState state)
+    {
+        var session = state.Session;
+        Label(SettingsLayout.Label(SettingRow.PerUserSettings), QwarkSettings.ProfilesTooltip);
+
+        bool on = session.ProfilesOn;
+        ImGui.BeginDisabled(state.ProfileQuestion is not null);
+        if (ImGui.Checkbox("##per-user", ref on))
+        {
+            if (on) state.TurnProfilesOn();
+            else state.TurnProfilesOff();
+        }
+
+        ImGui.EndDisabled();
+        ControlTooltip(QwarkSettings.ProfilesTooltip);
+        InlineHint(QwarkSettings.ProfileStatus(session, state.Profile));
+    }
+
     // ---------------------------------------------------------------- import
 
     /// <summary>
@@ -377,8 +706,6 @@ public static class SettingsPanel
     /// </summary>
     private static void DrawImport(AppState state)
     {
-        Ui.Hint("Import settings, save files and mods from previous versions of RaCMAN");
-
         ImGui.SetNextItemWidth(-110);
 
         // Enter in the path box is the Import button at the bottom of this section, which is the
@@ -769,19 +1096,6 @@ public static class SettingsPanel
         state.Settings.Theme = theme;
         state.Settings.Save();
         state.ThemeDirty = true;
-    }
-
-    /// <summary>
-    /// One of this client's own places on disk: what it is, and a button that opens it. The path
-    /// is on the button's tooltip, where a file has room to be named in full. The button goes at
-    /// <paramref name="column"/>, an offset from the start of the panel's content, so every row in
-    /// the section puts its button in the same place.
-    /// </summary>
-    private static void Folder(AppState state, string label, string folder, float column, string? tooltip = null)
-    {
-        ImGui.TextUnformatted(label);
-        ImGui.SameLine(column);
-        Ui.OpenFolderButton(state, folder, tooltip);
     }
 
     /// <summary>The folder a file sits in, for the buttons that lead to a file rather than a folder.</summary>

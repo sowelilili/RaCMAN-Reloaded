@@ -110,25 +110,25 @@ public class InGameMenusTests
     [Fact]
     public void TheBoxIsGatedOnTheBuildAndGreyedUnderRpcs3()
     {
-        Assert.False(CombosPanel.ShowsInGameMenus(54));
-        Assert.True(CombosPanel.ShowsInGameMenus(55));
-        Assert.True(CombosPanel.ShowsInGameMenus(QwarkClient.ExpectedQwarkBuild));
+        Assert.False(QwarkSettings.ShowsInGameMenus(54));
+        Assert.True(QwarkSettings.ShowsInGameMenus(55));
+        Assert.True(QwarkSettings.ShowsInGameMenus(QwarkClient.ExpectedQwarkBuild));
 
         var console = SessionInfo.Empty with { QwarkVersion = 55 };
         var off = console with { Flags = SessionFlags.MenuHelpOff };
         var rpcs3 = console with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
 
-        Assert.False(CombosPanel.InGameMenusBlocked(console));
-        Assert.True(CombosPanel.InGameMenusBlocked(rpcs3));
+        Assert.False(QwarkSettings.InGameMenusBlocked(console));
+        Assert.True(QwarkSettings.InGameMenusBlocked(rpcs3));
         // Qwark revision 1.29: ToD's menu is its pause menu, which works under RPCS3 too.
-        Assert.False(CombosPanel.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }));
-        Assert.Equal("Trainer replaces Help in the pause menu", CombosPanel.InGameMenusStatus(console));
+        Assert.False(QwarkSettings.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }));
+        Assert.Equal("Trainer replaces Help in the pause menu", QwarkSettings.InGameMenusStatus(console));
         // Qwark revision 1.29: in ToD the Trainer takes the pause list's Inventory row instead.
         Assert.Equal("Trainer replaces Inventory in the pause menu",
-            CombosPanel.InGameMenusStatus(console with { Game = GameId.Tod }));
-        Assert.Equal("the game's default pause menu", CombosPanel.InGameMenusStatus(off with { Game = GameId.Tod }));
-        Assert.Equal("the game's default pause menu", CombosPanel.InGameMenusStatus(off));
-        Assert.Equal("not under RPCS3", CombosPanel.InGameMenusStatus(rpcs3));
+            QwarkSettings.InGameMenusStatus(console with { Game = GameId.Tod }));
+        Assert.Equal("the game's default pause menu", QwarkSettings.InGameMenusStatus(off with { Game = GameId.Tod }));
+        Assert.Equal("the game's default pause menu", QwarkSettings.InGameMenusStatus(off));
+        Assert.Equal("not under RPCS3", QwarkSettings.InGameMenusStatus(rpcs3));
 
         var parsed = SessionInfo.Parse(off.ToBytes());
         Assert.True(parsed.MenuHelpOff);
@@ -219,9 +219,9 @@ public class InGameMenusTests
         var tod = console with { Flags2 = SessionFlags2.NoMenu };
 
         Assert.True(CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, console));
-        Assert.True(CombosPanel.ShowsInGameMenus(console));
+        Assert.True(QwarkSettings.ShowsInGameMenus(console));
         Assert.False(CombosPanel.ShowsRow(ComboAction.OpenConsoleMenu, tod));
-        Assert.False(CombosPanel.ShowsInGameMenus(tod));
+        Assert.False(QwarkSettings.ShowsInGameMenus(tod));
         Assert.True(CombosPanel.ShowsRow(ComboAction.ToggleFastLoads, tod));
         Assert.True(CombosPanel.ShowsRow(ComboAction.SavePosition, tod));
 

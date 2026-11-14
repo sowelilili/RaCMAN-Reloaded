@@ -31,7 +31,7 @@ The Connection panel shows how much memory the console's system software (the VS
 
 ## Connection modes
 
-The mode is on the Settings panel, in the **Connection** section.
+The mode is **Connection mode**, on the **Connection** tab of the Settings page.
 
 **webMAN** is the default mode. The client asks webMAN which plugin slot holds the module. If no slot holds it, the client sends `qwark.sprx` to the console and loads it. Automatic reconnections do the same, so the client can recover a module that stopped.
 
@@ -80,7 +80,7 @@ Open **Game**, then **Manips**, and pick the category type of your run. Hover a 
 
 The Save files panel has premade saves in its last category, **(premade savefiles)**. You can load them, but you cannot change them.
 
-Every category is in the game's planet order: each save goes under the planet it was made on, which the client reads from the save itself, whatever the save is called. A revisit has its own place after the planets before it, such as RaC1's second visit to Veldin, RaC2's return to Aranos and ToD's Fastoon II. Saves on the same planet are alphabetical, with numbers in number order ("Kerwan 9" before "Kerwan 10"). Saves whose planet the client cannot read come last, also alphabetical: a file that is not a save of this game, and a ToD save that is only on your console. The order of the planets is the line order of the autosplitter's `<game>-planets.txt` files, which is the game's own level order. In UYA that is not quite the story order (Daxx comes before Annihilation Nation, for example), and Deadlocked's Dreadzone Station, which you return to between planets, comes first. To list saves alphabetically only, open **Settings**, and under **Files** set **Sort save files** to **Alphabetical**. To replace one of your saves with the game's current state, right-click it and choose **Override...**. It asks first, because the old save is gone afterwards, and it works whenever **Save on console** does.
+Every category is in the game's planet order: each save goes under the planet it was made on, which the client reads from the save itself, whatever the save is called. A revisit has its own place after the planets before it, such as RaC1's second visit to Veldin, RaC2's return to Aranos and ToD's Fastoon II. Saves on the same planet are alphabetical, with numbers in number order ("Kerwan 9" before "Kerwan 10"). Saves whose planet the client cannot read come last, also alphabetical: a file that is not a save of this game, and a ToD save that is only on your console. The order of the planets is the line order of the autosplitter's `<game>-planets.txt` files, which is the game's own level order. In UYA that is not quite the story order (Daxx comes before Annihilation Nation, for example), and Deadlocked's Dreadzone Station, which you return to between planets, comes first. To list saves alphabetically only, open **Settings**, and on the **RaCMAN** tab, under **Files**, set **Sort save files** to **Alphabetical**. To replace one of your saves with the game's current state, right-click it and choose **Override...**. It asks first, because the old save is gone afterwards, and it works whenever **Save on console** does.
 
 ## Run warnings
 
@@ -93,7 +93,7 @@ Under RPCS3 the warnings go to qwark-rpcs3's log.
 
 ## Console menu
 
-On a console, all four games and ToD have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was (in ToD, where **Inventory** was, in the pause menu's first list), or press L1, R1, L2, R2, L3 and R3 together in play. ToD's Trainer menu uses the pause menu's own list and its Game Options screen, scrolls a page at a time like the game's lists (Down on a page's last row shows the next page, Up on the first page's top row goes round to the last), and works under RPCS3 too once RaCMAN has written its RPCS3 patch and the game has been restarted. The Combos panel can change that combo. Untick **In-game menus** there to keep the game's own Help (in ToD, Inventory) in the pause menu; the combo still opens the Trainer menu.
+On a console, all four games and ToD have a Trainer menu on the TV. Open it from **Trainer** in the pause menu, where Help was (in ToD, where **Inventory** was, in the pause menu's first list), or press L1, R1, L2, R2, L3 and R3 together in play. ToD's Trainer menu uses the pause menu's own list and its Game Options screen, scrolls a page at a time like the game's lists (Down on a page's last row shows the next page, Up on the first page's top row goes round to the last), and works under RPCS3 too once RaCMAN has written its RPCS3 patch and the game has been restarted. The Combos panel can change that combo. Untick **In-game menus** on the **Qwark** tab of the Settings page to keep the game's own Help (in ToD, Inventory) in the pause menu; the combo still opens the Trainer menu.
 
 The Combos panel also has a **Toggle fast loads** combo. It has no buttons until you capture some, and the console says whether fast loads are now on or off.
 
@@ -105,7 +105,7 @@ The Trainer menu has a **Mods** page, after **Unlocks**, with a row for each mod
 
 Your console can keep separate settings for each user on it. Each user gets their own position slots, the mods and cheats that load automatically, manip and planet choices, the **In-game menus** setting, and the chargeboot and HUD colours set for the boot. The mod and savefile libraries stay shared.
 
-Turn it on with **Per-user settings** at the bottom of the Combos panel, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line under the switch says whose settings you are editing.
+Turn it on with **Per-user settings** on the **Qwark** tab of the Settings page, while you are connected. If the signed-in user has no settings of their own yet, the client asks whether to copy the current settings or start from the defaults. Users who sign in later start from the defaults. To change user, sign in as someone else on the PS3 home screen; the line beside the switch says whose settings you are editing.
 
 Combos are shared by everyone, and so is the **Combos enabled** switch. To give the signed-in user their own combo for one action, press **Override** on that row and press the buttons. That row then shows in orange, and its buttons read **Override**, which captures the override again, and **Clear Override**, which removes only the override, so the shared combo comes back; press **Clear** again to clear the shared combo. Overrides are kept while per-user settings are off.
 
@@ -174,13 +174,24 @@ ToD's support is its game file, `tod.sprx`, which every release carries (see [Ga
 
 The **Level flags** panel lists ToD's level flags by name, grouped by planet, as the old RaCMAN did. Each box shows the flag as it is in your console's game, and a click sets or clears it. **Reset** under a planet clears that planet's flags and **Check all** beside it sets them all, both leaving the other planets' flags alone. The filter box finds a flag by name or by number.
 
+## Settings
+
+Press **Settings** at the bottom of the side bar. The side bar then shows the settings' own tabs: **RaCMAN**, **IPC**, **Connection** and **Qwark**. Press **< Back** at the top, or Esc, to go back to the panel you came from. Each tab is a list of settings. Hover over a setting to see what it does; the grey text beside it says what its current value does.
+
+- **RaCMAN**: the theme, debug information, the game layout, updates, and your files: the folders, **Mirror saves to this PC**, **Sort save files** and **Import from RaCMAN**.
+- **IPC**: the port of RPCS3's IPC server, and the address and port of LiveSplit's server.
+- **Connection**: the connection mode, **Table refresh** (how many seconds apart the Unlocks and Level flags tables read your console again; 0 reads only when you press **Refresh**), and **Input display rate**.
+- **Qwark**: your console's own settings, **In-game menus** and **Per-user settings**. They show while you are connected.
+
+**Input display rate** is how often your console sends the controller, and the rest of what the panels show live, to the client: 30, 60 or 120 times a second. A higher rate makes the input display and the OBS page smoother, and uses more network traffic. The setting is kept on your console, so it applies to every PC connected to it and stays after a restart. It shows when your console's module has it, and is greyed out while you are not connected.
+
 ## Updates
 
 The client asks GitHub for a newer release once a day. If there is one, a bar appears at the top of the window. Press **Download**, then **Restart to update**. The client downloads nothing until you press the button.
 
 **What's new** on the bar shows the release notes. The first start after an update offers them once more.
 
-The Settings panel holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
+The **RaCMAN** tab of the Settings page holds the switch, a **Check now** button and the version you run. The installer and the portable build can update themselves. A folder that you built yourself cannot.
 
 A new client can carry a newer console module. The console keeps the module it already loaded, so the header says that `qwark.sprx` is out of date. The Connection panel then tells you how to send the new one. In standalone mode the client sends it by itself.
 
@@ -194,11 +205,11 @@ Your settings, colour presets, watchlists, Lua scripts, save files and mods are 
 | Linux | `$XDG_CONFIG_HOME/racman-reloaded`, or `~/.config/racman-reloaded` |
 | macOS | `~/Library/Application Support/RaCMAN Reloaded` |
 
-The Settings panel has an **Open folder** button for it. To use a different folder, start the client with `--data-dir <path>`, or set the `RACMAN_DATA_DIR` variable. A copy on a memory stick needs one of the two.
+The **RaCMAN** tab of the Settings page has an **Open folder** button for it. To use a different folder, start the client with `--data-dir <path>`, or set the `RACMAN_DATA_DIR` variable. A copy on a memory stick needs one of the two.
 
 You can put your own mods in `mods/<TITLEID>/` in that folder. A mod of yours replaces a shipped mod with the same folder name. To remove a mod from the PC and the console, right-click it on the Mods panel and pick **Uninstall...**.
 
-If you come from the old RaCMAN, **Import from RaCMAN** on the Settings panel copies its save files and its mods into that folder as well as its settings, and it replaces nothing you already have. A few of the old default mods are left behind, and the import says which and why. See [docs/import.md](docs/import.md).
+If you come from the old RaCMAN, **Import from RaCMAN** on the **RaCMAN** tab of the Settings page copies its save files and its mods into that folder as well as its settings, and it replaces nothing you already have. A few of the old default mods are left behind, and the import says which and why. See [docs/import.md](docs/import.md).
 
 ## Windows firewall
 
@@ -208,7 +219,7 @@ The client checks for its rule at every start. It asks again only if the rule is
 
 ## The input display in OBS
 
-The client can serve the input display as a page for OBS. Add a Browser Source with the URL on the Input display panel, and give it the size the panel shows. The page is served on 127.0.0.1 only, so it needs no firewall rule. See [docs/obs.md](docs/obs.md).
+The client can serve the input display as a page for OBS. Add a Browser Source with the URL on the Input display panel, and give it the size the panel shows. The page is served on 127.0.0.1 only, so it needs no firewall rule. For a smoother display, raise **Input display rate** on the **Connection** tab of the Settings page. See [docs/obs.md](docs/obs.md).
 
 ## Customising the Game page
 
