@@ -168,6 +168,7 @@ The **Save files** panel works in ToD as in the other games, on your console and
 - **Infinite ammo** also keeps your devices full, the Visi-Copter included.
 - **Infinite health** is the game's own no-damage switch. It used to be called God Ratchet. It and **Infinite ammo** have an **on boot** box, as in the other games.
 - **God Ratchet** is the old RaCMAN's god ratchet, the one speedrunners use: it also makes enemies ignore Ratchet. It sits beside the values table, where RaC1's goodies menu is.
+- **Remove black screens**, on **Cheats**, is for practice: it lifts the black screen you can already move in before a planet's arrival cutscene, so you can see your setup. Other black screens and fades stay as they are.
 - The Unlocks panel lists weapons, devices, gadgets and items. Use the Collectables buttons for skill points and gold bolts, and the RYNO's own row for the RYNO.
 
 ToD's support is its game file, `tod.sprx`, which every release carries (see [Game modules](#game-modules)).
