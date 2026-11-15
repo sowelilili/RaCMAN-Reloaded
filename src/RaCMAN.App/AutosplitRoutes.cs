@@ -15,9 +15,11 @@ namespace RaCMAN.App;
 /// game.
 /// </para>
 /// <para>
-/// The Save files panel sorts a category by the same files (<see cref="SaveFileOrder"/>): a save
-/// goes under the line its own level index names, read out of the save (<see cref="SaveFilePlanet"/>),
-/// and a <c>null</c> line or one past the end of the file is no planet. The revisit aliases
+/// The Save files panel asks the same files which levels are planets (<see cref="SaveFileOrder"/>):
+/// a save goes under the line its own level index names, read out of the save (<see cref="SaveFilePlanet"/>),
+/// and a <c>null</c> line or one past the end of the file is no planet. The order it lists the
+/// planets in is the planet picker's (<see cref="SaveFilePlanetOrder"/>), not this file's, whose
+/// line order stays the game's numbering because the splits look a planet up by it. The revisit aliases
 /// ("veldin 2", "veldin ii") and whole planet names ("sarathos" beside "sara") the lines carry came
 /// with an earlier, name-based order and stay for the splits: each added alias holds one the line
 /// already had, except Veldin's "veldin ii", which matches the second visit as it should.

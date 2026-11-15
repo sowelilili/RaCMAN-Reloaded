@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using RaCMAN.App;
 using RaCMAN.App.Panels;
 using RaCMAN.Protocol.Testing;
@@ -186,6 +187,243 @@ public class SaveFileOrderTests : IDisposable
         var rows = PcRows(new SaveFileLibrary(_root), new SaveFilePlanetCache(), GameId.Tod, "story");
 
         Assert.Equal(new[] { "Kerwan", "Fastoon", "Rykan", "Fastoon II", "level 19" }, Names(rows));
+    }
+
+    /// <summary>One save of <paramref name="game"/> per name, each a real save moved to its level, in a "story" category.</summary>
+    private SaveFileEntry[] StoryRows(GameId game, byte[] ng, params (string Name, int Level)[] saves)
+    {
+        foreach (var (name, level) in saves) Write("story", name + ".sav", On(ng, level));
+        return PcRows(new SaveFileLibrary(_root), new SaveFilePlanetCache(), game, "story");
+    }
+
+    /// <summary>
+    /// UYA numbers its Clank, sewer and ranger levels and the vid comics after every planet, so the
+    /// level order put them all at the end. The list is the planet picker's order, each mission
+    /// level after its planet, and for the save list alone each ranger level right after its planet.
+    /// </summary>
+    [Fact]
+    public void UyaSavesAreInThePickersOrderWithEachRangerLevelAfterItsPlanet()
+    {
+        var rows = StoryRows(GameId.Rac3, Premade("NPEA00387", "NG+.sav"),
+            ("Vid Comic 1 SE", 36), ("Vid Comic 5", 35), ("Vid Comic 3", 34), ("Vid Comic 2", 33),
+            ("Vid Comic 4", 32), ("Vid Comic 1", 31), ("Vid Comic 6", 30), ("Tyhrranosis Rangers", 29),
+            ("Aquatos Sewers", 28), ("Aquatos Clank", 27), ("Metropolis Rangers", 26), ("Insomniac Museum", 24),
+            ("Holostar Clank", 23), ("Command Center", 22), ("Obani Draco", 21), ("Launch Site", 20),
+            ("Qwark's Hideout", 19), ("Aridia", 18), ("Crash Site", 17), ("Metropolis", 16), ("Koros", 14),
+            ("Holostar", 13), ("Blackwater City", 12), ("Obani Gemini", 11), ("Zeldrin Starport", 10),
+            ("Tyhrranosis", 9), ("Aquatos", 8), ("aquatos 2", 8), ("Annihilation Nation", 7),
+            ("Phoenix Rescue", 6), ("Daxx", 5), ("Marcadia", 4), ("Starship Phoenix", 3), ("Florana", 2),
+            ("Veldin", 1),
+            // The menu and a gap in the numbering are null lines, so no planet.
+            ("at the menu", 0), ("gap 15", 15));
+
+        Assert.Equal(new[]
+        {
+            "Veldin", "Florana", "Starship Phoenix", "Marcadia", "Daxx", "Obani Gemini", "Blackwater City",
+            "Annihilation Nation", "Aquatos", "aquatos 2", "Aquatos Clank", "Aquatos Sewers",
+            "Tyhrranosis", "Tyhrranosis Rangers", "Zeldrin Starport", "Holostar", "Holostar Clank", "Obani Draco",
+            "Metropolis", "Metropolis Rangers", "Crash Site", "Aridia", "Qwark's Hideout",
+            "Phoenix Rescue", "Koros", "Command Center", "Launch Site", "Insomniac Museum",
+            "Vid Comic 1", "Vid Comic 2", "Vid Comic 3", "Vid Comic 4", "Vid Comic 5", "Vid Comic 6", "Vid Comic 1 SE",
+            "at the menu", "gap 15",
+        }, Names(rows));
+    }
+
+    /// <summary>
+    /// RaC2's picker is in id order, which numbers its orbits, Wupash and the Jamming Array after the
+    /// Museum. For the save list each orbit follows its planet, the Jamming Array Maktar and Wupash
+    /// Oozla; the return to Aranos stays where the game visits it, and Slim Cognito, which names no
+    /// planet, where the picker has it.
+    /// </summary>
+    [Fact]
+    public void RaC2SavesFollowThePickerWithEachOrbitAfterItsPlanet()
+    {
+        var rows = StoryRows(GameId.Rac2, Premade("NPEA00386", "NG+ & NG+ no IMG.sav"),
+            ("Jamming Array", 26), ("Wupash", 25), ("Slim Cognito", 24), ("Damosel Orbit", 23), ("Dobbo Orbit", 22),
+            ("Insomniac Museum", 21), ("Yeedil", 20), ("Grelbin", 19), ("Damosel", 18), ("Smolg", 17),
+            ("Snivelak", 16), ("Gorn", 15), ("Aranos 2", 14), ("Boldan", 13), ("Todano", 12), ("Joba", 11),
+            ("Hrugis", 10), ("Dobbo", 9), ("Tabora", 8), ("Siberius", 7), ("Notak", 6), ("Feltzin", 5),
+            ("Barlow", 4), ("Endako", 3), ("Maktar", 2), ("Oozla", 1), ("Aranos", 0),
+            ("level 27", 27));
+
+        Assert.Equal(new[]
+        {
+            "Aranos", "Oozla", "Wupash", "Maktar", "Jamming Array", "Endako", "Barlow", "Feltzin", "Notak",
+            "Siberius", "Tabora", "Dobbo", "Dobbo Orbit", "Hrugis", "Joba", "Todano", "Boldan", "Aranos 2",
+            "Gorn", "Snivelak", "Smolg", "Damosel", "Damosel Orbit", "Grelbin", "Yeedil", "Insomniac Museum",
+            "Slim Cognito",
+            "level 27",
+        }, Names(rows));
+    }
+
+    /// <summary>Deadlocked's picker lists Orxon (8) before Valix (7), and so does the save list.</summary>
+    [Fact]
+    public void DeadlockedSavesAreInThePickersOrderWithOrxonBeforeValix()
+    {
+        var rows = StoryRows(GameId.Rac4, Premade("NPEA00423", "NG+.sav"),
+            ("Interior", 15), ("Ghost Station", 14), ("Maraxus", 13), ("Stygia", 11), ("Torval", 10),
+            ("Orxon", 8), ("Valix", 7), ("Shaar", 6), ("Kronos", 5), ("Sarathos", 4), ("Catacrom", 2),
+            ("DreadZone", 1),
+            // An infinite loop and the unused id 0 are null lines.
+            ("a loop", 3), ("id 0", 0));
+
+        Assert.Equal(new[]
+        {
+            "DreadZone", "Catacrom", "Sarathos", "Kronos", "Shaar", "Orxon", "Valix", "Torval", "Stygia",
+            "Maraxus", "Ghost Station", "Interior",
+            "a loop", "id 0",
+        }, Names(rows));
+    }
+
+    /// <summary>The planet combo's labels for each game's PLANET_LIST, exactly as it drew them before the save list followed it.</summary>
+    public static TheoryData<GameId, string, string[]> PickerLists() => new()
+    {
+        { GameId.Rac1, "NPEA00385", new[]
+            {
+                "Veldin", "Novalis", "Aridia", "Kerwan", "Eudora", "Rilgar", "Blarg", "Umbris", "Batalia", "Gaspar",
+                "Orxon", "Pokitaru", "Hoven", "Gemlik", "Oltanis", "Quartu", "Kalebo3", "Fleet", "Veldin2",
+            } },
+        { GameId.Rac2, "NPEA00386", new[]
+            {
+                "Aranos", "Oozla", "Maktar", "Endako", "Barlow", "Feltzin", "Notak", "Siberius", "Tabora", "Dobbo",
+                "Hrugis", "Joba", "Todano", "Boldan", "Aranos 2", "Gorn", "Snivelak", "Smolg", "Damosel", "Grelbin",
+                "Yeedil", "Insomniac Museum", "Dobbo Orbit", "Damosel Orbit", "Slim Cognito", "Wupash", "Jamming Array",
+            } },
+        { GameId.Rac3, "NPEA00387", new[]
+            {
+                "Veldin", "Florana", "Starship Phoenix", "Marcadia", "Daxx", "Obani Gemini", "Blackwater City",
+                "Annihilation Nation", "Aquatos", "Aquatos Clank", "Aquatos Sewers", "Tyhrranosis", "Zeldrin Starport",
+                "Holostar", "Holostar Clank", "Obani Draco", "Metropolis", "Crash Site", "Aridia", "Qwark's Hideout",
+                "Phoenix Rescue", "Koros", "Command Center", "Launch Site", "Insomniac Museum",
+                "Tyhrranosis Rangers", "Metropolis Rangers",
+                "Vid Comic 1", "Vid Comic 2", "Vid Comic 3", "Vid Comic 4", "Vid Comic 5", "Vid Comic 6", "Vid Comic 1 SE",
+            } },
+        { GameId.Rac4, "NPEA00423", new[]
+            {
+                "DreadZone", "Catacrom", "Sarathos", "Kronos", "Shaar", "Orxon", "Valix", "Torval", "Stygia",
+                "Maraxus", "Ghost Station", "Interior",
+            } },
+        { GameId.Tod, FakeQwarkServer.TodTitleId, new[]
+            {
+                "Kerwan", "Cobalia", "Kortog", "Fastoon", "Voron Asteroid Belt", "Mukow", "Nundac Asteroid Ring",
+                "Ardolis", "Rakar Star Cluster", "Rykan V", "Sargasso", "Kreeli Comet", "Viceron",
+                "Verdigris Black Hole", "Jasindu", "Ublik Passage", "Reepor", "Igliak", "Fastoon II",
+            } },
+    };
+
+    /// <summary>
+    /// Against the console's PLANET_LIST for each game, as the fake console answers it: the planet
+    /// combo is what it was, the save list takes the order the console sent, and that order makes
+    /// the same save list as the one the client keeps for when the console has not said it, which
+    /// is the order the console sends. The save list's moves leave the combo alone.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(PickerLists))]
+    public async Task ThePickerIsUnchangedAndTheConsolesOrderSortsAsTheKeptOneDoes(GameId game, string title, string[] picker)
+    {
+        using var server = new FakeQwarkServer();
+        server.Describe = server.Describe with { Game = game };
+        server.Session = server.Session with { Game = game, TitleId = title };
+        server.UsePlanetsOf(game);
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        int count = FakeQwarkServer.PlanetListOf(game).Names.Length;
+        Assert.True(await PumpAsync(state, () =>
+            state.DescribedGame == game && state.PlanetOrderSent && state.Planets.Length == count));
+
+        Assert.Equal(picker, PlanetChoices.For(state.Planets, state.PlanetOrder).Labels);
+
+        var sent = SaveFilesPanel.PickerOrder(state, game);
+        Assert.NotNull(sent);
+        Assert.Equal(state.PlanetOrder, SaveFilePlanetOrder.PickerOrder(game));
+        Assert.Equal(SaveFilePlanetOrder.For(game), SaveFilePlanetOrder.For(game, sent));
+    }
+
+    /// <summary>
+    /// The console's order is the one followed while it is the described game's: a qwark that listed
+    /// Zeldrin Starport after Obani Draco (where the old client's combo listed it a second time)
+    /// moves UYA's saves with it, and the rangers still follow their planets. A module before build
+    /// 53 sends no order, and the save list keeps the picker's rather than falling to the numbering.
+    /// </summary>
+    [Fact]
+    public async Task TheConsolesOrderIsFollowedAndAnOlderModulesMissingOneIsNotTheNumbering()
+    {
+        var library = new SaveFileLibrary(_root);
+        var planets = new SaveFilePlanetCache();
+        var ng = Premade("NPEA00387", "NG+.sav");
+        foreach (var (name, level) in new[]
+                 {
+                     ("Metropolis", 16), ("Obani Draco", 21), ("Zeldrin Starport", 10), ("Tyhrranosis Rangers", 29),
+                     ("Tyhrranosis", 9), ("Holostar", 13), ("Insomniac Museum", 24), ("Phoenix Rescue", 6),
+                 })
+        {
+            library.Write(Title, "story", name + ".sav", On(ng, level));
+        }
+
+        var pc = library.FilesWithCrc(Title, "story");
+        SaveFilesPanel.ReadPcPlanets(planets, GameId.Rac3, library.CategoryFolder(Title, "story"), pc);
+
+        // The rows as the panel sorts them while connected to a UYA module that sends this PLANET_LIST.
+        async Task<string[]> SortedAgainst(byte[]? order, bool sendsOrder)
+        {
+            using var server = new FakeQwarkServer();
+            server.Describe = server.Describe with { Game = GameId.Rac3 };
+            server.Session = server.Session with { Game = GameId.Rac3, TitleId = "NPEA00387" };
+            server.UsePlanetsOf(GameId.Rac3);
+            if (order is not null) server.PlanetOrder = order;
+            server.SendsPlanetOrder = sendsOrder;
+            server.Start();
+            using var state = await ConnectedStateAsync(server);
+            Assert.True(await PumpAsync(state, () =>
+                state.DescribedGame == GameId.Rac3 && state.Planets.Length > 0 && state.PlanetOrderSent == sendsOrder));
+
+            // Another game's saves are never sorted by UYA's order.
+            Assert.Null(SaveFilesPanel.PickerOrder(state, GameId.Rac1));
+
+            var picker = SaveFilesPanel.PickerOrder(state, GameId.Rac3);
+            Assert.Equal(sendsOrder, picker is not null);
+            return Names(SaveFilesPanel.Rows("story", null, pc, GameId.Rac3, SaveFileSort.ByPlanet,
+                SaveFilesPanel.PlanetOf(planets, GameId.Rac3), picker));
+        }
+
+        var moved = FakeQwarkServer.Rac3PlanetOrder.Where(id => id != 10).ToList();
+        moved.Insert(moved.IndexOf(21) + 1, 10);
+        Assert.Equal(new[]
+        {
+            "Tyhrranosis", "Tyhrranosis Rangers", "Holostar", "Obani Draco", "Zeldrin Starport", "Metropolis",
+            "Phoenix Rescue", "Insomniac Museum",
+        }, await SortedAgainst(moved.ToArray(), sendsOrder: true));
+
+        // A module before build 53: the ids in turn stand in for the combo, never for the save list.
+        Assert.Equal(new[]
+        {
+            "Tyhrranosis", "Tyhrranosis Rangers", "Zeldrin Starport", "Holostar", "Obani Draco", "Metropolis",
+            "Phoenix Rescue", "Insomniac Museum",
+        }, await SortedAgainst(null, sendsOrder: false));
+    }
+
+    private static async Task<AppState> ConnectedStateAsync(FakeQwarkServer server)
+    {
+        var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        return state;
+    }
+
+    /// <summary>Runs frames until the condition holds, the way the render loop would.</summary>
+    private static async Task<bool> PumpAsync(AppState state, Func<bool> condition, int timeoutMs = 5000)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            state.Tick(1f / 60f);
+            if (condition()) return true;
+            await Task.Delay(16);
+        }
+
+        state.Tick(1f / 60f);
+        return condition();
     }
 
     [Fact]

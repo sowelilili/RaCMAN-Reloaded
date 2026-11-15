@@ -34,7 +34,8 @@ public enum SaveFileSort
 /// <para>
 /// The number is the game's own level index, the line of the game's <c>&lt;game&gt;-planets.txt</c>
 /// (<see cref="AutosplitRoutes"/>), so a revisit (RaC1's second Veldin, RaC2's second Aranos,
-/// ToD's Fastoon II) has an index of its own after the planets before it.
+/// ToD's Fastoon II) has an index of its own after the planets before it. The list puts the
+/// levels in the game's order, <see cref="SaveFilePlanetOrder"/>.
 /// </para>
 /// </summary>
 public static class SaveFilePlanet
@@ -144,6 +145,127 @@ public static class SaveFilePlanet
     /// </summary>
     public static bool ReadableOnConsole(GameId game) =>
         RangeFor(game) is { Offset: 0 } range && range.Length <= QwarkClient.FileChunkSize;
+}
+
+/// <summary>
+/// The order By planet lists a game's levels in: the planet picker's order (the Positions panel's
+/// planet combo, PLANET_LIST's menu order), with a few levels moved for the save list alone. The
+/// level a save names is its line in the planets file, which is the game's numbering and not the
+/// order the game is played in: UYA numbers its Clank and ranger levels and the vid comics after
+/// every planet, Deadlocked numbers Valix before Orxon, RaC2 its orbits after the Museum.
+/// <para>
+/// The picker's order comes from the console, with the planet names (qwark's
+/// <c>planet_order</c>, build 53). While the running game's reply carried one, that is the order
+/// (<see cref="SaveFileOrder.Sort"/> is handed it); otherwise, before PLANET_LIST answers or
+/// against a module before build 53, <see cref="PickerOrder"/> is the same order as qwark sends
+/// it, so the list sorts the same either way.
+/// </para>
+/// <para>
+/// The picker is left exactly as the console orders it. The moves are the save list's own: a
+/// save made on a level that belongs to a planet sits right after that planet's saves, where the
+/// player meets it, rather than wherever the picker lists the level among the others.
+/// </para>
+/// </summary>
+public static class SaveFilePlanetOrder
+{
+    /// <summary>A level moved, for the save list alone, to right after <see cref="After"/>.</summary>
+    public readonly record struct Move(int Level, int After);
+
+    /// <summary>
+    /// UYA's picker order, qwark's <c>rac3_planet_order</c> (src/games/rac3.c): the planets in the
+    /// order the game visits them, each mission level after its planet, the arena and ranger levels
+    /// after the story, the vid comics by their number, then the two gaps and the menu.
+    /// </summary>
+    private static readonly int[] Rac3Picker =
+    {
+        1, 2, 3, 4, 5,          // Veldin, Florana, Starship Phoenix, Marcadia, Daxx
+        11, 12,                 // Obani Gemini, Blackwater City
+        7,                      // Annihilation Nation
+        8, 27, 28,              // Aquatos, Aquatos Clank, Aquatos Sewers
+        9, 10,                  // Tyhrranosis, Zeldrin Starport
+        13, 23,                 // Holostar, Holostar Clank
+        21,                     // Obani Draco
+        16, 17, 18, 19,         // Metropolis, Crash Site, Aridia, Qwark's Hideout
+        6, 14, 22, 20,          // Phoenix Rescue, Koros, Command Center, Launch Site
+        24,                     // Insomniac Museum
+        29, 26,                 // Tyhrranosis Rangers, Metropolis Rangers
+        31, 33, 34, 32, 35, 30, // Vid Comics 1 to 6
+        36,                     // Vid Comic 1 SE
+        15, 25, 0,              // the two gaps and the menu
+    };
+
+    /// <summary>
+    /// Deadlocked's picker order, qwark's <c>rac4_planet_order</c> (src/games/rac4.c): the
+    /// numbering but for Orxon (8) before Valix (7), then the unused id and the three loops.
+    /// </summary>
+    private static readonly int[] Rac4Picker = { 1, 2, 4, 5, 6, 8, 7, 10, 11, 13, 14, 15, 0, 3, 9, 12 };
+
+    /// <summary>
+    /// RaC2, whose picker is in id order: each orbit after its planet (Dobbo Orbit, 22, after
+    /// Dobbo, 9; Damosel Orbit, 23, after Damosel, 18), the Jamming Array (26) after Maktar (2)
+    /// and Wupash (25) after Oozla (1). Slim Cognito's Ship Shack (24) names
+    /// no planet and stays where the picker has it, after the Museum.
+    /// </summary>
+    private static readonly Move[] Rac2Moves = { new(25, 1), new(26, 2), new(22, 9), new(23, 18) };
+
+    /// <summary>UYA: each ranger level after its planet, Tyhrranosis (9) and Metropolis (16).</summary>
+    private static readonly Move[] Rac3Moves = { new(29, 9), new(26, 16) };
+
+    /// <summary>
+    /// The picker's order of <paramref name="game"/>'s levels when the console has not said one: the
+    /// order qwark's PLANET_LIST sends, every id of its list once. RaC1, RaC2 and ToD number their
+    /// levels in the order the game visits them and qwark sends the ids in turn (19, 27 and 19 of
+    /// them); UYA and Deadlocked have orders of their own. Empty for a game with no planet list.
+    /// </summary>
+    public static IReadOnlyList<int> PickerOrder(GameId game) => game switch
+    {
+        GameId.Rac1 => Ids(19),
+        GameId.Rac2 => Ids(27),
+        GameId.Rac3 => Rac3Picker,
+        GameId.Rac4 => Rac4Picker,
+        GameId.Tod => Ids(19),
+        _ => Array.Empty<int>(),
+    };
+
+    /// <summary>The levels the save list moves in <paramref name="game"/>, in the order they are made.</summary>
+    public static IReadOnlyList<Move> Moves(GameId game) => game switch
+    {
+        GameId.Rac2 => Rac2Moves,
+        GameId.Rac3 => Rac3Moves,
+        _ => Array.Empty<Move>(),
+    };
+
+    /// <summary>
+    /// The levels of <paramref name="game"/> in the save list's order: <paramref name="pickerOrder"/>,
+    /// the console's, or <see cref="PickerOrder"/> without one, then each of <see cref="Moves"/>
+    /// taken out and put back right after its planet. A move whose level or planet the order does
+    /// not have is left out, and a level named twice counts where it first stands.
+    /// </summary>
+    public static int[] For(GameId game, IReadOnlyList<int>? pickerOrder = null)
+    {
+        var order = (pickerOrder is { Count: > 0 } ? pickerOrder : PickerOrder(game)).Distinct().ToList();
+        foreach (var move in Moves(game))
+        {
+            if (move.Level == move.After || !order.Contains(move.After) || !order.Remove(move.Level)) continue;
+            order.Insert(order.IndexOf(move.After) + 1, move.Level);
+        }
+
+        return order.ToArray();
+    }
+
+    /// <summary>
+    /// Where each level of <paramref name="game"/> goes in the save list, from <see cref="For"/>.
+    /// A level the order does not name goes after every one it does, by its number.
+    /// </summary>
+    public static Func<int, int> Ranks(GameId game, IReadOnlyList<int>? pickerOrder = null)
+    {
+        var order = For(game, pickerOrder);
+        var rank = new Dictionary<int, int>(order.Length);
+        for (int i = 0; i < order.Length; i++) rank[order[i]] = i;
+        return level => rank.TryGetValue(level, out int at) ? at : order.Length + level;
+    }
+
+    private static int[] Ids(int count) => Enumerable.Range(0, count).ToArray();
 }
 
 /// <summary>

@@ -499,6 +499,12 @@ public sealed partial class AppState : IDisposable
     /// </summary>
     public int[] PlanetOrder { get; private set; } = Array.Empty<int>();
 
+    /// <summary>
+    /// True when <see cref="PlanetOrder"/> is the order the console sent, false while it is the ids
+    /// in turn standing in for none (a module before build 53, or no PLANET_LIST answer yet).
+    /// </summary>
+    public bool PlanetOrderSent { get; private set; }
+
     public WatchEntry[] Watches { get; private set; } = Array.Empty<WatchEntry>();
 
     public FreezeEntry[] Freezes { get; private set; } = Array.Empty<FreezeEntry>();
@@ -1779,6 +1785,7 @@ public sealed partial class AppState : IDisposable
         Autosplitter.Game = GameId.None;
         Planets = Array.Empty<string>();
         PlanetOrder = Array.Empty<int>();
+        PlanetOrderSent = false;
         Autosplitter.PlanetNames = Planets;
         EnumOptions.Clear();
         Unlocks = UnlockList.Empty;
@@ -1959,6 +1966,7 @@ public sealed partial class AppState : IDisposable
         {
             Planets = planets.Names;
             PlanetOrder = planets.Order;
+            PlanetOrderSent = planets.OrderSent;
             Autosplitter.PlanetNames = planets.Names;
         }, quiet);
 

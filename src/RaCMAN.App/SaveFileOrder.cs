@@ -6,11 +6,13 @@ namespace RaCMAN.App;
 /// The order of the rows in a savefile category, by the Settings choice (<see cref="SaveFileSort"/>).
 /// <para>
 /// By planet, the default: each save goes under the planet it was made on, which the save itself
-/// says (<see cref="SaveFilePlanet"/>), in the running game's level order, the line order of its
-/// planets file (<see cref="AutosplitRoutes"/>). A level the file has no planet on is no planet.
-/// Saves on one planet are in natural order, and the saves whose planet is not known (not read
-/// yet, too short, not a save of this game, only on the console where it cannot be read) come
-/// after all of them, in natural order too.
+/// says (<see cref="SaveFilePlanet"/>), in the order the game is played: the planet picker's
+/// order with the save list's own moves (<see cref="SaveFilePlanetOrder"/>), so a revisit (RaC1's
+/// second Veldin, RaC2's second Aranos, ToD's Fastoon II) is where the game visits it. A level
+/// whose line in the game's planets file (<see cref="AutosplitRoutes"/>) is null or missing is no
+/// planet. Saves on one planet are in natural order, and the saves whose planet is not known (not
+/// read yet, too short, not a save of this game, only on the console where it cannot be read)
+/// come after all of them, in natural order too.
 /// </para>
 /// <para>
 /// Alphabetical: natural order alone, which ignores case and compares numbers as numbers,
@@ -22,13 +24,16 @@ public static class SaveFileOrder
     /// <summary>
     /// The rows in the order the panel lists them. <paramref name="planetOf"/> is each row's level
     /// as its save says it, or null; without it, or without a game, the order is natural.
+    /// <paramref name="pickerOrder"/> is the planet picker's order as the console sent it for
+    /// <paramref name="game"/>, or null for the one <see cref="SaveFilePlanetOrder.PickerOrder"/> keeps.
     /// </summary>
     public static SaveFileEntry[] Sort(IEnumerable<SaveFileEntry> rows, GameId game, SaveFileSort sort,
-        Func<SaveFileEntry, int?>? planetOf)
+        Func<SaveFileEntry, int?>? planetOf, IReadOnlyList<int>? pickerOrder = null)
     {
         bool byPlanet = sort == SaveFileSort.ByPlanet && game != GameId.None && planetOf is not null;
+        var rank = byPlanet ? SaveFilePlanetOrder.Ranks(game, pickerOrder) : null;
         return rows
-            .Select(row => (Row: row, Planet: byPlanet ? PlanetIndex(game, planetOf!(row)) : -1))
+            .Select(row => (Row: row, Planet: byPlanet ? PlanetIndex(game, planetOf!(row), rank!) : -1))
             .OrderBy(r => r.Planet < 0 ? 1 : 0)
             .ThenBy(r => r.Planet)
             // The name on screen, without the .sav, so "Kerwan" comes before "Kerwan 2" rather than
@@ -44,11 +49,11 @@ public static class SaveFileOrder
         Sort(rows, GameId.None, SaveFileSort.Alphabetical, null);
 
     /// <summary>
-    /// Where a save on <paramref name="level"/> goes: the level itself when the game's planets file
-    /// has a planet on that line, -1 (below every planet) when not.
+    /// Where a save on <paramref name="level"/> goes: its level's place in <paramref name="rank"/>
+    /// when the game's planets file has a planet on that line, -1 (below every planet) when not.
     /// </summary>
-    public static int PlanetIndex(GameId game, int? level) =>
-        level is int index && AutosplitRoutes.Knows(game, index) ? index : -1;
+    private static int PlanetIndex(GameId game, int? level, Func<int, int> rank) =>
+        level is int index && AutosplitRoutes.Knows(game, index) ? rank(index) : -1;
 
     /// <summary>
     /// Natural order without regard to case: runs of digits compare as numbers, everything else

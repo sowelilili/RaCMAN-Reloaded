@@ -92,6 +92,12 @@ public static class SaveFilesPanel
     /// <summary>The Settings order <see cref="_entries"/> was last sorted by, so a change there re-sorts.</summary>
     private static SaveFileSort _sortedBy;
 
+    /// <summary>
+    /// The console's picker order <see cref="_entries"/> was last sorted by (<see cref="PickerOrder"/>),
+    /// so PLANET_LIST answering after the scan sorts the rows again by what it said.
+    /// </summary>
+    private static IReadOnlyList<int>? _sortedOrder;
+
     /// <summary>Seconds since SAVEFILE_INFO was last re-read while it said the helper had not run.</summary>
     private static float _sinceInfo;
 
@@ -275,6 +281,7 @@ public static class SaveFilesPanel
         if (!string.Equals(_title, title, StringComparison.Ordinal) || _game != session.Game) Rescan(state, title, session.Game);
         else if (!_consoleListed && ConsoleReadable(state)) Rescan(state, title);
         else if (_sortedBy != state.Settings.SaveFileSort) RescanFiles(state, title);
+        else if (!ReferenceEquals(_sortedOrder, PickerOrder(state, _game))) Resort(state);
 
         bool premade = IsPremade;
 
@@ -1425,9 +1432,21 @@ public static class SaveFilesPanel
     /// (<see cref="SaveFileOrder"/>), by planet with each row's planet from <paramref name="planetOf"/>.
     /// </summary>
     public static SaveFileEntry[] Rows(string category, IEnumerable<ConsoleSaveFile>? console, IEnumerable<LocalSaveFile>? pc,
-        GameId game = GameId.None, SaveFileSort sort = SaveFileSort.ByPlanet, Func<SaveFileEntry, int?>? planetOf = null) =>
+        GameId game = GameId.None, SaveFileSort sort = SaveFileSort.ByPlanet, Func<SaveFileEntry, int?>? planetOf = null,
+        IReadOnlyList<int>? pickerOrder = null) =>
         SaveFileOrder.Sort(IsReadOnly(category) ? SaveFileMerge.BuildPremade(console, pc) : SaveFileMerge.Build(console, pc),
-            game, sort, planetOf);
+            game, sort, planetOf, pickerOrder);
+
+    /// <summary>
+    /// The planet picker's order for <paramref name="game"/> as the console sent it, which the
+    /// order by planet follows (<see cref="SaveFilePlanetOrder"/>): PLANET_LIST's order while it
+    /// was sent for that game, null otherwise (no answer yet, another game described, a module
+    /// before build 53), when the sort uses the same order as the client keeps it.
+    /// </summary>
+    public static IReadOnlyList<int>? PickerOrder(AppState state, GameId game) =>
+        game != GameId.None && state.DescribedGame == game && state.PlanetOrderSent && state.PlanetOrder.Length > 0
+            ? state.PlanetOrder
+            : null;
 
     /// <summary>
     /// A row's planet as <paramref name="planets"/> knows it: this PC's copy when there is one,
@@ -1487,12 +1506,13 @@ public static class SaveFilesPanel
         return read;
     }
 
-    /// <summary>The rows on screen sorted again, the selection kept, after more planets became known.</summary>
+    /// <summary>The rows on screen sorted again, the selection kept, after more planets became known or the console sent its picker order.</summary>
     private static void Resort(AppState state)
     {
         string? keep = Selected?.Name;
         _sortedBy = state.Settings.SaveFileSort;
-        _entries = SaveFileOrder.Sort(_entries, _game, _sortedBy, PlanetOf(Planets, _game));
+        _sortedOrder = PickerOrder(state, _game);
+        _entries = SaveFileOrder.Sort(_entries, _game, _sortedBy, PlanetOf(Planets, _game), _sortedOrder);
         _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
     }
 
@@ -1564,7 +1584,8 @@ public static class SaveFilesPanel
         }
 
         _sortedBy = sort;
-        _entries = Rows(category, null, pc, game, sort, PlanetOf(Planets, game));
+        _sortedOrder = PickerOrder(state, game);
+        _entries = Rows(category, null, pc, game, sort, PlanetOf(Planets, game), _sortedOrder);
         if (_fileIndex >= _entries.Length) _fileIndex = -1;
 
         if (!ConsoleReadable(state)) return;
@@ -1585,7 +1606,8 @@ public static class SaveFilesPanel
 
                     string? keep = Selected?.Name;
                     _sortedBy = state.Settings.SaveFileSort;
-                    _entries = Rows(category, console, pc, game, _sortedBy, PlanetOf(Planets, game));
+                    _sortedOrder = PickerOrder(state, game);
+                    _entries = Rows(category, console, pc, game, _sortedBy, PlanetOf(Planets, game), _sortedOrder);
                     _fileIndex = keep is null ? -1 : Array.FindIndex(_entries, e => e.Name == keep);
                     ReadConsolePlanets(state, title, category, consoleCategory, game);
                 });
