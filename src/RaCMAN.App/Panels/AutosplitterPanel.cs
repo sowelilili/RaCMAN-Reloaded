@@ -268,11 +268,7 @@ public static class AutosplitterPanel
         ImGui.EndDisabled();
         if (ImGui.IsItemHovered())
         {
-            Ui.SetTooltip("Don't split on a load your console marks as a revisit. In Tools of "
-                             + "Destruction that is Metropolis or Cobalia once their arrival "
-                             + "cutscenes are behind you (the ship fixed on Fastoon). Your console "
-                             + "reads it from the save, so Fast loads and Remove cutscenes make no "
-                             + "difference.");
+            Ui.SetTooltip("Don't split on a Metropolis or Cobalia revisit.");
         }
     }
 
