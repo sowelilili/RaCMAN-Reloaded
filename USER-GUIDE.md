@@ -131,6 +131,14 @@ In Going Commando and Up Your Arsenal, **Game**, then **Cosmetics**, has three c
 
 The colours stay until the game restarts. Tick **on boot** beside **Save** to have the console set them again every time the game boots, also with no PC connected. While the box is ticked, the console also keeps every colour you change.
 
+## Armour and skins
+
+In Going Commando, Up Your Arsenal and Tools of Destruction, **Game**, then **Cosmetics**, has an **Armour** list (Up Your Arsenal's was already there) and a **Skin** list, named as the game names them. Deadlocked's **Skin** list is in the same place. They work on a console and under RPCS3.
+
+- **Going Commando:** a new armour protects Ratchet at once, but his look changes at the next planet load. A skin also shows from the next planet load. The skins are the game's own Cheats menu skins, and picking one turns the other three off.
+- **Up Your Arsenal:** a skin shows from the next planet load. **Current Armor** takes the skin off.
+- **Tools of Destruction:** an armour protects Ratchet at once, and the game counts it as bought, as its armour vendor does.
+
 ## Deadlocked's HUD colour
 
 In Deadlocked, **Game**, then **Cosmetics**, has a **HUD** heading with a **HUD colour** picker. It sets any colour for the HUD, where the game's HUD colour cheat offers only a few. The whole HUD changes at once: the health bar, the EXP bars, the ammo, the quick-select slots, the radar and its outline, the prompt and pickup boxes, the bot HUD and the end screen.

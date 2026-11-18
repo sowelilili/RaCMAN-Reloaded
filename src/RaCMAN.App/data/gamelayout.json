@@ -88,7 +88,14 @@
         "Max all weapon ammo": "Unlocks",
 
         "Enable debug mode": "Debug",
-        "QE save write-offset": "Debug"
+        "QE save write-offset": "Debug",
+
+        "Armour": "Cosmetics",
+        "Skin": "Cosmetics"
+      },
+      "tooltips": {
+        "Armour": "The armour Ratchet wears. It protects him at once; his look changes at the next planet load.",
+        "Skin": "Ratchet's skin, as the game's Cheats menu gives it. It shows from the next planet load."
       }
     },
 
@@ -112,6 +119,7 @@
 
         "Armour": "Cosmetics",
         "Ship colour": "Cosmetics",
+        "Skin": "Cosmetics",
 
         "QE offset": "Debug",
         "Enable vendor QE": "Debug"
@@ -124,6 +132,9 @@
             "Chargeboots tint"
           ]
         }
+      },
+      "tooltips": {
+        "Skin": "Ratchet's skin, as the game's skin menu gives it. It shows from the next planet load."
       }
     },
 
@@ -169,7 +180,10 @@
         "Unlock all skill points": "Collectables",
         "Reset skill points": "Collectables",
         "Unlock all gold bolts": "Collectables",
-        "Reset gold bolts": "Collectables"
+        "Reset gold bolts": "Collectables",
+
+        "Armour": "Cosmetics",
+        "Skin": "Cosmetics"
       },
       "headings": {
         "Manips": {
