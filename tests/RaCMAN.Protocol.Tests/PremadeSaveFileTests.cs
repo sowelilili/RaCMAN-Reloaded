@@ -476,7 +476,7 @@ public class PremadeSaveFileTests : IDisposable
 }
 
 /// <summary>
-/// The premade savefiles this repository ships, as publish.ps1 stages them: the six the release is
+/// The premade savefiles this repository ships, as publish.ps1 stages them: the seven the release is
 /// meant to carry, each one a whole save of its game, and nothing else in the folder.
 /// </summary>
 public class ShippedPremadeSaveFileTests
@@ -503,10 +503,11 @@ public class ShippedPremadeSaveFileTests
         ("NPEA00387", "NG+.sav", 2_097_152),
         ("NPEA00423", "NG+ no LC.sav", 1_048_576),
         ("NPEA00423", "NG+.sav", 1_048_576),
+        ("NPEA00452", "NG+.sav", 591_600),
     };
 
     [Fact]
-    public void TheRepositoryShipsTheSixPremadeSavefilesTheTitleListAndNothingElse()
+    public void TheRepositoryShipsTheSevenPremadeSavefilesTheTitleListAndNothingElse()
     {
         string root = LibraryPath();
 
@@ -524,7 +525,7 @@ public class ShippedPremadeSaveFileTests
     /// <summary>
     /// The other title ids qwark runs these games under: RaC2's two repacks, which are NPEA00386,
     /// and the disc trilogy, which holds RaC1, RaC2 and UYA and is told apart by the game running.
-    /// Deadlocked has no other title id in qwark, and so none here.
+    /// Deadlocked and Tools of Destruction have no other title id in qwark, and so none here.
     /// </summary>
     [Theory]
     [InlineData("RC2ILYOOO", GameId.Rac2, "NPEA00386")]

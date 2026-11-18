@@ -15,7 +15,7 @@ namespace RaCMAN.Protocol;
 /// older build's library to <c>DataFolderMigration</c>, which would copy it into the data folder.
 /// </para>
 /// <para>
-/// A game runs under more title ids than the four folders are named after, and a save fits every
+/// A game runs under more title ids than the five folders are named after, and a save fits every
 /// one of them that runs the same executable. <see cref="TitlesFileName"/> beside the folders says
 /// which: RaC2's two repacks take NPEA00386's, and the disc trilogy BCES01503 takes RaC1's, RaC2's
 /// or UYA's by the game that is running, since one title id holds all three. Everything here that

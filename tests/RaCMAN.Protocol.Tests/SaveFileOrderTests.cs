@@ -94,7 +94,9 @@ public class SaveFileOrderTests : IDisposable
         string root = PremadeFolder();
 
         // Every NG+ save starts the game over: RaC1's Veldin and RaC2's Aranos are level 0, UYA's
-        // Veldin and Deadlocked's Dreadzone Station level 1 (0 is their menus).
+        // Veldin and Deadlocked's Dreadzone Station level 1 (0 is their menus), ToD's Kerwan
+        // (Metropolis) level 0, its LEVEL_ at the end of the file.
+        Assert.Equal(0, SaveFilePlanet.ReadFile(GameId.Tod, Path.Combine(root, "NPEA00452", "NG+.sav")));
         Assert.Equal(0, SaveFilePlanet.ReadFile(GameId.Rac1, Path.Combine(root, "NPEA00385", "NG+.sav")));
         Assert.Equal(0, SaveFilePlanet.ReadFile(GameId.Rac2, Path.Combine(root, "NPEA00386", "NG+ & NG+ no IMG.sav")));
         Assert.Equal(1, SaveFilePlanet.ReadFile(GameId.Rac3, Path.Combine(root, "NPEA00387", "NG+.sav")));
@@ -125,6 +127,25 @@ public class SaveFileOrderTests : IDisposable
         Assert.Null(SaveFilePlanet.Parse(GameId.Rac1, moved, moved.Length));
         Assert.Null(SaveFilePlanet.Parse(GameId.Rac1, rac1.AsSpan(0, 0x18), 0x18));
         Assert.Null(SaveFilePlanet.Parse(GameId.Rac1, new byte[0x1C], 0x1C));
+
+        // ToD's save is no original game's, and theirs are not ToD's, which only a whole GAME.SAV is.
+        var tod = Premade("NPEA00452", "NG+.sav");
+        Assert.Null(SaveFilePlanet.Parse(GameId.Rac1, tod, tod.Length));
+        Assert.Null(SaveFilePlanet.Parse(GameId.Rac4, tod, tod.Length));
+        Assert.Null(SaveFilePlanet.Parse(GameId.Tod, uya.AsSpan((int)SaveFilePlanet.TodLevelOffset, 4), uya.Length));
+    }
+
+    [Fact]
+    public void ToDsPremadeSaveIsOneTheConsoleTakes()
+    {
+        // qwark's own check before a ToD load (tod_save.c, tod_sf_aside_ok): weapon slots 0 to 3,
+        // 0x14 bytes apart from the start, hold their own ids; the level is one of the 19; the
+        // challenge mode after it is at most 1000, and in an NG+ save at least 1.
+        var tod = Premade("NPEA00452", "NG+.sav");
+        Assert.Equal(SaveFilePlanet.TodSaveLength, tod.Length);
+        for (int i = 0; i < 4; i++) Assert.Equal((uint)i, BinaryPrimitives.ReadUInt32BigEndian(tod.AsSpan(i * 0x14)));
+        Assert.InRange(BinaryPrimitives.ReadUInt32BigEndian(tod.AsSpan((int)SaveFilePlanet.TodLevelOffset)), 0u, 18u);
+        Assert.InRange(BinaryPrimitives.ReadUInt32BigEndian(tod.AsSpan((int)SaveFilePlanet.TodLevelOffset + 4)), 1u, 1000u);
     }
 
     [Fact]
