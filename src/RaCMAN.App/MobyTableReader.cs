@@ -22,11 +22,26 @@ public sealed record MobyTableSnapshot(
     int TotalRows,
     MobyRow[] Rows)
 {
-    public bool Capped => Rows.Length < TotalRows;
+    /// <summary>
+    /// How many of the <see cref="TotalRows"/> rows were read, the free ones included: a table
+    /// whose MOBY_TABLE carries a live test (revision 1.34) lists only the live rows it read.
+    /// </summary>
+    public int RowsWalked { get; init; } = -1;
 
-    public string Describe() => Capped
-        ? $"Read {Rows.Length} of {TotalRows} rows (capped)."
-        : $"Read {Rows.Length} rows from 0x{Start:X8} to 0x{End:X8}.";
+    private int Walked => RowsWalked < 0 ? Rows.Length : RowsWalked;
+
+    /// <summary>The free rows the walk passed over.</summary>
+    public int FreeRows => Walked - Rows.Length;
+
+    public bool Capped => Walked < TotalRows;
+
+    public string Describe()
+    {
+        string free = FreeRows > 0 ? $", {Rows.Length} live and {FreeRows} free" : string.Empty;
+        return Capped
+            ? $"Read {Walked} of {TotalRows} rows (capped){free}."
+            : $"Read {Walked} rows from 0x{Start:X8} to 0x{End:X8}{free}.";
+    }
 }
 
 /// <summary>
@@ -60,7 +75,8 @@ public static class MobyTableReader
         }
 
         uint start = ReadPointer(await client.MemReadAsync(info.TablePointerAddress, 4, cancellationToken).ConfigureAwait(false));
-        uint end = ReadPointer(await client.MemReadAsync(info.TableEndPointerAddress, 4, cancellationToken).ConfigureAwait(false));
+        uint endWord = ReadPointer(await client.MemReadAsync(info.TableEndPointerAddress, 4, cancellationToken).ConfigureAwait(false));
+        uint end = EndOf(info, start, endWord);
 
         if (end < start)
         {
@@ -81,15 +97,32 @@ public static class MobyTableReader
 
             for (int i = 0; i < count && (i + 1) * stride <= chunk.Length; i++)
             {
+                // Revision 1.34: a free slot of a pool that keeps them among the live rows.
+                if (info.IsDead(chunk.AsSpan(i * stride, stride))) continue;
+
                 rows.Add(Decode(layout, first + i, address + (uint)(i * stride), chunk.AsSpan(i * stride, stride)));
             }
         }
 
-        return new MobyTableSnapshot(info, start, end, total, rows.ToArray());
+        return new MobyTableSnapshot(info, start, end, total, rows.ToArray()) { RowsWalked = wanted };
     }
 
     public static uint ReadPointer(byte[] bytes) =>
         bytes.Length >= 4 ? BinaryPrimitives.ReadUInt32BigEndian(bytes) : 0u;
+
+    /// <summary>
+    /// Where the table ends, out of the end word MOBY_TABLE names: a pointer past the last row, or
+    /// since revision 1.34 (<see cref="MobyTableFlags.LastIndex"/>) the index of the last row the
+    /// table can have live, negative when there is none.
+    /// </summary>
+    public static uint EndOf(MobyTableInfo info, uint start, uint endWord)
+    {
+        if (!info.EndIsLastIndex) return endWord;
+
+        int last = unchecked((int)endWord);
+        if (last < 0) return start;
+        return start + (uint)((long)(last + 1) * info.Stride);
+    }
 
     public static MobyRow Decode(MobyLayout? layout, int index, uint address, ReadOnlySpan<byte> row)
     {

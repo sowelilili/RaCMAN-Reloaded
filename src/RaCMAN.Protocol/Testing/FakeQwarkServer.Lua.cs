@@ -145,9 +145,63 @@ public sealed partial class FakeQwarkServer
             new Feature(7, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset skill points"),
             new Feature(8, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Unlock all gold bolts"),
             new Feature(9, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset gold bolts"),
+            // Revision 1.34: the weapon bulk actions, qwark's ids 27 to 29.
+            new Feature(27, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Max all weapon levels"),
+            new Feature(28, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset all weapon levels"),
+            new Feature(29, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Max all weapon ammo"),
             new Feature(40, FeatureKind.Action, 3, 0, FeatureFlags.SaveAside, 0xFF, 0, 0, "Set aside file"),
             new Feature(41, FeatureKind.Action, 3, 0, FeatureFlags.LoadAside, 0xFF, 0, 0, "Load set-aside file"),
         });
+
+    /// <summary>A ToD moby slot (revision 1.34, ToDMoby): 0x180 bytes.</summary>
+    public const int TodMobyStride = 0x180;
+
+    /// <summary>Where a ToD moby keeps its handle, serial in the high half, and the serial of a free slot.</summary>
+    public const ushort TodMobyHandleOffset = 0x64;
+
+    public const ushort TodMobyFreeSerial = 0xFFFE;
+
+    /// <summary>The fake pool's slots in memory, its last index in use, and the free ones below it.</summary>
+    public const int TodMobySlots = 7;
+
+    public const int TodMobyLastIndex = 4;
+
+    public static readonly int[] TodMobyFreeSlots = { 1, 3 };
+
+    private bool _todMobyPool;
+
+    /// <summary>
+    /// ToD's moby pool as the game keeps it (MobyPool_init, MobyPool_alloc, MobyPool_processFrees):
+    /// the slots' pointer at the pool's +0 and the highest index in use at +0x10, each slot's handle
+    /// at +0x64, a free one's serial 0xFFFE. Slots 1 and 3 are free; 5 and 6, past the last index,
+    /// hold what a live slot holds, which a reader that walks past the end would list.
+    /// </summary>
+    private void BuildTodMobyPool()
+    {
+        uint start = MemoryBase + MobyTableOffset;
+        var pool = new SpanWriter(Memory.AsSpan((int)MobyPointerOffset, 0x14));
+        pool.WriteU32(start);
+        pool.WriteU32(0);
+        pool.WriteU32((uint)TodMobySlots);
+        pool.WriteU32((uint)(TodMobyLastIndex + 1 - TodMobyFreeSlots.Length));
+        pool.WriteU32((uint)TodMobyLastIndex);
+
+        for (int i = 0; i < TodMobySlots; i++)
+        {
+            var entry = Memory.AsSpan((int)MobyTableOffset + i * TodMobyStride, TodMobyStride);
+            entry.Clear();
+            bool free = Array.IndexOf(TodMobyFreeSlots, i) >= 0;
+
+            var pos = new SpanWriter(entry[0x30..]);
+            pos.WriteF32(10f * i);
+            pos.WriteF32(-5f * i);
+            pos.WriteF32(1.5f + i);
+            pos.WriteF32(1f);
+
+            new SpanWriter(entry[0x50..]).WriteU16(free ? (ushort)0xFFFF : (ushort)(0x100 + i));
+            new SpanWriter(entry[0x64..]).WriteU32(free ? (0xFFFE0000u | (uint)i) : ((uint)(2 + i) << 16) | (uint)i);
+        }
+    }
 
     /// <summary>The size of a ToD save, the GAME.SAV image (revision 1.28).</summary>
     public const int TodSaveSize = 0x906F0;
@@ -168,6 +222,8 @@ public sealed partial class FakeQwarkServer
         lock (_gate)
         {
             Describe = TodDescribe();
+            _todMobyPool = true;
+            BuildMobyTable();
             Planets = (string[])TodPlanets.Clone();
             PlanetOrder = null;
             LevelFlags.Clear();

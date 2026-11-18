@@ -653,6 +653,54 @@ public class ParsingTests
         Assert.Equal(0x95F6B0u, info.TablePointerAddress);
         Assert.Equal(0x95F6B4u, info.TableEndPointerAddress);
         Assert.Equal(0x100, info.Stride);
+
+        // The four original games send flags 0: a flat table, no live test.
+        Assert.Equal(MobyTableFlags.None, info.Flags);
+        Assert.False(info.EndIsLastIndex);
+        Assert.False(info.IsDead(new byte[0x100]));
+    }
+
+    /// <summary>
+    /// Revision 1.34, Tools of Destruction's reply: the end word is the last index in use, and a
+    /// slot whose u16 at +0x64 is 0xFFFE is free. A reply that names the live test without its two
+    /// halfwords is refused rather than read as a test against offset 0.
+    /// </summary>
+    [Fact]
+    public void ToDMobyTableParsesItsFlagsAndLiveTest()
+    {
+        var payload = new byte[16];
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(0), 0x1066C300);
+        BinaryPrimitives.WriteUInt32BigEndian(payload.AsSpan(4), 0x1066C310);
+        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(8), 0x180);
+        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(10), 3);
+        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(12), 0x64);
+        BinaryPrimitives.WriteUInt16BigEndian(payload.AsSpan(14), 0xFFFE);
+
+        var info = MobyTableInfo.Parse(payload);
+        Assert.True(info.EndIsLastIndex);
+        Assert.True(info.HasLiveTest);
+        Assert.Equal(0x64, info.LiveOffset);
+        Assert.Equal(0xFFFE, info.DeadValue);
+
+        var row = new byte[0x180];
+        BinaryPrimitives.WriteUInt32BigEndian(row.AsSpan(0x64), 0xFFFE0007);
+        Assert.True(info.IsDead(row));
+        BinaryPrimitives.WriteUInt32BigEndian(row.AsSpan(0x64), 0x0003FFFE);   // live: only the serial half counts
+        Assert.False(info.IsDead(row));
+
+        // The end of the table: the slot after the last index, and the start itself for -1.
+        Assert.Equal(0x30000000u + 5 * 0x180, RaCMAN.App.MobyTableReader.EndOf(info, 0x30000000, 4));
+        Assert.Equal(0x30000000u, RaCMAN.App.MobyTableReader.EndOf(info, 0x30000000, 0xFFFFFFFF));
+        Assert.Equal(0x30000000u + 0x180, RaCMAN.App.MobyTableReader.EndOf(info, 0x30000000, 0));
+
+        // Without the flag the end word is a pointer, as it always was.
+        var flatPayload = payload.AsSpan(0, 12).ToArray();
+        flatPayload[11] = 0;
+        var flat = MobyTableInfo.Parse(flatPayload);
+        Assert.Equal(0x1066C310u, RaCMAN.App.MobyTableReader.EndOf(flat, 0x30000000, 0x1066C310));
+
+        var truncated = payload.AsSpan(0, 12).ToArray();
+        Assert.Throws<ProtocolException>(() => MobyTableInfo.Parse(truncated));
     }
 
     [Fact]

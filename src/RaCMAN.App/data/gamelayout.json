@@ -67,6 +67,9 @@
         "Unlock all skill points": "Collectables",
         "Reset skill points": "Collectables",
 
+        "Upgrade all weapons to gold": "Unlocks",
+        "Reset all gold weapons": "Unlocks",
+
         "Jankpot bolts": "Debug",
         "Jankpot timer (frames)": "Debug",
         "Activate jankpot": "Debug"
@@ -183,7 +186,11 @@
         "Reset gold bolts": "Collectables",
 
         "Armour": "Cosmetics",
-        "Skin": "Cosmetics"
+        "Skin": "Cosmetics",
+
+        "Max all weapon levels": "Unlocks",
+        "Reset all weapon levels": "Unlocks",
+        "Max all weapon ammo": "Unlocks"
       },
       "headings": {
         "Manips": {

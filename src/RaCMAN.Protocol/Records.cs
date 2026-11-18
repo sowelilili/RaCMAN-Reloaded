@@ -1415,17 +1415,52 @@ public sealed record ProfileInfo(
     }
 }
 
-/// <summary>MOBY_TABLE reply: where the client should point MEM_READ.</summary>
-public readonly record struct MobyTableInfo(uint TablePointerAddress, uint TableEndPointerAddress, ushort Stride)
+/// <summary>
+/// MOBY_TABLE reply: where the client should point MEM_READ. Revision 1.34: the reply's last
+/// halfword, a pad until then and 0 in the four original games, is <see cref="Flags"/>.
+/// <see cref="MobyTableFlags.LastIndex"/>: the end word is the index of the last row the table can
+/// have live (an s32, negative for none), not a pointer past its end.
+/// <see cref="MobyTableFlags.LiveTest"/>: two more halfwords follow, a row's offset and the value a
+/// free row holds there (Tools of Destruction's pool keeps its free slots among the live ones).
+/// </summary>
+public readonly record struct MobyTableInfo(uint TablePointerAddress, uint TableEndPointerAddress, ushort Stride,
+    MobyTableFlags Flags = MobyTableFlags.None, ushort LiveOffset = 0, ushort DeadValue = 0)
 {
+    public bool EndIsLastIndex => (Flags & MobyTableFlags.LastIndex) != 0;
+
+    public bool HasLiveTest => (Flags & MobyTableFlags.LiveTest) != 0;
+
     public static MobyTableInfo Parse(ReadOnlySpan<byte> payload)
     {
         var r = new SpanReader(payload);
         uint tablePtr = r.ReadU32();
         uint endPtr = r.ReadU32();
         ushort stride = r.ReadU16();
-        return new MobyTableInfo(tablePtr, endPtr, stride);
+        var flags = payload.Length >= 12 ? (MobyTableFlags)r.ReadU16() : MobyTableFlags.None;
+        ushort liveOffset = 0, deadValue = 0;
+        if ((flags & MobyTableFlags.LiveTest) != 0)
+        {
+            if (payload.Length < 16) throw new ProtocolException("MOBY_TABLE names a live test and does not carry it");
+            liveOffset = r.ReadU16();
+            deadValue = r.ReadU16();
+        }
+
+        return new MobyTableInfo(tablePtr, endPtr, stride, flags, liveOffset, deadValue);
     }
+
+    /// <summary>Whether a row (of this table) is a free slot by the reply's live test; never one without a test.</summary>
+    public bool IsDead(ReadOnlySpan<byte> row) =>
+        HasLiveTest && LiveOffset + 2 <= row.Length
+        && System.Buffers.Binary.BinaryPrimitives.ReadUInt16BigEndian(row[LiveOffset..]) == DeadValue;
+}
+
+/// <summary>MOBY_TABLE's flags, revision 1.34.</summary>
+[Flags]
+public enum MobyTableFlags : ushort
+{
+    None = 0,
+    LastIndex = 0x0001,
+    LiveTest = 0x0002,
 }
 
 /// <summary>One word of a client patch.</summary>

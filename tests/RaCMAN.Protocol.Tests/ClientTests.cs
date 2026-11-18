@@ -679,6 +679,58 @@ public class ClientTests
         }
     }
 
+    /// <summary>
+    /// Revision 1.34: Tools of Destruction's moby pool from the fake console. The table ends at the
+    /// last index in use, so the two live-looking slots past it are never read, and the free slots
+    /// below it are left out of the list while every live row keeps its pool index; the ToD layout
+    /// decodes the position at 0x30, the class at 0x50 and the handle at 0x64.
+    /// </summary>
+    [Fact]
+    public async Task MobyTableReaderListsToDsLiveMobysFromItsPool()
+    {
+        var (server, client) = await ConnectAsync();
+        using (server)
+        using (client)
+        {
+            server.UseTod();
+            var layout = MobyLayouts.Load(Path.Combine(AppContext.BaseDirectory, "data", "moby"))[GameId.Tod];
+
+            var snapshot = await MobyTableReader.ReadAsync(client, layout);
+
+            Assert.True(snapshot.Info.EndIsLastIndex && snapshot.Info.HasLiveTest);
+            Assert.Equal(FakeQwarkServer.TodMobyStride, snapshot.Info.Stride);
+            Assert.Equal(FakeQwarkServer.TodMobyLastIndex + 1, snapshot.TotalRows);
+            Assert.Equal(new[] { 0, 2, 4 }, snapshot.Rows.Select(r => r.Index).ToArray());
+            Assert.Equal(FakeQwarkServer.TodMobyFreeSlots.Length, snapshot.FreeRows);
+            Assert.False(snapshot.Capped);
+            Assert.Contains("3 live and 2 free", snapshot.Describe());
+
+            foreach (var row in snapshot.Rows)
+            {
+                int i = row.Index;
+                Assert.Equal(snapshot.Start + (uint)(i * FakeQwarkServer.TodMobyStride), row.Address);
+                Assert.Equal(10f * i, row.X);
+                Assert.Equal(-5f * i, row.Y);
+                Assert.Equal(1.5f + i, row.Z);
+                Assert.Equal(0x100 + i, row.OClass);
+                Assert.Equal(((long)(2 + i) << 16) | (long)i, row.Uid);
+                Assert.Null(row.State);
+            }
+
+            // The inspector reads one row and shows every field of the layout's struct, the
+            // handle as the table does; the class written back reads back.
+            var first = snapshot.Rows[1];
+            var bytes = await client.MemReadAsync(first.Address, (uint)layout.Stride);
+            var handle = layout.Struct.Single(f => f.Name == "handle");
+            Assert.Equal(((2u + 2u) << 16 | 2u).ToString(), MobyFieldCodec.Format(handle, bytes));
+            var oClass = layout.Struct.Single(f => f.Name == "oClass");
+            Assert.True(MobyFieldCodec.TryEncode(oClass, "777", out var written));
+            await client.MemWriteAsync(first.Address + (uint)oClass.Offset, written);
+            var again = await MobyTableReader.ReadAsync(client, layout);
+            Assert.Equal(777, again.Rows[1].OClass);
+        }
+    }
+
     [Fact]
     public async Task MobyTableReaderCapsTheRowCountAndSaysSo()
     {

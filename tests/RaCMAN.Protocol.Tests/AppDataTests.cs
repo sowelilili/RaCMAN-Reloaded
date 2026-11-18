@@ -149,7 +149,7 @@ public class AppDataTests
         var layouts = MobyLayouts.Load(MobyDataFolder());
 
         Assert.Empty(MobyLayouts.Problems);
-        Assert.Equal(4, layouts.Count);
+        Assert.Equal(5, layouts.Count);
 
         foreach (var game in new[] { GameId.Rac1, GameId.Rac2, GameId.Rac3, GameId.Rac4 })
         {
@@ -170,6 +170,21 @@ public class AppDataTests
                 Assert.NotEmpty(field.From);
             }
         }
+
+        // Revision 1.34: Tools of Destruction's ToDMoby, 0x180 bytes, the position the fourth row
+        // of its matrix. Its mobys keep no state byte of their own (the game object behind +0x40
+        // does), so it has no state column.
+        var tod = layouts[GameId.Tod];
+        Assert.Equal((byte)GameId.Tod, tod.Game);
+        Assert.Equal(0x180, tod.Stride);
+        Assert.NotEmpty(tod.Source);
+        Assert.Equal(0x30, tod.Fields["position"].Offset);
+        Assert.Equal("vec3f", tod.Fields["position"].Type);
+        Assert.False(tod.Has("state"));
+        Assert.Equal(0x50, tod.Fields["oClass"].Offset);
+        Assert.Equal("u16", tod.Fields["oClass"].Type);
+        Assert.Equal(0x64, tod.Fields["uid"].Offset);
+        Assert.Equal("u32", tod.Fields["uid"].Type);
     }
 
     [Theory]
@@ -194,6 +209,7 @@ public class AppDataTests
     [InlineData(GameId.Rac2, 94)]
     [InlineData(GameId.Rac3, 94)]
     [InlineData(GameId.Rac4, 70)]
+    [InlineData(GameId.Tod, 53)]
     public void EveryMobyStructListCoversItsWholeRow(GameId game, int count)
     {
         var layout = MobyLayouts.Load(MobyDataFolder())[game];
@@ -226,6 +242,7 @@ public class AppDataTests
     [InlineData(GameId.Rac2)]
     [InlineData(GameId.Rac3)]
     [InlineData(GameId.Rac4)]
+    [InlineData(GameId.Tod)]
     public void TheMobyColumnsAgreeWithTheStructTheyCameFrom(GameId game)
     {
         var layout = MobyLayouts.Load(MobyDataFolder())[game];

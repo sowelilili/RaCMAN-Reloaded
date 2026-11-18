@@ -154,6 +154,12 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// </summary>
     private void BuildMobyTable()
     {
+        if (_todMobyPool)
+        {
+            BuildTodMobyPool();
+            return;
+        }
+
         uint start = MemoryBase + MobyTableOffset;
         uint end = start + (uint)(_mobyRows * MobyStride);
 
@@ -2919,6 +2925,21 @@ public sealed partial class FakeQwarkServer : IDisposable
 
                 case Opcode.PatchList:
                     return (Status.Ok, new byte[] { 0 });
+
+                case Opcode.MobyTable when _todMobyPool:
+                {
+                    // Revision 1.34: ToD's g_mobyPool, the slots' pointer at +0 and the last
+                    // index in use at +0x10, the free slots told by the handle's serial.
+                    var buffer = new byte[16];
+                    var w = new SpanWriter(buffer);
+                    w.WriteU32(MemoryBase + MobyPointerOffset);
+                    w.WriteU32(MemoryBase + MobyPointerOffset + 0x10);
+                    w.WriteU16(TodMobyStride);
+                    w.WriteU16((ushort)(MobyTableFlags.LastIndex | MobyTableFlags.LiveTest));
+                    w.WriteU16(TodMobyHandleOffset);
+                    w.WriteU16(TodMobyFreeSerial);
+                    return (Status.Ok, buffer);
+                }
 
                 case Opcode.MobyTable:
                 {
