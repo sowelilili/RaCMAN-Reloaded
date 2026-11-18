@@ -202,15 +202,15 @@ public sealed partial class FakeQwarkServer
 
     /// <summary>
     /// COMBO_LIST's rows as the module lays them out: exactly one per action, in action order
-    /// (COMBO_COUNT, seven since revision 1.23), each with the mask in force: the active profile's
-    /// override where it has one, flagged, and the shared mask otherwise, 0 included. Caller holds
-    /// the gate.
+    /// (COMBO_COUNT, seven since revision 1.23, and the page combos after them since revision 1.34),
+    /// each with the mask in force: the active profile's override where it has one, flagged, and the
+    /// shared mask otherwise, 0 included. Caller holds the gate.
     /// </summary>
     private List<(ComboAction Action, ComboEntryFlags Flags, uint Mask)> CombosInForce()
     {
         var overrides = ActiveComboOverrides;
         var rows = new List<(ComboAction, ComboEntryFlags, uint)>();
-        for (var action = ComboAction.SavePosition; action <= ComboAction.ToggleFastLoads; action++)
+        for (var action = ComboAction.SavePosition; (int)action < ComboCount; action++)
         {
             rows.Add(overrides is not null && overrides.TryGetValue(action, out var own)
                 ? (action, ComboEntryFlags.Overridden, own)
@@ -372,7 +372,7 @@ public sealed partial class FakeQwarkServer
                 r.Skip(2);
                 uint mask = r.ReadU32();
 
-                if (action > ComboAction.ToggleFastLoads || set > 1) return (Status.BadArg, null);
+                if ((int)action >= ComboCount || set > 1) return (Status.BadArg, null);
                 if (!ProfilesLive) return (Status.Unsupported, null);
                 if (EnsureActiveProfile() is not { } profile) return (Status.NotFound, null);
 

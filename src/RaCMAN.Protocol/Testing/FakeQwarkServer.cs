@@ -1516,6 +1516,20 @@ public sealed partial class FakeQwarkServer : IDisposable
     };
 
     /// <summary>
+    /// Revision 1.34 (qwark build 59): the page combos, one per page of the Trainer, actions 7 on in
+    /// this order, which COMBO_LIST lists after the first seven and names after its entries, as
+    /// qwark's net.c does. Clear it to play a module before them: seven entries and no names, and
+    /// COMBO_SET and COMBO_OVERRIDE of action 7 on BAD_ARG.
+    /// </summary>
+    public List<string> ComboPages { get; } = new() { "Game", "Cheats", "Planets", "Manips", "Unlocks", "Mods", "Save files" };
+
+    /// <summary>The first page combo's action, qwark's COMBO_PAGE_FIRST.</summary>
+    public const byte FirstPageCombo = 7;
+
+    /// <summary>One past the module's last combo action: seven, and the page combos after them.</summary>
+    private int ComboCount => FirstPageCombo + ComboPages.Count;
+
+    /// <summary>
     /// The last COMBO_SUSPEND the client sent: true while it is holding the combos off, which is
     /// what the Combos panel does for the length of a capture. Null until one arrives, so a test
     /// can tell "never asked" from "asked and resumed".
@@ -3175,20 +3189,27 @@ public sealed partial class FakeQwarkServer : IDisposable
                     if (payload.Length < 8) return (Status.BadArg, null);
                     var r = new SpanReader(payload);
                     var action = (ComboAction)r.ReadU8();
-                    // Seven actions since revision 1.23, the fast-loads combo the seventh; an
-                    // action past them is BAD_ARG, as qwark answers it.
-                    if (action > ComboAction.ToggleFastLoads) return (Status.BadArg, null);
+                    // Seven actions since revision 1.23, the fast-loads combo the seventh, and
+                    // since revision 1.34 the page combos; an action past them is BAD_ARG, as qwark
+                    // answers it.
+                    if ((int)action >= ComboCount) return (Status.BadArg, null);
                     r.Skip(3);
-                    Combos[action] = r.ReadU32();
+                    uint set = r.ReadU32();
+                    // Revision 1.34: a page combo cleared is no line in config.txt, so no mask at all.
+                    if (set == 0 && (byte)action >= FirstPageCombo) Combos.Remove(action);
+                    else Combos[action] = set;
                     return (Status.Ok, null);
                 }
 
                 case Opcode.ComboList:
                 {
                     // Revision 1.24: the active profile's overrides laid over the shared masks, and
-                    // the byte after each action, pad before, says which rows they are.
+                    // the byte after each action, pad before, says which rows they are. Revision
+                    // 1.34: the page combos' names after the entries.
                     var rows = CombosInForce();
-                    var buffer = new byte[1 + rows.Count * 8];
+                    int names = ComboPages.Count == 0 ? 0
+                        : 1 + ComboPages.Sum(name => 2 + Encoding.ASCII.GetByteCount(name));
+                    var buffer = new byte[1 + (rows.Count * 8) + names];
                     var w = new SpanWriter(buffer);
                     w.WriteU8((byte)rows.Count);
                     foreach (var (action, flags, mask) in rows)
@@ -3197,6 +3218,18 @@ public sealed partial class FakeQwarkServer : IDisposable
                         w.WriteU8((byte)flags);
                         w.WriteZeros(2);
                         w.WriteU32(mask);
+                    }
+
+                    if (ComboPages.Count > 0)
+                    {
+                        w.WriteU8((byte)ComboPages.Count);
+                        for (int i = 0; i < ComboPages.Count; i++)
+                        {
+                            byte[] name = Encoding.ASCII.GetBytes(ComboPages[i]);
+                            w.WriteU8((byte)(FirstPageCombo + i));
+                            w.WriteU8((byte)name.Length);
+                            w.WriteBytes(name);
+                        }
                     }
 
                     return (Status.Ok, buffer);

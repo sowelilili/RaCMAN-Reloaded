@@ -101,6 +101,14 @@ The Combos panel also has a **Toggle fast loads** combo. It has no buttons until
 
 If you change or clear the console menu combo, hover its row to see the default buttons, and capture them again to put it back.
 
+You can also give each page of the Trainer menu a combo of its own, which opens the menu straight on that page: **Game**, **Cheats**, **Planets**, **Manips**, **Unlocks**, **Mods** and **Save files**. They share one row of the Combos panel, under **Open console menu**: pick the page in its dropdown (for example **Open Cheats**), then use **Capture**, **Clear** and **Override** as on any other row; they act on the page you picked. The dropdown lists each page with its buttons beside it once it has a combo, so you can see at a glance which pages have one. None has a combo until you capture one.
+
+- A page combo follows the same rules as the console menu combo: it works in play, not during a load or a cutscene, and not while the combos are switched off. Press it with the menu already open and you go to that page.
+- Back from the page goes to the Trainer menu's first page, as it does when you open a page yourself.
+- A page the game does not have opens nothing; the console says so the first time.
+- In ToD the pause menu opens for a moment first, then the page. ToD's **Planets** combo opens the galactic map straight away.
+- These combos need qwark build 59 or later on your console; with an older one the row is not shown.
+
 The Trainer menu has a **Mods** page, after **Unlocks**, with a row for each mod of the running game: the mods on your console, then the ones only a USB drive has (see [Mods on a USB drive](#mods-on-a-usb-drive)). Each row is **Off**, **On** (loaded) or **On boot** (loaded, and loaded again at every boot). Changing a row loads or unloads the mod at once, and the Mods panel shows the change.
 
 ## Per-user settings

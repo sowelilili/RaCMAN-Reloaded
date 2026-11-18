@@ -17,7 +17,7 @@ namespace RaCMAN.App;
 public static class FakeScript
 {
     public const string Usage = "seconds:step, comma separated. Steps: quit, xmb, booting, boot, rac2, rac3, rac4, tod, "
-                                + "unknown, drop, combos-off, combos-on, sfpatch, luapatch, switchesin, switchesout, start, "
+                                + "unknown, drop, combos-off, combos-on, pagecombos, sfpatch, luapatch, switchesin, switchesout, start, "
                                 + "split[:code[:arg]], reset, "
                                 + "load[:code[:ms]], loadend[:code[:ms]], pause[:code[:ms]], resume[:code[:ms]], "
                                 + "modsin[:dir], modscheck[:dir], modsout[:dir], consolemod[:dir], "
@@ -353,6 +353,13 @@ public static class FakeScript
 
             case "combos-on":
                 fake.CombosEnabled = true;
+                break;
+
+            // Revision 1.34: two of the Trainer's page combos bound, Cheats and Planets, so a
+            // headless run shows the Combos panel's page dropdown with pages that have a combo.
+            case "pagecombos":
+                fake.Combos[(ComboAction)(FakeQwarkServer.FirstPageCombo + 1)] = (uint)(PadButton.L1 | PadButton.Select);
+                fake.Combos[(ComboAction)(FakeQwarkServer.FirstPageCombo + 2)] = (uint)(PadButton.R1 | PadButton.Select);
                 break;
 
             // The game started again in RPCS3 with the savefile helper patch applied: a new boot

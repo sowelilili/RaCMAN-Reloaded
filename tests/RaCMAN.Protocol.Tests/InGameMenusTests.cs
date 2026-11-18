@@ -154,8 +154,9 @@ public class InGameMenusTests
             var combos = await client.ComboListAsync();
             Assert.Contains(new ComboEntry(ComboAction.ToggleFastLoads, CaptureMask), combos);
 
+            // Revision 1.34: the Trainer's page combos follow it; an action past them is BAD_ARG.
             var refused = await Assert.ThrowsAsync<QwarkStatusException>(
-                () => client.ComboSetAsync((ComboAction)7, CaptureMask));
+                () => client.ComboSetAsync((ComboAction)combos.Length, CaptureMask));
             Assert.Equal(Status.BadArg, refused.Status);
         }
     }

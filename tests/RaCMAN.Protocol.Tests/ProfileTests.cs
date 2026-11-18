@@ -226,7 +226,7 @@ public class ProfileTests
     }
 
     [Theory]
-    [InlineData(7, 1)]
+    [InlineData(14, 1)]     // past the Trainer's page combos of revision 1.34
     [InlineData(255, 0)]
     [InlineData(2, 2)]
     public async Task ComboOverrideRefusesAnActionOrSetOutOfRange(byte action, byte set)

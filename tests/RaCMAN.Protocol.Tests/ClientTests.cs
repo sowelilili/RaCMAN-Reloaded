@@ -279,7 +279,8 @@ public class ClientTests
             await client.ComboSetAsync(ComboAction.SavePosition, 0x0B);
             var combos = await client.ComboListAsync();
             // One row per action, in action order, as the module lists them: unset ones carry 0.
-            Assert.Equal(Enumerable.Range(0, 7).Select(i => (ComboAction)i), combos.Select(c => c.Action));
+            // Revision 1.34: the Trainer's seven page combos after the seven of before.
+            Assert.Equal(Enumerable.Range(0, 14).Select(i => (ComboAction)i), combos.Select(c => c.Action));
             Assert.Contains(new ComboEntry(ComboAction.Die, 0), combos);
             Assert.Contains(new ComboEntry(ComboAction.SavePosition, 0x0B), combos);
             // Revision 1.22: the console menu's combo is there before anybody sets it.
@@ -1667,6 +1668,40 @@ public class ClientTests
         Assert.Equal(CaptureMask, server.Combos[ComboAction.ToggleFastLoads]);
         Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
         Assert.True(await PumpAsync(state, () => state.Combos.Any(c => c.Action == ComboAction.ToggleFastLoads)));
+    }
+
+    /// <summary>
+    /// Revision 1.34: a Trainer page's combo, the page picked in the dropdown, is captured onto that
+    /// page and no other, and the toast names the page the module gave it.
+    /// </summary>
+    [Fact]
+    public async Task CapturingAPageComboStoresItOnThePickedPage()
+    {
+        using var server = new FakeQwarkServer();
+        server.AnimateInput = false;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        state.RefreshCombos();
+        Assert.True(await PumpAsync(state, () => CombosPanel.TrainerPages(state.Combos).Count == 7));
+        var pages = CombosPanel.TrainerPages(state.Combos);
+        var unlocks = pages.Single(p => p.Page == "Unlocks");
+        Assert.Equal(unlocks, CombosPanel.ChosenPage(pages, unlocks.Action));
+
+        CombosPanel.BeginCapture(state, unlocks.Action);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+        await PressAsync(state, server, CaptureMask);
+        await PressAsync(state, server, 0);
+
+        Assert.True(await PumpAsync(state, () => server.Combos.ContainsKey(unlocks.Action)));
+        Assert.Equal(CaptureMask, server.Combos[unlocks.Action]);
+        Assert.Equal(2, server.Combos.Count);   // the menu's default and this one: no other page
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
+        Assert.True(await PumpAsync(state, () => CombosPanel.TrainerPages(state.Combos).Single(p => p.Page == "Unlocks").Mask == CaptureMask));
+        Assert.Contains(state.Toasts, t => t.Text.StartsWith("Open Unlocks page = ", StringComparison.Ordinal));
+
+        // Picked by nobody since, the dropdown opens on the page that has a combo.
+        Assert.Equal("Unlocks", CombosPanel.ChosenPage(CombosPanel.TrainerPages(state.Combos), null)!.Value.Page);
     }
 
     /// <summary>

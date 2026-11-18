@@ -259,6 +259,23 @@ public static class CombosPanel
         return new ComboEntry(action, 0);
     }
 
+    /// <summary>
+    /// A combo's name as the panel and its toasts say it: a Trainer page's combo by the page the
+    /// module named ("Open Cheats page"), every other one by <see cref="Label(ComboAction)"/>.
+    /// </summary>
+    public static string Label(IEnumerable<ComboEntry> combos, ComboAction action)
+    {
+        foreach (var entry in combos)
+        {
+            if (entry.Action == action && entry.Page is { } page) return PageLabel(page);
+        }
+
+        return Label(action);
+    }
+
+    /// <summary>A Trainer page's combo, named for its page.</summary>
+    public static string PageLabel(string page) => $"Open {page} page";
+
     public static string Label(ComboAction action) => action switch
     {
         ComboAction.SavePosition => "Save position",
@@ -294,12 +311,13 @@ public static class CombosPanel
 
         _capturing = null;
         bool asOverride = _capturingOverride;
+        string name = Label(state.Combos, action);
         if (asOverride && !ShowsOverride(state.Session))
         {
             // The per-user settings went away under the capture: the switch went off, or the
             // console has none. There is no user to store it for, and COMBO_OVERRIDE is not sent.
             Suspend(state, false);
-            state.AddToast($"{Label(action)} not stored: per-user settings are off");
+            state.AddToast($"{name} not stored: per-user settings are off");
             return;
         }
 
@@ -311,7 +329,7 @@ public static class CombosPanel
             // back here cannot fire the one just stored: qwark waits for the next press.
             await state.Client.ComboSuspendAsync(false);
             state.Post(() => state.RefreshCombos());
-        }, $"{Label(action)} = {PadButtons.Describe(value)}{(asOverride ? " (override)" : "")}");
+        }, $"{name} = {PadButtons.Describe(value)}{(asOverride ? " (override)" : "")}");
     }
 
     /// <summary>
@@ -384,7 +402,6 @@ public static class CombosPanel
             if (!ShowsRow(action, state.Session)) continue;
 
             var entry = EntryFor(state, action);
-            bool overridden = IsOverridden(state.Session, entry);
 
             ImGui.TableNextRow();
             ImGui.PushID((int)action);
@@ -416,71 +433,12 @@ public static class CombosPanel
                 if (Tooltip(action) is { } tip && ImGui.IsItemHovered()) Ui.SetTooltip(tip);
             }
 
-            ImGui.TableNextColumn();
-            uint mask = entry.Mask;
-            if (_capturing == action)
-            {
-                uint held = Capture.Captured;
-                Ui.Text(Ui.Yellow, held == 0
-                    ? "Press a combo on the pad..."
-                    : $"{PadButtons.Describe(held)}, release to store");
-            }
-            else
-            {
-                Ui.Text(overridden ? Ui.Orange : mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
-                if (overridden && ImGui.IsItemHovered())
-                {
-                    Ui.SetTooltip($"Overridden: this combo is only active for {UserName(state.Profile)}.");
-                }
-            }
-
-            ImGui.TableNextColumn();
-            if (_capturing == action)
-            {
-                if (SizedSmallButton("Cancel", widths.First)) EndCapture(state);
-            }
-            else
-            {
-                // An overridden row's first button records the override again, and says so; a plain
-                // row's Capture records the shared combo. The IDs differ from the plain rows' Override.
-                string capture = overridden ? "Override##recapture" : "Capture";
-                if (SizedSmallButton(capture, widths.First)) BeginCapture(state, action, CaptureIsOverride(state.Session, entry));
-            }
-
-            ImGui.SameLine();
-            bool clear = overridden
-                ? SizedSmallButton("Clear Override##clear", widths.Rest)
-                : ImGui.SmallButton("Clear");
-            if (clear)
-            {
-                var target = action;
-                var request = ClearFor(state.Session, entry);
-                state.Run(async () =>
-                {
-                    if (request == ClearRequest.RemoveOverride) await state.Client.ComboOverrideClearAsync(target);
-                    else await state.Client.ComboSetAsync(target, 0);
-                    state.Post(() => state.RefreshCombos());
-                });
-            }
-
-            if (overridden && ImGui.IsItemHovered())
-            {
-                Ui.SetTooltip("Clear again to clear the shared combo.");
-            }
-
-            // Where the Default button was: a capture whose result is this user's own combo.
-            if (_capturing != action && overrides && ShowsOverrideButton(state.Session, entry))
-            {
-                ImGui.SameLine();
-                if (ImGui.SmallButton("Override")) BeginCapture(state, action, asOverride: true);
-                if (ImGui.IsItemHovered())
-                {
-                    Ui.SetTooltip($"Capture a combo for {UserName(state.Profile)} only.");
-                }
-            }
-
+            DrawCells(state, action, entry, widths, overrides);
             ImGui.PopID();
         }
+
+        // Revision 1.34: one row for every page of the Trainer, its page chosen in the dropdown.
+        DrawPagesRow(state, widths, overrides);
 
         ImGui.EndTable();
 
@@ -497,6 +455,182 @@ public static class CombosPanel
 
         // The console's own settings that were here (In-game menus, Run warnings, Per-user settings)
         // are on the Settings page's Qwark tab (QwarkSettings).
+    }
+
+    /// <summary>A row's Combo and buttons cells: the mask in force, Capture, Clear and Override.</summary>
+    private static void DrawCells(AppState state, ComboAction action, ComboEntry entry, ButtonWidths widths, bool overrides)
+    {
+        bool overridden = IsOverridden(state.Session, entry);
+
+        ImGui.TableNextColumn();
+        uint mask = entry.Mask;
+        if (_capturing == action)
+        {
+            uint held = Capture.Captured;
+            Ui.Text(Ui.Yellow, held == 0
+                ? "Press a combo on the pad..."
+                : $"{PadButtons.Describe(held)}, release to store");
+        }
+        else
+        {
+            Ui.Text(overridden ? Ui.Orange : mask == 0 ? Ui.Grey : Ui.Green, MaskText(mask, Ui.Debug));
+            if (overridden && ImGui.IsItemHovered())
+            {
+                Ui.SetTooltip($"Overridden: this combo is only active for {UserName(state.Profile)}.");
+            }
+        }
+
+        ImGui.TableNextColumn();
+        if (_capturing == action)
+        {
+            if (SizedSmallButton("Cancel", widths.First)) EndCapture(state);
+        }
+        else
+        {
+            // An overridden row's first button records the override again, and says so; a plain
+            // row's Capture records the shared combo. The IDs differ from the plain rows' Override.
+            string capture = overridden ? "Override##recapture" : "Capture";
+            if (SizedSmallButton(capture, widths.First)) BeginCapture(state, action, CaptureIsOverride(state.Session, entry));
+        }
+
+        ImGui.SameLine();
+        bool clear = overridden
+            ? SizedSmallButton("Clear Override##clear", widths.Rest)
+            : ImGui.SmallButton("Clear");
+        if (clear)
+        {
+            var target = action;
+            var request = ClearFor(state.Session, entry);
+            state.Run(async () =>
+            {
+                if (request == ClearRequest.RemoveOverride) await state.Client.ComboOverrideClearAsync(target);
+                else await state.Client.ComboSetAsync(target, 0);
+                state.Post(() => state.RefreshCombos());
+            });
+        }
+
+        if (overridden && ImGui.IsItemHovered())
+        {
+            Ui.SetTooltip("Clear again to clear the shared combo.");
+        }
+
+        // Where the Default button was: a capture whose result is this user's own combo.
+        if (_capturing != action && overrides && ShowsOverrideButton(state.Session, entry))
+        {
+            ImGui.SameLine();
+            if (ImGui.SmallButton("Override")) BeginCapture(state, action, asOverride: true);
+            if (ImGui.IsItemHovered())
+            {
+                Ui.SetTooltip($"Capture a combo for {UserName(state.Profile)} only.");
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- Trainer pages (revision 1.34)
+
+    /// <summary>The Trainer page the dropdown was last set to; null until the user picks one.</summary>
+    private static ComboAction? _page;
+
+    /// <summary>
+    /// The page combos the module listed, in its order (qwark build 59, revision 1.34): every page of
+    /// the in-game Trainer with its name. Empty against an older module, which names none, so the
+    /// panel then has no row for them.
+    /// </summary>
+    public static IReadOnlyList<ComboEntry> TrainerPages(IEnumerable<ComboEntry> combos) =>
+        combos.Where(entry => entry.IsTrainerPage).ToList();
+
+    /// <summary>
+    /// Whether the panel has its Trainer pages row: the module named pages, and the console menu's
+    /// combo has a row here (a module and a game with the Trainer), since the pages open the same menu.
+    /// </summary>
+    public static bool ShowsPagesRow(SessionInfo session, IEnumerable<ComboEntry> combos) =>
+        ShowsRow(ComboAction.OpenConsoleMenu, session) && combos.Any(entry => entry.IsTrainerPage);
+
+    /// <summary>
+    /// The page the row is on: the one picked, while the module still lists it; otherwise the first
+    /// page with a combo, so a bound page shows when the panel opens; otherwise the first page. Null
+    /// when the module listed none.
+    /// </summary>
+    public static ComboEntry? ChosenPage(IReadOnlyList<ComboEntry> pages, ComboAction? picked)
+    {
+        if (pages.Count == 0) return null;
+        foreach (var page in pages)
+        {
+            if (page.Action == picked) return page;
+        }
+
+        foreach (var page in pages)
+        {
+            if (page.Mask != 0) return page;
+        }
+
+        return pages[0];
+    }
+
+    /// <summary>
+    /// A page as the dropdown lists it: its name, and with a combo the buttons after it, "(yours)"
+    /// for this user's own, so the pages that have one stand out from the ones that do not.
+    /// </summary>
+    public static string PageItem(SessionInfo session, ComboEntry page) =>
+        page.Mask == 0
+            ? page.Page ?? string.Empty
+            : $"{page.Page}: {PadButtons.Describe(page.Mask)}{(IsOverridden(session, page) ? " (yours)" : string.Empty)}";
+
+    /// <summary>The dropdown's own line, closed: the page the row's combo opens.</summary>
+    public static string PagePreview(ComboEntry page) => $"Open {page.Page}";
+
+    /// <summary>The dropdown's tooltip: which pages have combos, or that none has.</summary>
+    public static string PagesTooltip(SessionInfo session, IReadOnlyList<ComboEntry> pages)
+    {
+        var bound = pages.Where(page => page.Mask != 0).Select(page => PageItem(session, page)).ToList();
+        return "Opens the in-game Trainer straight on a page. Pick the page here, then capture its combo."
+               + (bound.Count == 0 ? "\nNo page has a combo yet." : "\nWith a combo: " + string.Join(", ", bound) + ".");
+    }
+
+    /// <summary>
+    /// The Trainer pages' row: a dropdown of the pages in the Action cell, and the chosen page's
+    /// combo and buttons beside it, which act on that page alone. One row for every page, so the
+    /// table stays as long as it was.
+    /// </summary>
+    private static void DrawPagesRow(AppState state, ButtonWidths widths, bool overrides)
+    {
+        if (!ShowsPagesRow(state.Session, state.Combos)) return;
+        var pages = TrainerPages(state.Combos);
+        if (ChosenPage(pages, _page) is not { } chosen) return;
+
+        ImGui.TableNextRow();
+        ImGui.PushID("trainer-pages");
+        ImGui.TableNextColumn();
+
+        // A capture belongs to the page it started on: the dropdown waits until it is done.
+        ImGui.BeginDisabled(_capturing is not null && pages.Any(page => page.Action == _capturing));
+        ImGui.SetNextItemWidth(-float.Epsilon);
+        // As flat as the rows' buttons, so the row is as tall as every other.
+        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(ImGui.GetStyle().FramePadding.X, 0f));
+        bool open = ImGui.BeginCombo("##page", PagePreview(chosen));
+        ImGui.PopStyleVar();
+        if (open)
+        {
+            foreach (var page in pages)
+            {
+                bool selected = page.Action == chosen.Action;
+                bool coloured = page.Mask != 0;
+                if (coloured) ImGui.PushStyleColor(ImGuiCol.Text, IsOverridden(state.Session, page) ? Ui.Orange : Ui.Green);
+                if (ImGui.Selectable($"{PageItem(state.Session, page)}##{(int)page.Action}", selected)) _page = page.Action;
+                if (coloured) ImGui.PopStyleColor();
+                if (selected) ImGui.SetItemDefaultFocus();
+            }
+
+            ImGui.EndCombo();
+        }
+
+        ImGui.EndDisabled();
+        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(PagesTooltip(state.Session, pages));
+
+        ImGui.PushID((int)chosen.Action);
+        DrawCells(state, chosen.Action, chosen, widths, overrides);
+        ImGui.PopID();
+        ImGui.PopID();
     }
 
     // ---------------------------------------------------------------- per-user settings

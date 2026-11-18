@@ -1063,11 +1063,19 @@ public sealed record DirEntry(bool IsDirectory, uint Size, string Name)
 /// COMBO_LIST entry: <c>u8 action, u8 flags, u8 pad[2], u32 mask</c>. The flags byte was pad
 /// before revision 1.24, and so 0 from every earlier module. The mask is always the one in force:
 /// the active profile's override where the row is <see cref="Overridden"/>, the shared one otherwise.
+/// <para>
+/// Revision 1.34 (qwark build 59): <see cref="Page"/> is the Trainer page a page combo opens, by the
+/// name the module gives it after the entries (<c>u8 m, { u8 action, u8 len, char name[len] }[m]</c>);
+/// null for every other combo, and for every combo of a module before it, which sends no names.
+/// </para>
 /// </summary>
-public readonly record struct ComboEntry(ComboAction Action, uint Mask, ComboEntryFlags Flags = ComboEntryFlags.None)
+public readonly record struct ComboEntry(ComboAction Action, uint Mask, ComboEntryFlags Flags = ComboEntryFlags.None, string? Page = null)
 {
     /// <summary>The mask is the active profile's override of this combo (revision 1.24).</summary>
     public bool Overridden => (Flags & ComboEntryFlags.Overridden) != 0;
+
+    /// <summary>The combo opens a page of the in-game Trainer (revision 1.34).</summary>
+    public bool IsTrainerPage => Page is not null;
 
     public static ComboEntry[] ParseList(ReadOnlySpan<byte> payload)
     {
@@ -1081,6 +1089,20 @@ public readonly record struct ComboEntry(ComboAction Action, uint Mask, ComboEnt
             r.Skip(2);
             uint mask = r.ReadU32();
             result[i] = new ComboEntry(action, mask, flags);
+        }
+
+        // Revision 1.34: the page combos' names, when the module sends them. A name for an action
+        // the list has not, or a trailer cut short, names nothing more.
+        if (r.Remaining < 1) return result;
+        int m = r.ReadU8();
+        for (int k = 0; k < m && r.Remaining >= 2; k++)
+        {
+            var action = (ComboAction)r.ReadU8();
+            int len = r.ReadU8();
+            if (len > r.Remaining) break;
+            string name = Encoding.ASCII.GetString(r.ReadBytes(len));
+            int at = Array.FindIndex(result, e => e.Action == action);
+            if (at >= 0 && name.Length > 0) result[at] = result[at] with { Page = name };
         }
 
         return result;
