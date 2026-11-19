@@ -81,7 +81,7 @@ public sealed class TrainerPageTable
 
     /// <summary>What the button says about itself on hover.</summary>
     public string ButtonTooltip =>
-        Expanded ? "Hide the Trainer pages that have no combo." : "Show every page of the Trainer menu, to give one a combo.";
+        Expanded ? "Hide the Trainer pages that have no combo." : "Show Trainer page combos.";
 
     /// <summary>A row's first cell: the page, as the module names it.</summary>
     public static string RowLabel(ComboEntry page) => page.Page ?? CombosPanel.Label(page.Action);

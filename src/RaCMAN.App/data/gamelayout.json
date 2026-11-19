@@ -135,7 +135,7 @@
         }
       },
       "tooltips": {
-        "Skin": "Ratchet's skin, as the game's skin menu gives it. It shows from the next planet load. Old School Ratchet, Snowman and Tuxedo Ratchet are in the Armour list."
+        "Skin": "Ratchet's skin, as the game's skin menu gives it: on him at once, over whichever armour he wears. Under RPCS3 it waits for the next planet load unless qwark's patches are installed."
       }
     },
 
