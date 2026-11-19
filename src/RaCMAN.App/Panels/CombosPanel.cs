@@ -6,16 +6,25 @@ namespace RaCMAN.App.Panels;
 
 public static class CombosPanel
 {
-    private static ComboAction? _capturing;
-
     /// <summary>
-    /// Whether the capture in flight is committed as the active profile's override
-    /// (COMBO_OVERRIDE) rather than as the shared combo (COMBO_SET).
+    /// The capture in flight: which row, how it is committed and the pad watcher behind it. It is
+    /// the state's (<see cref="AppState.ComboCapture"/>) rather than the panel's, because it holds
+    /// that client's console's combos off and only that client's session change may drop it.
     /// </summary>
-    private static bool _capturingOverride;
+    public sealed class CaptureInFlight
+    {
+        /// <summary>The row being captured; null while none is. Only one row captures at a time.</summary>
+        internal ComboAction? Action;
 
-    /// <summary>The pad watcher behind the Capture button; only one row captures at a time.</summary>
-    private static readonly ComboCapture Capture = new();
+        /// <summary>
+        /// Whether the capture in flight is committed as the active profile's override
+        /// (COMBO_OVERRIDE) rather than as the shared combo (COMBO_SET).
+        /// </summary>
+        internal bool AsOverride;
+
+        /// <summary>The pad watcher behind the Capture button.</summary>
+        internal readonly ComboCapture Pad = new();
+    }
 
     private static readonly ComboAction[] Actions =
     {
@@ -38,23 +47,25 @@ public static class CombosPanel
     /// </summary>
     public static void BeginCapture(AppState state, ComboAction action, bool asOverride = false)
     {
-        _capturing = action;
-        _capturingOverride = asOverride;
-        Capture.Reset();
+        var capture = state.ComboCapture;
+        capture.Action = action;
+        capture.AsOverride = asOverride;
+        capture.Pad.Reset();
         Suspend(state, true);
     }
 
     /// <summary>Drops a capture in flight and hands the console's combos back. Idempotent.</summary>
     public static void EndCapture(AppState state)
     {
-        if (_capturing is null)
+        var capture = state.ComboCapture;
+        if (capture.Action is null)
         {
-            Capture.Reset();
+            capture.Pad.Reset();
             return;
         }
 
-        _capturing = null;
-        Capture.Reset();
+        capture.Action = null;
+        capture.Pad.Reset();
         Suspend(state, false);
     }
 
@@ -321,11 +332,12 @@ public static class CombosPanel
     /// </summary>
     public static void Update(AppState state)
     {
-        if (_capturing is not { } action) return;
-        if (Capture.Feed(state.Session.PadMask) is not { } value) return;
+        var capture = state.ComboCapture;
+        if (capture.Action is not { } action) return;
+        if (capture.Pad.Feed(state.Session.PadMask) is not { } value) return;
 
-        _capturing = null;
-        bool asOverride = _capturingOverride;
+        capture.Action = null;
+        bool asOverride = capture.AsOverride;
         string name = Label(state.Combos, action);
         if (asOverride && !ShowsOverride(state.Session))
         {
@@ -364,7 +376,7 @@ public static class CombosPanel
         bool off = state.Session.CombosOff;
         bool enabled = !off;
 
-        ImGui.BeginDisabled(_capturing is not null);
+        ImGui.BeginDisabled(state.ComboCapture.Action is not null);
         if (ImGui.Checkbox("Combos enabled", ref enabled))
         {
             bool on = enabled;
@@ -486,12 +498,13 @@ public static class CombosPanel
     private static void DrawCells(AppState state, ComboAction action, ComboEntry entry, ButtonWidths widths, bool overrides)
     {
         bool overridden = IsOverridden(state.Session, entry);
+        var inFlight = state.ComboCapture;
 
         ImGui.TableNextColumn();
         uint mask = entry.Mask;
-        if (_capturing == action)
+        if (inFlight.Action == action)
         {
-            uint held = Capture.Captured;
+            uint held = inFlight.Pad.Captured;
             Ui.Text(Ui.Yellow, held == 0
                 ? "Press a combo on the pad..."
                 : $"{PadButtons.Describe(held)}, release to store");
@@ -506,7 +519,7 @@ public static class CombosPanel
         }
 
         ImGui.TableNextColumn();
-        if (_capturing == action)
+        if (inFlight.Action == action)
         {
             if (SizedSmallButton("Cancel", widths.First)) EndCapture(state);
         }
@@ -538,7 +551,7 @@ public static class CombosPanel
         }
 
         // Where the Default button was: a capture whose result is this user's own combo.
-        if (_capturing != action && overrides && ShowsOverrideButton(state.Session, entry))
+        if (inFlight.Action != action && overrides && ShowsOverrideButton(state.Session, entry))
         {
             ImGui.SameLine();
             if (ImGui.SmallButton("Override")) BeginCapture(state, action, asOverride: true);
@@ -564,7 +577,7 @@ public static class CombosPanel
     /// </summary>
     private static void DrawPageTable(AppState state, IReadOnlyList<ComboEntry> pages, ButtonWidths widths, bool overrides)
     {
-        var rows = PageTable.Rows(pages, _capturing);
+        var rows = PageTable.Rows(pages, state.ComboCapture.Action);
         if (rows.Count == 0) return;
 
         ImGui.Spacing();

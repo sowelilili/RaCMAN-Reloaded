@@ -304,6 +304,13 @@ public sealed partial class AppState : IDisposable
     /// <summary>What this PC calls the console's position slots, one file per game.</summary>
     public PositionNameStore PositionNames { get; }
 
+    /// <summary>
+    /// The Combos panel's capture in flight (<see cref="Panels.CombosPanel.BeginCapture"/>). It is
+    /// this state's because the hold it puts on is this client's console's, and only this state's
+    /// session changes (<see cref="Panels.PanelState"/>) may drop it.
+    /// </summary>
+    internal Panels.CombosPanel.CaptureInFlight ComboCapture { get; } = new();
+
     /// <summary>The PC-side savefile library, <c>savefiles/&lt;TITLEID&gt;/&lt;category&gt;/</c>.</summary>
     public SaveFileLibrary SaveFiles { get; }
 

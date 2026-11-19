@@ -8,8 +8,8 @@ namespace RaCMAN.Protocol.Tests;
 /// them after the first seven in COMBO_LIST and names them after its entries; the Combos panel
 /// gives them a table of their own under the action combos', a row per page, with only the pages
 /// that have a combo showing until "More...". These are the wire, the table's model and the
-/// requests a row sends against the fake console; the capture itself, which is the panel's static
-/// state, is <see cref="ClientTests"/>'.
+/// requests a row sends against the fake console; the capture itself, driven through the panel
+/// with the frame loop, is <see cref="ClientTests"/>'.
 /// </summary>
 public class TrainerPageCombosTests
 {

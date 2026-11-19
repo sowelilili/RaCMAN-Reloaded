@@ -1631,8 +1631,9 @@ public class ClientTests
     // ------------------------------------------------------------------ the combo capture hold
     //
     // The Combos panel keeps the ImGui out of the sequence: Capture, Cancel and the session reset
-    // are three calls that only move a static and send one request, so the whole of the hold can
-    // be driven here with the same frame loop.
+    // are three calls that only move the state's capture (AppState.ComboCapture) and send one
+    // request, so the whole of the hold can be driven here with the same frame loop. The capture is
+    // the state's and not a static, so another test's session change cannot drop one in flight.
 
     private const uint CaptureMask = (uint)PadButton.Cross | (uint)PadButton.Square;
 
@@ -1695,8 +1696,8 @@ public class ClientTests
 
     /// <summary>
     /// Revision 1.23: the fast-loads combo is captured and stored like any other row. Here rather
-    /// than with the rest of revision 1.23's tests because the capture is the panel's static state,
-    /// which only the tests of one class may share.
+    /// than with the rest of revision 1.23's tests because it is driven with this class's capture
+    /// helpers.
     /// </summary>
     [Fact]
     public async Task CapturingTheFastLoadsComboStoresIt()
@@ -1825,6 +1826,36 @@ public class ClientTests
 
         Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
         AssertOnlyTheMenuDefault(server);
+    }
+
+    /// <summary>
+    /// The capture is the state's: another client's session change, here a dropped connection
+    /// (<see cref="PanelState.DropCapture"/>, what a game change's reset goes through as well), leaves
+    /// this one's capture running and it still commits. A capture in a static was dropped by any
+    /// state's reset, which made these tests fail now and then beside the others in parallel.
+    /// </summary>
+    [Fact]
+    public async Task AnotherStatesSessionChangeLeavesThisCaptureRunning()
+    {
+        using var server = new FakeQwarkServer();
+        server.AnimateInput = false;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+        using var other = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+
+        Assert.True(await PumpAsync(state, () => state.Hello is not null));
+
+        CombosPanel.BeginCapture(state, ComboAction.Die);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+
+        PanelState.DropCapture(other);
+
+        await PressAsync(state, server, CaptureMask);
+        await PressAsync(state, server, 0);
+
+        Assert.True(await PumpAsync(state, () => server.Combos.ContainsKey(ComboAction.Die)));
+        Assert.Equal(CaptureMask, server.Combos[ComboAction.Die]);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
     }
 
     /// <summary>
