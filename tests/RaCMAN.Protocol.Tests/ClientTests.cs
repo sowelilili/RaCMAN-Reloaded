@@ -1723,11 +1723,12 @@ public class ClientTests
     }
 
     /// <summary>
-    /// Revision 1.34: a Trainer page's combo, the page picked in the dropdown, is captured onto that
-    /// page and no other, and the toast names the page the module gave it.
+    /// Revision 1.34: Capture on a Trainer page's row, shown by "More...", stores the combo on that
+    /// page and no other, the toast names the page the module gave it, and the row then shows with
+    /// the unbound pages hidden again.
     /// </summary>
     [Fact]
-    public async Task CapturingAPageComboStoresItOnThePickedPage()
+    public async Task CapturingAPageRowStoresItOnThatPage()
     {
         using var server = new FakeQwarkServer();
         server.AnimateInput = false;
@@ -1735,12 +1736,13 @@ public class ClientTests
         using var state = await ConnectedStateAsync(server);
 
         state.RefreshCombos();
-        Assert.True(await PumpAsync(state, () => CombosPanel.TrainerPages(state.Combos).Count == 7));
-        var pages = CombosPanel.TrainerPages(state.Combos);
-        var unlocks = pages.Single(p => p.Page == "Unlocks");
-        Assert.Equal(unlocks, CombosPanel.ChosenPage(pages, unlocks.Action));
+        Assert.True(await PumpAsync(state, () => TrainerPageTable.Pages(state.Combos).Count == 7));
+        var table = new TrainerPageTable();
+        Assert.Empty(table.Rows(TrainerPageTable.Pages(state.Combos)));
+        table.Toggle();
+        var unlocks = table.Rows(TrainerPageTable.Pages(state.Combos)).Single(p => p.Page == "Unlocks");
 
-        CombosPanel.BeginCapture(state, unlocks.Action);
+        CombosPanel.BeginCapture(state, unlocks.Action, CombosPanel.CaptureIsOverride(state.Session, unlocks));
         Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
         await PressAsync(state, server, CaptureMask);
         await PressAsync(state, server, 0);
@@ -1749,11 +1751,50 @@ public class ClientTests
         Assert.Equal(CaptureMask, server.Combos[unlocks.Action]);
         Assert.Equal(2, server.Combos.Count);   // the menu's default and this one: no other page
         Assert.True(await PumpAsync(state, () => server.CombosSuspended == false));
-        Assert.True(await PumpAsync(state, () => CombosPanel.TrainerPages(state.Combos).Single(p => p.Page == "Unlocks").Mask == CaptureMask));
+        Assert.True(await PumpAsync(state, () => TrainerPageTable.Pages(state.Combos).Single(p => p.Page == "Unlocks").Mask == CaptureMask));
         Assert.Contains(state.Toasts, t => t.Text.StartsWith("Open Unlocks page = ", StringComparison.Ordinal));
 
-        // Picked by nobody since, the dropdown opens on the page that has a combo.
-        Assert.Equal("Unlocks", CombosPanel.ChosenPage(CombosPanel.TrainerPages(state.Combos), null)!.Value.Page);
+        table.Observe(PanelNav.Game);
+        var row = Assert.Single(table.Rows(TrainerPageTable.Pages(state.Combos)));
+        Assert.Equal("Unlocks", row.Page);
+        Assert.Equal(CaptureMask, row.Mask);
+    }
+
+    /// <summary>
+    /// The same row's Override, with a user's profile active: the capture is that user's own combo
+    /// for that page, the shared combos untouched, and the row is flagged as the user's own.
+    /// </summary>
+    [Fact]
+    public async Task OverridingAPageRowStoresItForTheUserOnThatPage()
+    {
+        using var server = new FakeQwarkServer { ProfilesSupported = true };
+        server.AnimateInput = false;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+
+        await state.Client.ProfileEnableAsync(true, ProfileSetup.Fresh);
+        state.RefreshCombos();
+        Assert.True(await PumpAsync(state, () => CombosPanel.ShowsOverride(state.Session) && TrainerPageTable.Pages(state.Combos).Count == 7));
+        var table = new TrainerPageTable();
+        table.Toggle();
+        var mods = table.Rows(TrainerPageTable.Pages(state.Combos)).Single(p => p.Page == "Mods");
+        Assert.True(CombosPanel.ShowsOverrideButton(state.Session, mods));
+
+        // What the row's Override button does.
+        CombosPanel.BeginCapture(state, mods.Action, asOverride: true);
+        Assert.True(await PumpAsync(state, () => server.CombosSuspended == true));
+        await PressAsync(state, server, CaptureMask);
+        await PressAsync(state, server, 0);
+
+        Assert.True(await PumpAsync(state, () => server.ComboOverridesFor(server.SignedInUser).ContainsKey(mods.Action)));
+        Assert.Equal(CaptureMask, Assert.Single(server.ComboOverridesFor(server.SignedInUser)).Value);
+        AssertOnlyTheMenuDefault(server);
+        Assert.True(await PumpAsync(state, () => TrainerPageTable.Pages(state.Combos).Single(p => p.Page == "Mods").Overridden));
+
+        table.Toggle();
+        var row = Assert.Single(table.Rows(TrainerPageTable.Pages(state.Combos)));
+        Assert.Equal("Mods", row.Page);
+        Assert.True(CombosPanel.CaptureIsOverride(state.Session, row));
     }
 
     /// <summary>

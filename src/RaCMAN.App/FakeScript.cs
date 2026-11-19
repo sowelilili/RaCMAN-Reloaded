@@ -356,7 +356,7 @@ public static class FakeScript
                 break;
 
             // Revision 1.34: two of the Trainer's page combos bound, Cheats and Planets, so a
-            // headless run shows the Combos panel's page dropdown with pages that have a combo.
+            // headless run shows the Combos panel's Trainer pages table with pages that have a combo.
             case "pagecombos":
                 fake.Combos[(ComboAction)(FakeQwarkServer.FirstPageCombo + 1)] = (uint)(PadButton.L1 | PadButton.Select);
                 fake.Combos[(ComboAction)(FakeQwarkServer.FirstPageCombo + 2)] = (uint)(PadButton.R1 | PadButton.Select);

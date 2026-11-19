@@ -209,6 +209,9 @@ public sealed class AppWindow : GameWindow
             controller.Update((float)args.Time);
             DrawUi(controller);
 
+            // Leaving the Combos panel hides its Trainer pages without a combo again.
+            CombosPanel.PageTable.Observe(_panel);
+
             GL.Clear(ClearBufferMask.ColorBufferBit);
             controller.Render();
             SwapBuffers();

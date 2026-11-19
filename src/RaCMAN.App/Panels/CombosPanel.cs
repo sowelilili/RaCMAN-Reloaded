@@ -77,11 +77,17 @@ public static class CombosPanel
         action == ComboAction.LoadSetAsideFile && !SaveFilesPanel.HelperIn(session, info);
 
     /// <summary>
-    /// Whether the console menu's combo has nothing to open: the menu is drawn by code qwark
-    /// writes into the game, which RPCS3 does not take, so qwark-rpcs3 has no menu at all.
+    /// Whether the console menu's combo has nothing to open: the running game's module says its
+    /// Trainer cannot come up in this game on this platform (DESCRIBE's extension, menu_flags bit0,
+    /// revision 1.34), the In-game menus switch's own rule (<see cref="QwarkSettings.InGameMenusBlocked"/>).
+    /// Under RPCS3 that is the four original games, whose menu is code qwark writes into the game;
+    /// Tools of Destruction's Trainer is its pause menu and comes up there too.
     /// </summary>
-    public static bool MenuComboBlocked(ComboAction action, SessionInfo session) =>
-        action == ComboAction.OpenConsoleMenu && session.IsEmulator;
+    public static bool MenuComboBlocked(ComboAction action, SessionInfo session, DescribeResult describe) =>
+        action == ComboAction.OpenConsoleMenu && QwarkSettings.InGameMenusBlocked(session, describe);
+
+    /// <summary>What a greyed console menu row, or Trainer page row, says on hover.</summary>
+    public const string MenuUnavailable = "The console menu is not available under RPCS3.";
 
     /// <summary>
     /// Whether the fast-loads combo has nothing to flip: the Fast loads cheat patches game code,
@@ -186,6 +192,15 @@ public static class CombosPanel
     /// </summary>
     public static ClearRequest ClearFor(SessionInfo session, ComboEntry entry) =>
         IsOverridden(session, entry) ? ClearRequest.RemoveOverride : ClearRequest.ClearShared;
+
+    /// <summary>
+    /// What a row's Clear sends, for the row's own action: COMBO_OVERRIDE(action, 0) on an overridden
+    /// row, COMBO_SET(action, 0) on any other (<see cref="ClearFor"/>).
+    /// </summary>
+    public static Task ClearAsync(QwarkClient client, SessionInfo session, ComboEntry entry) =>
+        ClearFor(session, entry) == ClearRequest.RemoveOverride
+            ? client.ComboOverrideClearAsync(entry.Action)
+            : client.ComboSetAsync(entry.Action, 0);
 
     /// <summary>Whether Capture on a row commits as the override (COMBO_OVERRIDE) rather than the shared combo (COMBO_SET).</summary>
     public static bool CaptureIsOverride(SessionInfo session, ComboEntry entry) => IsOverridden(session, entry);
@@ -417,10 +432,10 @@ public static class CombosPanel
                 Ui.TextDisabled(Label(action));
                 if (ImGui.IsItemHovered()) Ui.SetTooltip(Ui.NeedsSaveFileHelper);
             }
-            else if (MenuComboBlocked(action, state.Session))
+            else if (MenuComboBlocked(action, state.Session, state.Describe))
             {
                 Ui.TextDisabled(Label(action));
-                if (ImGui.IsItemHovered()) Ui.SetTooltip("The console menu is not available under RPCS3.");
+                if (ImGui.IsItemHovered()) Ui.SetTooltip(MenuUnavailable);
             }
             else if (FastLoadsComboBlocked(action, state.Session, state.Describe))
             {
@@ -437,12 +452,22 @@ public static class CombosPanel
             ImGui.PopID();
         }
 
-        // Revision 1.34: one row for every page of the Trainer, its page chosen in the dropdown.
-        DrawPagesRow(state, widths, overrides);
-
         ImGui.EndTable();
 
+        // Revision 1.34: the Trainer pages' own table, the pages with a combo and, after "More...",
+        // the rest. A module before build 59 names no page and has neither.
+        bool pageTable = TrainerPageTable.Shows(state.Combos);
+        var pages = pageTable ? TrainerPageTable.Pages(state.Combos) : Array.Empty<ComboEntry>();
+        if (pageTable) DrawPageTable(state, pages, widths, overrides);
+
         ImGui.Spacing();
+        if (pageTable && PageTable.ButtonLabel(pages) is { } more)
+        {
+            if (ImGui.SmallButton(more)) PageTable.Toggle();
+            Ui.Tooltip(PageTable.ButtonTooltip);
+            ImGui.SameLine();
+        }
+
         if (ImGui.SmallButton("Refresh")) state.RefreshCombos();
 
         // The capture reads the pad out of telemetry either way; the mask itself is only of use
@@ -499,12 +524,10 @@ public static class CombosPanel
             : ImGui.SmallButton("Clear");
         if (clear)
         {
-            var target = action;
-            var request = ClearFor(state.Session, entry);
+            var session = state.Session;
             state.Run(async () =>
             {
-                if (request == ClearRequest.RemoveOverride) await state.Client.ComboOverrideClearAsync(target);
-                else await state.Client.ComboSetAsync(target, 0);
+                await ClearAsync(state.Client, session, entry);
                 state.Post(() => state.RefreshCombos());
             });
         }
@@ -528,109 +551,56 @@ public static class CombosPanel
 
     // ---------------------------------------------------------------- Trainer pages (revision 1.34)
 
-    /// <summary>The Trainer page the dropdown was last set to; null until the user picks one.</summary>
-    private static ComboAction? _page;
+    /// <summary>
+    /// The Trainer pages' table under the action combos': which of its rows show, and its button.
+    /// The window tells it which panel is open every frame (<see cref="TrainerPageTable.Observe"/>).
+    /// </summary>
+    public static readonly TrainerPageTable PageTable = new();
 
     /// <summary>
-    /// The page combos the module listed, in its order (qwark build 59, revision 1.34): every page of
-    /// the in-game Trainer with its name. Empty against an older module, which names none, so the
-    /// panel then has no row for them.
+    /// The Trainer pages' table: a row for each page the module lists, laid out as the action combos'
+    /// table, with the same widths so the two line up, and acting on its own page alone. Drawn only
+    /// while it has a row: a page with a combo, or every page after "More...".
     /// </summary>
-    public static IReadOnlyList<ComboEntry> TrainerPages(IEnumerable<ComboEntry> combos) =>
-        combos.Where(entry => entry.IsTrainerPage).ToList();
-
-    /// <summary>
-    /// Whether the panel has its Trainer pages row: the module named pages, and the console menu's
-    /// combo has a row here (a module and a game with the Trainer), since the pages open the same menu.
-    /// </summary>
-    public static bool ShowsPagesRow(SessionInfo session, IEnumerable<ComboEntry> combos) =>
-        ShowsRow(ComboAction.OpenConsoleMenu, session) && combos.Any(entry => entry.IsTrainerPage);
-
-    /// <summary>
-    /// The page the row is on: the one picked, while the module still lists it; otherwise the first
-    /// page with a combo, so a bound page shows when the panel opens; otherwise the first page. Null
-    /// when the module listed none.
-    /// </summary>
-    public static ComboEntry? ChosenPage(IReadOnlyList<ComboEntry> pages, ComboAction? picked)
+    private static void DrawPageTable(AppState state, IReadOnlyList<ComboEntry> pages, ButtonWidths widths, bool overrides)
     {
-        if (pages.Count == 0) return null;
-        foreach (var page in pages)
+        var rows = PageTable.Rows(pages, _capturing);
+        if (rows.Count == 0) return;
+
+        ImGui.Spacing();
+        if (!ImGui.BeginTable("trainer-pages", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg | ImGuiTableFlags.SizingStretchProp)) return;
+
+        ImGui.TableSetupColumn(TrainerPageTable.Header, ImGuiTableColumnFlags.WidthFixed, 170);
+        ImGui.TableSetupColumn("Combo");
+        ImGui.TableSetupColumn("", ImGuiTableColumnFlags.WidthFixed, widths.Column);
+        ImGui.TableHeadersRow();
+
+        bool greyed = TrainerPageTable.Greyed(state.Session, state.Describe);
+        foreach (var page in rows)
         {
-            if (page.Action == picked) return page;
-        }
+            ImGui.TableNextRow();
+            ImGui.PushID((int)page.Action);
+            ImGui.TableNextColumn();
 
-        foreach (var page in pages)
-        {
-            if (page.Mask != 0) return page;
-        }
-
-        return pages[0];
-    }
-
-    /// <summary>
-    /// A page as the dropdown lists it: its name, and with a combo the buttons after it, "(yours)"
-    /// for this user's own, so the pages that have one stand out from the ones that do not.
-    /// </summary>
-    public static string PageItem(SessionInfo session, ComboEntry page) =>
-        page.Mask == 0
-            ? page.Page ?? string.Empty
-            : $"{page.Page}: {PadButtons.Describe(page.Mask)}{(IsOverridden(session, page) ? " (yours)" : string.Empty)}";
-
-    /// <summary>The dropdown's own line, closed: the page the row's combo opens.</summary>
-    public static string PagePreview(ComboEntry page) => $"Open {page.Page}";
-
-    /// <summary>The dropdown's tooltip: which pages have combos, or that none has.</summary>
-    public static string PagesTooltip(SessionInfo session, IReadOnlyList<ComboEntry> pages)
-    {
-        var bound = pages.Where(page => page.Mask != 0).Select(page => PageItem(session, page)).ToList();
-        return "Opens the in-game Trainer straight on a page. Pick the page here, then capture its combo."
-               + (bound.Count == 0 ? "\nNo page has a combo yet." : "\nWith a combo: " + string.Join(", ", bound) + ".");
-    }
-
-    /// <summary>
-    /// The Trainer pages' row: a dropdown of the pages in the Action cell, and the chosen page's
-    /// combo and buttons beside it, which act on that page alone. One row for every page, so the
-    /// table stays as long as it was.
-    /// </summary>
-    private static void DrawPagesRow(AppState state, ButtonWidths widths, bool overrides)
-    {
-        if (!ShowsPagesRow(state.Session, state.Combos)) return;
-        var pages = TrainerPages(state.Combos);
-        if (ChosenPage(pages, _page) is not { } chosen) return;
-
-        ImGui.TableNextRow();
-        ImGui.PushID("trainer-pages");
-        ImGui.TableNextColumn();
-
-        // A capture belongs to the page it started on: the dropdown waits until it is done.
-        ImGui.BeginDisabled(_capturing is not null && pages.Any(page => page.Action == _capturing));
-        ImGui.SetNextItemWidth(-float.Epsilon);
-        // As flat as the rows' buttons, so the row is as tall as every other.
-        ImGui.PushStyleVar(ImGuiStyleVar.FramePadding, new Vector2(ImGui.GetStyle().FramePadding.X, 0f));
-        bool open = ImGui.BeginCombo("##page", PagePreview(chosen));
-        ImGui.PopStyleVar();
-        if (open)
-        {
-            foreach (var page in pages)
+            // A page opens the Trainer, so where the module says the Trainer cannot come up it has
+            // nothing to open either.
+            string label = TrainerPageTable.RowLabel(page);
+            if (greyed)
             {
-                bool selected = page.Action == chosen.Action;
-                bool coloured = page.Mask != 0;
-                if (coloured) ImGui.PushStyleColor(ImGuiCol.Text, IsOverridden(state.Session, page) ? Ui.Orange : Ui.Green);
-                if (ImGui.Selectable($"{PageItem(state.Session, page)}##{(int)page.Action}", selected)) _page = page.Action;
-                if (coloured) ImGui.PopStyleColor();
-                if (selected) ImGui.SetItemDefaultFocus();
+                Ui.TextDisabled(label);
+                if (ImGui.IsItemHovered()) Ui.SetTooltip(MenuUnavailable);
+            }
+            else
+            {
+                ImGui.TextUnformatted(label);
+                if (ImGui.IsItemHovered()) Ui.SetTooltip(TrainerPageTable.Tooltip(page));
             }
 
-            ImGui.EndCombo();
+            DrawCells(state, page.Action, page, widths, overrides);
+            ImGui.PopID();
         }
 
-        ImGui.EndDisabled();
-        if (ImGui.IsItemHovered(ImGuiHoveredFlags.AllowWhenDisabled)) Ui.SetTooltip(PagesTooltip(state.Session, pages));
-
-        ImGui.PushID((int)chosen.Action);
-        DrawCells(state, chosen.Action, chosen, widths, overrides);
-        ImGui.PopID();
-        ImGui.PopID();
+        ImGui.EndTable();
     }
 
     // ---------------------------------------------------------------- per-user settings
