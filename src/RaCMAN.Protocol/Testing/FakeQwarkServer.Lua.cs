@@ -122,7 +122,36 @@ public sealed partial class FakeQwarkServer
     /// readout, with qwark's id, which the client's status line keys on) and its two toggles.
     /// 2026-11-12: Remove black screens (24), a cheat in Cheats, after God Ratchet.
     /// </summary>
-    public static DescribeResult TodDescribe() => new(
+    public static DescribeResult TodDescribe()
+    {
+        // Revision 1.34 (build 59): the run-legal rows in groups of their own and flagged RUN_LEGAL,
+        // the collectable actions in Collectables, labelled "Reset all ..." (D9), and the extension:
+        // both planet flags, the Trainer can come up, in place of Inventory.
+        const FeatureFlags2 legal = FeatureFlags2.RunLegal;
+        var old = TodDescribe58();
+        var features = old.Features.Select(f => f.Id switch
+        {
+            18 => f with { Group = 4, Flags2 = legal },
+            19 or 20 or 21 => f with { Group = 5, Flags2 = legal },
+            6 or 8 => f with { Group = 6 },
+            7 => f with { Group = 6, Label = "Reset all skill points" },
+            9 => f with { Group = 6, Label = "Reset all gold bolts" },
+            _ => f,
+        }).ToArray();
+        return old with
+        {
+            Groups = new[] { "Cheats", "Player", "Progress", "Savefile", "Manips", "Cutscene cache", "Collectables" },
+            Features = features,
+            Extension = new DescribeExtension(PlanetFlags.ResetLevelFlags | PlanetFlags.ResetSpecialBolts, true, "Inventory"),
+        };
+    }
+
+    /// <summary>
+    /// ToD's DESCRIBE as builds 57 and 58 sent it: no extension, the run-legal rows in Cheats and
+    /// unflagged, the collectable actions in Progress, for the tests of a client against an older
+    /// module.
+    /// </summary>
+    public static DescribeResult TodDescribe58() => new(
         GameId.Tod,
         new[] { "Cheats", "Player", "Progress", "Savefile" },
         new[] { "Bolts", "Raritanium", "Challenge mode", "Cutscene cache" },

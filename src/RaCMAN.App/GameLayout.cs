@@ -31,6 +31,15 @@ public sealed class TitleLayout
     /// </summary>
     [JsonPropertyName("tooltips")]
     public Dictionary<string, string> Tooltips { get; set; } = new();
+
+    /// <summary>
+    /// Feature label -> section, for a module before qwark revision 1.34 alone (no DESCRIBE
+    /// extension), which declared neither its run-legal rows (RUN_LEGAL) nor a Collectables group:
+    /// what the layout's moves did for such a module, so it keeps its pages until it is updated. A
+    /// module from revision 1.34 on says both itself, and this is never read for it.
+    /// </summary>
+    [JsonPropertyName("olderModules")]
+    public Dictionary<string, string> OlderModules { get; set; } = new();
 }
 
 /// <summary>The whole data/gamelayout.json file.</summary>
@@ -333,16 +342,30 @@ public static class GameLayout
     }
 
     /// <summary>
-    /// The section a feature belongs in: a configured move if there is one, otherwise the top value
-    /// table for a VALUE, otherwise the game's own DESCRIBE group.
+    /// The section a feature belongs in: Manips for a row the module declares run-legal (qwark
+    /// revision 1.34), else a configured move if there is one, then, for a module before that revision, the
+    /// layout's <c>olderModules</c> move, otherwise the top value table for a VALUE, otherwise the
+    /// game's own DESCRIBE group.
     /// </summary>
     public static string SectionFor(string titleId, GameId game, Feature feature, DescribeResult describe)
     {
+        // Revision 1.34: a run-legal row is the module's to declare, and is on Manips whatever the
+        // layout says, as it is on the Trainer's Manips page and out of the run-start warning.
+        if (feature.RunLegal) return ManipsSection;
+
         if (LayoutFor(titleId, game) is { } layout
             && layout.Moves.TryGetValue(feature.Label, out var section)
             && !string.IsNullOrWhiteSpace(section))
         {
             return section;
+        }
+
+        if (describe.Extension is null
+            && LayoutFor(titleId, game) is { } older
+            && older.OlderModules.TryGetValue(feature.Label, out var before)
+            && !string.IsNullOrWhiteSpace(before))
+        {
+            return before;
         }
 
         return feature.Kind == FeatureKind.Value ? ValuesSection : describe.GroupName(feature.Group);

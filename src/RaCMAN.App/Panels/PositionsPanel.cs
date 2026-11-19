@@ -209,10 +209,8 @@ public static class PositionsPanel
 
         // A game is offered the boxes for the bits its own planet load acts on, whatever the Level
         // flags panel can or cannot read for it, and each box shows the flag the console holds for
-        // that game. Which bits that is can depend on the module's build (UYA's special bolts,
-        // build 53).
-        byte build = state.Hello?.QwarkVersion ?? state.Session.QwarkVersion;
-        var boxes = PlanetResetOptions.For(state.DescribedGame, build).Boxes();
+        // that game. Which bits that is, the module says (qwark revision 1.34, DESCRIBE's extension).
+        var boxes = PlanetResetOptions.For(state.Describe.Extension, state.DescribedGame).Boxes();
         for (int i = 0; i < boxes.Count; i++)
         {
             if (i > 0) ImGui.SameLine();

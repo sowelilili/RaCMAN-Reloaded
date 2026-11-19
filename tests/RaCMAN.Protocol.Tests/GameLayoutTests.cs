@@ -97,8 +97,7 @@ public class GameLayoutTests
         var resetSkill = Make(23, FeatureKind.Action, 2, "Reset skill points");
         var jankBolts = Make(30, FeatureKind.Value, 4, "Jankpot bolts");
         var jankGo = Make(31, FeatureKind.Action, 4, "Activate jankpot");
-        var drek = Make(40, FeatureKind.Action, 2, "Drek skip");
-        var d = Describe(GameId.Rac1, Rac1Groups, goldBolts, resetGold, skill, resetSkill, jankBolts, jankGo, drek);
+        var d = Describe(GameId.Rac1, Rac1Groups, goldBolts, resetGold, skill, resetSkill, jankBolts, jankGo);
 
         Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, goldBolts, d));
         Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, resetGold, d));
@@ -106,7 +105,13 @@ public class GameLayoutTests
         Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, resetSkill, d));
         Assert.Equal("Debug", GameLayout.SectionFor(DiscTitle, GameId.Rac1, jankBolts, d));
         Assert.Equal("Debug", GameLayout.SectionFor(DiscTitle, GameId.Rac1, jankGo, d));
-        Assert.Equal("Manips", GameLayout.SectionFor(DiscTitle, GameId.Rac1, drek, d));
+
+        // Those four moves are for a module before qwark revision 1.34, which put them in Progress
+        // (the layout's "olderModules"). One from the revision on says Collectables itself, and
+        // the layout no longer decides: the same row in Progress stays in Progress there.
+        var newer = d with { Extension = new DescribeExtension(PlanetFlags.None, true, "Help") };
+        Assert.Equal("Progress", GameLayout.SectionFor(DiscTitle, GameId.Rac1, goldBolts, newer));
+        Assert.Equal("Debug", GameLayout.SectionFor(DiscTitle, GameId.Rac1, jankGo, newer));
     }
 
     [Fact]
@@ -114,15 +119,14 @@ public class GameLayoutTests
     {
         // The shooting pair sets up (or clears) an in-run strategy, so it sits with the manips; the
         // plain unlock/reset pair stays with the other collectables.
+        // Build 59: the layout names no run-legal row; the retired shooting pair's moves are gone.
         var setup = Make(24, FeatureKind.Action, 2, "Setup shooting skill points");
-        var reset = Make(25, FeatureKind.Action, 2, "Reset shooting skill points");
         var skill = Make(22, FeatureKind.Action, 2, "Unlock all skill points");
         var goldBolts = Make(20, FeatureKind.Action, 2, "Unlock all gold bolts");
         var goodies = Make(5, FeatureKind.Toggle, 0, "Goodies menu");
-        var d = Describe(GameId.Rac1, Rac1Groups, setup, reset, skill, goldBolts, goodies);
+        var d = Describe(GameId.Rac1, Rac1Groups, setup, skill, goldBolts, goodies);
 
-        Assert.Equal("Manips", GameLayout.SectionFor(DiscTitle, GameId.Rac1, setup, d));
-        Assert.Equal("Manips", GameLayout.SectionFor(DiscTitle, GameId.Rac1, reset, d));
+        Assert.Equal("Progress", GameLayout.SectionFor(DiscTitle, GameId.Rac1, setup, d));
         Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, skill, d));
         Assert.Equal("Collectables", GameLayout.SectionFor(DiscTitle, GameId.Rac1, goldBolts, d));
         Assert.Equal(GameLayout.OptionsSection, GameLayout.SectionFor(DiscTitle, GameId.Rac1, goodies, d));
@@ -133,14 +137,14 @@ public class GameLayoutTests
     {
         var debugMode = Make(5, FeatureKind.Toggle, 0, "Enable debug mode");
         var qe = Make(23, FeatureKind.Value, 2, "QE save write-offset");
-        var ngPlus = Make(24, FeatureKind.Action, 2, "NG+ setup");
-        var autoReset = Make(25, FeatureKind.Toggle, 2, "Auto-reset (any%)");
-        var d = Describe(GameId.Rac2, Rac2Groups, debugMode, qe, ngPlus, autoReset);
+        // Qwark revision 1.34: a row the module flags RUN_LEGAL is on Manips whatever its group,
+        // and the layout has no say in it: one flagged in Cheats, or named in a move, goes there.
+        var legal = Make(24, FeatureKind.Toggle, 0, "Enable debug mode") with { Flags2 = FeatureFlags2.RunLegal };
+        var d = Describe(GameId.Rac2, Rac2Groups, debugMode, qe);
 
         Assert.Equal("Debug", GameLayout.SectionFor("NPEA00386", GameId.Rac2, debugMode, d));
         Assert.Equal("Debug", GameLayout.SectionFor("NPEA00386", GameId.Rac2, qe, d));
-        Assert.Equal("Manips", GameLayout.SectionFor("NPEA00386", GameId.Rac2, ngPlus, d));
-        Assert.Equal("Manips", GameLayout.SectionFor("NPEA00386", GameId.Rac2, autoReset, d));
+        Assert.Equal("Manips", GameLayout.SectionFor("NPEA00386", GameId.Rac2, legal, d));
     }
 
     [Fact]
@@ -163,8 +167,7 @@ public class GameLayoutTests
         var resetTitanium = Make(22, FeatureKind.Action, 2, "Reset all titanium bolts");
         var upgrade = Make(23, FeatureKind.Action, 2, "Max all weapon levels");
         var downgrade = Make(24, FeatureKind.Action, 2, "Reset all weapon levels");
-        var ngPlus = Make(25, FeatureKind.Action, 2, "Setup NG+ manips");
-        var d = Describe(GameId.Rac3, Rac3Groups, trophy, titanium, resetTitanium, upgrade, downgrade, ngPlus);
+        var d = Describe(GameId.Rac3, Rac3Groups, trophy, titanium, resetTitanium, upgrade, downgrade);
 
         // The trophy reset is no longer in Progress, and the file does not move it: it is in a
         // DESCRIBE group of its own, which MANIP_LIST's Trophies heading takes over (below).
@@ -175,7 +178,6 @@ public class GameLayoutTests
         // The weapon-level pair rewrites the unlock table, so the Unlocks panel draws it, not the Game page.
         Assert.Equal(GameLayout.UnlocksSection, GameLayout.SectionFor("NPEA00387", GameId.Rac3, upgrade, d));
         Assert.Equal(GameLayout.UnlocksSection, GameLayout.SectionFor("NPEA00387", GameId.Rac3, downgrade, d));
-        Assert.Equal("Manips", GameLayout.SectionFor("NPEA00387", GameId.Rac3, ngPlus, d));
     }
 
     [Fact]
@@ -209,15 +211,9 @@ public class GameLayoutTests
     public void DeadlockedSkinMovesToCosmeticsAndPlanetsToPlayer()
     {
         var skin = Make(10, FeatureKind.Enum, 1, "Skin");
-        var planets = Make(11, FeatureKind.Action, 2, "Unlock all planets");
-        var actTune = Make(12, FeatureKind.Action, 2, "Act tune bosses");
-        var d = Describe(GameId.Rac4, Rac4Groups, skin, planets, actTune);
+        var d = Describe(GameId.Rac4, Rac4Groups, skin);
 
         Assert.Equal("Cosmetics", GameLayout.SectionFor("NPEA00423", GameId.Rac4, skin, d));
-
-        // Unlocking the planets is everyday progress, not a manip; only the act tune stays there.
-        Assert.Equal(GameLayout.PlayerSection, GameLayout.SectionFor("NPEA00423", GameId.Rac4, planets, d));
-        Assert.Equal("Manips", GameLayout.SectionFor("NPEA00423", GameId.Rac4, actTune, d));
 
         // Before build 56 Deadlocked had no Cosmetics group from qwark; the move creates the section, in configured order.
         var order = GameLayout.TabOrder("NPEA00423", GameId.Rac4, new[] { "Cheats", "Player", "Cosmetics" });
@@ -433,7 +429,7 @@ public class GameLayoutTests
     public void OnlyTheListedSectionsTheGameHasSomethingInBecomePagesAndTabs()
     {
         var goldBolts = Make(20, FeatureKind.Action, 2, "Unlock all gold bolts");
-        var drek = Make(40, FeatureKind.Action, 2, "Drek skip");
+        var drek = Make(40, FeatureKind.Action, 2, "Drek skip") with { Flags2 = FeatureFlags2.RunLegal };
         var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");
         var d = Describe(GameId.Rac1, Rac1Groups, goldBolts, drek, fastLoads);
 
@@ -861,8 +857,8 @@ public class GameLayoutTests
         var d = RaCMAN.Protocol.Testing.FakeQwarkServer.TodDescribe();
         string title = RaCMAN.Protocol.Testing.FakeQwarkServer.TodTitleId;
 
-        foreach (var label in new[] { "Unlock all skill points", "Reset skill points", "Unlock all gold bolts",
-                     "Reset gold bolts" })
+        foreach (var label in new[] { "Unlock all skill points", "Reset all skill points", "Unlock all gold bolts",
+                     "Reset all gold bolts" })
         {
             var feature = d.Features.Single(f => f.Label == label);
             Assert.Equal("Collectables", GameLayout.SectionFor(title, GameId.Tod, feature, d));
@@ -901,7 +897,9 @@ public class GameLayoutTests
         string title = RaCMAN.Protocol.Testing.FakeQwarkServer.TodTitleId;
         var cut = d.Features.Single(f => f.Label == "Remove cutscenes");
         Assert.Equal(18, cut.Id);
-        Assert.Equal("Cheats", d.GroupName(cut.Group));
+        // Revision 1.34: the module flags it run-legal, in a group of its own, no longer Cheats.
+        Assert.True(cut.RunLegal);
+        Assert.Equal("Manips", d.GroupName(cut.Group));
 
         Assert.Equal(GameLayout.ManipsSection, GameLayout.SectionFor(title, GameId.Tod, cut, d));
         var sections = GamePanel.SectionsFor(title, GameId.Tod, d);

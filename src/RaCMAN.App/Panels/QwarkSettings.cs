@@ -45,31 +45,44 @@ public static class QwarkSettings
         ShowsInGameMenus(session.QwarkVersion) && !session.NoConsoleMenu;
 
     /// <summary>
-    /// Whether the In-game menus box is greyed: under RPCS3 there is no console menu, and qwark
-    /// answers MENU_HELP UNSUPPORTED. Qwark revision 1.29: but Tools of Destruction's, which is the
-    /// game's own pause menu and works under RPCS3 with the Lua helper's patch, so there the box
-    /// is live.
+    /// What the running game's module says of its Trainer (qwark revision 1.34, DESCRIBE's
+    /// extension), or null: outside a game, before DESCRIBE has answered for this game, or from a
+    /// module before the revision.
     /// </summary>
-    public static bool InGameMenusBlocked(SessionInfo session) =>
-        (session.IsEmulator || session.CodePatchesUnsupported) && session.Game != GameId.Tod;
-
-    /// <summary>What the In-game menus box says when the pointer rests on it.</summary>
-    public static string InGameMenusTooltip(SessionInfo session) =>
-        InGameMenusBlocked(session)
-            ? "The console menu is not available under RPCS3."
-            : "When enabled, shows the in-game Trainer menu in place of the Help menu. "
-              + "When disabled, the Trainer menu is only accessible with its button combo.";
+    private static DescribeExtension? MenuFacts(SessionInfo session, DescribeResult describe) =>
+        session.Game != GameId.None && describe.Game == session.Game ? describe.Extension : null;
 
     /// <summary>
-    /// What the In-game menus box says beside itself, from the session alone. In Tools of Destruction
-    /// the Trainer takes the pause list's Inventory row (qwark revision 1.29), elsewhere Help's.
+    /// Whether the In-game menus box is greyed: the module says whether its Trainer can come up in
+    /// this game on this platform (a game whose Trainer is its own pause menu can under RPCS3, the
+    /// others cannot). Outside a game, or against a module that does not say, it is greyed where code
+    /// cannot be patched, as the four original games' menus need: a module before revision 1.34 under
+    /// RPCS3 reads as having none, ToD's included.
     /// </summary>
-    public static string InGameMenusStatus(SessionInfo session) =>
-        InGameMenusBlocked(session) ? "not under RPCS3"
-        : session.MenuHelpOff ? "the game's default pause menu"
-        : session.Game == GameId.Tod ? "Trainer replaces Inventory in the pause menu"
-        : "Trainer replaces Help in the pause menu";
+    public static bool InGameMenusBlocked(SessionInfo session, DescribeResult describe) =>
+        MenuFacts(session, describe) is { } facts
+            ? !facts.MenuHere
+            : session.IsEmulator || session.CodePatchesUnsupported;
 
+    /// <summary>What the In-game menus box says when the pointer rests on it.</summary>
+    public static string InGameMenusTooltip(SessionInfo session, DescribeResult describe) =>
+        InGameMenusBlocked(session, describe)
+            ? "The console menu is not available under RPCS3."
+            : $"When enabled, shows the in-game Trainer menu in place of the {MenuRow(session, describe)} menu. "
+              + "When disabled, the Trainer menu is only accessible with its button combo.";
+
+    /// <summary>The pause-menu row the Trainer takes, as the module names it; Help when it does not.</summary>
+    public static string MenuRow(SessionInfo session, DescribeResult describe) =>
+        MenuFacts(session, describe) is { MenuRow.Length: > 0 } facts ? facts.MenuRow : "Help";
+
+    /// <summary>
+    /// What the In-game menus box says beside itself: the row the Trainer takes in the pause menu,
+    /// as the running game's module names it (Inventory in Tools of Destruction, Help elsewhere).
+    /// </summary>
+    public static string InGameMenusStatus(SessionInfo session, DescribeResult describe) =>
+        InGameMenusBlocked(session, describe) ? "not under RPCS3"
+        : session.MenuHelpOff ? "the game's default pause menu"
+        : $"Trainer replaces {MenuRow(session, describe)} in the pause menu";
     /// <summary>
     /// Whether the Cheat warnings dropdown is drawn: SessionInfo <c>flags3</c> bit0 (qwark revision
     /// 1.30), the module's capability bit, and not the build number, so a test build of the same

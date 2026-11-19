@@ -18,6 +18,10 @@
 // Anything not moved stays in its qwark DESCRIBE group, and VALUE features default to the editable
 // table at the top of the Game page (the "Values" section). A group everything is moved out of
 // simply stops appearing.
+// Since qwark build 59 the console flags its run-legal features (they are always drawn on Manips,
+// whatever a move says) and gives the collectable actions a Collectables group of its own, so no
+// layout decides either. "olderModules" is a move table read only for a console on an older build,
+// which said neither.
 // "tabOrder" sets the section order; sections used but not listed follow in first-seen order.
 //
 // "headings" breaks a section up: it is keyed by section name, then by the heading text, and each
@@ -56,37 +60,24 @@
       "moves": {
         "Goodies menu": "Options",
 
-        "Drek skip": "Manips",
-        "Drek cutscene": "Manips",
-        "Any% all-missions reset": "Manips",
-        "Setup shooting skill points": "Manips",
-        "Reset shooting skill points": "Manips",
-
-        "Unlock all gold bolts": "Collectables",
-        "Reset all gold bolts": "Collectables",
-        "Unlock all skill points": "Collectables",
-        "Reset skill points": "Collectables",
-
         "Upgrade all weapons to gold": "Unlocks",
         "Reset all gold weapons": "Unlocks",
 
         "Jankpot bolts": "Debug",
         "Jankpot timer (frames)": "Debug",
         "Activate jankpot": "Debug"
+      },
+      "olderModules": {
+        "Unlock all gold bolts": "Collectables",
+        "Reset all gold bolts": "Collectables",
+        "Unlock all skill points": "Collectables",
+        "Reset skill points": "Collectables"
       }
     },
 
     "rac2": {
       "tabOrder": ["Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug"],
       "moves": {
-        "Reset any% manips": "Manips",
-        "Reset NG+ manips/menus": "Manips",
-        "NG+ setup": "Manips",
-        "NG+ No IMG setup": "Manips",
-        "NG+ All Missions setup": "Manips",
-        "Maktar slots": "Manips",
-        "Auto-reset (any%)": "Manips",
-        "Auto-reset (NG+)": "Manips",
         "Max all weapon levels": "Unlocks",
         "Max all weapon ammo": "Unlocks",
 
@@ -107,16 +98,6 @@
       "moves": {
         "Quick-select pause": "Options",
 
-        "Setup NG+ manips": "Manips",
-        "CC early setup": "Manips",
-        "Untune bosses": "Manips",
-        "Reset dropship health": "Manips",
-
-        "Unlock all skill points": "Collectables",
-        "Reset all skill points": "Collectables",
-        "Unlock all titanium bolts": "Collectables",
-        "Reset all titanium bolts": "Collectables",
-
         "Max all weapon levels": "Unlocks",
         "Reset all weapon levels": "Unlocks",
 
@@ -126,6 +107,12 @@
 
         "QE offset": "Debug",
         "Enable vendor QE": "Debug"
+      },
+      "olderModules": {
+        "Unlock all skill points": "Collectables",
+        "Reset all skill points": "Collectables",
+        "Unlock all titanium bolts": "Collectables",
+        "Reset all titanium bolts": "Collectables"
       },
       "headings": {
         "Cosmetics": {
@@ -144,9 +131,6 @@
     "rac4": {
       "tabOrder": ["Cheats", "Player", "Savefile", "Manips", "Collectables", "Cosmetics", "Debug"],
       "moves": {
-        "Unlock all planets": "Player",
-        "Act tune bosses": "Manips",
-
         "Max all weapon levels": "Unlocks",
         "Max all weapon ammo": "Unlocks",
 
@@ -175,6 +159,14 @@
       "moves": {
         "God Ratchet": "Options",
 
+        "Armour": "Cosmetics",
+        "Skin": "Cosmetics",
+
+        "Max all weapon levels": "Unlocks",
+        "Reset all weapon levels": "Unlocks",
+        "Max all weapon ammo": "Unlocks"
+      },
+      "olderModules": {
         "Remove cutscenes": "Manips",
         "Cache cutscenes": "Manips",
         "Cache cutscenes on reset": "Manips",
@@ -183,14 +175,7 @@
         "Unlock all skill points": "Collectables",
         "Reset skill points": "Collectables",
         "Unlock all gold bolts": "Collectables",
-        "Reset gold bolts": "Collectables",
-
-        "Armour": "Cosmetics",
-        "Skin": "Cosmetics",
-
-        "Max all weapon levels": "Unlocks",
-        "Reset all weapon levels": "Unlocks",
-        "Max all weapon ammo": "Unlocks"
+        "Reset gold bolts": "Collectables"
       },
       "headings": {
         "Manips": {

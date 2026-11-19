@@ -30,7 +30,6 @@ public class TodTests
         // Revision 1.28: ToD has a planet route, one line per LEVEL_ id.
         Assert.Equal(19, AutosplitRoutes.For(GameId.Tod).Count);
         Assert.Empty(LegacyLibraryImport.LegacyPlanets(GameId.Tod));
-        Assert.Equal(new PlanetResetOptions(false, false), PlanetResetOptions.For(GameId.Tod, QwarkClient.ExpectedQwarkBuild));
     }
 
     [Fact]

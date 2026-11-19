@@ -9,7 +9,7 @@ namespace RaCMAN.App.Panels;
 /// a line for the console's last event. The headings MANIP_LIST names under it (Deadlocked's Fixes,
 /// UYA's Trophies) are drawn by <see cref="GamePanel"/>, which owns the feature controls, from
 /// <see cref="HeaderBlocks"/>, each with <see cref="DrawStatusLines"/> under it: the trophy reset's
-/// status, from its status readout in the last telemetry (revision 1.21).
+/// status, worded by the module for its status readout's word (qwark revision 1.34).
 /// <para>
 /// Everything here is drawn from <see cref="AppState.Manips"/>, MANIP_LIST's last answer, and each
 /// control sends one request and reads the list again. The client keeps no selection and no option
@@ -55,129 +55,13 @@ public static class ManipsArea
         ManipEvents.NoticeFor(list) is { } notice ? $"Last: {notice.Text}" : null;
 
     /// <summary>
-    /// The line under UYA's Trophies heading for the trophy reset's status word (revision 1.21), or
-    /// null for nothing to say: no reset this boot, or a state this client does not know. It is read
-    /// at a glance between attempts, so it stays short; the console's log has the details.
+    /// The status line under <paramref name="feature"/>, when it is an ACTION that names a status
+    /// readout: the module's words for the word that readout carries (ACTION_STATUS, qwark revision
+    /// 1.34), which <see cref="AppState.ActionLine"/> asks for as the word moves. Null for every other
+    /// feature, for nothing to say, and against a module before the revision. The client keeps no
+    /// layout of any game's status word (UYA's Reset trophies, ToD's Cache cutscenes).
     /// </summary>
-    public static string? TrophyLine(TrophyResetStatus status) => status.State switch
-    {
-        TrophyResetState.Running => status.Step switch
-        {
-            TrophyResetStep.Deleting => "Trophies: resetting... (deleting)",
-            TrophyResetStep.Registering when status.Registrations >= 2 =>
-                $"Trophies: resetting... (registering, attempt {status.Registrations})",
-            TrophyResetStep.Registering => "Trophies: resetting... (registering)",
-            _ => "Trophies: resetting...",
-        },
-        TrophyResetState.Ready => $"Trophies ready ({status.Seconds} s)",
-        TrophyResetState.Failed => $"Trophy reset failed: {FailureText(status)}",
-        _ => null,
-    };
-
-    /// <summary>Why a trophy reset failed, in a few words.</summary>
-    private static string FailureText(TrophyResetStatus status) => status.Failure switch
-    {
-        TrophyResetFailure.DeleteStopped => "a trophy file could not be deleted",
-        TrophyResetFailure.Unregistered => "the game could not re-register its trophies",
-        TrophyResetFailure.NoAnswer => "your console did not answer, restart the game",
-        TrophyResetFailure.LoadEnded => "the Veldin load ended first",
-        TrophyResetFailure.GameRefused => "the game refused it",
-        TrophyResetFailure.NotTaken => "the game did not respond",
-        TrophyResetFailure.Refused when status.RefusedWith == Status.NotFound => "trophy folder not found",
-        TrophyResetFailure.Refused => $"refused ({status.RefusedWith})",
-        TrophyResetFailure.Stopped => "the game changed under it",
-        _ => $"reason {status.Detail}",
-    };
-
-    /// <summary>
-    /// The line under Tools of Destruction's Cache cutscenes for its status word (revision 1.29,
-    /// PROTOCOL.md section 5.17), or null for nothing to say: no run this boot, or a state this
-    /// client does not know.
-    /// </summary>
-    public static string? CutsceneCacheLine(CutsceneCacheStatus status) => status.State switch
-    {
-        CutsceneCacheState.Waiting => status.Wait == CutsceneCacheWait.Warmer
-            ? "Cutscene cache: waiting for the game's level caching to start..."
-            : "Cutscene cache: waiting for gameplay...",
-        CutsceneCacheState.Caching => $"Caching cutscenes: {status.Planet ?? "a planet"} {status.Percent}%",
-        CutsceneCacheState.Done => status.MiBPerSecond is { } rate
-            ? string.Create(System.Globalization.CultureInfo.InvariantCulture,
-                $"Cutscenes cached ({status.Seconds} s, {rate:0.0} MiB/s)")
-            : "Cutscenes already cached (all three planets)",
-        CutsceneCacheState.Failed => TooLateFor(status.Failure) is { } planet
-            ? $"Cutscene cache: too late for {planet}, the run got there first"
-            : $"Cutscene caching stopped: {CacheFailureText(status)}",
-        _ => null,
-    };
-
-    /// <summary>
-    /// The planet a "too late" reason names, or null for every other reason. Those runs did not stop:
-    /// that planet was dropped and the rest was cached.
-    /// </summary>
-    private static string? TooLateFor(CutsceneCacheFailure failure) => failure switch
-    {
-        CutsceneCacheFailure.TooLateCobalia => "Cobalia",
-        CutsceneCacheFailure.TooLateStratusCity => "Stratus City",
-        CutsceneCacheFailure.TooLateFastoon => "Fastoon",
-        _ => null,
-    };
-
-    /// <summary>Why a cutscene caching run stopped, in a few words.</summary>
-    private static string CacheFailureText(CutsceneCacheStatus status) => status.Failure switch
-    {
-        CutsceneCacheFailure.TitleFirst => "the title screen came before it finished",
-        CutsceneCacheFailure.NoTable => "the game's level table could not be read",
-        CutsceneCacheFailure.Stalled => "the game stopped reading",
-        CutsceneCacheFailure.Disabled => "Disable cutscene caching is on",
-        CutsceneCacheFailure.Unreadable => "the game could not be read",
-        CutsceneCacheFailure.GameClosed => "the game closed",
-        _ => "unknown reason",
-    };
-
-    /// <summary>How a status line is drawn: grey while under way, green once done, red when it failed.</summary>
-    public enum StatusTone
-    {
-        Busy,
-        Good,
-        Bad,
-    }
-
-    /// <summary>
-    /// The status line for <paramref name="feature"/>, when it is an ACTION that names a status
-    /// readout, read from <paramref name="session"/>; null for every other feature, for a qwark that
-    /// names no status readout, and for nothing to say. The word's layout is the action's own:
-    /// Tools of Destruction's Cache cutscenes (revision 1.29) in <paramref name="game"/> Tod, UYA's
-    /// Reset trophies (revision 1.21) for every other.
-    /// </summary>
-    public static (string Text, StatusTone Tone)? StatusLine(SessionInfo session, Feature feature, GameId game = GameId.None)
-    {
-        if (feature.StatusReadout is not { } index || session.ReadoutAt(index) is not { } word) return null;
-
-        if (game == GameId.Tod)
-        {
-            if (feature.Id != CutsceneCacheStatus.FeatureId) return null;
-            var cache = CutsceneCacheStatus.Parse(word);
-            return CutsceneCacheLine(cache) is { } line
-                ? (line, cache.State switch
-                {
-                    CutsceneCacheState.Done => StatusTone.Good,
-                    CutsceneCacheState.Failed => StatusTone.Bad,
-                    _ => StatusTone.Busy,
-                })
-                : null;
-        }
-
-        var status = TrophyResetStatus.Parse(word);
-        return TrophyLine(status) is { } text
-            ? (text, status.State switch
-            {
-                TrophyResetState.Ready => StatusTone.Good,
-                TrophyResetState.Failed => StatusTone.Bad,
-                _ => StatusTone.Busy,
-            })
-            : null;
-    }
-
+    public static ActionStatusLine? StatusLine(AppState state, Feature feature) => state.ActionLine(feature);
     /// <summary>
     /// The status lines of a block's actions, drawn under its buttons: grey while one runs, green
     /// once it is done (the trophies ready, the cutscenes cached), red when it failed. Nothing at
@@ -187,7 +71,7 @@ public static class ManipsArea
     {
         foreach (var feature in features)
         {
-            if (StatusLine(state.Session, feature, state.DescribedGame) is not { } line) continue;
+            if (StatusLine(state, feature) is not { } line) continue;
 
             switch (line.Tone)
             {
@@ -248,7 +132,7 @@ public static class ManipsArea
         string headers = string.Join(" ", blocks.Select(b =>
             $"{Name(b.Heading!)}:{string.Join(",", b.Features.Select(f => Name(f.Label)))}"));
         string? status = blocks.SelectMany(b => b.Features)
-            .Select(f => StatusLine(state.Session, f, state.DescribedGame)?.Text)
+            .Select(f => StatusLine(state, f)?.Text)
             .FirstOrDefault(text => text is not null);
 
         return $"selected={Name(list.GroupName(list.Selected))} auto={(list.AutoReset ? "on" : "off")} "

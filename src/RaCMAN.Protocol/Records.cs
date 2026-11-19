@@ -443,11 +443,19 @@ public sealed record Feature(
     uint Min,
     uint Max,
     string Label,
-    byte Bits = 0)
+    byte Bits = 0,
+    FeatureFlags2 Flags2 = FeatureFlags2.None)
 {
     public const int Size = 48;
 
     public bool Auto => (Flags & FeatureFlags.Auto) != 0;
+
+    /// <summary>
+    /// Qwark revision 1.34: the module declares this row run-legal (<c>flags2</c> bit0), so it is
+    /// drawn on the Manips page and the console never counts it as a cheat at a run start. A module
+    /// before the revision sends 0 there, the pad byte it always was.
+    /// </summary>
+    public bool RunLegal => (Flags2 & FeatureFlags2.RunLegal) != 0;
 
     public bool WritesCode => (Flags & FeatureFlags.WritesCode) != 0;
 
@@ -584,11 +592,11 @@ public sealed record Feature(
         var flags = (FeatureFlags)r.ReadU8();
         byte readout = r.ReadU8();
         byte bits = r.ReadU8();
-        r.Skip(1);
+        var flags2 = (FeatureFlags2)r.ReadU8();
         uint min = r.ReadU32();
         uint max = r.ReadU32();
         string label = r.ReadFixedString(32);
-        return new Feature(id, kind, group, aux, flags, readout, min, max, label, bits);
+        return new Feature(id, kind, group, aux, flags, readout, min, max, label, bits, flags2);
     }
 
     public byte[] ToBytes()
@@ -602,7 +610,7 @@ public sealed record Feature(
         w.WriteU8((byte)Flags);
         w.WriteU8(Readout);
         w.WriteU8(Bits);
-        w.WriteZeros(1);
+        w.WriteU8((byte)Flags2);
         w.WriteU32(Min);
         w.WriteU32(Max);
         w.WriteFixedString(Label, 32);
@@ -610,9 +618,18 @@ public sealed record Feature(
     }
 }
 
-/// <summary>The DESCRIBE reply: groups, readout names and the feature table.</summary>
+/// <summary>
+/// The DESCRIBE reply: groups, readout names and the feature table, and since qwark revision 1.34
+/// the extension after the features (<see cref="Extension"/>), null from a module before it.
+/// </summary>
 public sealed record DescribeResult(GameId Game, string[] Groups, string[] Readouts, Feature[] Features)
 {
+    /// <summary>
+    /// Qwark revision 1.34: what the module says of the game beyond its rows, or null when the
+    /// reply ends with the features, as every module before the revision's does.
+    /// </summary>
+    public DescribeExtension? Extension { get; init; }
+
     public static DescribeResult Empty { get; } =
         new(GameId.None, Array.Empty<string>(), Array.Empty<string>(), Array.Empty<Feature>());
 
@@ -642,7 +659,7 @@ public sealed record DescribeResult(GameId Game, string[] Groups, string[] Reado
             for (int i = 0; i < nfeatures; i++) features[i] = Feature.Parse(r.ReadSpan(Feature.Size));
         }
 
-        return new DescribeResult(game, groups, readouts, features);
+        return new DescribeResult(game, groups, readouts, features) { Extension = DescribeExtension.Read(ref r) };
     }
 
     /// <summary>The ACTION flagged SAVE_ASIDE, or null when this game has no savefile helper.</summary>
@@ -679,6 +696,7 @@ public sealed record DescribeResult(GameId Game, string[] Groups, string[] Reado
         if (!Groups.AsSpan().SequenceEqual(other.Groups)) return false;
         if (!Readouts.AsSpan().SequenceEqual(other.Readouts)) return false;
         if (Features.Length != other.Features.Length) return false;
+        if (!Equals(Extension, other.Extension)) return false;
 
         for (int i = 0; i < Features.Length; i++)
         {
@@ -692,6 +710,71 @@ public sealed record DescribeResult(GameId Game, string[] Groups, string[] Reado
         feature with { Flags = feature.Flags & ~FeatureFlags.Auto };
 }
 
+/// <summary>
+/// Qwark revision 1.34: DESCRIBE's extension, after the features: <c>u8 ext_len</c>, then
+/// <c>u8 planet_flags</c> (the PLANET_LOAD flag bits the game's load acts on), <c>u8 menu_flags</c>
+/// (bit0: the in-game Trainer can come up in this game on this platform) and <c>char menu_row[16]</c>
+/// (the pause-menu row the Trainer takes). What the module knows of its game, so the client keeps
+/// none of it. A longer extension from a later revision is read for what this one knows.
+/// </summary>
+public sealed record DescribeExtension(PlanetFlags PlanetFlags, bool MenuHere, string MenuRow)
+{
+    /// <summary>The bytes after <c>ext_len</c> this revision sends.</summary>
+    public const int Length = 18;
+
+    public static DescribeExtension? Read(ref SpanReader r)
+    {
+        if (r.Remaining < 1) return null;
+        int length = r.ReadU8();
+        if (length < Length || r.Remaining < length) return null;
+        var flags = (PlanetFlags)(r.ReadU8() & (byte)(PlanetFlags.ResetLevelFlags | PlanetFlags.ResetSpecialBolts));
+        bool here = (r.ReadU8() & 1) != 0;
+        string row = r.ReadFixedString(16);
+        return new DescribeExtension(flags, here, row);
+    }
+
+    public byte[] ToBytes()
+    {
+        var buffer = new byte[1 + Length];
+        var w = new SpanWriter(buffer);
+        w.WriteU8(Length);
+        w.WriteU8((byte)PlanetFlags);
+        w.WriteU8(MenuHere ? (byte)1 : (byte)0);
+        w.WriteFixedString(MenuRow, 16);
+        return buffer;
+    }
+}
+/// <summary>How a status line is drawn: nothing, grey while under way, green once done, red when it failed.</summary>
+public enum StatusTone : byte
+{
+    None = 0,
+    Busy = 1,
+    Good = 2,
+    Bad = 3,
+}
+
+/// <summary>ACTION_STATUS's reply (qwark revision 1.34): the line under an ACTION's button and its tone.</summary>
+public sealed record ActionStatusLine(StatusTone Tone, string Text)
+{
+    public static ActionStatusLine Parse(ReadOnlySpan<byte> payload)
+    {
+        var r = new SpanReader(payload);
+        var tone = (StatusTone)r.ReadU8();
+        int length = r.ReadU8();
+        if (r.Remaining < length) throw new ProtocolException($"ACTION_STATUS has {r.Remaining} bytes for a text of {length}");
+        return new ActionStatusLine(tone, System.Text.Encoding.ASCII.GetString(r.ReadSpan(length)));
+    }
+
+    public byte[] ToBytes()
+    {
+        var text = System.Text.Encoding.ASCII.GetBytes(Text);
+        var buffer = new byte[2 + text.Length];
+        buffer[0] = (byte)Tone;
+        buffer[1] = (byte)text.Length;
+        text.CopyTo(buffer, 2);
+        return buffer;
+    }
+}
 /// <summary>WATCH_LIST entry.</summary>
 public readonly record struct WatchEntry(byte Id, byte Size, uint Address)
 {

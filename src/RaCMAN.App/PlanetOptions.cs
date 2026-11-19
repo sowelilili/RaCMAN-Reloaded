@@ -130,28 +130,37 @@ public sealed class PlanetChoices
 /// </summary>
 public readonly record struct PlanetResetOptions(bool LevelFlags, bool SpecialBolts)
 {
-    /// <summary>The first qwark build whose UYA planet load acts on the special-bolts bit.</summary>
-    public const byte Rac3SpecialBoltsBuild = 53;
-
     /// <summary>
-    /// RaC1 resets both, its level flags and its gold bolts, and so does UYA from qwark build 53,
-    /// whose special bolts are its titanium bolts (PROTOCOL.md 5.5). An older module's UYA load
-    /// ignores that bit, so against one UYA is offered the level flags alone, as it always was:
-    /// the build comes from HELLO, as the stale-module warning's does. RaC2 resets its level flags
-    /// and has no per-planet special bolt, so its load ignores that bit, and Deadlocked's load
-    /// ignores both. A game the client has no name for is offered neither, the same as Deadlocked.
+    /// The boxes for a game, as its module says (qwark revision 1.34, DESCRIBE's extension): the
+    /// PLANET_LOAD flag bits the game's load acts on. The rule the modules follow is that a game with
+    /// per-planet level flags acts on bit0 and one with per-planet special bolts on bit1 (RaC1's gold
+    /// bolts, RaC2's platinum bolts, UYA's titanium bolts, ToD's gold bolts); Deadlocked has neither.
     /// <para>
     /// This is not the Level flags panel's question, and whether LEVELFLAGS_GET is answered does
-    /// not come into it. qwark withholds RaC1's flag viewer, so RaC1 answers UNSUPPORTED there,
-    /// but RaC1's PLANET_LOAD still resets the flags (PROTOCOL.md, level flags), the one thing the
-    /// old client ever did with them. Reading the one as the other hid RaC1's box while its bit
-    /// kept resetting the flags on every load.
+    /// not come into it: qwark withholds RaC1's flag viewer, but RaC1's PLANET_LOAD still resets the
+    /// flags, and the module says so.
+    /// </para>
+    /// <para>
+    /// A module before the revision says nothing, and is out of date for this client, which offers
+    /// the update. Until it is replaced, <see cref="OlderModule"/> stands in, the table this client
+    /// kept until then: hiding the boxes instead would leave a bit ticked earlier acting on every
+    /// load out of sight.
     /// </para>
     /// </summary>
-    public static PlanetResetOptions For(GameId game, byte qwarkBuild) => new(
-        LevelFlags: game is GameId.Rac1 or GameId.Rac2 or GameId.Rac3,
-        SpecialBolts: game is GameId.Rac1 || (game is GameId.Rac3 && qwarkBuild >= Rac3SpecialBoltsBuild));
+    public static PlanetResetOptions For(DescribeExtension? extension, GameId game) =>
+        extension is { } ext
+            ? new(LevelFlags: (ext.PlanetFlags & PlanetFlags.ResetLevelFlags) != 0,
+                  SpecialBolts: (ext.PlanetFlags & PlanetFlags.ResetSpecialBolts) != 0)
+            : OlderModule(game);
 
+    /// <summary>
+    /// What a module before qwark revision 1.34 acts on, which it does not say: RaC1 and UYA both
+    /// bits, RaC2 its level flags, Deadlocked and ToD neither (as their builds 53 to 58 load them).
+    /// Compatibility alone, for the time a console runs such a module; nothing newer reads it.
+    /// </summary>
+    public static PlanetResetOptions OlderModule(GameId game) => new(
+        LevelFlags: game is GameId.Rac1 or GameId.Rac2 or GameId.Rac3,
+        SpecialBolts: game is GameId.Rac1 or GameId.Rac3);
     private static readonly PlanetResetBox LevelFlagsBox = new("Reset level flags", PlanetFlags.ResetLevelFlags);
     private static readonly PlanetResetBox SpecialBoltsBox = new("Reset special bolts", PlanetFlags.ResetSpecialBolts);
 

@@ -1307,7 +1307,7 @@ public class ClientTests
         string? stale = null;
 
         string Boxes() => PositionsPanel.ResetBoxSummary(
-            PlanetResetOptions.For(state.DescribedGame, state.Session.QwarkVersion).Boxes(), state.Session.PlanetFlags);
+            PlanetResetOptions.For(state.Describe.Extension, state.DescribedGame).Boxes(), state.Session.PlanetFlags);
 
         // Frames as the render loop runs them, each checked the way PlanetLoadControls draws it:
         // nothing while the planet list is empty, else the described game's planets and the

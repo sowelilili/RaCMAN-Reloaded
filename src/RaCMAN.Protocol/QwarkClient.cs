@@ -1027,6 +1027,17 @@ public sealed class QwarkClient : IDisposable
     /// PLANET_LIST: the names at their ids, and since build 53 the order a menu lists them in. An
     /// older module's reply, names alone, comes back in id order.
     /// </summary>
+    /// <summary>
+    /// ACTION_STATUS (qwark revision 1.34): the line to draw under <paramref name="id"/>'s button for
+    /// <paramref name="word"/>, the word its status readout carried, worded by the module.
+    /// </summary>
+    public async Task<ActionStatusLine> ActionStatusAsync(byte id, uint word, CancellationToken cancellationToken = default)
+    {
+        var request = new byte[5];
+        request[0] = id;
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(request.AsSpan(1), word);
+        return ActionStatusLine.Parse(await RequestAsync(Opcode.ActionStatus, request, cancellationToken).ConfigureAwait(false));
+    }
     public async Task<PlanetList> PlanetListAsync(CancellationToken cancellationToken = default)
     {
         var payload = await RequestAsync(Opcode.PlanetList, null, cancellationToken).ConfigureAwait(false);

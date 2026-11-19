@@ -1143,7 +1143,13 @@ public sealed partial class FakeQwarkServer : IDisposable
         {
             foreach (var label in labels)
             {
-                if (features.Any(f => f.Label == label)) continue;
+                // Revision 1.34: a header's rows are run-legal, and the module flags them so.
+                int have = features.FindIndex(f => f.Label == label);
+                if (have >= 0)
+                {
+                    features[have] = features[have] with { Flags2 = FeatureFlags2.RunLegal };
+                    continue;
+                }
 
                 var (kind, flags, wanted) = ManipHeaderFeature(label);
                 byte id = wanted is { } at && features.All(f => f.Id != at)
@@ -1163,7 +1169,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                     if (index >= 0) readout = (byte)index;
                 }
 
-                features.Add(new Feature(id, kind, 0, 0, flags, readout, 0, 0, label));
+                features.Add(new Feature(id, kind, 0, 0, flags, readout, 0, 0, label, Flags2: FeatureFlags2.RunLegal));
             }
         }
 
@@ -2347,7 +2353,7 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// is left.
     /// </summary>
     public static bool IsGameOp(Opcode opcode) => opcode is
-        Opcode.Describe or Opcode.FeatureSet or Opcode.FeatureTrigger or Opcode.FeatureSetAuto
+        Opcode.Describe or Opcode.ActionStatus or Opcode.FeatureSet or Opcode.FeatureTrigger or Opcode.FeatureSetAuto
         or Opcode.FeatureOptions or Opcode.SwitchPatch
         or Opcode.PreviousList or Opcode.PreviousReapply or Opcode.PreviousDismiss
         or Opcode.PosSelect or Opcode.PosSave or Opcode.PosLoad or Opcode.PosList or Opcode.PosClear
@@ -2660,6 +2666,18 @@ public sealed partial class FakeQwarkServer : IDisposable
                 case Opcode.Describe:
                     DescribeCount++;
                     return (Status.Ok, EncodeDescribe(WithAutoFlags(Describe, _session.ToggleAuto)));
+
+                // Qwark revision 1.34: an ACTION's status line, worded as the module words it.
+                case Opcode.ActionStatus:
+                {
+                    ActionStatusAsks++;
+                    if (ActionStatusUnknown) return (Status.UnknownOp, Array.Empty<byte>());
+                    if (payload.Length < 5) return (Status.BadArg, Array.Empty<byte>());
+                    var action = Array.Find(Describe.Features, f => f.Id == payload[0]);
+                    if (action?.StatusReadout is null) return (Status.NotFound, Array.Empty<byte>());
+                    uint word = (uint)(payload[1] << 24 | payload[2] << 16 | payload[3] << 8 | payload[4]);
+                    return (Status.Ok, ActionLine(Describe.Game, action, word).ToBytes());
+                }
 
                 case Opcode.FeatureSet:
                 {
@@ -3899,6 +3917,70 @@ public sealed partial class FakeQwarkServer : IDisposable
     /// <c>toggle_auto</c>, which qwark ORs in as it answers (features.c). It is why two DESCRIBE
     /// answers from one module differ once an "on boot" box has been ticked in between.
     /// </summary>
+    /// <summary>On answers ACTION_STATUS UNKNOWN_OP, as a module before build 59 does.</summary>
+    public bool ActionStatusUnknown { get; set; }
+
+    /// <summary>How many ACTION_STATUS requests the fake has answered, for the tests of the client's asking.</summary>
+    public int ActionStatusAsks { get; private set; }
+
+    /// <summary>
+    /// The line qwark words for an ACTION's status word (ACTION_STATUS, revision 1.34), as its
+    /// action_status does for UYA's Reset trophies and ToD's Cache cutscenes (rac3.c, tod_cache.c):
+    /// the fake console stands in for the module here, and the client draws what it is sent.
+    /// </summary>
+    public static ActionStatusLine ActionLine(GameId game, Feature action, uint word)
+    {
+        if (game == GameId.Tod && action.Id == CutsceneCacheStatus.FeatureId)
+        {
+            var c = CutsceneCacheStatus.Parse(word);
+            return c.State switch
+            {
+                CutsceneCacheState.Waiting => new(StatusTone.Busy, c.Wait == CutsceneCacheWait.Warmer
+                    ? "Cutscene cache: waiting for the game's level caching to start..."
+                    : "Cutscene cache: waiting for gameplay..."),
+                CutsceneCacheState.Caching => new(StatusTone.Busy, $"Caching cutscenes: {c.Planet ?? "a planet"} {c.Percent}%"),
+                CutsceneCacheState.Done => new(StatusTone.Good, c.MiBPerSecond is { } rate
+                    ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Cutscenes cached ({c.Seconds} s, {rate:0.0} MiB/s)")
+                    : "Cutscenes already cached (all three planets)"),
+                CutsceneCacheState.Failed => new(StatusTone.Bad, c.Failure switch
+                {
+                    CutsceneCacheFailure.TooLateCobalia => "Cutscene cache: too late for Cobalia, the run got there first",
+                    CutsceneCacheFailure.TooLateStratusCity => "Cutscene cache: too late for Stratus City, the run got there first",
+                    CutsceneCacheFailure.TooLateFastoon => "Cutscene cache: too late for Fastoon, the run got there first",
+                    CutsceneCacheFailure.Disabled => "Cutscene caching stopped: Disable cutscene caching is on",
+                    _ => "Cutscene caching stopped: the game stopped reading",
+                }),
+                _ => new(StatusTone.None, ""),
+            };
+        }
+
+        var s = TrophyResetStatus.Parse(word);
+        return s.State switch
+        {
+            TrophyResetState.Running => new(StatusTone.Busy, s.Step switch
+            {
+                TrophyResetStep.Deleting => "Trophies: resetting... (deleting)",
+                TrophyResetStep.Registering when s.Registrations >= 2 => $"Trophies: resetting... (registering, attempt {s.Registrations})",
+                TrophyResetStep.Registering => "Trophies: resetting... (registering)",
+                _ => "Trophies: resetting...",
+            }),
+            TrophyResetState.Ready => new(StatusTone.Good, $"Trophies ready ({s.Seconds} s)"),
+            TrophyResetState.Failed => new(StatusTone.Bad, "Trophy reset failed: " + s.Failure switch
+            {
+                TrophyResetFailure.DeleteStopped => "a trophy file could not be deleted",
+                TrophyResetFailure.Unregistered => "the game could not re-register its trophies",
+                TrophyResetFailure.NoAnswer => "your console did not answer, restart the game",
+                TrophyResetFailure.LoadEnded => "the Veldin load ended first",
+                TrophyResetFailure.GameRefused => "the game refused it",
+                TrophyResetFailure.NotTaken => "the game did not respond",
+                TrophyResetFailure.Refused when s.RefusedWith == Status.NotFound => "trophy folder not found",
+                TrophyResetFailure.Refused => $"refused (status {(int)s.RefusedWith})",
+                TrophyResetFailure.Stopped => "the game changed under it",
+                _ => $"reason {s.Detail}",
+            }),
+            _ => new(StatusTone.None, ""),
+        };
+    }
     public static DescribeResult WithAutoFlags(DescribeResult describe, ulong toggleAuto) =>
         describe with
         {
@@ -3912,7 +3994,8 @@ public sealed partial class FakeQwarkServer : IDisposable
     public static byte[] EncodeDescribe(DescribeResult describe)
     {
         int size = 1 + 1 + describe.Groups.Length * 24 + 1 + describe.Readouts.Length * 24 + 1
-                   + describe.Features.Length * Feature.Size;
+                   + describe.Features.Length * Feature.Size
+                   + (describe.Extension is null ? 0 : 1 + DescribeExtension.Length);
         var buffer = new byte[size];
         var w = new SpanWriter(buffer);
         w.WriteU8((byte)describe.Game);
@@ -3922,6 +4005,8 @@ public sealed partial class FakeQwarkServer : IDisposable
         foreach (var readout in describe.Readouts) w.WriteFixedString(readout, 24);
         w.WriteU8((byte)describe.Features.Length);
         foreach (var feature in describe.Features) w.WriteBytes(feature.ToBytes());
+        // Qwark revision 1.34: the extension after the features, as a module from build 59 sends it.
+        if (describe.Extension is { } ext) w.WriteBytes(ext.ToBytes());
         return buffer;
     }
 

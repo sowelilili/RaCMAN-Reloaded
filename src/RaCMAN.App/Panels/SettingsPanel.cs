@@ -712,16 +712,17 @@ public static class SettingsPanel
 
     /// <summary>
     /// The console's In-game menus switch, MENU_HELP of revision 1.23: whether the Trainer menu
-    /// takes the place of Help in the game's pause menu. Greyed under RPCS3, which has no console
-    /// menu (but in ToD, whose pause menu is its console menu there too, qwark revision 1.29).
+    /// takes the place of a row of the game's pause menu (the one the module names, qwark revision
+    /// 1.34). Greyed where the module says its Trainer cannot come up (the four original games under
+    /// RPCS3), and outside a game where code cannot be patched.
     /// </summary>
     private static void DrawInGameMenus(AppState state)
     {
         var session = state.Session;
-        string tooltip = QwarkSettings.InGameMenusTooltip(session);
+        string tooltip = QwarkSettings.InGameMenusTooltip(session, state.Describe);
         Label(SettingsLayout.Label(SettingRow.InGameMenus), tooltip);
 
-        bool blocked = QwarkSettings.InGameMenusBlocked(session);
+        bool blocked = QwarkSettings.InGameMenusBlocked(session, state.Describe);
         bool on = !session.MenuHelpOff;
 
         ImGui.BeginDisabled(blocked);
@@ -733,7 +734,7 @@ public static class SettingsPanel
 
         ImGui.EndDisabled();
         ControlTooltip(tooltip);
-        InlineHint(QwarkSettings.InGameMenusStatus(session));
+        InlineHint(QwarkSettings.InGameMenusStatus(session, state.Describe));
     }
 
     /// <summary>

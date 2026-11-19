@@ -77,111 +77,13 @@ public class TrophyStatusParsingTests
     }
 }
 
-/// <summary>The line under the Trophies heading, one per state, and nothing where there is nothing to say.</summary>
+/// <summary>
+/// The fake console's trophy states. The line under the Trophies heading for each state is the
+/// module's since qwark revision 1.34 (ACTION_STATUS, worded by rac3.c and pinned by qwark's own
+/// tests); the client draws what it is sent, which the end-to-end tests below follow.
+/// </summary>
 public class TrophyStatusLineTests
-{
-    private static readonly Feature Reset =
-        new(21, FeatureKind.Action, 5, 0, FeatureFlags.None, 12, 0, 0, "Reset trophies");
-
-    private static SessionInfo SessionWith(int index, uint word)
-    {
-        var readouts = new uint[SessionInfo.ReadoutCount];
-        readouts[index] = word;
-        return SessionInfo.Empty with { State = SessionState.Ingame, Game = GameId.Rac3, Readout = readouts };
-    }
-
-    [Fact]
-    public void NothingIsShownBeforeTheFirstResetOfABoot()
-    {
-        Assert.Null(ManipsArea.TrophyLine(default));
-        Assert.Null(ManipsArea.StatusLine(SessionWith(12, 0), Reset));
-    }
-
-    [Fact]
-    public void ARunningResetSaysWhereItIs()
-    {
-        Assert.Equal("Trophies: resetting...", ManipsArea.TrophyLine(TrophyResetStatus.Running(TrophyResetStep.Starting)));
-        Assert.Equal("Trophies: resetting... (deleting)",
-            ManipsArea.TrophyLine(TrophyResetStatus.Running(TrophyResetStep.Deleting)));
-
-        // Before the first registration and during it, no attempt number: the first after the
-        // delete fails on every console so far, so the second is the one worth naming.
-        Assert.Equal("Trophies: resetting... (registering)",
-            ManipsArea.TrophyLine(TrophyResetStatus.Running(TrophyResetStep.Registering, 0)));
-        Assert.Equal("Trophies: resetting... (registering)",
-            ManipsArea.TrophyLine(TrophyResetStatus.Running(TrophyResetStep.Registering, 1)));
-        Assert.Equal("Trophies: resetting... (registering, attempt 2)",
-            ManipsArea.TrophyLine(TrophyResetStatus.Running(TrophyResetStep.Registering, 2)));
-
-        // A step this client does not know is still a reset under way.
-        Assert.Equal("Trophies: resetting...", ManipsArea.TrophyLine(new TrophyResetStatus(TrophyResetState.Running, 9, 0, 0, 0)));
-    }
-
-    [Fact]
-    public void AReadyResetSaysHowLongItTook()
-    {
-        Assert.Equal("Trophies ready (13 s)", ManipsArea.TrophyLine(TrophyResetStatus.Ready(13)));
-        Assert.Equal("Trophies ready (0 s)", ManipsArea.TrophyLine(TrophyResetStatus.Ready(0)));
-    }
-
-    [Theory]
-    [InlineData(TrophyResetFailure.DeleteStopped, "Trophy reset failed: a trophy file could not be deleted")]
-    [InlineData(TrophyResetFailure.Unregistered, "Trophy reset failed: the game could not re-register its trophies")]
-    [InlineData(TrophyResetFailure.NoAnswer, "Trophy reset failed: your console did not answer, restart the game")]
-    [InlineData(TrophyResetFailure.LoadEnded, "Trophy reset failed: the Veldin load ended first")]
-    [InlineData(TrophyResetFailure.GameRefused, "Trophy reset failed: the game refused it")]
-    [InlineData(TrophyResetFailure.NotTaken, "Trophy reset failed: the game did not respond")]
-    [InlineData(TrophyResetFailure.Stopped, "Trophy reset failed: the game changed under it")]
-    [InlineData((TrophyResetFailure)12, "Trophy reset failed: reason 12")]
-    public void AFailedResetSaysWhy(TrophyResetFailure failure, string line)
-    {
-        Assert.Equal(line, ManipsArea.TrophyLine(TrophyResetStatus.Failed(failure, seconds: 13)));
-    }
-
-    [Fact]
-    public void ARefusalSaysWhatItWasRefusedWith()
-    {
-        Assert.Equal("Trophy reset failed: trophy folder not found",
-            ManipsArea.TrophyLine(TrophyResetStatus.Failed(TrophyResetFailure.Refused, Status.NotFound)));
-        Assert.Equal("Trophy reset failed: refused (Unsupported)",
-            ManipsArea.TrophyLine(TrophyResetStatus.Failed(TrophyResetFailure.Refused, Status.Unsupported)));
-        Assert.Equal("Trophy reset failed: refused (IoError)",
-            ManipsArea.TrophyLine(TrophyResetStatus.Failed(TrophyResetFailure.Refused, Status.IoError)));
-    }
-
-    [Fact]
-    public void AStateThisClientDoesNotKnowSaysNothing()
-    {
-        Assert.Null(ManipsArea.TrophyLine(TrophyResetStatus.Parse(0x40000D01u)));
-        Assert.Null(ManipsArea.TrophyLine(TrophyResetStatus.Parse(0xF0000000u)));
-    }
-
-    [Fact]
-    public void TheLineIsReadThroughTheResetsOwnRow()
-    {
-        var ready = TrophyResetStatus.Ready(13, 4).ToWord();
-
-        var line = ManipsArea.StatusLine(SessionWith(12, ready), Reset);
-        Assert.Equal<(string, ManipsArea.StatusTone)?>(("Trophies ready (13 s)", ManipsArea.StatusTone.Good), line);
-
-        // The row says where the word is, whatever index that is.
-        Assert.Equal("Trophies ready (13 s)",
-            ManipsArea.StatusLine(SessionWith(3, ready), Reset with { Readout = 3 })?.Text);
-
-        // An older qwark names no status readout: nothing, whatever the readouts hold.
-        Assert.Null(ManipsArea.StatusLine(SessionWith(12, ready), Reset with { Readout = SessionInfo.NoReadout }));
-
-        // The toggle beside it is not a status, and neither is a VALUE that mirrors a readout.
-        var toggle = new Feature(39, FeatureKind.Toggle, 5, 0, FeatureFlags.None, 12, 0, 0, "Reset trophies on Veldin load");
-        Assert.Null(ManipsArea.StatusLine(SessionWith(12, ready), toggle));
-        var value = new Feature(3, FeatureKind.Value, 0, 0, FeatureFlags.None, 12, 0, 0, "Bolts");
-        Assert.Null(ManipsArea.StatusLine(SessionWith(12, ready), value));
-
-        var failed = TrophyResetStatus.Failed(TrophyResetFailure.DeleteStopped).ToWord();
-        Assert.Equal(ManipsArea.StatusTone.Bad, ManipsArea.StatusLine(SessionWith(12, failed), Reset)?.Tone);
-    }
-
-    [Fact]
+{    [Fact]
     public void TheFakeScriptNamesEachState()
     {
         static TrophyResetStatus? Step(string step) => FakeScript.TrophyStep(step.Split(':'));

@@ -34,7 +34,7 @@ The `games` entries are keyed by game: `rac1`, `rac2`, `rac3`, `rac4` and `tod`.
 BCES01503 holds three games under one title id, so a game key is what gives each of them the correct
 layout. An entry keyed by a title id is also possible. The client reads it first.
 
-Each entry can hold three tables.
+Each entry can hold these tables.
 
 **`moves`** sends one feature to a named section. The key is the feature label, exactly as the
 Connection panel and the Game page show it. The client makes the section if it does not exist.
@@ -79,6 +79,8 @@ no heading.
 controls, and the client shows it even when no feature is in it. The console can also list features
 under headings of its own there: Deadlocked's **Fixes** and UYA's **Trophies**. Those features are
 always drawn under their heading, so a `moves` entry for one of them has no effect.
+
+Since qwark build 59 (revision 1.34) the console says which features are run-legal, and the client draws every one of them on `Manips`: a `moves` entry for one has no effect, and the layout never decides what is run-legal. The collectable buttons are in a **Collectables** group of the console's own. A console still on an older build says neither, and for that console alone the client reads a game's **`olderModules`** table, label to section as `moves` is, which the shipped file uses for ToD's run-legal rows and the collectable buttons that older builds left in Progress. It is never read for a build 59 console.
 
 `Debug` is an ordinary section as well. In a game with Lua (ToD) it starts with the Lua box, and
 the client shows it even when no feature is in it.

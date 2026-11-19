@@ -209,6 +209,13 @@ public enum Opcode : ushort
     /// </summary>
     RebootApply = 0x0098,
 
+    /// <summary>
+    /// Qwark revision 1.34: <c>u8 id, u32 word</c>, the line to draw under an ACTION that names a status
+    /// readout, for the word the client saw in it: <c>u8 tone, u8 len, char text[len]</c>, worded by
+    /// the module. An older module answers UNKNOWN_OP, and the client draws no line.
+    /// </summary>
+    ActionStatus = 0x0099,
+
     // 5.11 Autosplitting (revision 1.5)
     AutosplitEvents = 0x00A0,
     AutosplitDescribe = 0x00A1,
@@ -1178,6 +1185,18 @@ public enum VshMemoryReading : byte
 /// 1.2: they mark the two ACTIONs that drive the savefile helper, so the client can find them
 /// without matching labels.
 /// </summary>
+/// <summary>
+/// Qwark revision 1.34: a Feature's second flag byte, the pad after <c>bits</c> until then, so
+/// every module before the revision sends None.
+/// </summary>
+[Flags]
+public enum FeatureFlags2 : byte
+{
+    None = 0,
+
+    /// <summary>The row is run-legal: drawn on the Manips page, never counted at a run start.</summary>
+    RunLegal = 1 << 0,
+}
 [Flags]
 public enum FeatureFlags : byte
 {

@@ -58,60 +58,103 @@ public class CutsceneCacheTests
         Assert.Null(CutsceneCacheStatus.Parse(0x24140500u).Planet);
     }
 
+    /// <summary>
+    /// Qwark revision 1.34 (D19): the line under Cache cutscenes is the module's (ACTION_STATUS), for
+    /// the word the readout carries; the client keeps no layout of ToD's word. It asks once a word,
+    /// draws what it is told, asks again as the word moves, and against a module that does not know
+    /// the op (UNKNOWN_OP, before build 59) draws nothing and stops asking.
+    /// </summary>
     [Fact]
-    public void EachStateHasItsLineAndNoneHasNothing()
+    public async Task TheLineIsTheModulesForTheWordTheReadoutCarries()
     {
-        Assert.Null(ManipsArea.CutsceneCacheLine(default));
-        Assert.Equal("Cutscene cache: waiting for gameplay...",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x11000000u)));
-        Assert.Equal("Cutscene cache: waiting for the game's level caching to start...",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x12000000u)));
-        Assert.Equal("Caching cutscenes: Fastoon 7%", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x21070300u)));
-        Assert.Equal("Cutscenes cached (12 s, 10.0 MiB/s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30640C01u)));
-        Assert.Equal("Cutscenes cached (16 s, 7.4 MiB/s)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x304A1001u)));
-        // Done with rate 0: all three planets were cached already, nothing was read.
-        Assert.Equal("Cutscenes already cached (all three planets)", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x30000001u)));
-        Assert.Equal("Cutscene caching stopped: the title screen came before it finished",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x41000501u)));
-        Assert.Equal("Caching cutscenes: Cobalia 64%", ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x23400200u)));
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+        Assert.True(await PumpAsync(state, () => state.Describe.Game == GameId.Tod));
+        var cache = state.Describe.Features.Single(f => f.Label == "Cache cutscenes");
 
-        // The too-late reasons did not stop the run: that planet was dropped and the rest cached.
-        Assert.Equal("Cutscene cache: too late for Cobalia, the run got there first",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x49000501u)));
-        Assert.Equal("Cutscene cache: too late for Stratus City, the run got there first",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x47000501u)));
-        Assert.Equal("Cutscene cache: too late for Fastoon, the run got there first",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x48000501u)));
-        Assert.Equal("Cutscene caching stopped: unknown reason",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x4A000501u)));
-        Assert.Equal("Cutscene caching stopped: Disable cutscene caching is on",
-            ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x44000001u)));
-        Assert.Null(ManipsArea.CutsceneCacheLine(CutsceneCacheStatus.Parse(0x90000000u)));
+        SetWord(server, 0x30640C01u);
+        Assert.True(await PumpAsync(state, () => state.ActionLine(cache) is not null
+                                                             && state.Session.ReadoutAt(3) == 0x30640C01u));
+        Assert.Equal(new ActionStatusLine(StatusTone.Good, "Cutscenes cached (12 s, 10.0 MiB/s)"), state.ActionLine(cache));
+        int asks = server.ActionStatusAsks;
+        await PumpForAsync(state, 300, () => state.ActionLine(cache));
+        Assert.Equal(asks, server.ActionStatusAsks);
+
+        SetWord(server, 0x23400200u);
+        Assert.True(await PumpAsync(state, () => state.ActionLine(cache)?.Tone == StatusTone.Busy));
+        Assert.Equal("Caching cutscenes: Cobalia 64%", state.ActionLine(cache)!.Text);
+
+        SetWord(server, 0);
+        Assert.True(await PumpAsync(state, () => state.Session.ReadoutAt(3) == 0 && server.ActionStatusAsks > asks + 1,
+            () => state.ActionLine(cache)));
+        await PumpForAsync(state, 100, () => state.ActionLine(cache));
+        Assert.Null(state.ActionLine(cache));
     }
 
     [Fact]
-    public void TheGameSaysWhoseWordItIs()
+    public async Task AnOlderModuleDrawsNoLineAndIsAskedOnce()
     {
-        // ToD's Cache cutscenes: the cache's line, green once done, red when it failed.
-        var done = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x30640C01u), Cache, GameId.Tod);
-        Assert.Equal(("Cutscenes cached (12 s, 10.0 MiB/s)", ManipsArea.StatusTone.Good), done);
-        var failed = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x43000000u), Cache, GameId.Tod);
-        Assert.Equal(ManipsArea.StatusTone.Bad, failed?.Tone);
-        var late = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x49002001u), Cache, GameId.Tod);
-        Assert.Equal(("Cutscene cache: too late for Cobalia, the run got there first", ManipsArea.StatusTone.Bad), late);
-        var busy = ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x21320000u), Cache, GameId.Tod);
-        Assert.Equal(("Caching cutscenes: Fastoon 50%", ManipsArea.StatusTone.Busy), busy);
-        Assert.Null(ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0), Cache, GameId.Tod));
+        using var server = new FakeQwarkServer();
+        server.UseTod();
+        server.Describe = FakeQwarkServer.TodDescribe58();
+        server.ActionStatusUnknown = true;
+        server.Start();
+        using var state = await ConnectedStateAsync(server);
+        Assert.True(await PumpAsync(state, () => state.Describe.Game == GameId.Tod));
+        var cache = state.Describe.Features.Single(f => f.Label == "Cache cutscenes");
 
-        // Another ToD action naming a readout has no layout this client knows: nothing.
-        Assert.Null(ManipsArea.StatusLine(SessionWith(GameId.Tod, 3, 0x30640C01u), Cache with { Id = 22 }, GameId.Tod));
-
-        // UYA's trophy word in the same readout is still read as the trophy reset's.
-        var reset = new Feature(21, FeatureKind.Action, 5, 0, FeatureFlags.None, 12, 0, 0, "Reset trophies");
-        var ready = ManipsArea.StatusLine(SessionWith(GameId.Rac3, 12, 0x20000D06u), reset, GameId.Rac3);
-        Assert.Equal(("Trophies ready (13 s)", ManipsArea.StatusTone.Good), ready);
+        SetWord(server, 0x30640C01u);
+        Assert.True(await PumpAsync(state, () => state.Session.ReadoutAt(3) == 0x30640C01u
+                                                             && server.ActionStatusAsks == 1, () => state.ActionLine(cache)));
+        SetWord(server, 0x23400200u);
+        await PumpForAsync(state, 300, () => state.ActionLine(cache));
+        Assert.Null(state.ActionLine(cache));
+        Assert.Equal(1, server.ActionStatusAsks);
     }
 
+    private static async Task<AppState> ConnectedStateAsync(FakeQwarkServer server)
+    {
+        var state = new AppState(new Settings { Ps3 = { AutoReconnect = false } });
+        state.Client.AutoReconnect = false;
+        await state.Client.ConnectAsync("127.0.0.1", server.Port);
+        return state;
+    }
+
+    /// <summary>Frames until the condition holds; rame is what a panel draws each frame.</summary>
+    private static async Task<bool> PumpAsync(AppState state, Func<bool> condition, Action? frame = null, int timeoutMs = 5000)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            state.Tick(1f / 60f);
+            frame?.Invoke();
+            if (condition()) return true;
+            await Task.Delay(16);
+        }
+
+        state.Tick(1f / 60f);
+        return condition();
+    }
+
+    private static async Task PumpForAsync(AppState state, int milliseconds, Action? frame = null)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < milliseconds)
+        {
+            state.Tick(1f / 60f);
+            frame?.Invoke();
+            await Task.Delay(16);
+        }
+    }
+
+    private static void SetWord(FakeQwarkServer server, uint word)
+    {
+        var readouts = (uint[])server.Session.Readout.Clone();
+        readouts[3] = word;
+        server.Session = server.Session with { Readout = readouts };
+    }
     [Fact]
     public void TheThreeRowsAreOnToDsManipsPageUnderOneHeading()
     {

@@ -118,17 +118,33 @@ public class InGameMenusTests
         var off = console with { Flags = SessionFlags.MenuHelpOff };
         var rpcs3 = console with { Flags = SessionFlags.Emulator | SessionFlags.NoCodePatches };
 
-        Assert.False(QwarkSettings.InGameMenusBlocked(console));
-        Assert.True(QwarkSettings.InGameMenusBlocked(rpcs3));
-        // Qwark revision 1.29: ToD's menu is its pause menu, which works under RPCS3 too.
-        Assert.False(QwarkSettings.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }));
-        Assert.Equal("Trainer replaces Help in the pause menu", QwarkSettings.InGameMenusStatus(console));
-        // Qwark revision 1.29: in ToD the Trainer takes the pause list's Inventory row instead.
-        Assert.Equal("Trainer replaces Inventory in the pause menu",
-            QwarkSettings.InGameMenusStatus(console with { Game = GameId.Tod }));
-        Assert.Equal("the game's default pause menu", QwarkSettings.InGameMenusStatus(off with { Game = GameId.Tod }));
-        Assert.Equal("the game's default pause menu", QwarkSettings.InGameMenusStatus(off));
-        Assert.Equal("not under RPCS3", QwarkSettings.InGameMenusStatus(rpcs3));
+        var none = DescribeResult.Empty;
+        Assert.False(QwarkSettings.InGameMenusBlocked(console, none));
+        Assert.True(QwarkSettings.InGameMenusBlocked(rpcs3, none));
+        Assert.Equal("Trainer replaces Help in the pause menu", QwarkSettings.InGameMenusStatus(console, none));
+        Assert.Equal("the game's default pause menu", QwarkSettings.InGameMenusStatus(off, none));
+        Assert.Equal("not under RPCS3", QwarkSettings.InGameMenusStatus(rpcs3, none));
+
+        // Qwark revision 1.34 (D19): the module says whether its Trainer can come up here and which
+        // pause row it takes; the client keeps neither. ToD's build 59 module: under RPCS3 too, in
+        // place of Inventory. A game's module that says it cannot (the four under RPCS3) greys it.
+        var tod = FakeQwarkServer.TodDescribe();
+        var todConsole = console with { Game = GameId.Tod };
+        Assert.False(QwarkSettings.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }, tod));
+        Assert.Equal("Trainer replaces Inventory in the pause menu", QwarkSettings.InGameMenusStatus(todConsole, tod));
+        Assert.Contains("in place of the Inventory menu", QwarkSettings.InGameMenusTooltip(todConsole, tod));
+        Assert.Equal("the game's default pause menu", QwarkSettings.InGameMenusStatus(off with { Game = GameId.Tod }, tod));
+        var other = tod with { Game = GameId.Rac2, Extension = new DescribeExtension(PlanetFlags.None, false, "Help") };
+        Assert.True(QwarkSettings.InGameMenusBlocked(rpcs3 with { Game = GameId.Rac2 }, other));
+        Assert.False(QwarkSettings.InGameMenusBlocked(console with { Game = GameId.Rac2 },
+            other with { Extension = other.Extension! with { MenuHere = true } }));
+
+        // Another game's description, or one from a module before the revision, says nothing: the
+        // build 58 ToD module under RPCS3 reads as having no menu, and the row as Help.
+        Assert.True(QwarkSettings.InGameMenusBlocked(rpcs3 with { Game = GameId.Rac1 }, tod));
+        var tod58 = FakeQwarkServer.TodDescribe58();
+        Assert.True(QwarkSettings.InGameMenusBlocked(rpcs3 with { Game = GameId.Tod }, tod58));
+        Assert.Equal("Trainer replaces Help in the pause menu", QwarkSettings.InGameMenusStatus(todConsole, tod58));
 
         var parsed = SessionInfo.Parse(off.ToBytes());
         Assert.True(parsed.MenuHelpOff);

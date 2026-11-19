@@ -1081,105 +1081,62 @@ public class PositionRefreshTests
 /// </summary>
 public class PlanetResetOptionTests
 {
-    /// <summary>
-    /// The regression this pins: RaC1's "Reset level flags" box went missing because the client read
-    /// RaC1's LEVELFLAGS_GET UNSUPPORTED (qwark withholds the flag viewer) as "RaC1 has no level
-    /// flags", while RaC1's PLANET_LOAD went on resetting them whenever the stored bit was set.
-    /// The row is both boxes, level flags first and special bolts beside it.
-    /// </summary>
-    [Fact]
-    public void RaC1OffersResetLevelFlagsBesideResetSpecialBolts()
-    {
-        foreach (byte build in new byte[] { 52, QwarkClient.ExpectedQwarkBuild })
-        {
-            var options = PlanetResetOptions.For(GameId.Rac1, build);
+    private static readonly PlanetResetBox LevelBox = new("Reset level flags", PlanetFlags.ResetLevelFlags);
+    private static readonly PlanetResetBox BoltsBox = new("Reset special bolts", PlanetFlags.ResetSpecialBolts);
 
-            Assert.True(options.LevelFlags);
-            Assert.True(options.SpecialBolts);
-            Assert.Equal(
-                new[]
-                {
-                    new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags),
-                    new PlanetResetBox("Reset special bolts", PlanetFlags.ResetSpecialBolts),
-                },
-                options.Boxes());
-        }
-    }
+    private static DescribeExtension Says(PlanetFlags flags) => new(flags, true, "Help");
 
     /// <summary>
-    /// RaC2's load resets the level flags and leaves bit 1 alone: it has no per-planet special bolt
-    /// to take back, so a box for it would be a reset the load never makes.
+    /// Qwark revision 1.34 (D3): the boxes are the bits the module says its load acts on, whatever
+    /// the game, and nothing the client knew of the game comes into it: ToD and RaC2, which the old
+    /// table gave neither and one, get both when their module says both, and RaC1 none when its
+    /// module says none.
     /// </summary>
-    [Fact]
-    public void RaC2OffersTheLevelFlagsBoxOnly()
+    [Theory]
+    [InlineData(GameId.Tod)]
+    [InlineData(GameId.Rac2)]
+    [InlineData(GameId.Rac1)]
+    [InlineData(GameId.None)]
+    public void TheBoxesAreTheBitsTheModuleSays(GameId game)
     {
-        var options = PlanetResetOptions.For(GameId.Rac2, QwarkClient.ExpectedQwarkBuild);
-
-        Assert.True(options.LevelFlags);
-        Assert.False(options.SpecialBolts);
-        Assert.Equal(
-            new[] { new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags) },
-            options.Boxes());
+        Assert.Equal(new[] { LevelBox, BoltsBox },
+            PlanetResetOptions.For(Says(PlanetFlags.ResetLevelFlags | PlanetFlags.ResetSpecialBolts), game).Boxes());
+        Assert.Equal(new[] { LevelBox }, PlanetResetOptions.For(Says(PlanetFlags.ResetLevelFlags), game).Boxes());
+        Assert.Equal(new[] { BoltsBox }, PlanetResetOptions.For(Says(PlanetFlags.ResetSpecialBolts), game).Boxes());
+        Assert.Empty(PlanetResetOptions.For(Says(PlanetFlags.None), game).Boxes());
     }
 
     /// <summary>
-    /// From build 53 UYA's load takes back the destination's titanium bolts on bit 1, so UYA gets
-    /// RaC1's row: the same two boxes, worded the same, in the same order.
+    /// A module before the revision says nothing; until the client has replaced it, the boxes are
+    /// those its loads act on (builds 53 to 58): RaC1 and UYA both, RaC2 its level flags, Deadlocked
+    /// and ToD neither, and no game none. Hiding them would leave a stored bit acting out of sight.
     /// </summary>
     [Fact]
-    public void UyaOffersRaC1sTwoBoxesAgainstBuild53()
+    public void AnOlderModuleGetsTheBoxesItsLoadsActOn()
     {
-        var options = PlanetResetOptions.For(GameId.Rac3, PlanetResetOptions.Rac3SpecialBoltsBuild);
-
-        Assert.True(options.LevelFlags);
-        Assert.True(options.SpecialBolts);
-        Assert.Equal(PlanetResetOptions.For(GameId.Rac1, PlanetResetOptions.Rac3SpecialBoltsBuild).Boxes(),
-            options.Boxes());
-        Assert.Equal(53, PlanetResetOptions.Rac3SpecialBoltsBuild);
-        Assert.True(QwarkClient.ExpectedQwarkBuild >= PlanetResetOptions.Rac3SpecialBoltsBuild);
-
-        Assert.True(PlanetResetOptions.For(GameId.Rac3, 54).SpecialBolts);
+        Assert.Equal(new[] { LevelBox, BoltsBox }, PlanetResetOptions.For(null, GameId.Rac1).Boxes());
+        Assert.Equal(new[] { LevelBox }, PlanetResetOptions.For(null, GameId.Rac2).Boxes());
+        Assert.Equal(new[] { LevelBox, BoltsBox }, PlanetResetOptions.For(null, GameId.Rac3).Boxes());
+        Assert.Empty(PlanetResetOptions.For(null, GameId.Rac4).Boxes());
+        Assert.Empty(PlanetResetOptions.For(null, GameId.Tod).Boxes());
+        Assert.Empty(PlanetResetOptions.For(null, GameId.None).Boxes());
     }
 
     /// <summary>
-    /// A module before build 53 ignores bit 1 in UYA, so against one the box is not drawn: it
-    /// would promise a reset the load does not make.
+    /// The extension over the wire: what the fake ToD module of build 59 sends is read back as
+    /// both bits, and a reply that ends with the features, as an older module's does, as none.
     /// </summary>
     [Fact]
-    public void UyaAgainstAnOlderModuleOffersTheLevelFlagsBoxOnly()
+    public void TheExtensionIsReadOffTheWire()
     {
-        foreach (byte build in new byte[] { 0, 12, 52 })
-        {
-            var options = PlanetResetOptions.For(GameId.Rac3, build);
+        var d = DescribeResult.Parse(RaCMAN.Protocol.Testing.FakeQwarkServer.EncodeDescribe(RaCMAN.Protocol.Testing.FakeQwarkServer.TodDescribe()));
+        Assert.Equal(PlanetFlags.ResetLevelFlags | PlanetFlags.ResetSpecialBolts, d.Extension?.PlanetFlags);
+        Assert.Equal(new[] { LevelBox, BoltsBox }, PlanetResetOptions.For(d.Extension, d.Game).Boxes());
 
-            Assert.True(options.LevelFlags);
-            Assert.False(options.SpecialBolts);
-            Assert.Equal(
-                new[] { new PlanetResetBox("Reset level flags", PlanetFlags.ResetLevelFlags) },
-                options.Boxes());
-        }
+        var old = DescribeResult.Parse(RaCMAN.Protocol.Testing.FakeQwarkServer.EncodeDescribe(RaCMAN.Protocol.Testing.FakeQwarkServer.TodDescribe58()));
+        Assert.Null(old.Extension);
+        Assert.Empty(PlanetResetOptions.For(old.Extension, old.Game).Boxes());
     }
-
-    [Fact]
-    public void DeadlockedHasNeither()
-    {
-        var options = PlanetResetOptions.For(GameId.Rac4, QwarkClient.ExpectedQwarkBuild);
-
-        Assert.False(options.LevelFlags);
-        Assert.False(options.SpecialBolts);
-        Assert.Empty(options.Boxes());
-    }
-
-    [Fact]
-    public void NoGameMeansNoBoxes()
-    {
-        var options = PlanetResetOptions.For(GameId.None, QwarkClient.ExpectedQwarkBuild);
-
-        Assert.False(options.LevelFlags);
-        Assert.False(options.SpecialBolts);
-        Assert.Empty(options.Boxes());
-    }
-
     /// <summary>
     /// Each box shows the flag the console holds for the running game as it is: the boxes are where
     /// a stored choice is seen and changed, never where it is quietly cleared.
@@ -1187,7 +1144,7 @@ public class PlanetResetOptionTests
     [Fact]
     public void TheBoxesShowTheStoredFlagsAsTheyAre()
     {
-        var rac1 = PlanetResetOptions.For(GameId.Rac1, QwarkClient.ExpectedQwarkBuild).Boxes();
+        var rac1 = PlanetResetOptions.For(null, GameId.Rac1).Boxes();
 
         Assert.Equal("Reset_level_flags:on Reset_special_bolts:off",
             PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.ResetLevelFlags));
@@ -1197,7 +1154,7 @@ public class PlanetResetOptionTests
             PositionsPanel.ResetBoxSummary(rac1, PlanetFlags.None));
 
         // A bit the game does not act on has no box to show it in, and is not read as one that does.
-        var rac2 = PlanetResetOptions.For(GameId.Rac2, QwarkClient.ExpectedQwarkBuild).Boxes();
+        var rac2 = PlanetResetOptions.For(null, GameId.Rac2).Boxes();
         Assert.Equal("Reset_level_flags:off", PositionsPanel.ResetBoxSummary(rac2, PlanetFlags.ResetSpecialBolts));
     }
 }
