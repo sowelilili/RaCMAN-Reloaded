@@ -94,7 +94,7 @@ public sealed partial class FakeQwarkServer
     /// ToD's AUTOSPLIT_DESCRIBE as qwark lays it out (revision 1.29): the planet split, "Tachyon
     /// defeated", code 7, the fade to black after Tachyon's last hit (the final split, on), every
     /// mission, the old ToD autosplitter's long load held (HOLD: game time stands still while it
-    /// lasts) and the quit to the XMB at the old script's 19.95 s. Codes 2, 5 (the credits) and 8 are
+    /// lasts) and the quit to the XMB at 16.9 s. Codes 2, 5 (the credits) and 8 are
     /// retired.
     /// </summary>
     public static AutosplitEventDesc[] TodAutosplitDescriptors() => new[]
@@ -110,7 +110,7 @@ public sealed partial class FakeQwarkServer
         new AutosplitEventDesc(4, AutosplitKind.LoadStart,
             AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Hold, 0, "Long load"),
         new AutosplitEventDesc(3, AutosplitKind.Pause,
-            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise, 19_950_000, "Quit to XMB"),
+            AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise, 16_900_000, "Quit to XMB"),
     };
 
     /// <summary>

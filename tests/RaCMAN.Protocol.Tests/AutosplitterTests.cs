@@ -1174,10 +1174,10 @@ public class AutosplitterTests
     private static readonly AutosplitEventDesc HeldLoad = new(
         4, AutosplitKind.LoadStart, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Hold, 0, "Long load");
 
-    /// <summary>ToD's quit to the XMB: game time stops and 19.95 s goes on at the resume.</summary>
+    /// <summary>ToD's quit to the XMB: game time stops and 16.9 s goes on at the resume.</summary>
     private static readonly AutosplitEventDesc TodQuit = new(
         3, AutosplitKind.Pause, AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Normalise,
-        19_950_000, "Quit to XMB");
+        16_900_000, "Quit to XMB");
 
     /// <summary>A ToD run on the fake timer, real time and game time together.</summary>
     private static async Task<Harness> RunningTodAsync(double seconds)
@@ -1266,7 +1266,7 @@ public class AutosplitterTests
         int held = Array.LastIndexOf(actions, LiveSplitClient.PauseGameTime);
         Assert.True(unpause >= 0 && unpause < held, $"the hold has to follow the resume, got {string.Join(", ", actions)}");
         Assert.True(h.Server.GameTimePaused);
-        Assert.Equal(TimeSpan.FromSeconds(619.95), h.Server.GameTime!.Value);
+        Assert.Equal(TimeSpan.FromSeconds(616.9), h.Server.GameTime!.Value);
     }
 
     /// <summary>A load end whose start this client never saw still lets game time run.</summary>
@@ -2525,7 +2525,7 @@ public class AutosplitterTests
         Assert.Empty(h.Server.Actions.Where(a => a == LiveSplitClient.Split));
     }
 
-    /// <summary>ToD's quit to the XMB: game time stops, and the resume puts the old script's 19.95 s on.</summary>
+    /// <summary>ToD's quit to the XMB: game time stops, and the resume puts the quit's 16.9 s on.</summary>
     [Fact]
     public async Task ToDsQuitPaysTheOldScriptsNineteenPointNineFiveSeconds()
     {
@@ -2548,7 +2548,7 @@ public class AutosplitterTests
         h.Engine.Handle(new AutosplitEvent(3, 41_000, AutosplitKind.Resume, quit.Code, 0));
         Assert.True(await h.Sent(LiveSplitClient.UnpauseGameTime));
         Assert.True(await WaitFor(() => !h.Server.GameTimePaused));
-        Assert.Equal(TimeSpan.FromSeconds(619.95), h.Server.GameTime!.Value);
+        Assert.Equal(TimeSpan.FromSeconds(616.9), h.Server.GameTime!.Value);
     }
 
     /// <summary>

@@ -363,7 +363,7 @@ public class TodTests
         Assert.True(rows[4].IsTiming);
         Assert.Equal("Long load", rows[4].Label);
         Assert.Equal(AutosplitKind.Pause, rows[5].Kind);
-        Assert.Equal(19_950_000u, rows[5].ParamUs);
+        Assert.Equal(16_900_000u, rows[5].ParamUs);
     }
 
     // ------------------------------------------- the savefile manager, revision 1.28
