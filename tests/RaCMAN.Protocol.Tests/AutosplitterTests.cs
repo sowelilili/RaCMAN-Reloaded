@@ -2757,6 +2757,95 @@ public class AutosplitterTests
         Assert.True(await h.Sent(LiveSplitClient.Split));
     }
 
+    // ---------------------------------------------------------------- ToD: the Fastoon Clank subsplit
+
+    /// <summary>
+    /// Qwark revision 1.34: "Fastoon: Clank section", code 9, the switch to Clank on Fastoon. It is
+    /// a subsplit: off until ticked, and once ticked it splits whatever the planet route says, since
+    /// the route only ever weighs the planet row (code 1). The same moment's planet event, here into
+    /// Fastoon while the next split is Cobalia, is still held back by the route.
+    /// </summary>
+    [Fact]
+    public async Task ToDsClankSubsplitIsOffUntilTickedAndSplitsWhateverTheRoute()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Metropolis", "Cobalia", "Kortog" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+        Assert.Equal("Cobalia", h.Engine.View.UpcomingSplit);
+        var clank = TodRow(9);
+        Assert.Equal("Fastoon: Clank section", clank.Label);
+        Assert.False(h.Engine.IsEnabled(clank));
+
+        // The planet event into Fastoon: off the route, no split.
+        h.Engine.Handle(new AutosplitEvent(1, 1_000, AutosplitKind.Split, AutosplitEvent.PlanetEnteredCode, 3));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("not on this planet's route", h.Engine.Log()[^1].Action);
+
+        // The switch to Clank, not ticked: nothing.
+        h.Engine.Handle(new AutosplitEvent(2, 2_000, AutosplitKind.Split, clank.Code, 3));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("switched off", h.Engine.Log()[^1].Action);
+
+        // Ticked: it splits, though the route's next split is Cobalia.
+        h.Options.SetEvent(clank.Label, true);
+        h.Engine.Handle(new AutosplitEvent(3, 3_000, AutosplitKind.Split, clank.Code, 3));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Single(h.Server.Actions, a => a == LiveSplitClient.Split);
+        Assert.Equal("Fastoon: Clank section (3)", h.Engine.Log()[^1].Event);
+    }
+
+    /// <summary>
+    /// The choice is kept by label like every other row's: a fresh file has it off (the console's
+    /// default), a tick is written out and read back, and the other ToD rows are untouched by it.
+    /// </summary>
+    [Fact]
+    public void ToDsClankSubsplitChoiceIsPersisted()
+    {
+        var clank = TodRow(9);
+        Assert.False(new AutosplitGameSettings().EventEnabled(clank.Label, clank.EnabledByDefault));
+
+        var folder = Path.Combine(Path.GetTempPath(), "racman-autosplit-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(folder);
+        try
+        {
+            string path = Path.Combine(folder, "racman-reloaded.settings.json");
+            var saved = Settings.Load(path);
+            saved.Autosplit.For(GameId.Tod).SetEvent(clank.Label, true);
+            saved.Save();
+
+            var tod = Settings.Load(path).Autosplit.For(GameId.Tod);
+            Assert.True(tod.EventEnabled(clank.Label, clank.EnabledByDefault));
+            foreach (var row in FakeQwarkServer.TodAutosplitDescriptors().Where(d => d.Code != clank.Code))
+                Assert.Equal(row.EnabledByDefault, tod.EventEnabled(row.Label, row.EnabledByDefault));
+            Assert.False(Settings.Load(path).Autosplit.For(GameId.Rac2).EventEnabled(clank.Label, false));
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// A module before revision 1.34 has no code 9 row, so the client offers no such checkbox, and
+    /// a file that ticked it changes nothing about the rows that module does list.
+    /// </summary>
+    [Fact]
+    public void ToDsClankSubsplitIsOfferedOnlyByAModuleWithTheRow()
+    {
+        var current = FakeQwarkServer.TodAutosplitDescriptors();
+        var older = current.Where(d => d.Code != 9).ToArray();
+        Assert.Contains(current, d => d.IsSplitOption && d.Label == "Fastoon: Clank section");
+        Assert.DoesNotContain(older, d => d.IsSplitOption && d.Label == "Fastoon: Clank section");
+
+        var plain = new AutosplitGameSettings();
+        var ticked = new AutosplitGameSettings();
+        ticked.SetEvent("Fastoon: Clank section", true);
+        foreach (var row in older)
+            Assert.Equal(plain.EventEnabled(row.Label, row.EnabledByDefault), ticked.EventEnabled(row.Label, row.EnabledByDefault));
+    }
+
     /// <summary>
     /// The option is ToD's only: the panel draws it under a planet row that marks revisits, which
     /// only ToD's does, and never for another game's rows.

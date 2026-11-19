@@ -63,6 +63,12 @@ public enum CutsceneCacheFailure : byte
 
     /// <summary>Finished, but a load into Cobalia came before its cutscene sound was in.</summary>
     TooLateCobalia = 9,
+
+    /// <summary>
+    /// Qwark revision 1.34: the game reads a cutscene sound file qwark does not know (neither
+    /// streaming_sound.dat nor its Japanese twin), so nothing was cached rather than the wrong file.
+    /// </summary>
+    UnknownSoundFile = 10,
 }
 
 /// <summary>

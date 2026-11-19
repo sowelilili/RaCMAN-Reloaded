@@ -51,6 +51,11 @@ public class CutsceneCacheTests
         Assert.Equal(CutsceneCacheFailure.TooLateStratusCity, CutsceneCacheStatus.Parse(0x47000001u).Failure);
         Assert.Equal(CutsceneCacheFailure.TooLateFastoon, CutsceneCacheStatus.Parse(0x48000001u).Failure);
         Assert.Equal(CutsceneCacheFailure.TooLateCobalia, CutsceneCacheStatus.Parse(0x49000001u).Failure);
+        // Qwark revision 1.34: 10, the game reads a sound file qwark does not know; and Done's detail
+        // bit0, the Japanese sound files, leaves the rate and the "already cached" reading alone.
+        Assert.Equal(CutsceneCacheFailure.UnknownSoundFile, CutsceneCacheStatus.Parse(0x4A000C01u).Failure);
+        Assert.Equal(10.0, CutsceneCacheStatus.Parse(0x31640C01u).MiBPerSecond);
+        Assert.True(CutsceneCacheStatus.Parse(0x31000C01u).AlreadyCached);
 
         // Caching detail 3 is Cobalia, the first of the three; 1 Fastoon, 2 Stratus City.
         Assert.Equal("Cobalia", CutsceneCacheStatus.Parse(0x23140500u).Planet);

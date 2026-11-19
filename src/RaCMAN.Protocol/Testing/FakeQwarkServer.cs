@@ -3939,8 +3939,11 @@ public sealed partial class FakeQwarkServer : IDisposable
                     ? "Cutscene cache: waiting for the game's level caching to start..."
                     : "Cutscene cache: waiting for gameplay..."),
                 CutsceneCacheState.Caching => new(StatusTone.Busy, $"Caching cutscenes: {c.Planet ?? "a planet"} {c.Percent}%"),
+                // Revision 1.34: Done's detail bit0 is the Japanese sound files.
                 CutsceneCacheState.Done => new(StatusTone.Good, c.MiBPerSecond is { } rate
-                    ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Cutscenes cached ({c.Seconds} s, {rate:0.0} MiB/s)")
+                    ? string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                        $"Cutscenes cached ({c.Seconds} s, {rate:0.0} MiB/s{((c.Detail & 1) != 0 ? ", Japanese audio" : "")})")
+                    : (c.Detail & 1) != 0 ? "Cutscenes already cached (all three planets, Japanese audio)"
                     : "Cutscenes already cached (all three planets)"),
                 CutsceneCacheState.Failed => new(StatusTone.Bad, c.Failure switch
                 {
@@ -3948,6 +3951,7 @@ public sealed partial class FakeQwarkServer : IDisposable
                     CutsceneCacheFailure.TooLateStratusCity => "Cutscene cache: too late for Stratus City, the run got there first",
                     CutsceneCacheFailure.TooLateFastoon => "Cutscene cache: too late for Fastoon, the run got there first",
                     CutsceneCacheFailure.Disabled => "Cutscene caching stopped: Disable cutscene caching is on",
+                    CutsceneCacheFailure.UnknownSoundFile => "Cutscene caching stopped: the game's cutscene sound file is not one qwark knows",
                     _ => "Cutscene caching stopped: the game stopped reading",
                 }),
                 _ => new(StatusTone.None, ""),
