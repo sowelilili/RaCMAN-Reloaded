@@ -313,11 +313,11 @@ public class GameLayoutTests
     public void ASectionNoHeadingNamesIsStillOneBlock()
     {
         var fastLoads = Make(0, FeatureKind.Toggle, 0, "Fast loads");
-        var autosave = Make(20, FeatureKind.Action, 2, "Force autosave");
+        var setAside = Make(13, FeatureKind.Action, 2, "Set aside file");
 
         Assert.Empty(GameLayout.HeadingsFor("NPEA00387", GameId.Rac3, "Savefile"));
 
-        var blocks = GameLayout.Blocks("NPEA00387", GameId.Rac3, "Savefile", new[] { fastLoads, autosave });
+        var blocks = GameLayout.Blocks("NPEA00387", GameId.Rac3, "Savefile", new[] { fastLoads, setAside });
         Assert.Single(blocks);
         Assert.Null(blocks[0].Heading);
         Assert.Equal(2, blocks[0].Features.Count);

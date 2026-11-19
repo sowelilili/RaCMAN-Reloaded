@@ -21,7 +21,7 @@
 // Since qwark build 59 the console flags its run-legal features (they are always drawn on Manips,
 // whatever a move says) and gives the collectable actions a Collectables group of its own, so no
 // layout decides either. "olderModules" is a move table read only for a console on an older build,
-// which said neither.
+// which said neither. It is temporary, approved for build 59 only: remove it in build 60.
 // "tabOrder" sets the section order; sections used but not listed follow in first-seen order.
 //
 // "headings" breaks a section up: it is keyed by section name, then by the heading text, and each

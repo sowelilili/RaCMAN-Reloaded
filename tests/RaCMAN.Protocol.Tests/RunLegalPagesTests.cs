@@ -45,7 +45,7 @@ public class RunLegalPagesTests
         new(13, FeatureKind.Action, "Progress", "Collectables", "Unlock all gold bolts", null, false, "Collectables"),
         new(14, FeatureKind.Action, "Progress", "Collectables", "Reset skill points", "Reset all skill points", false, "Collectables"),
         new(15, FeatureKind.Action, "Progress", "Collectables", "Unlock all skill points", null, false, "Collectables"),
-        new(20, FeatureKind.Action, "Savefile", "Savefile", "Force autosave", null, false, "Savefile"),
+        // 20, Force autosave, is retired in build 59: no row.
         new(21, FeatureKind.Action, "Jankpot", "Jankpot", "Activate jankpot", null, false, "Debug"),
         new(24, FeatureKind.Toggle, "Debug", "Debug", "Update Ratchet", null, false, "Debug", FeatureFlags.Live),
         // Build 59's weapon bulk actions: Progress on the wire, the Unlocks panel's buttons by the layout.

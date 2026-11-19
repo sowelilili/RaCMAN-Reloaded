@@ -494,7 +494,8 @@ public enum SaveFileError : byte
     /// <summary>
     /// There was no save to act on (build 53, revision 1.20). A set-aside found the game holding no
     /// save yet: RaC1, RaC2 and UYA have none until they have saved or loaded once since the game
-    /// started, which on a new game is the first autosave. A load found nothing set aside that is
+    /// started, which on a new game is the first autosave or a save made in the game (RaC1's Force
+    /// autosave, retired in qwark build 59, made one). A load found nothing set aside that is
     /// a save of this game and no save of the game's own to fill it from, and a RESTORE found that
     /// the file it copied in is not a save of the running game, so it loaded nothing.
     /// </summary>
@@ -587,7 +588,7 @@ public static class SaveFileErrorExtensions
         {
             SaveFileRequest.Restore => "that file isn't a save of this game",
             SaveFileRequest.Load => "there's no save to load yet",
-            _ => "the game has no save yet",
+            _ => "the game has no save yet; save in the game first",
         },
         SaveFileError.NoUiPak => "your console's ui.pak is missing or from another build",
         _ => $"error {(byte)error}",

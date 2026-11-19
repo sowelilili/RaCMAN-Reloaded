@@ -157,6 +157,8 @@ public readonly record struct PlanetResetOptions(bool LevelFlags, bool SpecialBo
     /// What a module before qwark revision 1.34 acts on, which it does not say: RaC1 and UYA both
     /// bits, RaC2 its level flags, Deadlocked and ToD neither (as their builds 53 to 58 load them).
     /// Compatibility alone, for the time a console runs such a module; nothing newer reads it.
+    /// Temporary, approved for build 59 only: remove in build 60, with <see cref="For"/> then
+    /// reading the extension alone.
     /// </summary>
     public static PlanetResetOptions OlderModule(GameId game) => new(
         LevelFlags: game is GameId.Rac1 or GameId.Rac2 or GameId.Rac3,
