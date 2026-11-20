@@ -17,7 +17,7 @@ The qwark server can run standalone on your PS3 to provide the core trainer func
 
 # Usage
 
-Currently, only the original Ratchet & Clank quadrilogy is supported. That includes the PAL digital download versions (NPEA00385, NPEA00386, NPEA00387, NPEA00423) and the PAL trilogy disc version (BCES01503). The fan-made projects Black Label Mod (BLMODYOOO) and RaC2 IL Mod (RC2ILYOOO) are also supported.
+Currently, only the original Ratchet & Clank quadrilogy and Tools of Destruction are supported. That includes the PAL digital download versions of the original games (NPEA00385, NPEA00386, NPEA00387, NPEA00423), the PAL trilogy disc bundle (BCES01503), and Tools of Destruction's PAL digital download version (NPEA00452). The fan-made projects Black Label Mod (BLMODYOOO) and RaC2 IL Mod (RC2ILYOOO) are also supported.
 
 To use the standalone trainer, just install qwark and boot a supported game. To connect RaCMAN Reloaded from your PC, ensure your PS3 and PC are on the same network. Enter your PS3's IP and press connect. Windows users may see a firewall warning; in most cases the program should be able to silence it with the included helper. RaCMAN Reloaded uses the PINE protocol for RPCS3 support. To connect to RPCS3, ensure the PINE server is running (Manage > Network Services > IPC). To connect to LiveSplit, first start the LiveSplit TCP Server (Control > Start TCP Server) or enable it on-boot (Settings > LiveSplit Server > Startup Behavior). As of 2026-10-21, **the [LiveSplit Development Build](https://livesplit.org/downloads/)** is required.
 
