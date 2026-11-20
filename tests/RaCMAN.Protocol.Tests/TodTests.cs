@@ -345,7 +345,7 @@ public class TodTests
         using var client = await ConnectAsync(server);
 
         var rows = await client.AutosplitDescribeAsync();
-        Assert.Equal(new byte[] { 1, 7, 6, 9, 4, 3 }, rows.Select(r => r.Code).ToArray());
+        Assert.Equal(new byte[] { 1, 7, 6, 9, 10, 4, 3 }, rows.Select(r => r.Code).ToArray());
         Assert.True(rows[0].PlanetRoute && rows[0].EnabledByDefault);
         Assert.Equal("Tachyon defeated", rows[1].Label);
         Assert.True(rows[1].EnabledByDefault);
@@ -358,12 +358,16 @@ public class TodTests
         Assert.Equal("Fastoon: Clank section", rows[3].Label);
         Assert.True(rows[3].IsSplitOption);
         Assert.False(rows[3].EnabledByDefault || rows[3].PlanetRoute || rows[3].IsTiming);
-        Assert.Equal(AutosplitKind.LoadStart, rows[4].Kind);
-        Assert.True(rows[4].Hold && !rows[4].Normalise && !rows[4].Flat && rows[4].ParamUs == 0);
-        Assert.True(rows[4].IsTiming);
-        Assert.Equal("Long load", rows[4].Label);
-        Assert.Equal(AutosplitKind.Pause, rows[5].Kind);
-        Assert.Equal(16_900_000u, rows[5].ParamUs);
+        // Qwark revision 1.35: the Kreeli Comet Clank subsplit, the same kind of row.
+        Assert.Equal("Kreeli: Clank section", rows[4].Label);
+        Assert.True(rows[4].IsSplitOption);
+        Assert.False(rows[4].EnabledByDefault || rows[4].PlanetRoute || rows[4].IsTiming);
+        Assert.Equal(AutosplitKind.LoadStart, rows[5].Kind);
+        Assert.True(rows[5].Hold && !rows[5].Normalise && !rows[5].Flat && rows[5].ParamUs == 0);
+        Assert.True(rows[5].IsTiming);
+        Assert.Equal("Long load", rows[5].Label);
+        Assert.Equal(AutosplitKind.Pause, rows[6].Kind);
+        Assert.Equal(16_900_000u, rows[6].ParamUs);
     }
 
     // ------------------------------------------- the savefile manager, revision 1.28

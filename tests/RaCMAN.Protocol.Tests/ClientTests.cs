@@ -1619,12 +1619,13 @@ public class ClientTests
     [Theory]
     [InlineData(0, true)]
     [InlineData(57, true)]
-    [InlineData(58, true)]     // the build before the one this client ships with: client 1.6.0's
-    [InlineData(59, false)]    // exactly the expected build
-    [InlineData(60, false)]    // a console ahead of the client is not the client's problem
+    [InlineData(58, true)]
+    [InlineData(59, true)]     // the build before the one this client ships with: client 1.6.1's
+    [InlineData(60, false)]    // exactly the expected build
+    [InlineData(61, false)]    // a console ahead of the client is not the client's problem
     public void IsStaleBuildOnlyFlagsOlderModules(byte reported, bool stale)
     {
-        Assert.Equal(59, QwarkClient.ExpectedQwarkBuild);
+        Assert.Equal(60, QwarkClient.ExpectedQwarkBuild);
         Assert.Equal(stale, QwarkClient.IsStaleBuild(reported));
     }
 

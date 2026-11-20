@@ -107,6 +107,8 @@ public sealed partial class FakeQwarkServer
         new AutosplitEventDesc(6, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Mission completed"),
         // Revision 1.34: a subsplit, the switch to Clank on Fastoon, off and not the route's.
         new AutosplitEventDesc(9, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Fastoon: Clank section"),
+        // Revision 1.35: the same on Kreeli Comet, code 10.
+        new AutosplitEventDesc(10, AutosplitKind.Split, AutosplitEventFlags.None, 0, "Kreeli: Clank section"),
         new AutosplitEventDesc(4, AutosplitKind.LoadStart,
             AutosplitEventFlags.EnabledByDefault | AutosplitEventFlags.Hold, 0, "Long load"),
         new AutosplitEventDesc(3, AutosplitKind.Pause,

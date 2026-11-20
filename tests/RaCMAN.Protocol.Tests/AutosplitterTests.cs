@@ -2846,6 +2846,85 @@ public class AutosplitterTests
             Assert.Equal(plain.EventEnabled(row.Label, row.EnabledByDefault), ticked.EventEnabled(row.Label, row.EnabledByDefault));
     }
 
+    // ---------------------------------------------------------------- ToD: the Kreeli Clank subsplit
+
+    /// <summary>
+    /// Qwark revision 1.35: "Kreeli: Clank section", code 10, the switch to Clank on Kreeli Comet
+    /// (LEVEL_IRIS, 11). Offered as one more split option, off until ticked, and then it splits
+    /// whatever the planet route says, as Fastoon's does; Fastoon's tick does not tick it.
+    /// </summary>
+    [Fact]
+    public async Task ToDsKreeliClankSubsplitIsOfferedOffAndSplitsOnceTicked()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Sargasso", "Viceron", "Jasindu" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+        Assert.Equal("Viceron", h.Engine.View.UpcomingSplit);
+        var kreeli = TodRow(10);
+        Assert.Equal("Kreeli: Clank section", kreeli.Label);
+        Assert.True(kreeli.IsSplitOption);
+        Assert.False(h.Engine.IsEnabled(kreeli));
+
+        // Fastoon's subsplit ticked is not Kreeli's: the switch on Kreeli is still ignored.
+        h.Options.SetEvent(TodRow(9).Label, true);
+        h.Engine.Handle(new AutosplitEvent(1, 1_000, AutosplitKind.Split, kreeli.Code, 11));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+        Assert.Contains("switched off", h.Engine.Log()[^1].Action);
+
+        // Ticked: it splits, though the route's next split is Viceron.
+        h.Options.SetEvent(kreeli.Label, true);
+        h.Engine.Handle(new AutosplitEvent(2, 2_000, AutosplitKind.Split, kreeli.Code, 11));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Single(h.Server.Actions, a => a == LiveSplitClient.Split);
+        Assert.Equal("Kreeli: Clank section (11)", h.Engine.Log()[^1].Event);
+    }
+
+    /// <summary>
+    /// tod-planets.txt has "ratchet" on Fastoon's line (the first visit, LEVEL_ 3) and Kreeli
+    /// Comet's (11), so a run whose splits around a Clank section are named "Clank" and "Ratchet"
+    /// takes the planet split into either planet on a split named "Ratchet". No other planet,
+    /// Fastoon II included, matches that name.
+    /// </summary>
+    [Fact]
+    public void ToDsRouteTakesASplitNamedRatchetOnFastoonAndKreeliOnly()
+    {
+        for (int planet = 0; planet < FakeQwarkServer.TodPlanets.Length; planet++)
+        {
+            Assert.True(AutosplitRoutes.Matches(GameId.Tod, planet, "Ratchet") == (planet == 3 || planet == 11),
+                $"a split named \"Ratchet\" and planet {planet} ({FakeQwarkServer.TodPlanets[planet]})");
+        }
+    }
+
+    /// <summary>
+    /// The same over the engine: with the next split "Ratchet" and the route on, a load into Rykan V
+    /// or Fastoon II is held back, and a load into Kreeli Comet, then (next split "Ratchet" again)
+    /// one into Fastoon, splits.
+    /// </summary>
+    [Fact]
+    public async Task ToDsRouteSplitsIntoFastoonAndKreeliOnASplitNamedRatchet()
+    {
+        using var h = new Harness(GameId.Tod, new[] { "Sargasso", "Ratchet", "Clank", "Ratchet", "Clank" }, FakeQwarkServer.TodAutosplitDescriptors());
+        await h.ReadyAsync();
+        h.Options.PlanetRoute = true;
+        Assert.Equal("Ratchet", h.Engine.View.UpcomingSplit);
+
+        h.Engine.Handle(Split(1, 9));
+        h.Engine.Handle(Split(1, 18, seq: 2));
+        await Task.Delay(200);
+        Assert.Empty(h.Server.Actions);
+
+        h.Engine.Handle(new AutosplitEvent(3, 3_000, AutosplitKind.Split, AutosplitEvent.PlanetEnteredCode, 11));
+        Assert.True(await h.Sent(LiveSplitClient.Split));
+        Assert.Contains("\"Ratchet\" is this planet", h.Engine.Log()[^1].Action);
+
+        h.Server.SplitIndex = 2;
+        await h.RefreshAsync();
+        Assert.Equal("Ratchet", h.Engine.View.UpcomingSplit);
+        h.Engine.Handle(new AutosplitEvent(4, 9_000, AutosplitKind.Split, AutosplitEvent.PlanetEnteredCode, 3));
+        Assert.True(await WaitFor(() => h.Server.Actions.Count(a => a == LiveSplitClient.Split) == 2));
+    }
+
     /// <summary>
     /// The option is ToD's only: the panel draws it under a planet row that marks revisits, which
     /// only ToD's does, and never for another game's rows.

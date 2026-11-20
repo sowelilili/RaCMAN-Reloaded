@@ -1,7 +1,7 @@
 kerwan,metropolis
 cobalia
 kortog,stratus
-fastoon
+fastoon,ratchet
 voron,space combat 1,space combat i
 mukow,fight fest,imperial fight fest,imperial fight festival
 nundac,apogee
@@ -9,7 +9,7 @@ ardolis,pirate
 rakar,space combat 2,space combat ii
 rykan
 sargasso
-kreeli,iris
+kreeli,iris,ratchet
 viceron,zordoom
 verdigris,space combat 3,space combat iii
 jasindu,kerchu
