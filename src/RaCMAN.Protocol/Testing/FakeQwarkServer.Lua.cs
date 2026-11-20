@@ -176,9 +176,8 @@ public sealed partial class FakeQwarkServer
             new Feature(7, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset skill points"),
             new Feature(8, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Unlock all gold bolts"),
             new Feature(9, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset gold bolts"),
-            // Revision 1.34: the weapon bulk actions, qwark's ids 27 to 29.
+            // Revision 1.34: the weapon bulk actions, qwark's ids 27 and 29 (28 retired before release).
             new Feature(27, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Max all weapon levels"),
-            new Feature(28, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Reset all weapon levels"),
             new Feature(29, FeatureKind.Action, 2, 0, FeatureFlags.None, 0xFF, 0, 0, "Max all weapon ammo"),
             new Feature(40, FeatureKind.Action, 3, 0, FeatureFlags.SaveAside, 0xFF, 0, 0, "Set aside file"),
             new Feature(41, FeatureKind.Action, 3, 0, FeatureFlags.LoadAside, 0xFF, 0, 0, "Load set-aside file"),

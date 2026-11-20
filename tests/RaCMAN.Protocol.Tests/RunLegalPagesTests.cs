@@ -106,7 +106,6 @@ public class RunLegalPagesTests
         new(25, FeatureKind.Enum, "Player", "Player", "Armour", null, false, "Cosmetics"),
         new(26, FeatureKind.Enum, "Player", "Player", "Skin", null, false, "Cosmetics"),
         new(27, FeatureKind.Action, "Progress", "Progress", "Max all weapon levels", null, false, Unlocks),
-        new(28, FeatureKind.Action, "Progress", "Progress", "Reset all weapon levels", null, false, Unlocks),
         new(29, FeatureKind.Action, "Progress", "Progress", "Max all weapon ammo", null, false, Unlocks),
     };
 
